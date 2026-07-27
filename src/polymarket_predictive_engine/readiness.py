@@ -6,7 +6,15 @@ from typing import Any
 from .config import EngineConfig, kill_switch_active, load_config
 from .data_quality import data_quality
 from .pipeline_health import pipeline_health
-from .utils import csv_columns, discover_files, find_first_column, read_csv_rows, read_json, write_json
+from .utils import (
+    csv_columns,
+    discover_files,
+    find_first_column,
+    now_utc,
+    read_csv_rows,
+    read_json,
+    write_json,
+)
 
 DECISIONS = {
     "APPROVED_FOR_TRAINING",
@@ -337,6 +345,10 @@ def paper_trade_readiness(cfg: EngineConfig) -> dict[str, Any]:
     payload = {
         "decision": "APPROVED_FOR_PAPER_TRADING" if not reasons else "NOT_APPROVED_FOR_PAPER_TRADING",
         "approved_for_paper_trading": not reasons,
+        # WO-121 (TS-17): this artifact carried NO timestamp, so every freshness
+        # reader treated a months-old readiness verdict as current - the
+        # subsystem rollup mapped its missing status to "ok" outright.
+        "generated_at_utc": now_utc(),
         "resolved_labels": labels,
         "min_paper_labels": paper_min,
         "calibration_model_present": calibration_present,

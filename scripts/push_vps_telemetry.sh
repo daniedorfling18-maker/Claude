@@ -11,8 +11,11 @@
 #     to the branch, so `vps-telemetry` always contains exactly one commit.
 #   - Read-only everywhere else: never touches the working tree, index, or
 #     any other branch; uses a private temp index and git plumbing only.
-#   - Fail-soft: any missing file is skipped; any error exits quietly so a
-#     cron/scheduler wrapper never wedges.
+#   - Fail-soft but never silent (WO-121): any missing file is skipped, and a
+#     failure never wedges the research stack - but every outcome is stamped to
+#     outputs/ops_scheduler/telemetry_push_status.json and a real failure exits
+#     nonzero, so the bridge's own health is measurable instead of inferred from
+#     the absence of new telemetry.
 #
 # Install on the VPS as the repo-owning user (opc):
 #   crontab -e
@@ -28,8 +31,65 @@ BRANCH="${VPS_TELEMETRY_BRANCH:-vps-telemetry}"
 MAX_FILE_KB="${VPS_TELEMETRY_MAX_FILE_KB:-300}"
 CSV_TAIL_LINES="${VPS_TELEMETRY_CSV_TAIL_LINES:-200}"
 LOCK_DIR="${TMPDIR:-/tmp}/push_vps_telemetry.lock"
+STATUS_FILE="${VPS_TELEMETRY_STATUS_FILE:-$REPO_DIR/outputs/ops_scheduler/telemetry_push_status.json}"
 
 GIT_DIR="$REPO_DIR/.git"
+
+# WO-121 (OPS-2): this bridge is the single observability point of failure - the
+# sandbox cannot reach the VPS, so everything remote-visible arrives through it -
+# and NOTHING measured its age. It went >22h without a push in 2026-07-26 and
+# the only symptom was silence. Stamp the outcome locally so the watchdog can
+# alarm on the age of the last SUCCESSFUL push.
+#
+# The copy published on the branch necessarily lags one cycle (the snapshot is
+# collected before this push's own result is known). The local file is current,
+# which is what the on-VPS watchdog reads.
+stamp_push() {
+  STATE="$1"
+  DETAIL="${2:-}"
+  COMMIT_SHA="${3:-}"
+  mkdir -p "$(dirname "$STATUS_FILE")" 2>/dev/null || return 0
+  python3 - "$STATUS_FILE" "$STATE" "$DETAIL" "$COMMIT_SHA" "$BRANCH" <<'PY' || return 0
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+path = Path(sys.argv[1])
+state, detail, commit, branch = sys.argv[2:6]
+try:
+    payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+except Exception:
+    payload = {}
+if not isinstance(payload, dict):
+    payload = {}
+stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+payload.update(
+    {
+        "work_order": "WO-121",
+        "status": state,
+        "generated_at_utc": stamp,
+        "telemetry_branch": branch,
+        "detail": detail,
+        "reporting_only": True,
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+)
+if state == "ok":
+    payload["last_success_at_utc"] = stamp
+    payload["last_success_commit"] = commit or payload.get("last_success_commit")
+    payload["failure_detail"] = ""
+elif state == "error":
+    payload["last_failure_at_utc"] = stamp
+    payload["failure_detail"] = detail
+temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+temp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+os.replace(temp, path)
+PY
+}
+
 [ -d "$GIT_DIR" ] || { echo "no git repo at $REPO_DIR" >&2; exit 0; }
 
 # WO-73: refuse every telemetry/archive push if a credential-shaped value is
@@ -41,6 +101,7 @@ CREDENTIAL_GUARD_OUTPUT="$REPO_DIR/outputs/ops_scheduler/credential_guard.json"
 if [ ! -f "$CREDENTIAL_GUARD" ] || ! PYTHONPATH="$REPO_DIR/src${PYTHONPATH:+:$PYTHONPATH}" \
   python3 "$CREDENTIAL_GUARD" --repo-root "$REPO_DIR" --output "$CREDENTIAL_GUARD_OUTPUT"; then
   echo "WO-73 credential guard failed; refusing telemetry and archive push" >&2
+  stamp_push "error" "WO-73 credential guard failed; telemetry and archive push refused"
   exit 1
 fi
 
@@ -63,6 +124,7 @@ fi
 # mkdir is atomic: poor-man's flock that works on any POSIX sh.
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   echo "another telemetry push is running; skipping" >&2
+  stamp_push "skipped_locked" "another telemetry push is running"
   exit 0
 fi
 SNAP=""
@@ -72,7 +134,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-SNAP=$(mktemp -d) || exit 0
+SNAP=$(mktemp -d) || { stamp_push "error" "mktemp -d failed"; exit 1; }
 STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # WO-68: persist the same host-derived deployment marker that is published on
@@ -83,7 +145,8 @@ MANIFEST_WRITER="$REPO_DIR/scripts/write_vps_telemetry_manifest.py"
 if [ ! -f "$MANIFEST_WRITER" ] || ! python3 "$MANIFEST_WRITER" \
   --repo-root "$REPO_DIR" --output "$HOST_MANIFEST" --as-of "$STAMP"; then
   echo "WO-68 host manifest refresh failed; refusing to publish stale telemetry" >&2
-  exit 0
+  stamp_push "error" "WO-68 host manifest refresh failed; stale telemetry not published"
+  exit 1
 fi
 
 # Whitelisted output directories: decision summaries only, never the heavy
@@ -153,13 +216,18 @@ cp "$HOST_MANIFEST" "$SNAP/telemetry/manifest.json"
 
 # Build a parentless commit with plumbing: temp index, no working-tree touch.
 export GIT_INDEX_FILE="$SNAP/.gitindex"
-( cd "$SNAP" && git --git-dir="$GIT_DIR" --work-tree="$SNAP" add -f telemetry ) || exit 0
-TREE=$(git --git-dir="$GIT_DIR" write-tree) || exit 0
+( cd "$SNAP" && git --git-dir="$GIT_DIR" --work-tree="$SNAP" add -f telemetry ) \
+  || { stamp_push "error" "git add of the telemetry snapshot failed"; exit 1; }
+TREE=$(git --git-dir="$GIT_DIR" write-tree) || { stamp_push "error" "write-tree failed"; exit 1; }
 COMMIT=$(git --git-dir="$GIT_DIR" \
   -c user.name="vps-telemetry" -c user.email="vps-telemetry@localhost" \
-  commit-tree -m "vps telemetry snapshot $STAMP [skip ci]" "$TREE") || exit 0
+  commit-tree -m "vps telemetry snapshot $STAMP [skip ci]" "$TREE") \
+  || { stamp_push "error" "commit-tree failed"; exit 1; }
 if git --git-dir="$GIT_DIR" push -q origin "+$COMMIT:refs/heads/$BRANCH"; then
   echo "$STAMP pushed telemetry snapshot $COMMIT to $BRANCH"
+  stamp_push "ok" "pushed $COMMIT to $BRANCH" "$COMMIT"
 else
   echo "$STAMP push failed (network or credential scope); will retry next cycle" >&2
+  stamp_push "error" "push to $BRANCH failed (network or credential scope)" "$COMMIT"
+  exit 1
 fi

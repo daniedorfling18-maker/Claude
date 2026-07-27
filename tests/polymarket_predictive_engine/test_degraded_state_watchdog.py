@@ -496,3 +496,427 @@ def test_persisted_watchdog_contract_has_no_trading_invocation(tmp_path: Path) -
     assert persisted["order_placement_invoked"] is False
     assert persisted["order_amendment_invoked"] is False
     assert persisted["order_cancellation_invoked"] is False
+
+
+# --- WO-121 (2026-07-27): coverage for producers that published failure to nobody ---
+
+
+def _evaluation(result: dict, registration_id: str) -> dict:
+    return next(
+        row for row in result["evaluations"] if row["registration_id"] == registration_id
+    )
+
+
+def _incidents_for(result: dict, registration_id: str) -> list[dict]:
+    return [
+        row
+        for row in result["active_incidents"]
+        if row["registration_id"] == registration_id
+    ]
+
+
+def test_wo121_registered_freshness_covers_the_anchor_and_safety_lanes() -> None:
+    # 2026-07: the anchor lane stopped producing for nine days and the 15-minute
+    # safety lane owns five decision artifacts. Neither had a freshness ceiling.
+    from polymarket_predictive_engine.degraded_state_watchdog import (
+        REGISTERED_JOB_FRESHNESS_MAX_SECONDS as ceilings,
+    )
+
+    assert ceilings["ledger_anchor"] == 26 * 60 * 60
+    assert ceilings["maker_safety_refresh"] == 60 * 60
+    scheduler = Path("scripts/run_vps_ops_scheduler.sh").read_text(encoding="utf-8")
+    for job in ceilings:
+        # Every ceiling must name a lane the scheduler actually stamps, or the
+        # registration is measuring nothing.
+        assert f"stamp_status {job} " in scheduler or f"stamp_status {job}\n" in scheduler, job
+
+
+def test_wo121_broken_ledger_chain_opens_an_immediate_incident(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    verification = cfg.output_root / "performance" / "ledger_anchor_verification.json"
+    summary = cfg.output_root / "performance" / "ledger_anchor_summary.json"
+    write_json(
+        verification,
+        {
+            "generated_at_utc": "2026-07-16T00:00:00Z",
+            "status": "broken",
+            "first_broken_date": "2026-07-12",
+            "issues": ["maker_carry/maker_carry_history.csv: anchored prefix digest changed"],
+        },
+    )
+    write_json(
+        summary,
+        {"generated_at_utc": "2026-07-16T00:00:00Z", "status": "blocked_broken_chain"},
+    )
+
+    broken = build_degraded_state_watchdog(cfg, as_of="2026-07-16T00:05:00Z")
+
+    assert broken["status"] == "incident"
+    evaluation = _evaluation(broken, "ledger_chain_integrity")
+    assert evaluation["state"] == "incident"
+    assert evaluation["first_broken_date"] == "2026-07-12"
+    incident = _incidents_for(broken, "ledger_chain_integrity")[0]
+    assert "first_broken_date=2026-07-12" in incident["reason"]
+    assert "blocked_broken_chain" in incident["reason"]
+
+    # A repaired chain clears without needing a counter to decay.
+    write_json(verification, {"generated_at_utc": "2026-07-17T00:00:00Z", "status": "ok"})
+    write_json(summary, {"generated_at_utc": "2026-07-17T00:00:00Z", "status": "ok"})
+    repaired = build_degraded_state_watchdog(cfg, as_of="2026-07-17T00:05:00Z")
+    assert _evaluation(repaired, "ledger_chain_integrity")["state"] == "healthy"
+    assert _incidents_for(repaired, "ledger_chain_integrity") == []
+
+
+def test_wo121_unverified_chain_is_not_a_healthy_chain(tmp_path: Path) -> None:
+    # Fail-closed: an active anchor lane with no verification artifact is an
+    # UNVERIFIED chain. "No evidence of tampering" requires evidence.
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "performance" / "ledger_anchor_summary.json",
+        {"generated_at_utc": "2026-07-20T00:00:00Z", "status": "ok"},
+    )
+
+    result = build_degraded_state_watchdog(cfg, as_of="2026-07-20T00:05:00Z")
+
+    assert _evaluation(result, "ledger_chain_integrity")["state"] == "incident"
+    assert "verification artifact is missing" in _incidents_for(result, "ledger_chain_integrity")[0][
+        "reason"
+    ]
+
+
+def test_wo121_disaster_recovery_failure_and_rpo_breach_are_observed(tmp_path: Path) -> None:
+    # 2026-07-16..26: the archive builder failed for ten consecutive days and
+    # published that failure to a file nothing opened.
+    cfg = _cfg(tmp_path)
+    path = cfg.output_root / "performance" / "disaster_recovery_status.json"
+    write_json(
+        path,
+        {
+            "generated_at_utc": "2026-07-20T00:00:00Z",
+            "status": "error",
+            "error": "ValueError: archive expands above the configured size cap",
+            "remote_push_status": "error",
+        },
+    )
+
+    failing = build_degraded_state_watchdog(cfg, as_of="2026-07-20T00:05:00Z")
+    assert failing["status"] == "incident"
+    assert "size cap" in _incidents_for(failing, "disaster_recovery_not_recoverable")[0]["reason"]
+
+    # A build that succeeds but leaves the archive older than the active RPO is
+    # still not recoverable - the honest predicate uses the OBSERVED age.
+    write_json(
+        path,
+        {
+            "generated_at_utc": "2026-07-21T00:00:00Z",
+            "status": "ok",
+            "remote_push_status": "ok",
+            "last_remote_archive_age_hours": 233.5,
+            "rpo": {"active_rpo_hours": 24, "compliant": False},
+        },
+    )
+    stale = build_degraded_state_watchdog(cfg, as_of="2026-07-21T00:05:00Z")
+    reason = _incidents_for(stale, "disaster_recovery_not_recoverable")[0]["reason"]
+    assert "233.5h is outside the active RPO of 24h" in reason
+
+    write_json(
+        path,
+        {
+            "generated_at_utc": "2026-07-22T00:00:00Z",
+            "status": "ok",
+            "remote_push_status": "ok",
+            "last_remote_archive_age_hours": 1.0,
+            "rpo": {"active_rpo_hours": 24, "compliant": True},
+        },
+    )
+    healthy = build_degraded_state_watchdog(cfg, as_of="2026-07-22T00:05:00Z")
+    assert _evaluation(healthy, "disaster_recovery_not_recoverable")["state"] == "healthy"
+
+
+def test_wo121_failed_maker_study_run_is_an_incident(tmp_path: Path) -> None:
+    # Owner decision 2026-07-26: a failed run still commits its history row
+    # (fail-closed), so it must be loud - it silently banks a failed UTC day.
+    cfg = _cfg(tmp_path)
+    path = cfg.output_root / "maker_carry" / "maker_carry_study.json"
+    write_json(
+        path,
+        {
+            "generated_at_utc": "2026-07-22T09:00:00Z",
+            "status": "failed",
+            "errors": ["books fetch failed for 0xabc"],
+        },
+    )
+
+    failed = build_degraded_state_watchdog(cfg, as_of="2026-07-22T09:05:00Z")
+    assert failed["status"] == "incident"
+    reason = _incidents_for(failed, "maker_study_run_failed")[0]["reason"]
+    assert "still committed its history row" in reason
+
+    write_json(
+        path,
+        {"generated_at_utc": "2026-07-23T09:00:00Z", "status": "no_candidates"},
+    )
+    benign = build_degraded_state_watchdog(cfg, as_of="2026-07-23T09:05:00Z")
+    assert _evaluation(benign, "maker_study_run_failed")["state"] == "healthy"
+    assert _incidents_for(benign, "maker_study_run_failed") == []
+
+
+def test_wo121_persistent_partial_book_collection_trips_after_its_maximum(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    path = cfg.output_root / "maker_carry" / "official_book_snapshot.json"
+    maximum = REGISTERED_MAXIMA["official_book_partial_max_consecutive_cycles"]
+    states = []
+    for cycle in range(1, maximum + 2):
+        write_json(
+            path,
+            {
+                "generated_at_utc": f"2026-07-24T0{cycle}:00:00Z",
+                "status": "partial",
+                "markets_polled": 3,
+            },
+        )
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-07-24T0{cycle}:05:00Z")
+        states.append(_evaluation(result, "official_book_snapshot_partial")["state"])
+
+    assert states[:-1] == ["degraded_within_tolerance"] * maximum
+    assert states[-1] == "incident"
+
+
+def test_wo121_slo_breach_and_unmeasurable_rows_become_incidents(tmp_path: Path) -> None:
+    # OPS-3: the operating-state SLO block had NO consumer. Seven rows could sit
+    # in BREACH indefinitely with no incident, no exit code, no notification.
+    cfg = _cfg(tmp_path)
+    path = cfg.output_root / "performance" / "operating_state.json"
+
+    def _state(cycle: int) -> dict:
+        return {
+            "generated_at_utc": f"2026-07-25T0{cycle}:00:00Z",
+            "slo": {
+                "status": "breach",
+                "rows": [
+                    {
+                        "id": "ledger_anchor_age",
+                        "metric": "Ledger-anchor age",
+                        "target": 129600,
+                        "measured": 800000,
+                        "unit": "seconds",
+                        "breach": True,
+                        "state": "BREACH",
+                        "source": "ledger_anchor_head.json",
+                    },
+                    {
+                        "id": "websocket_gap",
+                        "metric": "Websocket observation gap",
+                        "target": 300,
+                        "measured": None,
+                        "unit": "seconds",
+                        "breach": None,
+                        "state": "UNKNOWN",
+                        "source": "websocket_messages_latest.json",
+                    },
+                    {
+                        "id": "dashboard_staleness",
+                        "metric": "Dashboard staleness",
+                        "target": 300,
+                        "measured": 12.0,
+                        "unit": "seconds",
+                        "breach": False,
+                        "state": "OK",
+                        "source": "dashboard_data.json",
+                    },
+                ],
+            },
+        }
+
+    breach_max = REGISTERED_MAXIMA["slo_breach_max_consecutive_cycles"]
+    unknown_max = REGISTERED_MAXIMA["slo_unknown_max_consecutive_cycles"]
+    assert breach_max < unknown_max  # a measured breach alarms sooner than a blind one
+
+    entities: list[list[str]] = []
+    for cycle in range(1, unknown_max + 2):
+        write_json(path, _state(cycle))
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-07-25T0{cycle}:05:00Z")
+        entities.append(sorted(row["entity"] for row in _incidents_for(result, "operating_state_slo_breach")))
+
+    # The measured breach fires first; the unmeasurable row gets its longer grace.
+    assert entities[0] == []
+    assert entities[breach_max] == ["ledger_anchor_age"]
+    assert entities[unknown_max] == ["ledger_anchor_age", "websocket_gap"]
+    # A passing row is never an incident.
+    assert all("dashboard_staleness" not in row for row in entities)
+    evaluation = _evaluation(result, "operating_state_slo_breach")
+    assert evaluation["breaching_rows"] == ["ledger_anchor_age"]
+    assert evaluation["unmeasurable_rows"] == ["websocket_gap"]
+
+
+def test_wo121_missing_job_exit_code_fails_closed(tmp_path: Path) -> None:
+    # A truncated job record used to default to last_exit_code=0 and read as a
+    # clean success.
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "ops_scheduler" / "status.json",
+        {
+            "generated_at_utc": "2026-07-26T00:00:00Z",
+            "jobs": {"trade_prints": {"last_run_utc": "2026-07-26T00:00:00Z"}},
+        },
+    )
+
+    result = build_degraded_state_watchdog(cfg, as_of="2026-07-26T00:01:00Z")
+
+    failing = _evaluation(result, "scheduler_nonzero_exit")["failing_jobs"]
+    assert [row["job"] for row in failing] == ["trade_prints"]
+    assert failing[0]["last_exit_code"] == 1
+
+
+def test_wo121_lock_held_cycle_never_publishes_empty_incidents(tmp_path: Path) -> None:
+    # OPS-4: the lock-held path overwrote the artifact with empty incident lists
+    # at exit 0, so a concurrent run published "all clear" over a live incident.
+    from polymarket_predictive_engine.runtime_lock import runtime_lock
+
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"generated_at_utc": "2026-07-26T09:00:00Z", "status": "failed"},
+    )
+    first = build_degraded_state_watchdog(cfg, as_of="2026-07-26T09:05:00Z")
+    assert first["active_incident_count"] == 1
+
+    with runtime_lock(cfg, "degraded_state_watchdog", stale_after_seconds=900) as held:
+        assert held.acquired
+        skipped = build_degraded_state_watchdog(cfg, as_of="2026-07-26T09:20:00Z")
+
+    assert skipped["status"] == "skipped_lock_held"
+    assert skipped["active_incident_count"] == 1
+    assert skipped["active_incidents"][0]["registration_id"] == "maker_study_run_failed"
+    assert skipped["carried_forward_from_utc"] == first["generated_at_utc"]
+    persisted = read_json(cfg.output_root / "ops_scheduler" / "degraded_state_watchdog.json")
+    assert persisted["active_incidents"] == skipped["active_incidents"]
+
+
+def test_wo121_incident_push_is_state_change_gated_and_carries_no_payload(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # Owner-approved delivery channel. The push must fire on the state CHANGE
+    # only, and must carry registration ids only - no market, wallet, amount, or
+    # artifact contents leave the host.
+    from polymarket_predictive_engine import degraded_state_watchdog as module
+
+    sent: list[tuple[str, bytes]] = []
+
+    class _Response:
+        status_code = 200
+
+    def _fake_post(url, data=None, timeout=None):
+        sent.append((url, data))
+        return _Response()
+
+    monkeypatch.setattr(module.requests, "post", _fake_post)
+    monkeypatch.setenv(module.NTFY_ENV_VAR, "https://ntfy.example/polymarket-owner")
+
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {
+            "generated_at_utc": "2026-07-26T10:00:00Z",
+            "status": "failed",
+            "errors": ["books fetch failed for 0xSECRETMARKET"],
+        },
+    )
+
+    opened = build_degraded_state_watchdog(cfg, as_of="2026-07-26T10:05:00Z")
+    assert opened["notification"]["push"] == {
+        "attempted": True,
+        "delivered": True,
+        "status_code": 200,
+        "channel_configured": True,
+    }
+    assert len(sent) == 1
+    body = sent[0][1].decode("utf-8")
+    assert "maker_study_run_failed" in body
+    assert "0xSECRETMARKET" not in body
+
+    # Same incident on the next cycle: no new id, so no second push.
+    repeat = build_degraded_state_watchdog(cfg, as_of="2026-07-26T10:20:00Z")
+    assert repeat["new_incident_count"] == 0
+    assert repeat["notification"]["push"]["attempted"] is False
+    assert len(sent) == 1
+
+
+def test_wo121_push_channel_absent_is_reported_not_faked(tmp_path: Path, monkeypatch) -> None:
+    from polymarket_predictive_engine import degraded_state_watchdog as module
+
+    monkeypatch.delenv(module.NTFY_ENV_VAR, raising=False)
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"generated_at_utc": "2026-07-26T11:00:00Z", "status": "failed"},
+    )
+
+    result = build_degraded_state_watchdog(cfg, as_of="2026-07-26T11:05:00Z")
+
+    assert result["notification"]["notify"] is True
+    assert result["notification"]["push"] == {"attempted": False, "channel_configured": False}
+
+
+def test_wo121_publication_bridge_staleness_is_measured(tmp_path: Path) -> None:
+    # OPS-1/2: neither push could fail observably and nothing measured either
+    # one's age, so a >22h telemetry blackout presented as silence.
+    from polymarket_predictive_engine.degraded_state_watchdog import REGISTERED_PUSH_LANES
+
+    cfg = _cfg(tmp_path)
+    telemetry = cfg.output_root / REGISTERED_PUSH_LANES["telemetry_push"]["artifact"]
+
+    # Absent artifact stays unobserved: the producer lane covers a host where
+    # the push was never installed.
+    absent = build_degraded_state_watchdog(cfg, as_of="2026-07-26T12:00:00Z")
+    assert _evaluation(absent, "publication_bridge_stale")["state"] == "unobserved"
+
+    write_json(
+        telemetry,
+        {
+            "generated_at_utc": "2026-07-26T12:00:00Z",
+            "status": "ok",
+            "last_success_at_utc": "2026-07-26T11:40:00Z",
+        },
+    )
+    fresh = build_degraded_state_watchdog(cfg, as_of="2026-07-26T12:00:00Z")
+    assert _evaluation(fresh, "publication_bridge_stale")["state"] == "healthy"
+    assert _incidents_for(fresh, "publication_bridge_stale") == []
+
+    # 22 hours without a successful push is the exact production blackout.
+    write_json(
+        telemetry,
+        {
+            "generated_at_utc": "2026-07-26T12:00:00Z",
+            "status": "error",
+            "detail": "WO-73 credential guard failed; telemetry and archive push refused",
+            "last_success_at_utc": "2026-07-25T12:30:00Z",
+        },
+    )
+    dark = build_degraded_state_watchdog(cfg, as_of="2026-07-26T12:00:00Z")
+    incident = _incidents_for(dark, "publication_bridge_stale")[0]
+    assert incident["entity"] == "telemetry_push"
+    assert "credential guard failed" in incident["reason"]
+    assert "above its 7200s ceiling" in incident["reason"]
+
+    # A bridge that exists but never succeeded is not healthy either.
+    write_json(telemetry, {"generated_at_utc": "2026-07-26T12:00:00Z", "status": "ok"})
+    never = build_degraded_state_watchdog(cfg, as_of="2026-07-26T12:00:00Z")
+    assert "no recorded successful push" in _incidents_for(never, "publication_bridge_stale")[0]["reason"]
+
+
+def test_wo121_push_scripts_stamp_every_outcome() -> None:
+    telemetry = Path("scripts/push_vps_telemetry.sh").read_text(encoding="utf-8")
+    anchor = Path("scripts/push_vps_anchor.sh").read_text(encoding="utf-8")
+
+    # Both bridges must record success AND failure, and a real failure must exit
+    # nonzero rather than returning 0 from every path.
+    assert "telemetry_push_status.json" in telemetry
+    assert 'stamp_push "ok"' in telemetry and 'stamp_push "error"' in telemetry
+    assert "anchor_push_status.json" in anchor
+    assert 'stamp_push "ok"' in anchor and 'stamp_push "error"' in anchor
+    assert 'stamp_push "already_present"' in anchor
+    # The pending flag is cleared by a durable success, which nothing did before.
+    assert '"external_anchor_pending"] = False' in anchor
+    for script in (telemetry, anchor):
+        assert "last_success_at_utc" in script

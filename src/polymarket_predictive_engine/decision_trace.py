@@ -224,6 +224,26 @@ def build_cycle_decision_trace(
     return trace
 
 
+# WO-121 (TS-7): per-subsystem staleness ceilings. The single 180-second default
+# was right for the websocket-rate heartbeats and meaningless for the on-demand
+# and daily producers, so the honest rollup below needs honest per-row limits.
+_SUBSYSTEM_STALE_AFTER_SECONDS: dict[str, float] = {
+    "local_live_loop": 180.0,
+    "background_discovery": 900.0,
+    "forward_paper_cycle": 26 * 3600.0,
+    "paper_broker": 900.0,
+    "paper_readiness": 26 * 3600.0,
+    "cohort_pnl": 26 * 3600.0,
+    "shadow_cohort_pnl": 26 * 3600.0,
+    "liquidity_discovery": 26 * 3600.0,
+    "sharp_odds_fetch": 26 * 3600.0,
+    "sharp_anchor": 26 * 3600.0,
+    "crypto_fundamental": 26 * 3600.0,
+    "supervisor": 3600.0,
+}
+_SUBSYSTEM_HEALTHY_STATES = frozenset({"ok"})
+
+
 def _subsystem_freshness(cfg: EngineConfig) -> dict[str, Any]:
     governance = cfg.governance_root
     candidates = {
@@ -243,16 +263,34 @@ def _subsystem_freshness(cfg: EngineConfig) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     for name, path in candidates.items():
         payload = _read_json(path)
+        stale_after = _SUBSYSTEM_STALE_AFTER_SECONDS.get(name, 180.0)
+        timestamp = _payload_timestamp(payload)
+        status = _status_from_payload(payload, stale_after_seconds=stale_after)
+        # An artifact that exists but carries no timestamp cannot be called
+        # fresh. It used to fall through to "present" -> "ok".
+        if payload and not timestamp:
+            status = "undated"
         rows.append(
             {
                 "subsystem": name,
                 "path": str(path),
-                "status": _status_from_payload(payload),
-                "generated_at_utc": _payload_timestamp(payload),
+                "status": status,
+                "generated_at_utc": timestamp,
                 "age_seconds": _payload_age_seconds(payload),
+                "stale_after_seconds": stale_after,
             }
         )
-    payload = {"status": "ok", "generated_at_utc": now_utc(), "subsystems": rows}
+    # WO-121 (TS-7): the rollup was hardcoded "ok" and published green over six
+    # stale or missing children. Propagate the worst child instead.
+    unhealthy = [row["subsystem"] for row in rows if row["status"] not in _SUBSYSTEM_HEALTHY_STATES]
+    payload = {
+        "status": "ok" if not unhealthy else "degraded",
+        "generated_at_utc": now_utc(),
+        "rollup_reflects_worst_child": True,
+        "unhealthy_subsystems": unhealthy,
+        "unhealthy_count": len(unhealthy),
+        "subsystems": rows,
+    }
     write_json(governance / "subsystem_freshness.json", payload)
     return payload
 

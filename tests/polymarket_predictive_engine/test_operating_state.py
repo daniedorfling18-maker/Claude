@@ -558,3 +558,68 @@ def test_operating_state_payload_remains_json_serializable_with_structured_evide
     cfg = _config(tmp_path)
     result = build_operating_state(cfg)
     assert json.loads(json.dumps(result))["source"] == "point_in_time_config_and_artifacts"
+
+
+def test_wo121_mtime_is_not_laundered_into_a_producer_observation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # OPS-14: `_path_timestamp` fell back to the file's mtime, so a rewritten
+    # error stub (or any touch of the file) read as a fresh observation and the
+    # age SLO passed against a dead producer.
+    cfg = _config(tmp_path)
+    _write_complete_evidence(cfg)
+    monkeypatch.setenv("PM_VPS_DEPLOYED_SHA", "abcdef123456")
+    monkeypatch.setenv("PM_IMAGE_BUILD_SHA", "abcdef1")
+    monkeypatch.setattr(
+        "polymarket_predictive_engine.operating_state.now_utc", lambda: "2026-07-12T10:00:00Z"
+    )
+    # An error stub with no timestamp, written just now.
+    write_json(
+        cfg.output_root / "polymarket_dashboard" / "dashboard_data.json",
+        {"error": "render failed"},
+    )
+    write_json(
+        cfg.output_root / "performance" / "ledger_anchor_head.json",
+        {"chain_head": "deadbeef"},
+    )
+    quote_sheet = cfg.output_root / "maker_carry" / "maker_quote_sheet.md"
+    quote_sheet.parent.mkdir(parents=True, exist_ok=True)
+    quote_sheet.write_text("# quote sheet\n", encoding="utf-8")
+
+    result = build_operating_state(cfg)
+
+    rows = {row["id"]: row for row in result["slo"]["rows"]}
+    assert rows["dashboard_staleness"]["state"] == "UNKNOWN"
+    assert rows["dashboard_staleness"]["measured"] is None
+    assert rows["ledger_anchor_age"]["state"] == "UNKNOWN"
+    # The quote sheet has no internal timestamp at all, so file time IS its only
+    # observation and must still be used.
+    assert rows["quote_sheet_age"]["measured"] is not None
+
+
+def test_wo121_deployment_block_reports_image_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # TS-2: the block published ALIGNED from marker fields while the only marker
+    # describing what is actually RUNNING sat misaligned in the same file.
+    cfg = _config(tmp_path)
+    _write_complete_evidence(cfg)
+    monkeypatch.setenv("PM_VPS_DEPLOYED_SHA", "abcdef1")
+    monkeypatch.setenv("PM_IMAGE_BUILD_SHA", "0000000deadbeef")
+    monkeypatch.setattr(
+        "polymarket_predictive_engine.operating_state.now_utc", lambda: "2026-07-12T10:00:00Z"
+    )
+
+    drifted = build_operating_state(cfg)
+
+    deployment = drifted["deployment"]
+    assert deployment["status"] == "IMAGE_DRIFTED"
+    # The source-vs-deployed comparison is preserved, not replaced.
+    assert deployment["source_vs_deployed_status"] == "ALIGNED"
+    assert deployment["image_matches_checkout"] is False
+    assert deployment["image_build_git_rev"] == "0000000deadbeef"
+
+    monkeypatch.setenv("PM_IMAGE_BUILD_SHA", "abcdef1")
+    aligned = build_operating_state(cfg)
+    assert aligned["deployment"]["status"] == "ALIGNED"
+    assert aligned["deployment"]["image_matches_checkout"] is True

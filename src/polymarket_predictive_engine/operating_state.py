@@ -124,7 +124,22 @@ def _slo_settings(cfg: EngineConfig) -> dict[str, float]:
     return targets
 
 
-def _path_timestamp(path: Path, *, fields: tuple[str, ...] = ()) -> tuple[datetime | None, str]:
+def _path_timestamp(
+    path: Path,
+    *,
+    fields: tuple[str, ...] = (),
+    allow_mtime: bool = True,
+) -> tuple[datetime | None, str]:
+    """Resolve an artifact's observation time.
+
+    WO-121 (OPS-14): ``allow_mtime`` must be False for any producer that stamps
+    its own timestamp. The mtime fallback laundered a rewritten error stub - or
+    any touch of the file - into a fresh market/producer observation, which is
+    exactly how a dead producer read as a passing SLO. mtime stays available for
+    artifacts that genuinely have no internal timestamp (the rendered quote
+    sheet), where file time IS the only observation.
+    """
+
     if not path.exists():
         return None, ""
     payload = read_json(path, default={})
@@ -134,6 +149,8 @@ def _path_timestamp(path: Path, *, fields: tuple[str, ...] = ()) -> tuple[dateti
             parsed = parse_timestamp(raw)
             if parsed is not None:
                 return parsed, raw
+    if not allow_mtime:
+        return None, ""
     stamp = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
     return stamp, stamp.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -261,11 +278,21 @@ def _build_slo_block(cfg: EngineConfig, *, as_of: datetime) -> dict[str, Any]:
 
     websocket_at, websocket_raw, websocket_source = _latest_websocket_timestamp(cfg)
     dashboard_path = output_root / "polymarket_dashboard" / "dashboard_data.json"
-    dashboard_at, dashboard_raw = _path_timestamp(dashboard_path, fields=("generated_at_utc",))
+    # WO-121 (OPS-14): these three producers all stamp their own timestamp, so
+    # the mtime fallback is refused - a file that exists without a parseable
+    # stamp is UNMEASURED (UNKNOWN), which the watchdog now treats as a blind
+    # SLO rather than a passing one.
+    dashboard_at, dashboard_raw = _path_timestamp(
+        dashboard_path, fields=("generated_at_utc",), allow_mtime=False
+    )
     reconciliation_path = output_root / "performance" / "wallet_reconciliation.json"
-    reconciliation_at, reconciliation_raw = _path_timestamp(reconciliation_path, fields=("generated_at_utc",))
+    reconciliation_at, reconciliation_raw = _path_timestamp(
+        reconciliation_path, fields=("generated_at_utc",), allow_mtime=False
+    )
     anchor_path = output_root / "performance" / "ledger_anchor_head.json"
-    anchor_at, anchor_raw = _path_timestamp(anchor_path, fields=("anchored_at_utc", "generated_at_utc"))
+    anchor_at, anchor_raw = _path_timestamp(
+        anchor_path, fields=("anchored_at_utc", "generated_at_utc"), allow_mtime=False
+    )
 
     rows = [
         _age_slo_row(
@@ -915,8 +942,22 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         source_deployed_state = "DIVERGED"
         divergence_started = parse_timestamp(divergence_started_at)
         divergence_age_seconds = max(0.0, (as_of - divergence_started).total_seconds()) if divergence_started else None
+    # WO-121 (TS-2): the running IMAGE against the checked-out tree is the only
+    # comparison that answers "is the deployed code the code we think it is".
+    # None when the image marker is absent (nothing to compare), never True.
+    image_matches_checkout = (
+        _sha_matches(image_sha, checkout_sha) if image_sha and checkout_sha else None
+    )
+    if image_matches_checkout is False:
+        deployment_block_state = "IMAGE_DRIFTED"
+    elif deployment_markers_aligned is False:
+        deployment_block_state = "MARKERS_MISALIGNED"
+    else:
+        deployment_block_state = source_deployed_state
     source_deployed_evidence = (
         f"source={source_sha or UNKNOWN}; checkout={checkout_sha or UNKNOWN}; deployed={telemetry_sha or UNKNOWN}; "
+        f"image={image_sha or UNKNOWN}; "
+        f"image_matches_checkout={image_matches_checkout if image_matches_checkout is not None else UNKNOWN}; "
         f"divergence_started_at_utc={divergence_started_at or UNKNOWN}; "
         f"divergence_age_seconds={round(divergence_age_seconds, 3) if divergence_age_seconds is not None else UNKNOWN}"
     )
@@ -1107,10 +1148,18 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         "a1_sweep_advisory": a1_sweep_advisory,
         "paper_activity_lanes": lane_counts,
         "deployment": {
-            "status": source_deployed_state,
+            "status": deployment_block_state,
+            "source_vs_deployed_status": source_deployed_state,
             "source_git_rev": source_sha or UNKNOWN,
             "checkout_git_rev": checkout_sha or UNKNOWN,
             "deployed_git_rev": telemetry_sha or UNKNOWN,
+            # WO-121 (TS-2): the block reported ALIGNED from marker fields alone
+            # while the only marker describing what is actually RUNNING - the
+            # image build SHA - sat misaligned in the same file. Surface it, and
+            # let it decide the block's status.
+            "image_build_git_rev": image_sha or UNKNOWN,
+            "image_matches_checkout": image_matches_checkout,
+            "deployment_markers_aligned": deployment_markers_aligned,
             "source_observed_at_utc": source_observed_at or UNKNOWN,
             "divergence_started_at_utc": divergence_started_at or UNKNOWN,
             "divergence_age_seconds": divergence_age_seconds,

@@ -116,3 +116,47 @@ def test_run_paper_session_blocks_in_live_mode(tmp_path):
     report = run_paper_session(cfg)
     assert report["status"] == "blocked"
     assert report["live_trading"] is False
+
+
+def test_wo121_paper_readiness_is_dated_and_freshness_rollup_is_honest(tmp_path):
+    # TS-17: paper_trade_readiness.json carried no timestamp at all, so every
+    # freshness reader treated a months-old verdict as current.
+    # TS-7: the subsystem rollup was hardcoded "ok" and published green over
+    # stale and missing children.
+    from polymarket_predictive_engine.decision_trace import _subsystem_freshness
+    from polymarket_predictive_engine.utils import parse_timestamp, read_json
+
+    cfg = _cfg(tmp_path)
+    _dataset(tmp_path)
+    gate = paper_trade_readiness(cfg)
+    assert parse_timestamp(gate["generated_at_utc"]) is not None
+    persisted = read_json(cfg.governance_root / "paper_trade_readiness.json")
+    assert persisted["generated_at_utc"] == gate["generated_at_utc"]
+
+    freshness = _subsystem_freshness(cfg)
+    rows = {row["subsystem"]: row for row in freshness["subsystems"]}
+    # Only readiness exists in this tree; every other child is missing, so the
+    # rollup must NOT be "ok".
+    assert rows["paper_readiness"]["status"] == "ok"
+    assert rows["paper_readiness"]["stale_after_seconds"] == 26 * 3600.0
+    assert rows["supervisor"]["status"] == "missing"
+    assert freshness["status"] == "degraded"
+    assert freshness["rollup_reflects_worst_child"] is True
+    assert "supervisor" in freshness["unhealthy_subsystems"]
+    assert "paper_readiness" not in freshness["unhealthy_subsystems"]
+    assert freshness["unhealthy_count"] == len(freshness["unhealthy_subsystems"])
+
+
+def test_wo121_undated_subsystem_artifact_is_not_fresh(tmp_path):
+    from polymarket_predictive_engine.decision_trace import _subsystem_freshness
+    from polymarket_predictive_engine.utils import write_json
+
+    cfg = _cfg(tmp_path)
+    # Exists, non-empty, no timestamp: used to fall through to "present" -> "ok".
+    write_json(cfg.governance_root / "supervisor_status.json", {"pid": 4242})
+
+    freshness = _subsystem_freshness(cfg)
+
+    rows = {row["subsystem"]: row for row in freshness["subsystems"]}
+    assert rows["supervisor"]["status"] == "undated"
+    assert freshness["status"] == "degraded"

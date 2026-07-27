@@ -948,6 +948,37 @@ def verify_and_restore_archive(
                 and not relative.startswith(tolerated)
                 and not (extracted_output / PurePosixPath(relative)).is_file()
             )
+            # Codex review of #364 (P1): the guard above checks only that a path
+            # EXISTS, so adding bytes satisfied it. An archive built on a restored
+            # host while the prefix was excluded carries the inherited marker and
+            # only `missing_at_anchor` rows after that boundary; relabel it to
+            # declare no exclusions and add arbitrary self-consistent corpus bytes,
+            # and nothing ever digest-checks them - pre-boundary rows are waived by
+            # the inherited marker and post-boundary rows are missing_at_anchor,
+            # which performs no byte check. The forged corpus restored as recovered
+            # evidence. Presence is not attestation: bytes under a waived prefix are
+            # accepted only where an anchor recorded them `present` AFTER the
+            # boundary, mirroring the builder-side rule.
+            honoured_boundary = str(chain.get("restore_boundary_date") or "")
+            unattested: list[str] = []
+            if honoured_boundary:
+                attested_since_restore = anchored_relative_paths(
+                    extracted_cfg, as_of_date=snapshot_date, after_date=honoured_boundary
+                )
+                unattested = sorted(
+                    name[len("outputs/") :]
+                    for name in files
+                    if name.startswith("outputs/")
+                    and name[len("outputs/") :].startswith(ARCHIVE_EXCLUDED_PREFIXES)
+                    and name[len("outputs/") :] not in attested_since_restore
+                )
+            if unattested:
+                raise ValueError(
+                    "archive carries bytes under a waived prefix that no anchor attests: "
+                    f"{len(unattested)} path(s) have no `present` anchor after the inherited "
+                    f"restore boundary {honoured_boundary} (first: {unattested[0]}); a restore "
+                    "waiver excuses absence, it does not authenticate replacement bytes"
+                )
             if undeclared_missing:
                 raise ValueError(
                     "archive omits "

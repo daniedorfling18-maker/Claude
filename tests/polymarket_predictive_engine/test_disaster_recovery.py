@@ -1074,6 +1074,43 @@ def test_wo127_a_narrowed_target_config_requires_the_corpus_on_restore(tmp_path:
     assert verify_and_restore_archive(cfg, Path(built["archive_path"]), dry_run=True)["status"] == "ok"
 
 
+def test_wo127_relabelled_archive_cannot_smuggle_unattested_corpus_bytes(tmp_path: Path):
+    # Codex review of #364 (P1). The undeclared-omission guard checked only that a
+    # path EXISTS, so an attacker could satisfy it by ADDING bytes. An archive built
+    # on a restored host while the prefix was excluded carries the inherited marker
+    # and only missing_at_anchor rows after that boundary; relabel it to declare no
+    # exclusions and add arbitrary self-consistent corpus bytes, and nothing ever
+    # digest-checks them - pre-boundary rows are waived by the inherited marker, and
+    # missing_at_anchor rows perform no byte check. The forged corpus restored as
+    # recovered evidence. Presence is not attestation.
+    cfg = _config(tmp_path)
+    corpus = _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+    relative = corpus.relative_to(cfg.output_root).as_posix()
+    built = create_ledger_archive(cfg, force=True)
+    restored_root = tmp_path / "restored_outputs"
+    verify_and_restore_archive(
+        cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=restored_root
+    )
+    restored_cfg = _restored_config(cfg, restored_root)
+
+    # A post-boundary anchor on the restored host, where the corpus is absent: the
+    # row records missing_at_anchor, which performs no byte check.
+    assert anchor_ledgers(restored_cfg, anchor_date="2026-07-12")["status"] == "ok"
+    honest = create_ledger_archive(restored_cfg, force=True)
+    assert honest["archive_excluded_paths"] == ["polymarket_training/"]
+    assert verify_and_restore_archive(cfg, Path(honest["archive_path"]), dry_run=True)["status"] == "ok"
+
+    forged = _rebuild_archive_with_manifest(
+        Path(honest["archive_path"]),
+        tmp_path / "smuggled.tar.gz",
+        manifest_updates={"excluded_path_prefixes": [], "excluded_files": [], "excluded_file_count": 0},
+        add_paths={f"outputs/{relative}": b"ts,bid,ask\n9999999999,0.01,0.99\n"},
+    )
+    with pytest.raises(DisasterRecoveryError, match="no anchor attests"):
+        verify_and_restore_archive(cfg, forged, dry_run=True)
+
+
 def test_wo127_malformed_exclusion_config_stamps_error_instead_of_raising(tmp_path: Path):
     # _base_payload runs BEFORE create_ledger_archive's try block, so a malformed
     # exclusion config raised out of the builder with no status written at all -

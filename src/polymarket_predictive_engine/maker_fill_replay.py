@@ -16,6 +16,8 @@ import gzip
 import json
 import time
 from bisect import bisect_left, bisect_right
+from datetime import datetime, timedelta, timezone
+from math import isfinite
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -26,6 +28,7 @@ from .trade_print_collector import collect_maker_portfolio_trade_prints
 from .utils import (
     normalize_external_timestamp,
     now_utc,
+    parse_timestamp,
     read_csv_rows,
     read_json,
     safe_float,
@@ -85,6 +88,16 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         # the portfolio oscillating at 0-1 eligible markets. Collection-only:
         # no gate, threshold, or eligibility rule reads this setting.
         "max_candidate_markets": 20,
+        # WO-131: delisted-token hygiene. A candidate whose token 404s is a
+        # corpse: on 2026-07-27, 7 of 50 polled markets returned HTTP 404, so
+        # ~14% of the seeding budget bought markets that no longer exist while
+        # M-A had 23 days left. The skip is a COOLDOWN, never a blacklist - a
+        # skipped token has no book file, so it never enters the mtime tranche
+        # either, and a permanent skip could never be undone by any later
+        # success. Config may make the system poll MORE (lower threshold is
+        # rejected, shorter cooldown is honoured), never blind it.
+        "delisted_skip_threshold": 3,
+        "delisted_cooldown_hours": 24.0,
         "replay_days": 7,
         "book_source": "both",
         "clob_base_url": DEFAULT_CLOB_BASE_URL,
@@ -98,7 +111,90 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         "regime_days": 7,
     }
     merged.update({k: v for k, v in raw.items() if v is not None})
+    # Tighten-only: configuration may only make collection MORE willing to poll.
+    threshold = safe_float(merged.get("delisted_skip_threshold"))
+    merged["delisted_skip_threshold"] = max(3, int(threshold)) if threshold is not None else 3
+    cooldown = safe_float(merged.get("delisted_cooldown_hours"))
+    merged["delisted_cooldown_hours"] = (
+        min(24.0, cooldown) if cooldown is not None and cooldown > 0 else 24.0
+    )
     return merged
+
+
+DELISTED_MARKER_FILE = "delisted_token_markers.json"
+
+
+def _read_delisted_markers(out_root: Path) -> dict[str, dict[str, Any]]:
+    """Per-token 404 history. Fail-safe: unreadable means NOTHING is skipped.
+
+    WO-131. For a collector the conservative direction is to collect, so a
+    missing or malformed marker file must never suppress a poll.
+    """
+
+    payload = read_json(out_root / DELISTED_MARKER_FILE, default={}) or {}
+    tokens = payload.get("tokens") if isinstance(payload, dict) else None
+    if not isinstance(tokens, dict):
+        return {}
+    return {str(key): value for key, value in tokens.items() if isinstance(value, dict)}
+
+
+def _delisted_skip_tokens(
+    markers: dict[str, dict[str, Any]], *, threshold: int, cooldown_hours: float, now: datetime
+) -> set[str]:
+    """Tokens inside their cooldown. Past the TTL a token is re-probed once."""
+
+    skip: set[str] = set()
+    for token_id, row in markers.items():
+        count = safe_float(row.get("consecutive_404s"))
+        if count is None or int(count) < threshold:
+            continue
+        last = parse_timestamp(row.get("last_404_utc"))
+        if last is None:
+            # An unparseable stamp cannot establish that the cooldown is still
+            # running, so the token is re-probed rather than silently dropped.
+            continue
+        if (now - last).total_seconds() < cooldown_hours * 3600.0:
+            skip.add(token_id)
+    return skip
+
+
+def _update_delisted_markers(
+    markers: dict[str, dict[str, Any]],
+    *,
+    polls: list[dict[str, Any]],
+    generated_at: str,
+    cooldown_hours: float,
+) -> dict[str, dict[str, Any]]:
+    """Fold this cycle's outcomes in: a 404 extends the cooldown, a book clears it."""
+
+    updated = {str(key): dict(value) for key, value in markers.items()}
+    stamp = parse_timestamp(generated_at)
+    for poll in polls:
+        token_id = str(poll.get("asset_id") or "").strip()
+        if not token_id:
+            continue
+        error = str(poll.get("error") or "")
+        if str(poll.get("status") or "") == "ok":
+            # Any valid book clears the marker outright - a re-listing or a
+            # transient outage recovers with no operator action.
+            updated.pop(token_id, None)
+            continue
+        if "404" not in error:
+            # Only a 404 is evidence the token is gone. A timeout or a 5xx is an
+            # outage on our side of the wire and must not accrue toward a skip.
+            continue
+        row = updated.setdefault(token_id, {})
+        row["condition_id"] = str(poll.get("condition_id") or row.get("condition_id") or "")
+        row["first_404_utc"] = row.get("first_404_utc") or generated_at
+        row["last_404_utc"] = generated_at
+        previous = safe_float(row.get("consecutive_404s")) or 0.0
+        row["consecutive_404s"] = int(previous) + 1
+        row["next_probe_due_utc"] = (
+            (stamp + timedelta(hours=cooldown_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            if stamp is not None
+            else ""
+        )
+    return updated
 
 
 def _stamp(value: Any) -> float | None:
@@ -383,7 +479,8 @@ def _candidate_seed_markets(
     *,
     exclude: set[str],
     cap: int,
-) -> list[dict[str, Any]]:
+    skip_tokens: set[str] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Top-ranked study candidates not already on the watchlist (WO-116).
 
     Fresh rewarded markets carry no local book history, so the WO-113
@@ -395,17 +492,32 @@ def _candidate_seed_markets(
     mtime-based persistent tranche keeps them warm afterwards. Read-only
     collection breadth: no gate, sizing, eligibility, or order path reads it.
     """
+    excluded = {"delisted_cooldown": 0, "non_finite_rank": 0, "missing_token": 0}
     if cap <= 0:
-        return []
+        return [], excluded
+    skip = skip_tokens or set()
     ranked: list[tuple[float, float, str, str]] = []
     for condition_id, row in candidates.items():
         if condition_id in exclude:
             continue
         token_id = str(row.get("token_id") or "").strip()
         if not token_id:
+            excluded["missing_token"] += 1
+            continue
+        if token_id in skip:
+            excluded["delisted_cooldown"] += 1
             continue
         carry = safe_float(row.get("net_carry_usd_per_day"))
         yield_rank = safe_float(row.get("yield_rank"))
+        # WO-131: a NaN carry participates in the sort with UNDEFINED ordering
+        # and can take a seeding slot ahead of a real candidate. Today such rows
+        # sort last only by accident of -(-inf); exclude them explicitly and
+        # count them, so an upstream producer emitting NaN is visible.
+        if (carry is not None and not isfinite(carry)) or (
+            yield_rank is not None and not isfinite(yield_rank)
+        ):
+            excluded["non_finite_rank"] += 1
+            continue
         ranked.append(
             (
                 -(carry if carry is not None else float("-inf")),
@@ -415,10 +527,67 @@ def _candidate_seed_markets(
             )
         )
     ranked.sort()
-    return [
-        {"condition_id": condition_id, "token_id": token_id}
-        for _, _, condition_id, token_id in ranked[:cap]
-    ]
+    return (
+        [
+            {"condition_id": condition_id, "token_id": token_id}
+            for _, _, condition_id, token_id in ranked[:cap]
+        ],
+        excluded,
+    )
+
+
+def _seasoning_runway(out_root: Path, watchlist: list[dict[str, Any]]) -> dict[str, Any]:
+    """Per-market book depth against the registered eligibility floors.
+
+    WO-131. The 48h / 100-snapshot runway was previously only inferrable, so
+    nobody could say which seeded market was closest to becoming measurable.
+    Depth is read from ``maker_carry_study._book_history_depth`` - the exact
+    helper ``_measurement_eligible`` consumes - because a second implementation
+    would drift from the rule it is meant to describe. Reporting only: no gate,
+    threshold, or eligibility path reads any of this.
+    """
+
+    from .maker_carry_study import MAKER_POLICY_DEFAULTS, _book_history_depth
+
+    min_hours = float(MAKER_POLICY_DEFAULTS.get("maker_min_book_history_hours", 48.0))
+    min_snaps = int(MAKER_POLICY_DEFAULTS.get("maker_min_book_snapshots", 100))
+    rows: list[dict[str, Any]] = []
+    for entry in watchlist:
+        condition_id = str(entry.get("condition_id") or "")
+        try:
+            hours, snapshots = _book_history_depth(out_root, condition_id)
+        except (OSError, ValueError):
+            # Unmeasurable depth reports null and is never ranked as closer to
+            # eligibility than a measured market.
+            rows.append(
+                {
+                    "condition_id": condition_id,
+                    "book_history_hours": None,
+                    "book_snapshot_count": None,
+                    "hours_remaining": None,
+                    "snapshots_remaining": None,
+                }
+            )
+            continue
+        rows.append(
+            {
+                "condition_id": condition_id,
+                "book_history_hours": round(float(hours), 4),
+                "book_snapshot_count": int(snapshots),
+                "hours_remaining": round(max(0.0, min_hours - float(hours)), 4),
+                "snapshots_remaining": max(0, min_snaps - int(snapshots)),
+            }
+        )
+    measured = [row for row in rows if row["hours_remaining"] is not None]
+    closest = sorted(
+        measured, key=lambda row: (row["hours_remaining"], row["snapshots_remaining"])
+    )[:3]
+    return {
+        "markets": rows,
+        "closest": closest,
+        "min_book_history_hours": min_hours,
+        "min_book_snapshots": min_snaps,
+    }
 
 
 def _payload_snapshots(payload: Any) -> list[dict[str, Any]]:
@@ -531,11 +700,21 @@ def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
     # WO-116: third tranche - seed collection for the best-ranked candidates so
     # they season toward the WO-113 book-history requirement before selection.
     # Runs even when the portfolio is empty (exactly the starved state it fixes).
-    seeds = _candidate_seed_markets(
+    # WO-131: tokens inside their delisted cooldown are not seeded this cycle.
+    markers = _read_delisted_markers(out_root)
+    now_dt = parse_timestamp(generated_at) or datetime.now(timezone.utc)
+    skip_tokens = _delisted_skip_tokens(
+        markers,
+        threshold=int(settings["delisted_skip_threshold"]),
+        cooldown_hours=float(settings["delisted_cooldown_hours"]),
+        now=now_dt,
+    )
+    seeds, seed_exclusions = _candidate_seed_markets(
         candidate_rows,
         exclude={str(entry["condition_id"]) for entry in portfolio}
         | {str(entry["condition_id"]) for entry in persistent},
         cap=max(0, int(settings.get("max_candidate_markets", 0))),
+        skip_tokens=skip_tokens,
     )
     watchlist = portfolio + persistent + seeds
     if not watchlist:
@@ -661,6 +840,32 @@ def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
 
     successful = sum(row["status"] == "ok" for row in market_polls)
     status = "ok" if successful == len(watchlist) else ("partial" if successful else "failed")
+
+    # WO-131: fold this cycle's 404s into the cooldown ledger, and clear any
+    # token that returned a book. Written atomically by this lane only.
+    updated_markers = _update_delisted_markers(
+        markers,
+        polls=market_polls,
+        generated_at=generated_at,
+        cooldown_hours=float(settings["delisted_cooldown_hours"]),
+    )
+    write_json(
+        out_root / DELISTED_MARKER_FILE,
+        {
+            "work_order": "WO-131",
+            "generated_at_utc": generated_at,
+            "reporting_only": True,
+            "skip_threshold": int(settings["delisted_skip_threshold"]),
+            "cooldown_hours": float(settings["delisted_cooldown_hours"]),
+            "tokens": updated_markers,
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+    # WO-131: the 48h/100-snapshot runway, measured by the SAME helper the
+    # eligibility rule uses, so the report and the rule cannot drift.
+    runway = _seasoning_runway(out_root, watchlist)
     summary.update(
         {
             "status": status,
@@ -671,6 +876,11 @@ def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
             "market_polls": market_polls,
             "batch_fallback_reason": batch_error,
             "errors": errors[:10],
+            "candidate_seed_exclusions": seed_exclusions,
+            "delisted_tokens_skipped": sorted(skip_tokens),
+            "delisted_token_count": len(updated_markers),
+            "seasoning_runway": runway["markets"],
+            "closest_to_eligibility": runway["closest"],
             "note": (
                 "Current official CLOB books for exactly the maker quote-sheet portfolio. "
                 "Repeated point-in-time snapshots form the replay archive; no orders or gates are touched."

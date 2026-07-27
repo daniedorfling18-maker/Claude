@@ -11,6 +11,7 @@ from polymarket_predictive_engine.degraded_state_watchdog import (
     INCIDENT_LEDGER,
     LEGACY_WALLET_REGISTRATION_ID,
     REGISTERED_MAXIMA,
+    REGISTERED_PUSH_LANES,
     WALLET_HEALTHY_STATES,
     WALLET_REGISTRATION_ID,
     _settings,
@@ -53,6 +54,14 @@ def _requote(cycle: int, *, rule: str, state: str = "pull_quotes_now") -> dict:
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
     }
+
+
+def _wallet_incidents(result: dict) -> list[dict]:
+    return [
+        row
+        for row in result["active_incidents"]
+        if row["registration_id"] == WALLET_REGISTRATION_ID
+    ]
 
 
 def test_registered_maxima_only_tighten() -> None:
@@ -296,7 +305,10 @@ def test_wallet_partial_counts_distinct_harvests_not_watchdog_polls(tmp_path: Pa
         )
         result = build_degraded_state_watchdog(cfg, as_of=f"2026-07-{10 + harvest}T02:00:01Z")
         if harvest < 3:
-            assert result["status"] == "ok"
+            # Scoped to the registration under test: this fixture stages only a
+            # wallet artifact, so unrelated registrations (the WO-121 publication
+            # bridges, absent here) legitimately have their own opinion.
+            assert not _wallet_incidents(result)
             polled = build_degraded_state_watchdog(cfg, as_of=f"2026-07-{10 + harvest}T02:04:01Z")
             wallet_eval = next(
                 row for row in polled["evaluations"] if row["registration_id"] == WALLET_REGISTRATION_ID
@@ -304,6 +316,7 @@ def test_wallet_partial_counts_distinct_harvests_not_watchdog_polls(tmp_path: Pa
             assert wallet_eval["consecutive_degraded_observations"] == harvest
 
     assert result["status"] == "incident"
+    assert len(_wallet_incidents(result)) == 1
     wallet_eval = next(row for row in result["evaluations"] if row["registration_id"] == WALLET_REGISTRATION_ID)
     assert wallet_eval["consecutive_degraded_observations"] == 3
 
@@ -326,7 +339,7 @@ def test_wallet_discrepancy_and_unknown_status_are_outside_healthy_allowlist(tmp
     wallet_eval = next(row for row in result["evaluations"] if row["registration_id"] == WALLET_REGISTRATION_ID)
     assert wallet_eval["observed_state"] == "DISCREPANCY"
     assert wallet_eval["healthy_reachable_states"] == sorted(WALLET_HEALTHY_STATES)
-    assert result["active_incidents"][0]["reason"] == "synthetic normalized NAV mismatch"
+    assert _wallet_incidents(result)[0]["reason"] == "synthetic normalized NAV mismatch"
 
     write_json(
         wallet_path,
@@ -335,7 +348,7 @@ def test_wallet_discrepancy_and_unknown_status_are_outside_healthy_allowlist(tmp
             "reconciliation_status": "clean",
         },
     )
-    assert build_degraded_state_watchdog(cfg, as_of="2026-07-14T03:05:01Z")["status"] == "ok"
+    assert not _wallet_incidents(build_degraded_state_watchdog(cfg, as_of="2026-07-14T03:05:01Z"))
 
     write_json(
         wallet_path,
@@ -741,12 +754,64 @@ def test_wo121_slo_breach_and_unmeasurable_rows_become_incidents(tmp_path: Path)
     # The measured breach fires first; the unmeasurable row gets its longer grace.
     assert entities[0] == []
     assert entities[breach_max] == ["ledger_anchor_age"]
-    assert entities[unknown_max] == ["ledger_anchor_age", "websocket_gap"]
     # A passing row is never an incident.
     assert all("dashboard_staleness" not in row for row in entities)
     evaluation = _evaluation(result, "operating_state_slo_breach")
     assert evaluation["breaching_rows"] == ["ledger_anchor_age"]
-    assert evaluation["unmeasurable_rows"] == ["websocket_gap"]
+    # WO-126 (Codex #363 P1): the registered row set is evaluated, not just what
+    # the artifact published, so this fixture's four omitted rows are unmeasurable
+    # observations rather than rows that silently vanish - and after the UNKNOWN
+    # grace they alarm alongside the row the fixture did publish as UNKNOWN.
+    from polymarket_predictive_engine.operating_state import REGISTERED_SLO_ROW_IDS
+
+    assert evaluation["registered_rows"] == list(REGISTERED_SLO_ROW_IDS)
+    assert "websocket_gap" in evaluation["unmeasurable_rows"]
+    assert set(evaluation["rows_absent_from_artifact"]) == set(REGISTERED_SLO_ROW_IDS) - {
+        "ledger_anchor_age",
+        "websocket_gap",
+        "dashboard_staleness",
+    }
+    assert "websocket_gap" in entities[unknown_max]
+    assert "ledger_anchor_age" in entities[unknown_max]
+
+
+def test_wo126_omitted_slo_row_cannot_silence_a_live_breach(tmp_path: Path) -> None:
+    # Codex #363 P1: reading only the rows the producer published meant an omitted
+    # row was never evaluated AND its counter was dropped from state, so a partial
+    # artifact cleared an active breach instead of counting the lost measurement.
+    cfg = _cfg(tmp_path)
+    path = cfg.output_root / "performance" / "operating_state.json"
+    breach_row = {
+        "id": "ledger_anchor_age",
+        "metric": "Ledger-anchor age",
+        "target": 129600,
+        "measured": 800000,
+        "unit": "seconds",
+        "breach": True,
+        "state": "BREACH",
+        "source": "ledger_anchor_head.json",
+    }
+    maximum = REGISTERED_MAXIMA["slo_breach_max_consecutive_cycles"]
+
+    for cycle in range(1, maximum + 2):
+        write_json(
+            path,
+            {"generated_at_utc": f"2026-07-28T0{cycle}:00:00Z", "slo": {"rows": [breach_row]}},
+        )
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-07-28T0{cycle}:05:00Z")
+    assert [row["entity"] for row in _incidents_for(result, "operating_state_slo_breach")] == [
+        "ledger_anchor_age"
+    ]
+
+    # The producer now omits the breaching row entirely. That must NOT read as
+    # resolved: the measurement is missing, which is an unknown observation.
+    write_json(path, {"generated_at_utc": "2026-07-28T09:00:00Z", "slo": {"rows": []}})
+    partial = build_degraded_state_watchdog(cfg, as_of="2026-07-28T09:05:00Z")
+
+    evaluation = _evaluation(partial, "operating_state_slo_breach")
+    row = next(item for item in evaluation["rows"] if item["id"] == "ledger_anchor_age")
+    assert row["kind"] == "unknown"
+    assert "ledger_anchor_age" in evaluation["rows_absent_from_artifact"]
 
 
 def test_wo121_missing_job_exit_code_fails_closed(tmp_path: Path) -> None:
@@ -866,10 +931,19 @@ def test_wo121_publication_bridge_staleness_is_measured(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     telemetry = cfg.output_root / REGISTERED_PUSH_LANES["telemetry_push"]["artifact"]
 
-    # Absent artifact stays unobserved: the producer lane covers a host where
-    # the push was never installed.
+    # WO-126 (Codex #363 P1): an absent artifact gets a bounded grace period and
+    # then alarms. Both bridges run from host cron with no scheduler lane behind
+    # them, so nothing else would ever notice that they were never installed.
     absent = build_degraded_state_watchdog(cfg, as_of="2026-07-26T12:00:00Z")
     assert _evaluation(absent, "publication_bridge_stale")["state"] == "unobserved"
+    assert _incidents_for(absent, "publication_bridge_stale") == []
+
+    grace = REGISTERED_PUSH_LANES["telemetry_push"]["absent_grace_seconds"]
+    assert grace > 0
+    beyond_grace = build_degraded_state_watchdog(cfg, as_of="2026-07-26T15:30:00Z")
+    never_installed = _incidents_for(beyond_grace, "publication_bridge_stale")
+    assert "telemetry_push" in [row["entity"] for row in never_installed]
+    assert "no status artifact" in never_installed[0]["reason"]
 
     write_json(
         telemetry,
@@ -879,9 +953,15 @@ def test_wo121_publication_bridge_staleness_is_measured(tmp_path: Path) -> None:
             "last_success_at_utc": "2026-07-26T11:40:00Z",
         },
     )
+    # Only the anchor lane is still absent now, and a healthy rollup requires
+    # EVERY lane: one working bridge must not mask another that never published.
     fresh = build_degraded_state_watchdog(cfg, as_of="2026-07-26T12:00:00Z")
-    assert _evaluation(fresh, "publication_bridge_stale")["state"] == "healthy"
-    assert _incidents_for(fresh, "publication_bridge_stale") == []
+    telemetry_lane = next(
+        row
+        for row in _evaluation(fresh, "publication_bridge_stale")["lanes"]
+        if row["lane"] == "telemetry_push"
+    )
+    assert telemetry_lane["state"] == "healthy"
 
     # 22 hours without a successful push is the exact production blackout.
     write_json(
@@ -920,3 +1000,43 @@ def test_wo121_push_scripts_stamp_every_outcome() -> None:
     assert '"external_anchor_pending"] = False' in anchor
     for script in (telemetry, anchor):
         assert "last_success_at_utc" in script
+
+
+def test_wo126_maker_study_artifact_without_a_status_is_not_healthy(tmp_path: Path) -> None:
+    # Codex #363 P2: an artifact that is present and timestamped but carries NO
+    # status used to skip the allowlist entirely (the predicate required a
+    # non-empty status before evaluating), so a malformed producer artifact read as
+    # healthy and cleared any previous failure episode.
+    cfg = _cfg(tmp_path)
+    path = cfg.output_root / "maker_carry" / "maker_carry_study.json"
+
+    write_json(path, {"generated_at_utc": "2026-07-29T09:00:00Z", "status": "failed"})
+    failed = build_degraded_state_watchdog(cfg, as_of="2026-07-29T09:05:00Z")
+    assert _incidents_for(failed, "maker_study_run_failed")
+
+    # Status disappears while the artifact stays fresh: still not healthy.
+    write_json(path, {"generated_at_utc": "2026-07-29T10:00:00Z", "portfolio": []})
+    malformed = build_degraded_state_watchdog(cfg, as_of="2026-07-29T10:05:00Z")
+    evaluation = _evaluation(malformed, "maker_study_run_failed")
+    assert evaluation["state"] == "incident"
+    assert evaluation["observed_state"] is None
+    assert _incidents_for(malformed, "maker_study_run_failed")
+
+    # An explicitly benign status clears it.
+    write_json(path, {"generated_at_utc": "2026-07-29T11:00:00Z", "status": "no_candidates"})
+    healthy = build_degraded_state_watchdog(cfg, as_of="2026-07-29T11:05:00Z")
+    assert _evaluation(healthy, "maker_study_run_failed")["state"] == "healthy"
+
+
+def test_wo126_unparseable_observation_stamp_never_fabricates_an_age(tmp_path: Path) -> None:
+    # Clock hygiene: substituting wall-clock time for an unparseable observation
+    # stamp mixes two clocks and invented a 14-day "absence" against a same-minute
+    # observation. If the observation cannot be placed in time, say so.
+    cfg = _cfg(tmp_path)
+
+    result = build_degraded_state_watchdog(cfg, as_of="2026-07-13T00:7:30Z")
+
+    evaluation = _evaluation(result, "publication_bridge_stale")
+    assert evaluation["state"] == "age_unmeasurable"
+    assert evaluation["lanes"] == []
+    assert _incidents_for(result, "publication_bridge_stale") == []

@@ -116,42 +116,45 @@ model, renders the dashboard, runs `scripts/check_polymarket_vps_paper.sh`, and
 verifies the current proof/evidence schema. A checkout refusal restores the
 previous stack when HEAD was not changed.
 
-## Manual deploy from the VPS shell
+## Deploy acceptance after any out-of-workflow deploy (WO-122, TS-15)
 
-Use this when the Actions path is unavailable. Run every command from the repo
-root — `cd ~/Claude` first; running these from `~` silently 404s each script.
+`AGENTS.md` requires production deploys to go through the
+`Deploy Polymarket VPS Paper` workflow: it preserves runtime ledgers, stamps
+`PM_VPS_DEPLOYED_SHA`, runs post-deploy acceptance, and retains a rollback
+revision. An ad-hoc pull/rebuild is explicitly not a substitute, so this runbook
+does not document one — normalising a manual deploy path is an owner governance
+decision, not a runbook edit.
+
+What the guarded path gives you and a hand-run stack does not, in order of how
+much it hurts to lose it:
+
+1. **A rollback revision.** Nothing else retags the last-known-good image, so a
+   bad deploy has no automatic way back.
+2. **WO-79 acceptance against the target SHA.** Without it,
+   `deploy_acceptance.json` keeps reporting the PASS from whichever revision last
+   ran it, which can be several revisions stale.
+3. **Marker ordering.** Every service interpolates
+   `PM_IMAGE_BUILD_SHA: ${PM_VPS_DEPLOYED_SHA}` at container-create time, so
+   starting containers *before* `.env` and `outputs/performance/deployed_git_rev`
+   are updated leaves the running stack labelled with the previous deploy. WO-126
+   makes that visible: the operating-state deployment block compares the SHA
+   **baked into the image** against the checkout and reports `IMAGE_DRIFTED`.
+
+If a deploy did happen outside the workflow (an emergency, or Actions being
+unavailable), the stack is not trustworthy until acceptance has been re-run
+against the current SHA. The scheduler must be **absent** while acceptance runs —
+it is the sole full-governance owner and a concurrent pass invalidates the
+result. Run from the repo root; running these from `~` silently 404s each script:
 
 ```bash
 cd ~/Claude
-git fetch origin main
-python3 scripts/preflight_vps_capacity.py \
-  --compose docker-compose.vps-paper.yml \
-  --env-file .env \
-  --output outputs/performance/vps_capacity_preflight.json \
-  --root .
-docker compose -f docker-compose.vps-paper.yml stop
-python3 scripts/update_vps_checkout_preserving_runtime.py \
-  --repo . --target-ref origin/main --branch main \
-  --report outputs/performance/vps_checkout_update.json
-docker compose -f docker-compose.vps-paper.yml up -d --build
-
-# Deployment markers: the health gate, the WO-68 manifest, and the
-# operating-state deployment block all read these.
+# The markers must be correct BEFORE containers are recreated, or the running
+# stack carries the previous deploy's image marker (see point 3 above).
 git rev-parse HEAD > outputs/performance/deployed_git_rev
 sed -i "s/^PM_VPS_DEPLOYED_SHA=.*/PM_VPS_DEPLOYED_SHA=$(git rev-parse HEAD)/" .env
 python3 scripts/write_vps_telemetry_manifest.py \
   --repo-root . --output outputs/performance/vps_telemetry_manifest.json
-```
 
-### Re-run deploy acceptance (WO-122, TS-15)
-
-The Actions path runs WO-79 component acceptance on every deploy; the manual
-path did not, so `deploy_acceptance.json` could sit several revisions stale
-while reporting PASS. Run it here too. The scheduler must be **absent** while
-acceptance runs — it is the sole full-governance owner and a concurrent pass
-invalidates the result:
-
-```bash
 docker compose -f docker-compose.vps-paper.yml stop vps-ops-scheduler
 docker compose -f docker-compose.vps-paper.yml --profile deploy-acceptance \
   run --rm --no-deps vps-deploy-acceptance
@@ -164,8 +167,10 @@ Then verify:
 bash scripts/check_polymarket_vps_paper.sh
 ```
 
-The health check now enforces freshness ceilings and fails on a missing or
-container-invisible `THE_ODDS_API_KEY`, so a frozen or half-configured stack no
+The health check now enforces freshness ceilings, fails on a missing or
+container-invisible `THE_ODDS_API_KEY`, fails when the dashboard container
+recorded a failed startup render, and fails closed when Tailscale funnel state
+cannot be established — so a frozen, half-configured or stale-serving stack no
 longer passes the gate.
 
 ## Dashboard access

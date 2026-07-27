@@ -83,6 +83,18 @@ tighter_of() {
   fi
 }
 
+age_is_valid() {
+  # Codex review of #363 (P2): a restored artifact with a FUTURE mtime, or a host
+  # clock that moved backward, makes file_age_seconds negative - and a negative
+  # age passes every `-le ceiling` test, so a frozen artifact reads fresh until
+  # wall time catches up to its timestamp. A negative age is not evidence of
+  # freshness, it is evidence the clock or the file is wrong.
+  case "${1:-}" in
+    ''|-*|*[!0-9]*) return 1 ;;
+  esac
+  return 0
+}
+
 assert_age_within() {
   # $1 = label, $2 = measured age ("" = missing), $3 = ceiling
   label="$1"
@@ -90,6 +102,11 @@ assert_age_within() {
   ceiling="$3"
   if [ -z "${measured:-}" ]; then
     printf '%s\n' "  FAIL: $label is missing; freshness cannot be verified."
+    exit_code=1
+    return
+  fi
+  if ! age_is_valid "$measured"; then
+    printf '%s\n' "  FAIL: $label reports an invalid age (${measured}s); a future mtime or clock backstep cannot prove freshness."
     exit_code=1
     return
   fi
@@ -162,15 +179,30 @@ else
   # exists to prevent, so an unprovable funnel state now fails closed.
   #
   # `tailscale funnel status` exits nonzero on some versions when no funnel is
-  # configured, which is the state we want to pass. Distinguish the two by
-  # requiring SOME output: a working CLI always says something (typically "No
-  # funnel config"), while a broken/unavailable CLI writes nothing.
-  funnel_capture="$transport_tmp/tailscale-funnel-status.txt"
-  $SUDO tailscale funnel status > "$funnel_capture" 2>&1 || true
-  if [ -s "$funnel_capture" ]; then
-    cat "$funnel_capture" >> "$transport_tmp/tailscale-serve-status.txt"
+  # configured, which is the state we want to pass. Codex review of #363 (P1)
+  # caught the first attempt at distinguishing those: merging stderr into the
+  # capture and testing for non-empty output means a permissions, daemon or
+  # unsupported-command error ALSO produces output, and that error text then goes
+  # to a validator that only matches positive funnel phrases - so "could not
+  # check" passed as "funnel is off" again.
+  #
+  # Keep the streams separate and accept only two provable outcomes: exit 0, or a
+  # nonzero exit whose stdout is the recognised no-configuration response. Any
+  # other command error fails closed.
+  funnel_out="$transport_tmp/tailscale-funnel-status.txt"
+  funnel_err="$transport_tmp/tailscale-funnel-status.err"
+  funnel_ok=false
+  if $SUDO tailscale funnel status > "$funnel_out" 2> "$funnel_err"; then
+    funnel_ok=true
+  elif grep -qiE 'no funnel (config|configuration)|funnel is not (configured|enabled)|no serve config' "$funnel_out"; then
+    # A recognised "nothing configured" answer on stdout is a real observation.
+    funnel_ok=true
+  fi
+  if [ "$funnel_ok" = true ]; then
+    cat "$funnel_out" >> "$transport_tmp/tailscale-serve-status.txt"
   else
-    printf '%s\n' "  FAIL: Tailscale funnel status could not be captured; public exposure cannot be ruled out."
+    printf '%s\n' "  FAIL: Tailscale funnel status could not be established; public exposure cannot be ruled out."
+    printf '%s\n' "  Command error: $(head -n 1 "$funnel_err" 2>/dev/null || printf 'no stderr captured')"
     exit_code=1
     transport_inputs_ready=false
   fi
@@ -334,15 +366,30 @@ fi
 
 printf '%s\n' ""
 printf '%s\n' "Freshness ceilings (WO-122):"
+# Codex review of #363 (P1): WO-122 taught the dashboard container to record a
+# failed startup render in render_failed.json and keep serving the stale
+# generation - but nothing read the marker, so the health gate could still pass a
+# stale cockpit during bootstrap or rollback whenever the old dashboard_data.json
+# was recent enough and still carried the expected schema keys. A marker with no
+# consumer is the exact defect class this batch exists to remove.
+render_marker="outputs/polymarket_dashboard/render_failed.json"
+if [ -f "$render_marker" ]; then
+  printf '%s\n' "  FAIL: the dashboard container's startup render failed; the served generation is stale."
+  printf '%s\n' "  Marker: $render_marker"
+  dashboard_rerender_hint
+  exit_code=1
+else
+  printf '%s\n' "  ok: no dashboard render failure recorded for the current container start"
+fi
 heartbeat_ceiling="$(tighter_of "$HEARTBEAT_MAX_AGE_REGISTERED" "${PM_HEALTH_HEARTBEAT_MAX_AGE_SECONDS:-}")"
 forward_ceiling="$(tighter_of "$FORWARD_CYCLE_MAX_AGE_REGISTERED" "${PM_HEALTH_FORWARD_CYCLE_MAX_AGE_SECONDS:-}")"
 dashboard_ceiling="$(tighter_of "$DASHBOARD_DATA_MAX_AGE_REGISTERED" "${PM_HEALTH_DASHBOARD_MAX_AGE_SECONDS:-}")"
 # The live loop and the daily forward cycle are alternative liveness evidence on
 # a freshly started stack, so require the FRESHER of the two to be inside its
 # own ceiling rather than demanding both.
-if [ -n "${heartbeat_age:-}" ] && [ "$heartbeat_age" -le "$heartbeat_ceiling" ]; then
+if age_is_valid "${heartbeat_age:-}" && [ "$heartbeat_age" -le "$heartbeat_ceiling" ]; then
   printf '%s\n' "  ok: live heartbeat ${heartbeat_age}s (ceiling ${heartbeat_ceiling}s)"
-elif [ -n "${forward_age:-}" ] && [ "$forward_age" -le "$forward_ceiling" ]; then
+elif age_is_valid "${forward_age:-}" && [ "$forward_age" -le "$forward_ceiling" ]; then
   printf '%s\n' "  ok: forward paper cycle ${forward_age}s (ceiling ${forward_ceiling}s)"
   printf '%s\n' "  note: live heartbeat is ${heartbeat_age:-missing}s (above ${heartbeat_ceiling}s)"
 else

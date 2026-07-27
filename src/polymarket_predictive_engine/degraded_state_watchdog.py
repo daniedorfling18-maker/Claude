@@ -19,6 +19,7 @@ from typing import Any, Mapping
 import requests
 
 from .config import EngineConfig, load_config
+from .operating_state import REGISTERED_SLO_ROW_IDS
 from .runtime_lock import runtime_lock
 from .utils import ensure_dir, now_utc, read_csv_rows, read_json, serialize_value, write_json
 
@@ -91,20 +92,30 @@ OPERATING_STATE_ARTIFACT = "performance/operating_state.json"
 # behaviour, owner decision 2026-07-26), so a silent failure erases that day
 # from the M-A streak. These are the only statuses that are not a failure.
 MAKER_STUDY_HEALTHY_STATES = frozenset({"ok", "no_candidates", "disabled"})
+UNKNOWN_ROW_STATE = "UNKNOWN"
 DISASTER_RECOVERY_HEALTHY_STATES = frozenset({"ok", "not_due", "disabled", "skipped_locked"})
 
 # WO-121 (OPS-1/2): the two publication bridges now stamp their own outcome, so
 # their age is measurable. Ceilings are fixed; configuration cannot widen them.
 # Telemetry cron is every 30 minutes and the anchor lane is twice daily.
+# WO-126 (Codex #363 P1): `absent_grace_seconds` closes the hole where a MISSING
+# status artifact produced no incident at all. Both bridges run from HOST CRON,
+# so no scheduler freshness ceiling covers them - if the cron is removed, never
+# installed, or the host is rebuilt, the artifact simply never appears and the
+# watchdog would have stayed silent through a total remote-telemetry blackout.
+# The grace period exists only so a genuinely fresh host is not an instant
+# incident; after it, absence is a breach.
 REGISTERED_PUSH_LANES: dict[str, dict[str, Any]] = {
     "telemetry_push": {
         "artifact": "ops_scheduler/telemetry_push_status.json",
         "maximum_age_seconds": 2 * 60 * 60,
+        "absent_grace_seconds": 2 * 60 * 60,
         "healthy_states": ("ok", "skipped_locked"),
     },
     "external_anchor_push": {
         "artifact": "performance/anchor_push_status.json",
         "maximum_age_seconds": 26 * 60 * 60,
+        "absent_grace_seconds": 26 * 60 * 60,
         "healthy_states": ("ok", "already_present", "skipped_locked", "skipped_no_head"),
     },
 }
@@ -1057,7 +1068,12 @@ def _evaluate_maker_study_status(
     payload = _mapping(read_json(cfg.output_root / MAKER_STUDY_ARTIFACT, default={}) or {})
     token = _stamp(payload)
     status = str(payload.get("status") or "").strip()
-    degraded = bool(token) and bool(status) and status not in MAKER_STUDY_HEALTHY_STATES
+    # WO-126 (Codex #363 P2): an artifact that is present and timestamped but
+    # carries NO status is malformed, not healthy. Requiring a non-empty status
+    # before evaluating meant the empty case skipped the allowlist entirely and
+    # cleared any previous failure episode. Every valid producer outcome sets a
+    # status, so only the explicit allowlist passes.
+    degraded = bool(token) and status not in MAKER_STUDY_HEALTHY_STATES
 
     episode_key = "maker_study_failure_episode_start"
     episode_start = str(state.get(episode_key) or "").strip()
@@ -1172,9 +1188,25 @@ def _evaluate_push_lanes(
     """
 
     del settings  # fixed registration; a dark bridge is never within tolerance
-    observed_at = _parse_stamp(generated_at) or datetime.now(timezone.utc)
+    # Clock hygiene: every age here is measured against the OBSERVATION stamp.
+    # Substituting wall-clock time when that stamp is unparseable mixes two
+    # clocks and fabricates an age (it produced a 14-day "absence" against a
+    # same-minute observation in testing). If we cannot place the observation in
+    # time, we report that we cannot measure it rather than inventing a number.
+    observed_at = _parse_stamp(generated_at)
     lanes: list[dict[str, Any]] = []
     incidents: dict[str, dict[str, Any]] = {}
+    if observed_at is None:
+        return (
+            {
+                "registration_id": "publication_bridge_stale",
+                "artifact": ", ".join(lane["artifact"] for lane in REGISTERED_PUSH_LANES.values()),
+                "state": "age_unmeasurable",
+                "reason": f"observation stamp {generated_at!r} is not a parseable UTC timestamp",
+                "lanes": [],
+            },
+            {},
+        )
 
     for lane_name, lane in REGISTERED_PUSH_LANES.items():
         relative = str(lane["artifact"])
@@ -1194,11 +1226,33 @@ def _evaluate_push_lanes(
                 f"{lane_name} last succeeded {round(age_seconds)}s ago, above its {maximum}s ceiling"
             )
         # A payload that exists but has never recorded a success is a bridge that
-        # has never worked. Absent artifact stays unobserved: the producer lane's
-        # own freshness ceiling covers a host where the push was never installed.
+        # has never worked.
         if payload and success_at is None:
             reasons.append(f"{lane_name} has no recorded successful push")
 
+        # WO-126: an ABSENT artifact gets a bounded grace period, then alarms.
+        # These bridges run from host cron with no scheduler lane behind them, so
+        # nothing else would ever notice their absence.
+        absent_grace = int(lane["absent_grace_seconds"])
+        absent_since_key = f"push_lane_absent_since_{lane_name}"
+        absent_age: float | None = None
+        if not payload:
+            absent_since = str(state.get(absent_since_key) or "").strip() or generated_at
+            state[absent_since_key] = absent_since
+            first_absent_at = _parse_stamp(absent_since) or observed_at
+            absent_age = max(0.0, (observed_at - first_absent_at).total_seconds())
+            if absent_age > absent_grace:
+                reasons.append(
+                    f"{lane_name} has published no status artifact for {round(absent_age)}s "
+                    f"(grace {absent_grace}s); the bridge is not installed or not running"
+                )
+        else:
+            state.pop(absent_since_key, None)
+
+        if not payload:
+            lane_state = "incident" if reasons else "unobserved_within_grace"
+        else:
+            lane_state = "incident" if reasons else "healthy"
         lanes.append(
             {
                 "lane": lane_name,
@@ -1207,7 +1261,9 @@ def _evaluate_push_lanes(
                 "last_success_at_utc": last_success or None,
                 "age_seconds": None if age_seconds is None else round(age_seconds, 3),
                 "maximum_age_seconds": maximum,
-                "state": "unobserved" if not payload else ("incident" if reasons else "healthy"),
+                "artifact_absent_seconds": None if absent_age is None else round(absent_age, 3),
+                "absent_grace_seconds": absent_grace,
+                "state": lane_state,
             }
         )
         if not reasons:
@@ -1237,9 +1293,11 @@ def _evaluate_push_lanes(
         {
             "registration_id": "publication_bridge_stale",
             "artifact": ", ".join(lane["artifact"] for lane in REGISTERED_PUSH_LANES.values()),
+            # A healthy rollup requires EVERY lane to be healthy: one working
+            # bridge must not mask another that has never published.
             "state": "incident"
             if incidents
-            else ("healthy" if any(row["state"] == "healthy" for row in lanes) else "unobserved"),
+            else ("healthy" if all(row["state"] == "healthy" for row in lanes) else "unobserved"),
             "lanes": lanes,
         },
         incidents,
@@ -1264,13 +1322,39 @@ def _evaluate_operating_slo(
     payload = _mapping(read_json(cfg.output_root / relative, default={}) or {})
     token = _stamp(payload)
     slo = _mapping(payload.get("slo"))
-    rows = slo.get("rows") if isinstance(slo.get("rows"), list) else []
+    raw_rows = slo.get("rows") if isinstance(slo.get("rows"), list) else []
     breach_maximum = int(settings["slo_breach_max_consecutive_cycles"])
     unknown_maximum = int(settings["slo_unknown_max_consecutive_cycles"])
     previous_rows = _mapping(state.get("slo_rows"))
     next_rows: dict[str, Any] = {}
     evaluations: list[dict[str, Any]] = []
     incidents: dict[str, dict[str, Any]] = {}
+
+    # WO-126 (Codex #363 P1): iterate the REGISTERED row set, not the artifact's.
+    # Reading only what the producer published meant an omitted, dropped or
+    # malformed row was never evaluated AND its counter was dropped from state on
+    # the next write - so a partial artifact silently cleared a live breach. A
+    # row that should exist and does not is an unmeasured observation, which is
+    # exactly what the UNKNOWN grace period is for.
+    published = {
+        str(row.get("id") or "").strip(): row
+        for row in raw_rows
+        if isinstance(row, Mapping) and str(row.get("id") or "").strip()
+    }
+    rows = [
+        published.get(
+            identifier,
+            {
+                "id": identifier,
+                "metric": identifier,
+                "state": UNKNOWN_ROW_STATE,
+                "breach": None,
+                "measured": None,
+                "source": f"{relative} (row absent from the published SLO block)",
+            },
+        )
+        for identifier in REGISTERED_SLO_ROW_IDS
+    ]
 
     for row in rows:
         if not isinstance(row, Mapping):
@@ -1338,11 +1422,14 @@ def _evaluate_operating_slo(
     state["slo_rows"] = next_rows
     breached = [row for row in evaluations if row["kind"] == "breach"]
     unmeasured = [row for row in evaluations if row["kind"] == "unknown"]
+    absent = sorted(set(REGISTERED_SLO_ROW_IDS) - set(published))
     return (
         {
             "registration_id": "operating_state_slo_breach",
             "artifact": relative,
-            "state": "incident" if incidents else ("healthy" if rows else "unobserved"),
+            "state": "incident" if incidents else ("healthy" if payload else "unobserved"),
+            "registered_rows": list(REGISTERED_SLO_ROW_IDS),
+            "rows_absent_from_artifact": absent,
             "slo_block_status": slo.get("status"),
             "observation_token": token or None,
             "observed_rows": len(evaluations),

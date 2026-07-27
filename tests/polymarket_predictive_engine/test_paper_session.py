@@ -160,3 +160,43 @@ def test_wo121_undated_subsystem_artifact_is_not_fresh(tmp_path):
     rows = {row["subsystem"]: row for row in freshness["subsystems"]}
     assert rows["supervisor"]["status"] == "undated"
     assert freshness["status"] == "degraded"
+
+
+def test_wo126_producer_native_success_states_are_not_reported_unhealthy(tmp_path):
+    # Codex #363 P2: `_status_from_payload` returns producer-native states verbatim
+    # and only "ok" was accepted as healthy, so sharp_anchor/crypto_fundamental
+    # ("built") and cohort_validation/liquidity discovery ("computed"/"complete")
+    # were listed unhealthy even when freshly and successfully generated - a
+    # rollup that cries wolf on a healthy system is its own dishonesty.
+    from polymarket_predictive_engine.decision_trace import _subsystem_freshness
+    from polymarket_predictive_engine.utils import now_utc, write_json
+
+    cfg = _cfg(tmp_path)
+    stamp = now_utc()
+    for name, status in (
+        ("sharp_anchor_summary", "built"),
+        ("crypto_fundamental_summary", "built"),
+        ("liquidity_discovery_summary", "computed"),
+        ("sharp_odds_fetch_summary", "complete"),
+        ("signal_cohort_pnl", "ok"),
+    ):
+        write_json(cfg.governance_root / f"{name}.json", {"generated_at_utc": stamp, "status": status})
+
+    freshness = _subsystem_freshness(cfg)
+
+    rows = {row["subsystem"]: row for row in freshness["subsystems"]}
+    for subsystem in ("sharp_anchor", "crypto_fundamental", "liquidity_discovery", "sharp_odds_fetch"):
+        assert subsystem not in freshness["unhealthy_subsystems"], rows[subsystem]
+    # A real failure and a genuinely stale artifact still degrade the rollup.
+    write_json(
+        cfg.governance_root / "supervisor_status.json",
+        {"generated_at_utc": stamp, "status": "error"},
+    )
+    write_json(
+        cfg.governance_root / "local_live_loop_heartbeat.json",
+        {"generated_at_utc": "2026-01-01T00:00:00Z", "status": "ok"},
+    )
+    degraded = _subsystem_freshness(cfg)
+    assert "supervisor" in degraded["unhealthy_subsystems"]
+    assert "local_live_loop" in degraded["unhealthy_subsystems"]
+    assert degraded["status"] == "degraded"

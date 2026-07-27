@@ -5662,3 +5662,92 @@ M-C payout floor to zero, with no amendment and no merge.
   observation collapse to one). Retention is no factor either:
   `max_official_book_rows` is 200000, about 5.7 years at the 15-minute cadence,
   against a 48h/100-snapshot floor.
+
+## WO-126 — Codex review of #363: ten findings, all accepted — `done` (2026-07-27, PR #363, owner merge)
+
+Codex reviewed commit `f8d386e` and raised six P1s and four P2s. Every one was
+legitimate on inspection, and four were defects introduced by WO-121/122 itself —
+the same "absent or unprovable reads as healthy" class the batch exists to remove.
+
+**P1 — funnel state could still fail open** (`check_polymarket_vps_paper.sh`).
+WO-122 merged stderr into the funnel capture and tested for non-empty output, so
+a permissions/daemon/unsupported-command error also produced output, and that
+error text went to a validator that only matches POSITIVE funnel phrases. "Could
+not check" read as "funnel is off" again. Streams are now separate and only two
+outcomes pass: exit 0, or a nonzero exit whose STDOUT is the recognised
+no-configuration answer. Anything else fails closed and prints the stderr line.
+
+**P1 — the render-failure marker had no consumer.** WO-122 taught the dashboard
+container to record a failed startup render and keep serving the stale
+generation, but nothing read `render_failed.json`, so the health gate could still
+pass a stale cockpit during bootstrap or rollback. The gate now fails when the
+marker is present (it is cleared at every container start, so it can only ever
+describe the current run).
+
+**P1 — an absent publication-bridge artifact never alarmed.** Both bridges run
+from HOST CRON, so no scheduler freshness ceiling covers them; a removed,
+never-installed or rebuilt-host cron left the status artifact absent forever and
+the registration silently reported `unobserved`. Each lane now has a bounded
+`absent_grace_seconds` (telemetry 2h, anchor 26h) after which absence is an
+incident, and a healthy rollup requires EVERY lane — one working bridge must not
+mask another that never published.
+
+**P1 — an omitted SLO row cleared a live breach.** The evaluator read only the
+rows the artifact published and then replaced `state["slo_rows"]` with just those,
+so a partial or malformed producer artifact dropped the counter and resolved an
+active incident. It now walks the registered row set
+(`operating_state.REGISTERED_SLO_ROW_IDS`, shared so the two surfaces cannot
+drift) and treats an absent row as an unmeasured observation on the UNKNOWN grace.
+
+**P1 — image-drift detection was still the vacuous self-comparison.** Every
+Compose service sets `PM_IMAGE_BUILD_SHA: ${PM_VPS_DEPLOYED_SHA}` in its
+`environment:` block, which shadows the value baked by the Dockerfile — so a
+process inside the container reads the CURRENT deploy marker, and WO-121's
+"image vs checkout" check compared the marker with the checkout. `up --no-build`
+starting a stale `:latest` would have reported alignment. The Dockerfile now bakes
+`/app/.pm_image_build_sha` (no bind mount covers it, and environment cannot
+override a file); `operating_state` reads that first and labels the fallback
+honestly as overridable and not proof of the running image.
+
+**P1 — the runbook documented what AGENTS.md forbids.** The WO-122 manual-deploy
+section was a full ad-hoc pull/rebuild sequence; AGENTS.md requires the guarded
+workflow and says "Do not replace it with an ad-hoc pull/rebuild." Normalising a
+manual deploy path is an owner governance decision, not a runbook edit, so the
+recipe is removed. The acceptance-rerun guidance stays (that was TS-15's actual
+point), reframed as what to do after an out-of-workflow deploy, and now names the
+three things the guarded path provides that a hand-run stack does not. Codex also
+caught a real ordering defect in the removed sequence: containers were started
+BEFORE `PM_VPS_DEPLOYED_SHA` was updated, so the running stack kept the previous
+deploy's interpolated image marker — the retained snippet corrects the markers
+first.
+
+**P2 — the freshness rollup cried wolf on a healthy system.** `_status_from_payload`
+returns producer-native states verbatim, and only `ok` was accepted, so
+sharp_anchor/crypto_fundamental (`built`) and cohort_validation/liquidity
+discovery (`computed`/`complete`) were listed unhealthy while freshly and
+successfully generated. Inverted to degrade only on states that MEAN failure
+(`missing`, `stale`, `undated`, `error`, `failed`, `blocked`, `down`) — the
+staleness the rollup exists to catch is still caught, and a producer adding a new
+benign status defaults to "not a failure" instead of a false alarm.
+
+**P2 — a maker-study artifact with no status read as healthy.** The predicate
+required a non-empty status before evaluating, so an empty status skipped the
+allowlist and cleared any previous failure episode. Only the explicit allowlist
+passes now.
+
+**P2 — negative artifact ages passed every ceiling.** A future mtime or a backward
+clock step makes `file_age_seconds` negative, and a negative age satisfies every
+`-le ceiling` test, so a frozen artifact read fresh until wall time caught up.
+Negative and non-numeric ages are now invalid and fail closed.
+
+**P2 — a partial telemetry snapshot was stamped `ok`.** `cp` was unchecked and
+followed by an unconditional `return 0`, the copy loop runs in a SUBSHELL so a
+failure could not propagate, and the manifest copy was unchecked — Git could push
+an incomplete tree while the new status artifact told the watchdog the bridge
+succeeded. Copy failures are recorded in a file (a subshell cannot set a parent
+variable), and any failure refuses the push and stamps `error`.
+
+Found while fixing the above: `_evaluate_push_lanes` substituted
+`datetime.now()` for an unparseable observation stamp, mixing the caller's clock
+with wall time and fabricating a 14-day absence against a same-minute
+observation. It now reports `age_unmeasurable` rather than inventing a number.

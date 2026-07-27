@@ -45,6 +45,19 @@ GOVERNED_PAPER_MAX_AGE_SECONDS = 24 * 3600
 # 2026-07-12 WO-68b registered reporting targets. Config may tighten these
 # maxima but cannot widen them. They alert a human only and are never read by a
 # gate, broker, sizing rule, or order path.
+# WO-126 (Codex #363 P1): the row ids are registered, not "whatever the artifact
+# happens to contain". The watchdog evaluates this fixed set so a partial or
+# malformed producer artifact cannot silence a breach by simply omitting a row.
+REGISTERED_SLO_ROW_IDS: tuple[str, ...] = (
+    "quote_sheet_age",
+    "governance_refresh_duration",
+    "scheduler_overrun_cycles",
+    "websocket_gap",
+    "dashboard_staleness",
+    "reconciliation_age",
+    "ledger_anchor_age",
+)
+
 REGISTERED_SLO_TARGETS: dict[str, float] = {
     "quote_sheet_max_age_seconds": 26 * 3600,
     "governance_refresh_max_duration_seconds": 2400,
@@ -406,6 +419,38 @@ def _sha_matches(left: str, right: str) -> bool:
     if not left or not right or UNKNOWN.lower() in {left, right}:
         return False
     return left.startswith(right) or right.startswith(left)
+
+
+BAKED_IMAGE_SHA_PATHS: tuple[str, ...] = ("/app/.pm_image_build_sha", ".pm_image_build_sha")
+
+
+def _baked_image_sha() -> tuple[str, str]:
+    """Return the SHA baked into the running image, and where it came from.
+
+    WO-126 (Codex review of #363, P1): `PM_IMAGE_BUILD_SHA` is NOT a statement
+    about the running image - every Compose service re-sets it from
+    `PM_VPS_DEPLOYED_SHA` in its `environment:` block, so a process inside the
+    container reads the current deploy marker. Comparing that to the checkout is
+    the vacuous self-comparison TS-2 reported: `up --no-build` starting a stale
+    `:latest` would still report alignment. The file below is written at image
+    build time and cannot be overridden by environment or bind mount, so it is
+    preferred; the environment variable remains a labelled fallback for hosts
+    running an image built before this marker existed.
+    """
+
+    for candidate in BAKED_IMAGE_SHA_PATHS:
+        try:
+            value = Path(candidate).read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if value and value.lower() != "unknown":
+            return value, candidate
+    env_value = str(os.getenv("PM_IMAGE_BUILD_SHA") or "").strip()
+    if env_value and env_value.lower() != "unknown":
+        # Labelled honestly: this value is overridable and may describe the
+        # deploy marker rather than the built code.
+        return env_value, "env:PM_IMAGE_BUILD_SHA (overridable; not proof of the running image)"
+    return "", ""
 
 
 def _telemetry_manifest(cfg: EngineConfig) -> tuple[dict[str, Any], Path]:
@@ -919,6 +964,7 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
     source_observed_at = str(telemetry_manifest.get("source_observed_at_utc") or "").strip()
     divergence_started_at = str(telemetry_manifest.get("divergence_started_at_utc") or "").strip()
     expected_sha = str(os.getenv("PM_VPS_DEPLOYED_SHA") or "").strip()
+    baked_image_sha, baked_image_source = _baked_image_sha()
     image_sha = str(os.getenv("PM_IMAGE_BUILD_SHA") or "").strip()
     deployed_sha = telemetry_sha or expected_sha or image_sha or UNKNOWN
     comparable_markers = [value for value in (telemetry_sha, expected_sha, image_sha) if value]
@@ -942,11 +988,13 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         source_deployed_state = "DIVERGED"
         divergence_started = parse_timestamp(divergence_started_at)
         divergence_age_seconds = max(0.0, (as_of - divergence_started).total_seconds()) if divergence_started else None
-    # WO-121 (TS-2): the running IMAGE against the checked-out tree is the only
-    # comparison that answers "is the deployed code the code we think it is".
-    # None when the image marker is absent (nothing to compare), never True.
+    # WO-121 (TS-2), corrected by WO-126: the running IMAGE against the
+    # checked-out tree is the only comparison that answers "is the deployed code
+    # the code we think it is" - but it has to use a marker the runtime cannot
+    # override, or it degenerates into comparing the deploy marker with itself.
+    # None when no trustworthy marker exists (nothing to compare), never True.
     image_matches_checkout = (
-        _sha_matches(image_sha, checkout_sha) if image_sha and checkout_sha else None
+        _sha_matches(baked_image_sha, checkout_sha) if baked_image_sha and checkout_sha else None
     )
     if image_matches_checkout is False:
         deployment_block_state = "IMAGE_DRIFTED"
@@ -956,7 +1004,7 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
         deployment_block_state = source_deployed_state
     source_deployed_evidence = (
         f"source={source_sha or UNKNOWN}; checkout={checkout_sha or UNKNOWN}; deployed={telemetry_sha or UNKNOWN}; "
-        f"image={image_sha or UNKNOWN}; "
+        f"baked_image={baked_image_sha or UNKNOWN} (source {baked_image_source or UNKNOWN}); "
         f"image_matches_checkout={image_matches_checkout if image_matches_checkout is not None else UNKNOWN}; "
         f"divergence_started_at_utc={divergence_started_at or UNKNOWN}; "
         f"divergence_age_seconds={round(divergence_age_seconds, 3) if divergence_age_seconds is not None else UNKNOWN}"
@@ -1157,7 +1205,9 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
             # while the only marker describing what is actually RUNNING - the
             # image build SHA - sat misaligned in the same file. Surface it, and
             # let it decide the block's status.
-            "image_build_git_rev": image_sha or UNKNOWN,
+            "image_build_git_rev": baked_image_sha or UNKNOWN,
+            "image_build_sha_source": baked_image_source or UNKNOWN,
+            "runtime_image_marker_env": image_sha or UNKNOWN,
             "image_matches_checkout": image_matches_checkout,
             "deployment_markers_aligned": deployment_markers_aligned,
             "source_observed_at_utc": source_observed_at or UNKNOWN,

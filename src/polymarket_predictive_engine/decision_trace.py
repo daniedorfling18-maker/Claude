@@ -241,7 +241,20 @@ _SUBSYSTEM_STALE_AFTER_SECONDS: dict[str, float] = {
     "crypto_fundamental": 26 * 3600.0,
     "supervisor": 3600.0,
 }
-_SUBSYSTEM_HEALTHY_STATES = frozenset({"ok"})
+# WO-126 (Codex #363 P2): an "only ok is healthy" rollup was wrong in the noisy
+# direction - `_status_from_payload` returns producer-native states verbatim, and
+# sharp_anchor/crypto_fundamental publish "built" while cohort_validation and
+# liquidity discovery publish "computed"/"complete". All four are successes, so a
+# healthy system would have reported degraded forever, which is its own dishonesty.
+#
+# Inverted instead: degrade only on the states that actually MEAN a failure.
+# `missing`, `stale` and `undated` are produced by the freshness check itself, so
+# the thing this rollup exists to catch is still caught, while a producer adding a
+# new benign status (entry_paused, no_predictions, disabled, skipped_*) defaults
+# to "not a failure" rather than to a false alarm.
+_SUBSYSTEM_UNHEALTHY_STATES = frozenset(
+    {"missing", "stale", "undated", "error", "failed", "blocked", "down"}
+)
 
 
 def _subsystem_freshness(cfg: EngineConfig) -> dict[str, Any]:
@@ -282,7 +295,7 @@ def _subsystem_freshness(cfg: EngineConfig) -> dict[str, Any]:
         )
     # WO-121 (TS-7): the rollup was hardcoded "ok" and published green over six
     # stale or missing children. Propagate the worst child instead.
-    unhealthy = [row["subsystem"] for row in rows if row["status"] not in _SUBSYSTEM_HEALTHY_STATES]
+    unhealthy = [row["subsystem"] for row in rows if row["status"] in _SUBSYSTEM_UNHEALTHY_STATES]
     payload = {
         "status": "ok" if not unhealthy else "degraded",
         "generated_at_utc": now_utc(),

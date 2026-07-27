@@ -1022,9 +1022,18 @@ def test_wo122_health_script_fails_closed_on_secrets_and_funnel():
     assert "FAIL: THE_ODDS_API_KEY is NOT visible inside the container" in odds_block
     assert odds_block.count("exit_code=1") >= 2
     # OPS-17: an unprovable funnel state must not read like "funnel is off".
-    assert "tailscale funnel status > \"$funnel_capture\"" in text
+    # WO-126 (Codex #363 P1): the first attempt merged stderr into the capture and
+    # tested for non-empty output, so a permissions/daemon/unsupported-command
+    # error also produced output and that error text reached a validator which only
+    # matches POSITIVE funnel phrases - reintroducing the same fail-open. The
+    # streams must stay separate, and only two outcomes may pass: exit 0, or a
+    # nonzero exit whose STDOUT is the recognised no-configuration answer.
+    assert 'tailscale funnel status > "$funnel_out" 2> "$funnel_err"' in text
     assert "public exposure cannot be ruled out" in text
-    assert 'if [ -s "$funnel_capture" ]; then' in text
+    assert "no funnel (config|configuration)" in text
+    # The old non-empty-capture heuristic must be gone.
+    assert '2>&1 || true' not in text
+    assert 'if [ -s "$funnel_capture" ]' not in text
     # The registered ceilings are present and comparisons reference them.
     for name in (
         "HEARTBEAT_MAX_AGE_REGISTERED",
@@ -1083,16 +1092,114 @@ def test_wo122_deploy_and_bootstrap_stop_hiding_their_own_failures():
     assert "wait_for_dashboard || dashboard_ready=false" in bootstrap
 
 
-def test_wo122_manual_runbook_reruns_deploy_acceptance():
-    # TS-15: WO-79 acceptance ran only on the Actions path, so the manual runbook
-    # left deploy_acceptance.json several revisions stale while reporting PASS.
+def test_wo122_runbook_documents_acceptance_without_advertising_an_adhoc_deploy():
+    # TS-15: WO-79 acceptance ran only on the Actions path, so an out-of-workflow
+    # deploy left deploy_acceptance.json revisions stale while reporting PASS.
+    # WO-126 (Codex #363 P1): the first version of this section documented a full
+    # manual pull/rebuild sequence, which AGENTS.md explicitly forbids as a
+    # substitute for the guarded workflow. Normalising a manual deploy path is an
+    # owner governance decision, not a runbook edit - so the acceptance guidance
+    # stays and the ad-hoc deploy recipe does not.
     runbook = (ROOT / "docs" / "POLYMARKET_VPS_DOCKER_RUNBOOK.md").read_text(encoding="utf-8")
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
 
-    section = runbook[runbook.index("## Manual deploy from the VPS shell") :]
+    assert "Do not replace it with an ad-hoc pull/rebuild." in agents
+    start = runbook.index("## Deploy acceptance after any out-of-workflow deploy")
+    # Bound the slice to this section: later sections legitimately mention builds.
+    next_heading = runbook.index("\n## ", start + 1)
+    section = runbook[start:next_heading]
     assert "--profile deploy-acceptance" in section
     assert "vps-deploy-acceptance" in section
     # The scheduler must be absent while acceptance runs.
     assert section.index("stop vps-ops-scheduler") < section.index("vps-deploy-acceptance")
     assert section.index("vps-deploy-acceptance") < section.index("up -d vps-ops-scheduler")
-    # And running from the wrong directory is the mistake worth calling out.
-    assert "cd ~/Claude" in section
+    # Markers must be corrected BEFORE containers are recreated, or the running
+    # stack keeps the previous deploy's interpolated image marker.
+    assert section.index("PM_VPS_DEPLOYED_SHA") < section.index("vps-deploy-acceptance")
+    # And no rebuild recipe is advertised as an alternative to the workflow.
+    assert "up -d --build" not in section
+    assert "update_vps_checkout_preserving_runtime.py" not in section
+
+
+# --- WO-126: Codex review of #363 ---
+
+
+def test_wo126_negative_ages_cannot_prove_freshness():
+    # Codex #363 P2: a restored artifact with a FUTURE mtime, or a host clock that
+    # moved backward, makes file_age_seconds negative - and a negative age passes
+    # every `-le ceiling` test, so a frozen artifact read fresh.
+    result = _health_library(
+        'age_is_valid 120 && printf "valid\\n"; '
+        'age_is_valid -5 || printf "rejected-negative\\n"; '
+        'age_is_valid "" || printf "rejected-empty\\n"; '
+        'assert_age_within backdated -5 900; printf "exit_code=%s\\n" "${exit_code:-0}"'
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "valid" in result.stdout
+    assert "rejected-negative" in result.stdout
+    assert "rejected-empty" in result.stdout
+    assert "invalid age (-5s)" in result.stdout
+    assert "exit_code=1" in result.stdout
+
+
+def test_wo126_health_gate_consumes_the_render_failure_marker():
+    # Codex #363 P1: WO-122 taught the dashboard container to record a failed
+    # startup render and keep serving the stale generation - but nothing read the
+    # marker, so the gate could still pass a stale cockpit. A marker with no
+    # consumer is the exact defect class this batch exists to remove.
+    text = (ROOT / "scripts" / "check_polymarket_vps_paper.sh").read_text(encoding="utf-8")
+    compose = yaml.safe_load((ROOT / "docker-compose.vps-paper.yml").read_text(encoding="utf-8"))
+
+    marker = "outputs/polymarket_dashboard/render_failed.json"
+    assert marker in text
+    # Writer and reader must agree on the path.
+    assert "render_failed.json" in compose["services"]["polymarket-dashboard"]["command"]
+    gate = text[text.index('render_marker="') :]
+    assert "the served generation is stale" in gate
+    # Present marker => nonzero exit, and the repair hint is offered.
+    assert gate.index("exit_code=1") < gate.index("else")
+    assert "dashboard_rerender_hint" in gate[: gate.index("else")]
+
+
+def test_wo126_image_drift_reads_a_marker_compose_cannot_override():
+    # Codex #363 P1: PM_IMAGE_BUILD_SHA is re-set from PM_VPS_DEPLOYED_SHA in every
+    # service's `environment:` block, so a process inside the container reads the
+    # CURRENT deploy marker - making the WO-121 image-vs-checkout check compare the
+    # marker against the checkout, which is the vacuous self-comparison TS-2
+    # reported. The baked file cannot be overridden by env or by the per-path mounts.
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    operating = (ROOT / "src" / "polymarket_predictive_engine" / "operating_state.py").read_text(
+        encoding="utf-8"
+    )
+    compose = yaml.safe_load((ROOT / "docker-compose.vps-paper.yml").read_text(encoding="utf-8"))
+
+    assert '/app/.pm_image_build_sha' in dockerfile
+    assert "BAKED_IMAGE_SHA_PATHS" in operating
+    assert "_baked_image_sha()" in operating
+    # The drift comparison must use the baked value, not the overridable env var.
+    assert "_sha_matches(baked_image_sha, checkout_sha)" in operating
+    # No bind mount may cover the baked marker (they are all per-path under /app).
+    for service in compose["services"].values():
+        for volume in service.get("volumes") or []:
+            target = str(volume).split(":")[1] if ":" in str(volume) else ""
+            assert target not in {"/app", "/app/"}, volume
+
+
+def test_wo126_partial_telemetry_snapshot_refuses_to_push_or_stamp_ok():
+    # Codex #363 P2: a successful git push was stamped `ok` even when building the
+    # snapshot had failed - cp was unchecked, the copy loop runs in a subshell, and
+    # the manifest copy was unchecked. Git could push an incomplete tree while the
+    # new status artifact told the watchdog the bridge succeeded.
+    text = (ROOT / "scripts" / "push_vps_telemetry.sh").read_text(encoding="utf-8")
+
+    assert "COPY_FAILURES=" in text
+    assert "note_copy_failure" in text
+    # A subshell cannot set a parent variable, hence a file.
+    assert 'printf \'%s\\n\' "$1" >> "$COPY_FAILURES"' in text
+    assert 'cp "$src" "$dst" || note_copy_failure' in text
+    assert 'cp "$HOST_MANIFEST" "$SNAP/telemetry/manifest.json"' in text
+    assert "refusing to push" in text
+    assert 'stamp_push "error" "snapshot incomplete' in text
+    # The refusal must come BEFORE the commit and push.
+    assert text.index('if [ -s "$COPY_FAILURES" ]') < text.index("commit-tree -m \"vps telemetry snapshot")

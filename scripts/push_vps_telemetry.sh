@@ -167,6 +167,20 @@ outputs/polymarket_shadow
 outputs/performance
 "
 
+# Codex review of #363 (P2): a successful git push used to be stamped `ok` even
+# when building the snapshot had failed - `cp` was unchecked and followed by an
+# unconditional `return 0`, and the `find | while read` loop runs in a SUBSHELL so
+# a failure there could not propagate to this script anyway. Git would then push an
+# incomplete tree and the new status artifact would tell the watchdog the bridge
+# succeeded. Copy failures are recorded in a file precisely because a subshell
+# cannot set a variable in the parent.
+COPY_FAILURES="$SNAP/.copy_failures"
+
+note_copy_failure() {
+  printf '%s\n' "$1" >> "$COPY_FAILURES" 2>/dev/null || true
+  echo "telemetry snapshot copy failed: $1" >&2
+}
+
 copy_capped() {
   # $1 = repo-relative path. Copies whole file if small, else skips (JSON) or
   # keeps header + tail (CSV) so ledgers stay readable without getting huge.
@@ -174,16 +188,21 @@ copy_capped() {
   src="$REPO_DIR/$rel"
   [ -f "$src" ] || return 0
   dst="$SNAP/telemetry/$rel"
-  mkdir -p "$(dirname "$dst")"
+  if ! mkdir -p "$(dirname "$dst")"; then
+    note_copy_failure "$rel (mkdir)"
+    return 0
+  fi
   size_kb=$(du -k "$src" 2>/dev/null | cut -f1)
   [ -n "$size_kb" ] || return 0
   if [ "$size_kb" -le "$MAX_FILE_KB" ]; then
-    cp "$src" "$dst"
+    cp "$src" "$dst" || note_copy_failure "$rel (cp)"
     return 0
   fi
   case "$rel" in
     *.csv)
-      { head -n 1 "$src"; tail -n "$CSV_TAIL_LINES" "$src"; } > "$dst"
+      if ! { head -n 1 "$src" && tail -n "$CSV_TAIL_LINES" "$src"; } > "$dst"; then
+        note_copy_failure "$rel (csv head+tail)"
+      fi
       ;;
     *)
       : # oversized non-CSV summaries are skipped rather than truncated
@@ -212,7 +231,19 @@ for dir in $TELEMETRY_DIRS; do
 done
 
 mkdir -p "$SNAP/telemetry"
-cp "$HOST_MANIFEST" "$SNAP/telemetry/manifest.json"
+if ! cp "$HOST_MANIFEST" "$SNAP/telemetry/manifest.json"; then
+  note_copy_failure "outputs/performance/vps_telemetry_manifest.json (cp)"
+fi
+
+# Refuse to publish, and refuse to stamp success, on a partial snapshot. An
+# incomplete tree read as fresh telemetry is worse than no new telemetry.
+if [ -s "$COPY_FAILURES" ]; then
+  FAILED_COUNT=$(wc -l < "$COPY_FAILURES" | tr -d ' ')
+  FIRST_FAILURE=$(head -n 1 "$COPY_FAILURES")
+  echo "$STAMP refusing to push: $FAILED_COUNT snapshot file(s) could not be copied (first: $FIRST_FAILURE)" >&2
+  stamp_push "error" "snapshot incomplete: $FAILED_COUNT file(s) failed to copy (first: $FIRST_FAILURE)"
+  exit 1
+fi
 
 # Build a parentless commit with plumbing: temp index, no working-tree touch.
 export GIT_INDEX_FILE="$SNAP/.gitindex"

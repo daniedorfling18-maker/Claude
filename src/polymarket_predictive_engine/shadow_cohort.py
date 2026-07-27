@@ -861,6 +861,12 @@ def read_shadow_signal_cohort_pnl(cfg: EngineConfig) -> dict[str, Any]:
 
 
 def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str, Any]]) -> dict[str, Any]:
+    """Update shadow ledgers while relying on the caller's serialization.
+
+    Callers MUST hold the ``prediction_cycle`` runtime lock; this function does
+    not acquire it because that lock is intentionally non-reentrant.
+    """
+
     settings = _settings(cfg)
     if not boolish(settings.get("enabled", True)):
         payload = {"status": "disabled", "generated_at_utc": now_utc()}

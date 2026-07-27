@@ -212,19 +212,35 @@ def append_csv_rows_matching_existing_header(
     older, narrower header: appending under the CURRENT canonical fieldnames
     would either raise (append_csv_rows) or force a full rewrite (write_csv,
     which breaks every prior anchor prefix - the WO-115 incident class).
-    Instead, append under the header already on disk, dropping keys the
-    legacy schema cannot hold; a schema change still requires a new versioned
-    ledger path. Falls back to the canonical fieldnames for a new/empty file.
+    Instead, append under the header already on disk. Fields absent from that
+    legacy schema are allowed only when empty in every new row; otherwise the
+    append refuses rather than silently losing data. A schema change requires
+    a new versioned ledger path. Falls back to the canonical fieldnames for a
+    new/empty file.
     """
 
     path = Path(path)
+    materialized_rows = list(rows)
     if path.exists() and path.stat().st_size > 0:
         effective = csv_columns(path)
         if not effective:
             effective = [str(field) for field in fieldnames]
     else:
         effective = [str(field) for field in fieldnames]
-    return append_csv_rows(path, rows, fieldnames=effective)
+    dropped_nonempty = sorted(
+        {
+            str(key)
+            for row in materialized_rows
+            for key, value in row.items()
+            if str(key) not in effective and serialize_value(value) != ""
+        }
+    )
+    if dropped_nonempty:
+        raise ValueError(
+            "existing CSV header cannot persist non-empty fields "
+            f"{', '.join(dropped_nonempty)}; use a new versioned ledger path"
+        )
+    return append_csv_rows(path, materialized_rows, fieldnames=effective)
 
 
 def serialize_value(value: Any) -> str:

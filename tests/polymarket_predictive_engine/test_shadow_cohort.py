@@ -1,10 +1,76 @@
 from __future__ import annotations
 
-from pathlib import Path
+import ast
 import json
+from pathlib import Path
 
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.shadow_cohort import _write_shadow_pnl_history, update_shadow_cohort_evidence
+
+
+def _unlocked_shadow_update_calls(source: str) -> list[int]:
+    tree = ast.parse(source)
+    parents: dict[ast.AST, ast.AST] = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+
+    def inside_prediction_lock(node: ast.AST) -> bool:
+        ancestor = parents.get(node)
+        while ancestor is not None:
+            if isinstance(ancestor, ast.With):
+                for item in ancestor.items:
+                    call = item.context_expr
+                    if (
+                        isinstance(call, ast.Call)
+                        and isinstance(call.func, ast.Name)
+                        and call.func.id == "runtime_lock"
+                        and any(
+                            isinstance(arg, ast.Constant) and arg.value == "prediction_cycle"
+                            for arg in call.args
+                        )
+                    ):
+                        return True
+            ancestor = parents.get(ancestor)
+        return False
+
+    # The paper-cycle implementation is deliberately split into a small lock
+    # owner and a large ``_unlocked`` helper. Treat that lexical call edge as
+    # guarded only when every invocation of the helper is itself in the lock.
+    calls_by_name: dict[str, list[ast.Call]] = {}
+    for candidate in ast.walk(tree):
+        if isinstance(candidate, ast.Call) and isinstance(candidate.func, ast.Name):
+            calls_by_name.setdefault(candidate.func.id, []).append(candidate)
+
+    unlocked: list[int] = []
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "update_shadow_cohort_evidence"
+        ):
+            continue
+        guarded = inside_prediction_lock(node)
+        enclosing = parents.get(node)
+        while enclosing is not None and not isinstance(enclosing, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            enclosing = parents.get(enclosing)
+        if not guarded and isinstance(enclosing, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            callers = calls_by_name.get(enclosing.name, [])
+            guarded = bool(callers) and all(inside_prediction_lock(call) for call in callers)
+        if not guarded:
+            unlocked.append(node.lineno)
+    return unlocked
+
+
+def test_all_source_shadow_update_callers_hold_prediction_cycle_lock() -> None:
+    deliberately_unlocked = "def bad(cfg, rows):\n    update_shadow_cohort_evidence(cfg, rows)\n"
+    assert _unlocked_shadow_update_calls(deliberately_unlocked) == [2]
+
+    violations: list[str] = []
+    for path in Path("src").rglob("*.py"):
+        for line in _unlocked_shadow_update_calls(path.read_text(encoding="utf-8")):
+            violations.append(f"{path}:{line}")
+    assert violations == []
 from polymarket_predictive_engine.utils import read_csv_rows
 
 

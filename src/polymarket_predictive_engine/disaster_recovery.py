@@ -486,17 +486,22 @@ def create_ledger_archive(cfg: EngineConfig, *, force: bool = False) -> dict[str
                 for row in sources
                 if str(row["path"]).startswith("outputs/")
             }
-            declared_excluded = {
-                str(row["path"])[len("outputs/") :]
-                for row in excluded
-                if str(row["path"]).startswith("outputs/")
-            }
+            # Codex review of #364 (P1) - a regression introduced by the previous
+            # commit. Whether a missing path is excluded BY SCOPE must be read from
+            # the effective exclusion set, never from `excluded`: that list is built
+            # by walking files that exist, so an absent path can never appear in it.
+            # Immediately after a restore every anchored corpus path is absent by
+            # design while the configured prefix still declares it excluded, so
+            # deriving the answer from `excluded` classified them as coverage gaps and
+            # refused the next archive - wedging the recurring recovery lane after
+            # every restore until collection recreated the corpus. That is the exact
+            # class of failure WO-127 exists to remove, reintroduced one layer over.
             pending_reharvest = sorted(
                 relative
                 for relative in anchored_relative_paths(cfg, as_of_date=day)
                 if relative.startswith(ARCHIVE_EXCLUDED_PREFIXES)
+                and not relative.startswith(tuple(excluded_prefixes))
                 and relative not in archived_relatives
-                and relative not in declared_excluded
             )
             # Codex review of #364 (P1). The absent-corpus case above is not the only
             # way a narrowed archive can lie. If the restore and the re-harvest happen
@@ -750,10 +755,19 @@ def _write_restore_provenance(
     # keeping the inherited boundary while recording this archive's head would
     # produce a marker that refuses itself.
     inherited_head = str(inherited.get("restored_from_chain_head") or "").strip()
+    # Codex review of #364 (P2): the inherited candidate is listed FIRST so that a
+    # stable sort by date leaves the NEW pair last and therefore selected on a tie.
+    # Otherwise a rejected marker whose boundary happens to equal the latest anchor
+    # date displaced the valid pair this restore supplies, and the freshly built
+    # archive failed its own verification. An inherited pair with no head is dropped
+    # outright - it could never be honoured, so propagating it only loses the good one.
     candidates = [
         (canonical_date(text), text, head)
-        for text, head in ((new_boundary, str(chain_head or "")), (inherited_boundary, inherited_head))
-        if text
+        for text, head in (
+            (inherited_boundary, inherited_head),
+            (new_boundary, str(chain_head or "")),
+        )
+        if text and head
     ]
     parsed = sorted(
         ((day, text, head) for day, text, head in candidates if day is not None),
@@ -875,6 +889,33 @@ def verify_and_restore_archive(
                 )
             if str(chain.get("verified_chain_head") or "") != str(manifest.get("chain_head") or ""):
                 raise ValueError("restored WO-61 chain head differs from the archive manifest")
+            # Codex review of #364 (P2). I removed this check once as redundant; it is
+            # redundant ONLY for an archive built after a re-harvest, where the corpus
+            # carries a post-boundary `present` row that chain verification already
+            # enforces. The still-excluded shape is not covered: an archive built while
+            # the prefix was excluded carries the inherited marker and no corpus, and
+            # relabelling its manifest to declare no exclusions is self-consistent -
+            # the file set already matches. The inherited prefix is then imported by
+            # the union, historical rows are waived, later missing_at_anchor rows are
+            # tolerated by design, and it restores ok while claiming full coverage.
+            # An archive that does not DECLARE a prefix excluded is asserting coverage
+            # of it, so every historically anchored path under it must be present -
+            # independent of any inherited provenance.
+            undeclared_missing = sorted(
+                relative
+                for relative in anchored_relative_paths(extracted_cfg, as_of_date=snapshot_date)
+                if relative.startswith(ARCHIVE_EXCLUDED_PREFIXES)
+                and not relative.startswith(tuple(declared_prefixes))
+                and not (extracted_output / PurePosixPath(relative)).is_file()
+            )
+            if undeclared_missing:
+                raise ValueError(
+                    "archive omits "
+                    f"{len(undeclared_missing)} anchored path(s) under a registered prefix it does "
+                    f"not declare excluded (first: {undeclared_missing[0]}); an inherited restore "
+                    "boundary excuses only what a declared exclusion accounts for, never an "
+                    "undeclared omission"
+                )
             if not dry_run:
                 if destination_output_root is None:
                     raise ValueError("destination_output_root is required unless --dry-run is used")

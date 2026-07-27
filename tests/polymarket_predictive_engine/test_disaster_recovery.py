@@ -806,6 +806,72 @@ def test_wo127_narrowing_before_reharvest_refuses_instead_of_publishing_a_gap(tm
     assert rebuilt["archive_coverage_complete"] is True
 
 
+def test_wo127_the_archive_after_a_restore_still_builds(tmp_path: Path):
+    # THE regression this work order exists to prevent, one layer up. Codex review of
+    # #364 (P1) caught that the coverage refusal read "is this path excluded by scope"
+    # from the list of EXISTING files the builder skipped - a list an absent path can
+    # never appear in. Immediately after a restore every anchored corpus path is
+    # absent by design while the configured prefix still declares it excluded, so the
+    # very next scheduled archive was refused, wedging the recurring recovery lane
+    # until collection recreated the corpus. A restore must not wedge the lane that
+    # produced it, which is the whole point of WO-127.
+    cfg = _config(tmp_path)
+    _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+    built = create_ledger_archive(cfg, force=True)
+    restored_root = tmp_path / "restored_outputs"
+    verify_and_restore_archive(
+        cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=restored_root
+    )
+    restored_cfg = _restored_config(cfg, restored_root)
+    assert not (restored_root / "polymarket_training").exists()
+
+    # Default (registered) exclusions still in force: the absent corpus is excluded
+    # by scope, not a coverage gap.
+    rebuilt = create_ledger_archive(restored_cfg, force=True)
+
+    assert rebuilt["status"] == "ok"
+    assert rebuilt["archive_pending_reharvest_paths"] == []
+    assert rebuilt["archive_coverage_complete"] is True
+    assert rebuilt["archive_excluded_paths"] == ["polymarket_training/"]
+
+
+def test_wo127_relabelled_archive_cannot_borrow_an_inherited_waiver(tmp_path: Path):
+    # Codex review of #364 (P2), the shape my earlier test missed: an archive built
+    # while the prefix was EXCLUDED carries the inherited marker and no corpus, so
+    # relabelling its manifest to declare no exclusions is self-consistent - the file
+    # set already matches. The inherited prefix was then imported by the union,
+    # historical rows waived, later missing_at_anchor rows tolerated by design, and it
+    # restored ok while claiming full coverage. An archive that does not declare a
+    # prefix excluded is asserting coverage of it.
+    cfg = _config(tmp_path)
+    corpus = _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+    relative = corpus.relative_to(cfg.output_root).as_posix()
+    built = create_ledger_archive(cfg, force=True)
+    restored_root = tmp_path / "restored_outputs"
+    verify_and_restore_archive(
+        cfg, Path(built["archive_path"]), dry_run=False, destination_output_root=restored_root
+    )
+    restored_cfg = _restored_config(cfg, restored_root)
+
+    # Honest archive on the restored host: prefix still excluded, corpus absent.
+    honest = create_ledger_archive(restored_cfg, force=True)
+    assert honest["archive_excluded_paths"] == ["polymarket_training/"]
+    with tarfile.open(Path(honest["archive_path"]), "r:gz") as archive:
+        assert f"outputs/{relative}" not in set(archive.getnames())
+    assert verify_and_restore_archive(cfg, Path(honest["archive_path"]), dry_run=True)["status"] == "ok"
+
+    # Relabel only the declaration. The file set is untouched and still self-consistent.
+    relabelled = _rebuild_archive_with_manifest(
+        Path(honest["archive_path"]),
+        tmp_path / "relabelled.tar.gz",
+        manifest_updates={"excluded_path_prefixes": [], "excluded_files": [], "excluded_file_count": 0},
+    )
+    with pytest.raises(DisasterRecoveryError, match="does not declare excluded"):
+        verify_and_restore_archive(cfg, relabelled, dry_run=True)
+
+
 def test_wo127_present_but_unanchored_corpus_cannot_enter_the_archive(tmp_path: Path):
     # Codex review of #364 (P1). The absent-corpus refusal is not the only way a
     # narrowed archive can lie. When the restore and the re-harvest happen on the

@@ -18,11 +18,66 @@ from pathlib import Path
 from typing import Any
 
 from .config import EngineConfig
-from .utils import now_utc, write_json
+from .utils import append_csv_rows, now_utc, write_json
 
 
 WORK_ORDER = "WO-85"
 OUTPUT_FILE = "ops_scheduler/training_harvest.json"
+
+# WO-124 (TS-3, 2026-07-27): the JSON artifact is overwritten every run, so a
+# failed harvest left no attributable trace once the next run started - the
+# lifetime counter said 6 of 18 runs failed and the only way to learn WHY was
+# the on-VPS scheduler log, which is deliberately not published. This sidecar
+# keeps one row per completed harvest so the failure rate becomes diagnosable
+# from telemetry. It is not enrolled in the WO-61 chain (append-only sidecar,
+# reporting only) and nothing reads it as a gate input.
+HISTORY_FILE = "ops_scheduler/training_harvest_history.csv"
+HISTORY_FIELDS = [
+    "generated_at_utc",
+    "started_at_utc",
+    "completed_at_utc",
+    "status",
+    "duration_seconds",
+    "successful_steps",
+    "failed_step_count",
+    "failed_steps",
+    "skipped_deadline_steps",
+    "first_failed_step",
+    "first_failed_exit_code",
+    "first_failed_error_type",
+    "mandatory_tail_completed",
+    "paper_trading_invoked",
+    "live_trading_invoked",
+]
+
+
+def _history_row(payload: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """One attributable line per harvest: which step failed, and how."""
+
+    first_failed = next(
+        (row for row in rows if row.get("status") in {"failed", "timed_out"}),
+        None,
+    )
+    failed = list(payload.get("failed_steps") or [])
+    return {
+        "generated_at_utc": payload.get("generated_at_utc"),
+        "started_at_utc": payload.get("started_at_utc"),
+        "completed_at_utc": payload.get("completed_at_utc"),
+        "status": payload.get("status"),
+        "duration_seconds": payload.get("duration_seconds"),
+        "successful_steps": payload.get("successful_steps"),
+        "failed_step_count": len(failed),
+        "failed_steps": ";".join(str(step) for step in failed),
+        "skipped_deadline_steps": ";".join(
+            str(step) for step in (payload.get("skipped_deadline_steps") or [])
+        ),
+        "first_failed_step": (first_failed or {}).get("step", ""),
+        "first_failed_exit_code": (first_failed or {}).get("exit_code", ""),
+        "first_failed_error_type": (first_failed or {}).get("error_type", ""),
+        "mandatory_tail_completed": payload.get("mandatory_tail_completed"),
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
 
 # Registered 2026-07-15 under WO-85. Configuration may make the deadline
 # shorter, never longer. A child already started is allowed to finish under
@@ -265,4 +320,16 @@ def run_training_harvest(
         }
     )
     write_json(artifact_path, payload)
+    # Append-only attribution trail. A history write failure must never turn a
+    # successful harvest into a failed one, but it is reported in the artifact.
+    try:
+        append_csv_rows(
+            cfg.output_root / HISTORY_FILE,
+            [_history_row(payload, rows)],
+            fieldnames=HISTORY_FIELDS,
+        )
+        payload["history_file"] = HISTORY_FILE
+    except (OSError, ValueError) as exc:
+        payload["history_error"] = f"{type(exc).__name__}: {exc}"
+        write_json(artifact_path, payload)
     return payload

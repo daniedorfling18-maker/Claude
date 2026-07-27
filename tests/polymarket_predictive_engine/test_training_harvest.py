@@ -148,3 +148,80 @@ def test_scheduler_rearms_harvest_from_successful_completion_not_start() -> None
         "touch_success_stamp training_harvest"
     )
     assert 'TRAINING_AGE="$(seconds_since_success_stamp training_harvest)"' in script
+
+
+def test_wo124_harvest_history_makes_a_failed_run_attributable(tmp_path: Path) -> None:
+    # TS-3: the lifetime counter said 6 of 18 harvests failed, and the JSON
+    # artifact is overwritten every run, so the only way to learn WHY was the
+    # on-VPS scheduler log - which is deliberately not published. One append-only
+    # row per run makes the failure rate diagnosable from telemetry.
+    from polymarket_predictive_engine.training_harvest import HISTORY_FIELDS, HISTORY_FILE
+    from polymarket_predictive_engine.utils import read_csv_rows
+
+    cfg, config_path = _config(tmp_path)
+    history_path = cfg.output_root / HISTORY_FILE
+
+    def failing_runner(command: Sequence[str], timeout_seconds: int) -> int:
+        return 124 if _step_name(command) == "collect-price-history" else 0
+
+    first = run_training_harvest(
+        cfg,
+        config_path=str(config_path),
+        runner=failing_runner,
+        clock=lambda: 0.0,
+        timestamp=lambda: "2026-07-20T00:00:00Z",
+    )
+    assert first["status"] == "partial_failure"
+    assert first["history_file"] == HISTORY_FILE
+
+    rows = read_csv_rows(history_path)
+    assert len(rows) == 1
+    assert list(rows[0]) == HISTORY_FIELDS
+    # A timeout is attributed to its step, with the exit code that produced it.
+    assert rows[0]["status"] == "partial_failure"
+    assert rows[0]["first_failed_step"] == "collect_price_history"
+    assert rows[0]["first_failed_exit_code"] == "124"
+    assert rows[0]["failed_step_count"] == "1"
+    assert rows[0]["failed_steps"] == "collect_price_history"
+    assert rows[0]["mandatory_tail_completed"] == "True"
+
+    # The next run APPENDS; a clean run records no failed step.
+    second = run_training_harvest(
+        cfg,
+        config_path=str(config_path),
+        runner=lambda command, timeout_seconds: 0,
+        clock=lambda: 0.0,
+        timestamp=lambda: "2026-07-21T00:00:00Z",
+    )
+    assert second["status"] == "ok"
+    rows = read_csv_rows(history_path)
+    assert len(rows) == 2
+    assert rows[1]["first_failed_step"] == ""
+    assert rows[1]["failed_step_count"] == "0"
+    assert [row["completed_at_utc"] for row in rows] == [
+        "2026-07-20T00:00:00Z",
+        "2026-07-21T00:00:00Z",
+    ]
+
+
+def test_wo124_history_write_failure_never_fails_the_harvest(tmp_path: Path) -> None:
+    from polymarket_predictive_engine import training_harvest as module
+
+    cfg, config_path = _config(tmp_path)
+    # Occupy the history path with an incompatible schema: append_csv_rows must
+    # refuse rather than rewrite, and the harvest must still report its own truth.
+    history_path = cfg.output_root / module.HISTORY_FILE
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    history_path.write_text("unrelated,header\n1,2\n", encoding="utf-8")
+
+    payload = run_training_harvest(
+        cfg,
+        config_path=str(config_path),
+        runner=lambda command, timeout_seconds: 0,
+        clock=lambda: 0.0,
+        timestamp=lambda: "2026-07-22T00:00:00Z",
+    )
+
+    assert payload["status"] == "ok"
+    assert "schema mismatch" in payload["history_error"]
+    assert "history_file" not in payload

@@ -42,6 +42,34 @@ KELLY_OVERLAY_INTERPRETATION = (
     "registered floor and is not vetoed by the overlay."
 )
 
+# WO-124 (TS-8): self-describing field semantics. Reporting text only - no
+# threshold, fraction, or dollar figure is defined or altered here.
+SIZING_FIELD_SEMANTICS: dict[str, str] = {
+    "daily_net_mean_usd": (
+        "mean measured net carry per UTC day from maker-study history. NOT portfolio NAV, "
+        "not realised P&L, and not a balance of any kind."
+    ),
+    "inline_quarter_kelly_fraction": (
+        "PRE-shrinkage inline ceiling: min(kelly_fraction_cap, raw_kelly * quarter_kelly_multiplier). "
+        "An upper bound on quarter_kelly_fraction, never the applied value."
+    ),
+    "quarter_kelly_fraction": (
+        "APPLIED fraction: min(inline_quarter_kelly_fraction, shrunk_kelly_fraction(...)). Because it "
+        "is a min() of the inline bound, it can only ever be <= inline_quarter_kelly_fraction; the two "
+        "differing by exactly kelly_shrinkage is the uncertainty shrinker working, not a mismatch."
+    ),
+    "kelly_shrinkage": (
+        "1 - kelly_observations / kelly_full_weight_days. Fewer usable observations means MORE "
+        "shrinkage, which is strictly tightening."
+    ),
+    "kelly_capital_usd": "ladder capital * quarter_kelly_fraction.",
+    "binding_capital_usd": (
+        "min(ladder capital, kelly_capital_usd) - the cap that actually binds. Ladder capital "
+        "exceeding this value is the overlay binding BELOW the ladder cap, which is its purpose; "
+        "binding_cap names which of the two is binding."
+    ),
+}
+
 DEFAULT_SETTINGS: dict[str, Any] = {
     "enabled": True,
     "decision_date": "2026-07-20",
@@ -585,6 +613,13 @@ def _quarter_kelly_cap(history: list[dict[str, Any]], ladder_cap: float, setting
         "kelly_capital_usd": kelly_capital,
         "binding_capital_usd": binding,
         "binding_cap": "quarter_kelly" if kelly_capital < ladder_cap else "ladder",
+        # WO-124 (TS-8, 2026-07-27): the 2026-07-26 sweep filed this block as
+        # internally inconsistent - inline 1.0 beside quarter 0.7, ladder 100
+        # above binding 70, and daily_net_mean_usd misread as portfolio NAV.
+        # Verified by execution: none of those are defects, the FIELD NAMES
+        # invite the misreading. No number here changes; the block now describes
+        # itself so the next reader cannot repeat it.
+        "sizing_field_semantics": SIZING_FIELD_SEMANTICS,
     }
 
 

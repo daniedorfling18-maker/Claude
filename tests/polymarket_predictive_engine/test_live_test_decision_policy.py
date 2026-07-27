@@ -949,3 +949,47 @@ def test_cli_and_dashboard_payload_surface_decision_policy(tmp_path):
     assert data["maker_lane"]["decision_policy"]["indicated_action"] == result["indicated_action"]
     assert "policy: " in html
     assert "makerPolicy" in html
+
+
+def test_wo124_sizing_block_describes_itself_without_changing_any_number():
+    # TS-8: the 2026-07-26 sweep filed this block as internally inconsistent -
+    # inline 1.0 beside quarter 0.7, ladder above binding, and daily_net_mean_usd
+    # misread as portfolio NAV. Verified by execution: the relations are the
+    # design. `quarter` is a min() of `inline`, so it can only be <=; `binding` is
+    # a min() of the ladder cap, so the ladder cap being larger IS the overlay
+    # binding below it. The names invited the misreading, so the block explains
+    # itself - and the explanation must not perturb the arithmetic.
+    settings = dict(policy.DEFAULT_SETTINGS)
+    history = _history_with_capital([1.0, 9.0, 1.0, 9.0, 1.0, 9.0, 1.0], [100.0] * 7)
+
+    sizing = policy._quarter_kelly_cap(history, 250.0, settings)
+
+    semantics = sizing["sizing_field_semantics"]
+    assert semantics is policy.SIZING_FIELD_SEMANTICS
+    # Documentation only: the reported field set is the pre-existing one plus the
+    # single descriptive key, and every described field is actually present.
+    numeric = {key: value for key, value in sizing.items() if key != "sizing_field_semantics"}
+    assert set(numeric) == {
+        "daily_net_mean_usd",
+        "daily_net_std_usd",
+        "quarter_kelly_fraction",
+        "inline_quarter_kelly_fraction",
+        "kelly_shrinkage",
+        "kelly_observations",
+        "kelly_full_weight_days",
+        "kelly_lineage",
+        "kelly_capital_usd",
+        "binding_capital_usd",
+        "binding_cap",
+    }
+    assert set(semantics) <= set(numeric)
+
+    # The documented invariants are the ones the sweep read as contradictions.
+    assert sizing["quarter_kelly_fraction"] <= sizing["inline_quarter_kelly_fraction"]
+    assert sizing["binding_capital_usd"] <= 250.0
+    assert sizing["kelly_shrinkage"] == round(
+        1.0 - sizing["kelly_observations"] / sizing["kelly_full_weight_days"], 6
+    )
+    assert "NOT portfolio NAV" in semantics["daily_net_mean_usd"]
+    assert "never the applied value" in semantics["inline_quarter_kelly_fraction"]
+    assert "binding BELOW the ladder cap" in semantics["binding_capital_usd"]

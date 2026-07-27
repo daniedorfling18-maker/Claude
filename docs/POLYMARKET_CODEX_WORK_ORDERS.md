@@ -5424,3 +5424,201 @@ on-window run "overrun" by construction (mismeasurement, not starvation).
   later than that genuinely missed a window and still stamps overrun. SLO
   target (0) and tighten-only rule untouched; run timing unchanged — label
   only. All other jobs keep bare-interval classification.
+
+## WO-118 — Kill-lane honesty: a data-free artifact must not satisfy a freshness guard — `done` (2026-07-26, PR #358, owner merge; registered WO-86 surface)
+
+Red-team, confirmed by execution: `_kill_input_freshness` counted any
+`maker_live_test.json` timestamp as an observation, so a `disabled` or
+`awaiting_wallet_address` payload — which carries NO kill inputs — kept the
+live-stage guard reading `fresh`/`clear` instead of forcing STOP, and the
+`kill_input_stale_live_stage` watchdog keys off the same field, so it was
+blinded with it.
+- `live_test_decision_policy.py`: a freshness-qualifying observation must carry
+  actual kill inputs (`net_score_usd` present and non-empty), gated on both
+  branches of `_latest_live_observation`.
+- `maker_live_test.py`: a zero net score is `flat_no_net_evidence`, not
+  "winning_so_far" — an all-zero scoreboard used to clear the scoreboard_stop
+  criterion by vacuity.
+- `executor_ops_monitor.py`: a null kill scoreboard is `unobserved`, never
+  `clear`.
+- `run_superbru_auto_pick_watchdog.sh`: explicit `exit 0` after the disabled
+  branch's `tail -f /dev/null`. It was the only action-taking script that could
+  fall THROUGH into its pick-submitting loop if tail died.
+
+## WO-119 — Anchor-integrity writers: three append_only ledgers were being rewritten — `done` (2026-07-26, PR #358, owner merge; registered WO-61 surface)
+
+Same class as WO-115, still live in three enrollments. A rewrite of an
+`append_only` ledger invalidates the anchored prefix and freezes the tamper lane
+until an owner re-genesis.
+- `shadow_cohort.py` (shadow_fills.csv), `maker_carry_study.py` (the WO-111
+  members sidecar), `run_polymarket_local_live_loop.py` (background timeout
+  incidents): converted to appends with pinned fieldnames. New
+  `append_csv_rows_matching_existing_header` appends under a legacy narrower
+  on-disk header instead of widening it. Deliberately NOT re-enrolled as
+  snapshot — that would loosen tamper evidence.
+- `longshot_bias.py`: the ad-hoc scan's shadow emission now runs under the
+  `prediction_cycle` runtime lock, so a manual run cannot race the live loop.
+- RT-5 (NTP-sensitive full-rewrite portfolio dumps) recorded as WATCH: loud
+  failure mode, low likelihood, no change.
+
+## WO-120 — Fail-loud plumbing: benign statuses stay 0, failures stop exiting 0 — `done` (2026-07-26, PR #358, owner merge)
+
+Only 2 of ~40 CLI commands converted a producer status into an exit code, so
+`failed` and `partial` runs were recorded as successes by the scheduler.
+- `cli.py`: per-command zero-exit allowlists for maker-carry-study,
+  collect-trade-prints, collect-maker-replay-data, maker-fill-replay,
+  snapshot-official-books. Benign statuses (`no_portfolio`, `no_candidates`,
+  `skipped_all_completed`, `insufficient_coverage`, `disabled`) stay 0.
+  Owner decision 2026-07-26: a failed study run KEEPS committing its history
+  row (fail-closed); WO-120 makes it loud so it is fixed same-day.
+- `run_vps_ops_scheduler.sh`: odds preflight distinguishes quota-exhausted (an
+  intentional skip) from a fetch/credential error (loud, exit 2) — a curl
+  failure used to refresh `last_success_utc` and could kill the clv and
+  locked-card lanes forever while green; atomic `status.json` write (temp +
+  `os.replace`) after a torn write could wipe all job history and silently
+  disarm both scheduler watchdog registrations; numeric guard in
+  `seconds_since_stamp` after a corrupt stamp could unschedule a job forever;
+  per-job `STARTED_AT` locals so the safety pulse stops clobbering another job's
+  duration; log-rotation failure logged loudly.
+
+## WO-121 — Give the failure states a consumer, and the owner a channel — `done` (2026-07-27, PR #362, owner merge)
+
+The sweep's dominant pattern was producers publishing failure to nobody.
+- `degraded_state_watchdog.py`: freshness ceilings for the two missing lanes
+  (`ledger_anchor` 26h, `maker_safety_refresh` 1h) and five new registrations —
+  `ledger_chain_integrity` (broken/blocked, and an active anchor lane with no
+  verification artifact is UNVERIFIED, not healthy), `disaster_recovery_not_recoverable`
+  (build/push failure or OBSERVED age outside the active RPO),
+  `maker_study_run_failed`, `official_book_snapshot_partial`,
+  `publication_bridge_stale`, and `operating_state_slo_breach`. The SLO block
+  had no consumer at all: seven rows could sit in BREACH with no incident, no
+  exit code, no notification. UNKNOWN is unmeasurable on its own longer maximum,
+  never healthy.
+- Fail-closed corrections: a job record missing `last_exit_code` no longer
+  defaults to 0; the lock-held path carries the previous evaluation forward
+  instead of publishing empty incident lists at exit 0.
+- `operating_state.py`: `_path_timestamp` no longer launders file mtime into a
+  producer observation for the three artifacts that stamp their own timestamp
+  (the rendered quote sheet keeps mtime — file time IS its only observation);
+  the deployment block now surfaces `image_matches_checkout` and lets it decide
+  the status, instead of reporting ALIGNED while the only marker describing what
+  is RUNNING sat misaligned in the same file.
+- `readiness.py` / `decision_trace.py`: `paper_trade_readiness.json` gains
+  `generated_at_utc` (it had none, so a months-old verdict read as current);
+  the subsystem-freshness rollup propagates the worst child instead of a
+  hardcoded "ok", with per-subsystem ceilings replacing one 180s default that
+  was wrong for every on-demand producer.
+- `push_vps_anchor.sh` / `push_vps_telemetry.sh`: both bridges now stamp a
+  status artifact with `last_success_at_utc` and exit nonzero on real failures.
+  The anchor push previously could not fail — every path exited 0 with no
+  artifact and `external_anchor_pending` was never cleared.
+- Owner-approved ntfy delivery (2026-07-26): state-CHANGE gated, topic URL from
+  the VPS environment only, message carries registration ids only — no market,
+  wallet, amount, or artifact contents leave the host. Reuses the WO-99
+  contract; a send failure is recorded, never raised, never faked.
+
+## WO-122 — Make the deploy health gate actually gate — `done` (2026-07-27, PR #362, owner merge)
+
+`check_polymarket_vps_paper.sh` is what the guarded deploy verifies and what the
+automatic rollback must satisfy. It computed three artifact ages and compared
+none of them, so a frozen stack passed as long as HTTP answered and the old JSON
+still contained the right keys.
+- Registered freshness ceilings enforced (heartbeat 900s OR daily forward cycle
+  93600s; dashboard data 1800s); an override may only tighten, and a missing
+  artifact fails closed. `PM_HEALTH_LIBRARY_ONLY=1` sources the helpers so the
+  comparisons are tested for real rather than grepped.
+- The secrets block printed findings and always exited 0: a missing
+  `THE_ODDS_API_KEY` now fails the gate, and a key present on the host but
+  invisible in the container fails too (that one is a deploy defect — env_file
+  was not reloaded).
+- The funnel probe was `|| true`, and the validator's funnel blocker matches
+  POSITIVE strings, so "could not check" read exactly like "funnel is off".
+  An uncapturable funnel state now fails closed.
+- Compose: the paper-live healthcheck tested file EXISTENCE (a wedged loop
+  stayed healthy forever); it now tests an mtime window, start_period 180s ->
+  300s. The dashboard render was `|| true`, silently serving the PREVIOUS
+  generation through deploy verification; a failed render now writes
+  `render_failed.json` (cleared at every start) and the cockpit still serves.
+- Deploy/bootstrap: restore-on-refusal reports a FAILED restore instead of
+  `|| true`; the single post-Serve probe now retries five times (the same race
+  that made the configure script fail with curl (56) three times on 2026-07-25);
+  bootstrap honours a dashboard that never came up.
+- Runbook: the manual deploy path is documented end to end, including the WO-79
+  acceptance re-run it was missing (acceptance ran only on the Actions path, so
+  `deploy_acceptance.json` could sit revisions stale while reporting PASS).
+
+## WO-123 — Narrow the disaster-recovery archive to the recoverable ledger set — `done` (2026-07-27, PR #362, owner merge; owner scope decision 2026-07-26)
+
+WO-122a raised the archive ceiling to 240MB and the build still refused: the
+expanded-restore guard (decompression-bomb check) is the binding cap, and one
+re-harvestable corpus was the whole problem. Measured on the VPS 2026-07-26: the
+enrolled set is 505.6MB, of which `polymarket_training/` is 476.6MB (94%) and a
+single file is 467.1MB. Owner decision: exclude the corpora, keep them anchored.
+- `disaster_recovery.py`: `ARCHIVE_EXCLUDED_PREFIXES = ("polymarket_training/",)`
+  — reported, never read or hashed, never packed (505.6MB -> ~29MB). The corpus
+  stays enrolled in the WO-61 chain, so tamper evidence over it is unchanged;
+  only recovery scope narrows. `excluded_path_prefixes` config may only SHRINK
+  the registered set — dropping a prefix puts that corpus back in, an
+  unregistered prefix is ignored, so config can never quietly remove a ledger
+  from disaster recovery.
+- `ledger_anchor.py`: opt-in `tolerated_missing_prefixes` (default empty, so
+  every other caller is byte-identical). Restore verification passes the
+  INTERSECTION of the archive's declared prefixes with the registered set — the
+  manifest is untrusted input, so an archive cannot widen its own tolerance and
+  a pre-WO-123 archive gets none. Tolerance covers ABSENCE only: a present file
+  whose anchored digest changed, or any missing path outside the prefixes, is
+  still a broken chain.
+- No size guard relaxed; a test proves the same ledger set still fails closed
+  with the exclusion switched off.
+
+## WO-124 — Diagnosis tickets TS-3, TS-8, TS-12 resolved — `done` (2026-07-27, PR #362, owner merge)
+
+Owner decision 2026-07-26 was "diagnose first, no cadence change". All three are
+now root-caused against production telemetry (snapshot 2026-07-27T11:00Z).
+
+**TS-3 — harvest failure rate (6 of 18 lifetime runs).** The per-run artifact
+`ops_scheduler/training_harvest.json` is OVERWRITTEN every run, so a failed
+harvest left no attributable trace once the next run started; the only record of
+why was the on-VPS scheduler log, which WO-121 deliberately stops publishing.
+The mechanism is understood — any failed step makes the whole harvest nonzero,
+`last_success_utc` does not advance, and the maker study's registered 11-13h
+harvest-age window never opens that day — but per-failure attribution was
+impossible remotely. Fix: `training_harvest.py` appends one row per completed
+harvest to `ops_scheduler/training_harvest_history.csv` (status, duration,
+first failed step, its exit code and error type, deadline skips). Not enrolled in
+the WO-61 chain; reporting only; a history-write failure can never turn a
+successful harvest into a failed one. Cadence unchanged, as decided. The window
+gate itself is confirmed working: the 2026-07-27T00:09 study run recorded
+`training_harvest_age=39782s` (11.05h), inside the window.
+
+**TS-8 — decision-policy sizing block "inconsistencies": NOT a defect.**
+Verified by execution. `quarter_kelly_fraction` is a `min()` of
+`inline_quarter_kelly_fraction`, so it can only ever be smaller — inline 1.0
+beside quarter 0.7 is the uncertainty shrinker working (shrinkage 0.3 = 1 -
+14/20 observations), in the tightening direction. `binding_capital_usd` is a
+`min()` of the ladder cap, so the ladder cap being larger IS the overlay binding
+below it, and `binding_cap` names which one binds. The "NAV 12.73" in the sweep
+was `daily_net_mean_usd` (measured net carry per UTC day), not a balance. The
+field NAMES invited every one of those misreadings, so the block now publishes
+`sizing_field_semantics` describing itself. No number changes.
+
+**TS-12 — sharp anchor fetched=30 / mapped=0: seasonal, correctly classified,
+needs an owner scope call.** Not a join regression. The World Cup ended (the
+same seasonality that closed the SuperBru locked-card lane), so of the three
+configured sport/markets only `basketball_nba_championship_winner / outrights`
+still returns rows — 30 of them, all `skipped_no_token` with reason
+`unmapped_sharp_anchor_row`. The outright-winner mapping path is hardcoded to
+the World Cup: `_looks_like_worldcup_outright` requires "world" AND "cup", and
+the token source searches the `world-cup-winner` event slug specifically. There
+is no mapping path for any other outright winner market, the static token map
+has no NBA teams, and the odds feed carries no `token_id`, so direct and
+public-search joins are both zero. The system already classified this correctly:
+`sharp_fetch_suppression.json` shows the family as `no_mappable_market` with a
+9-cycle zero-join streak, throttled to a 24h slow probe — which is why the
+anchor is 4 days stale (`anchor_generated_at_utc` 2026-07-23T18:26,
+`stale_rows: 30`). Recorded as an OWNER DECISION, no code: either generalise the
+outright mapping beyond the World Cup (bounded collection-side change, needs a
+token source for NBA champion markets and spends paid odds-API and public-search
+calls), or accept the sharp/taker lane as dormant until a mappable season starts.
+The taker verdict lane is already CLOSED and the campaign is maker-first, so
+nothing is blocked by leaving it dormant.

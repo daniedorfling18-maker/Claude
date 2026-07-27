@@ -528,7 +528,26 @@ jobs:
           # last-known-good backend before quiescing any writer.
           $SUDO tailscale funnel --https=443 off >/dev/null 2>&1 || true
           $SUDO tailscale serve --bg --yes --https=443 "http://127.0.0.1:${dashboard_port}"
-          curl -fsS --max-time 20 "$dashboard_private_url" >/dev/null
+          # WO-122 (OPS-26): a single probe immediately after `serve --bg` races
+          # the proxy coming up - the same race that made the interactive
+          # configure script fail with curl (56) three times in a row on
+          # 2026-07-25. Retry before concluding the private route is broken; the
+          # rollback path already retries its equivalent probe.
+          serve_probe_ok=false
+          probe_attempt=1
+          while [ "$probe_attempt" -le 5 ]; do
+            if curl -fsS --max-time 20 "$dashboard_private_url" >/dev/null; then
+              serve_probe_ok=true
+              break
+            fi
+            echo "[deploy] private HTTPS probe attempt $probe_attempt did not answer yet; retrying"
+            probe_attempt=$((probe_attempt + 1))
+            sleep 3
+          done
+          if [ "$serve_probe_ok" != true ]; then
+            echo "::error::Private tailnet HTTPS did not answer after 5 attempts; refusing to proceed."
+            exit 1
+          fi
 
           echo "[deploy] quiescing paper writers for a consistent runtime snapshot"
           $DOCKER compose -f "$COMPOSE_FILE" stop --timeout 60
@@ -540,7 +559,13 @@ jobs:
             --report outputs/performance/vps_checkout_update.json; then
             if [ "$(git rev-parse HEAD)" = "$original_head" ]; then
               echo "[deploy] source unchanged after refusal; restoring previous paper stack"
-              $DOCKER compose -f "$COMPOSE_FILE" up -d --no-build || true
+              # WO-122 (OPS-25): the restore was `|| true`, so a FAILED restore
+              # left the stack down while the log said "restoring". The deploy
+              # still exits 1 either way, but which of the two happened decides
+              # whether a human has to intervene right now.
+              if ! $DOCKER compose -f "$COMPOSE_FILE" up -d --no-build; then
+                echo "::error::Restore of the previous paper stack FAILED after a refused checkout update; the stack is DOWN and needs manual recovery."
+              fi
             fi
             exit 1
           fi

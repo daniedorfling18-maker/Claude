@@ -975,3 +975,124 @@ def test_private_dashboard_setup_waits_for_recreated_backend():
     retry_loop = text.index("backend_ready=false")
     serve_enable = text.index("tailscale serve --bg --yes --https=443")
     assert recreate < retry_loop < serve_enable
+
+
+# --- WO-122 (2026-07-27): the health gate compares what it measures ---
+
+
+def _health_library(snippet: str) -> subprocess.CompletedProcess:
+    script = ROOT / "scripts" / "check_polymarket_vps_paper.sh"
+    return subprocess.run(
+        ["sh", "-c", '. "$1"; shift; ' + snippet, "sh", str(script)],
+        env={**os.environ, "PM_HEALTH_LIBRARY_ONLY": "1"},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_wo122_health_freshness_ceilings_are_enforced_and_tighten_only():
+    # OPS-15: the script computed three ages and compared NONE of them, so a
+    # frozen stack passed the gate the guarded deploy AND the automatic rollback
+    # both verify against.
+    result = _health_library(
+        'printf "%s\\n" "$(tighter_of 900 300)" "$(tighter_of 900 5000)" '
+        '"$(tighter_of 900 "")" "$(tighter_of 900 abc)"; '
+        'assert_age_within fresh 100 900; assert_age_within stale 5000 900; '
+        'assert_age_within absent "" 900; printf "exit_code=%s\\n" "${exit_code:-0}"'
+    )
+
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    # An override may only tighten; a wider or malformed value keeps the ceiling.
+    assert lines[:4] == ["300", "900", "900", "900"]
+    assert "  ok: fresh 100s (ceiling 900s)" in result.stdout
+    assert "FAIL: stale is 5000s old, above its 900s ceiling." in result.stdout
+    # Fail-closed: an artifact that does not exist cannot be verified fresh.
+    assert "FAIL: absent is missing; freshness cannot be verified." in result.stdout
+    assert "exit_code=1" in result.stdout
+
+
+def test_wo122_health_script_fails_closed_on_secrets_and_funnel():
+    text = (ROOT / "scripts" / "check_polymarket_vps_paper.sh").read_text(encoding="utf-8")
+
+    # OPS-16: the secrets block printed its findings and always exited 0.
+    odds_block = text[text.index("Secrets check") :]
+    assert "FAIL: THE_ODDS_API_KEY is MISSING/empty" in odds_block
+    assert "FAIL: THE_ODDS_API_KEY is NOT visible inside the container" in odds_block
+    assert odds_block.count("exit_code=1") >= 2
+    # OPS-17: an unprovable funnel state must not read like "funnel is off".
+    assert "tailscale funnel status > \"$funnel_capture\"" in text
+    assert "public exposure cannot be ruled out" in text
+    assert 'if [ -s "$funnel_capture" ]; then' in text
+    # The registered ceilings are present and comparisons reference them.
+    for name in (
+        "HEARTBEAT_MAX_AGE_REGISTERED",
+        "FORWARD_CYCLE_MAX_AGE_REGISTERED",
+        "DASHBOARD_DATA_MAX_AGE_REGISTERED",
+    ):
+        assert name in text
+
+
+def test_wo122_compose_healthcheck_tests_freshness_not_existence():
+    # OPS-22: `test -f` kept a wedged loop "healthy" forever as long as it had
+    # written a heartbeat once.
+    compose = yaml.safe_load((ROOT / "docker-compose.vps-paper.yml").read_text(encoding="utf-8"))
+    healthcheck = compose["services"]["polymarket-paper-live"]["healthcheck"]
+    test_command = healthcheck["test"][1]
+
+    assert "-newermt" in test_command
+    assert "-15 minutes" in test_command
+    assert "-26 hours" in test_command
+    assert "test -f" not in test_command
+    # A cold start must be allowed to produce its first artifact.
+    assert healthcheck["start_period"] == "300s"
+
+
+def test_wo122_dashboard_render_failure_is_recorded_not_swallowed():
+    # OPS-23: `render || true` served the PREVIOUS generation through deploy
+    # verification, which then asserted schema keys against stale content.
+    compose = yaml.safe_load((ROOT / "docker-compose.vps-paper.yml").read_text(encoding="utf-8"))
+    command = compose["services"]["polymarket-dashboard"]["command"]
+
+    assert "render_polymarket_dashboard.py --config /app/polymarket_predictive_config.example.yaml || true" not in command
+    assert "render_failed.json" in command
+    # The stale marker is cleared on every start so it can only describe THIS run.
+    assert command.index("rm -f /app/outputs/polymarket_dashboard/render_failed.json") < command.index(
+        "render_polymarket_dashboard.py"
+    )
+    # The cockpit still gets served: a reachable stale dashboard beats none.
+    assert "serve_polymarket_dashboard.py" in command
+
+
+def test_wo122_deploy_and_bootstrap_stop_hiding_their_own_failures():
+    workflow = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(
+        encoding="utf-8"
+    )
+    bootstrap = (ROOT / "scripts" / "bootstrap_polymarket_vps_paper.sh").read_text(encoding="utf-8")
+
+    # OPS-25: a FAILED restore-on-refusal left the stack down while the log said
+    # "restoring".
+    assert "Restore of the previous paper stack FAILED" in workflow
+    assert 'up -d --no-build || true' not in workflow
+    # OPS-26: the single post-Serve probe raced the proxy coming up.
+    assert 'while [ "$probe_attempt" -le 5 ]' in workflow
+    assert "Private tailnet HTTPS did not answer after 5 attempts" in workflow
+    # OPS-27: bootstrap exited 0 whether or not the dashboard ever answered.
+    assert "wait_for_dashboard || true" not in bootstrap
+    assert "wait_for_dashboard || dashboard_ready=false" in bootstrap
+
+
+def test_wo122_manual_runbook_reruns_deploy_acceptance():
+    # TS-15: WO-79 acceptance ran only on the Actions path, so the manual runbook
+    # left deploy_acceptance.json several revisions stale while reporting PASS.
+    runbook = (ROOT / "docs" / "POLYMARKET_VPS_DOCKER_RUNBOOK.md").read_text(encoding="utf-8")
+
+    section = runbook[runbook.index("## Manual deploy from the VPS shell") :]
+    assert "--profile deploy-acceptance" in section
+    assert "vps-deploy-acceptance" in section
+    # The scheduler must be absent while acceptance runs.
+    assert section.index("stop vps-ops-scheduler") < section.index("vps-deploy-acceptance")
+    assert section.index("vps-deploy-acceptance") < section.index("up -d vps-ops-scheduler")
+    # And running from the wrong directory is the mistake worth calling out.
+    assert "cd ~/Claude" in section

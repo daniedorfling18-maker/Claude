@@ -116,6 +116,58 @@ model, renders the dashboard, runs `scripts/check_polymarket_vps_paper.sh`, and
 verifies the current proof/evidence schema. A checkout refusal restores the
 previous stack when HEAD was not changed.
 
+## Manual deploy from the VPS shell
+
+Use this when the Actions path is unavailable. Run every command from the repo
+root — `cd ~/Claude` first; running these from `~` silently 404s each script.
+
+```bash
+cd ~/Claude
+git fetch origin main
+python3 scripts/preflight_vps_capacity.py \
+  --compose docker-compose.vps-paper.yml \
+  --env-file .env \
+  --output outputs/performance/vps_capacity_preflight.json \
+  --root .
+docker compose -f docker-compose.vps-paper.yml stop
+python3 scripts/update_vps_checkout_preserving_runtime.py \
+  --repo . --target-ref origin/main --branch main \
+  --report outputs/performance/vps_checkout_update.json
+docker compose -f docker-compose.vps-paper.yml up -d --build
+
+# Deployment markers: the health gate, the WO-68 manifest, and the
+# operating-state deployment block all read these.
+git rev-parse HEAD > outputs/performance/deployed_git_rev
+sed -i "s/^PM_VPS_DEPLOYED_SHA=.*/PM_VPS_DEPLOYED_SHA=$(git rev-parse HEAD)/" .env
+python3 scripts/write_vps_telemetry_manifest.py \
+  --repo-root . --output outputs/performance/vps_telemetry_manifest.json
+```
+
+### Re-run deploy acceptance (WO-122, TS-15)
+
+The Actions path runs WO-79 component acceptance on every deploy; the manual
+path did not, so `deploy_acceptance.json` could sit several revisions stale
+while reporting PASS. Run it here too. The scheduler must be **absent** while
+acceptance runs — it is the sole full-governance owner and a concurrent pass
+invalidates the result:
+
+```bash
+docker compose -f docker-compose.vps-paper.yml stop vps-ops-scheduler
+docker compose -f docker-compose.vps-paper.yml --profile deploy-acceptance \
+  run --rm --no-deps vps-deploy-acceptance
+docker compose -f docker-compose.vps-paper.yml up -d vps-ops-scheduler
+```
+
+Then verify:
+
+```bash
+bash scripts/check_polymarket_vps_paper.sh
+```
+
+The health check now enforces freshness ceilings and fails on a missing or
+container-invisible `THE_ODDS_API_KEY`, so a frozen or half-configured stack no
+longer passes the gate.
+
 ## Dashboard access
 
 The dashboard backend is deliberately bound only to VPS loopback on port

@@ -56,6 +56,58 @@ file_age_seconds() {
   printf '%s' "$((now - mtime))"
 }
 
+# WO-122 (OPS-15): this script computed three ages and compared NONE of them, so
+# a completely frozen stack passed the gate as long as HTTP answered and the old
+# JSON still contained the right keys - and this is the gate the guarded deploy
+# and the automatic rollback both verify against. Ceilings are registered here;
+# an environment override may only TIGHTEN one.
+#
+# mtime is the right signal at this layer (a shell gate on the host); the
+# content-honest, timestamp-based version of the same question lives in the
+# operating-state SLO block and the WO-121 watchdog registrations.
+HEARTBEAT_MAX_AGE_REGISTERED=900
+FORWARD_CYCLE_MAX_AGE_REGISTERED=93600
+DASHBOARD_DATA_MAX_AGE_REGISTERED=1800
+
+tighter_of() {
+  # $1 = registered ceiling, $2 = requested override ("" keeps the ceiling)
+  registered="$1"
+  requested="$2"
+  case "${requested:-}" in
+    ''|*[!0-9]*) printf '%s' "$registered"; return ;;
+  esac
+  if [ "$requested" -lt "$registered" ] && [ "$requested" -gt 0 ]; then
+    printf '%s' "$requested"
+  else
+    printf '%s' "$registered"
+  fi
+}
+
+assert_age_within() {
+  # $1 = label, $2 = measured age ("" = missing), $3 = ceiling
+  label="$1"
+  measured="$2"
+  ceiling="$3"
+  if [ -z "${measured:-}" ]; then
+    printf '%s\n' "  FAIL: $label is missing; freshness cannot be verified."
+    exit_code=1
+    return
+  fi
+  if [ "$measured" -gt "$ceiling" ]; then
+    printf '%s\n' "  FAIL: $label is ${measured}s old, above its ${ceiling}s ceiling."
+    exit_code=1
+  else
+    printf '%s\n' "  ok: $label ${measured}s (ceiling ${ceiling}s)"
+  fi
+}
+
+# WO-122: allow the freshness helpers to be sourced and exercised directly,
+# matching the OPS_SCHEDULER_LIBRARY_ONLY pattern. Nothing below this point runs
+# under it, so a test never needs Docker or Tailscale to verify the comparisons.
+if [ "${PM_HEALTH_LIBRARY_ONLY:-0}" = "1" ]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 cd "$REPO_DIR"
 
 port="$(env_value POLYMARKET_DASHBOARD_PORT .env)"
@@ -103,7 +155,25 @@ else
     exit_code=1
     transport_inputs_ready=false
   fi
-  $SUDO tailscale funnel status >> "$transport_tmp/tailscale-serve-status.txt" 2>/dev/null || true
+  # WO-122 (OPS-17): the funnel probe was `|| true`, so a failed capture left the
+  # serve-status text with no funnel evidence at all - and the validator's
+  # funnel-enabled blocker looks for POSITIVE strings, meaning "could not check"
+  # read exactly like "funnel is off". Public exposure is the one thing this gate
+  # exists to prevent, so an unprovable funnel state now fails closed.
+  #
+  # `tailscale funnel status` exits nonzero on some versions when no funnel is
+  # configured, which is the state we want to pass. Distinguish the two by
+  # requiring SOME output: a working CLI always says something (typically "No
+  # funnel config"), while a broken/unavailable CLI writes nothing.
+  funnel_capture="$transport_tmp/tailscale-funnel-status.txt"
+  $SUDO tailscale funnel status > "$funnel_capture" 2>&1 || true
+  if [ -s "$funnel_capture" ]; then
+    cat "$funnel_capture" >> "$transport_tmp/tailscale-serve-status.txt"
+  else
+    printf '%s\n' "  FAIL: Tailscale funnel status could not be captured; public exposure cannot be ruled out."
+    exit_code=1
+    transport_inputs_ready=false
+  fi
   if ! docker_cmd port polymarket-dashboard 8765/tcp > "$transport_tmp/dashboard-bindings.txt"; then
     printf '%s\n' "  FAIL: dashboard Docker binding is unavailable."
     exit_code=1
@@ -152,19 +222,25 @@ fi
 printf '%s\n' ""
 printf '%s\n' "Secrets check (.env -> container):"
 odds_key_env="$(env_value THE_ODDS_API_KEY .env)"
+# WO-122 (OPS-16): this block printed its findings and always exited 0, so a
+# stack whose sharp-anchor lane could not run at all passed the deploy gate.
 if [ -n "$odds_key_env" ]; then
   printf '%s\n' "  THE_ODDS_API_KEY: set in .env (${#odds_key_env} chars)"
 else
-  printf '%s\n' "  THE_ODDS_API_KEY: MISSING/empty in .env - sharp-anchor pipeline cannot run."
+  printf '%s\n' "  FAIL: THE_ODDS_API_KEY is MISSING/empty in .env - the sharp-anchor pipeline cannot run."
   printf '%s\n' "  Fix either by running the GitHub deploy workflow after PM_VPS_SSH_PRIVATE_KEY is set,"
   printf '%s\n' "  or by editing .env in this directory by hand:"
   printf '%s\n' "    THE_ODDS_API_KEY=<key from the-odds-api.com>"
   printf '%s\n' "    docker compose -f $COMPOSE_FILE up -d --force-recreate polymarket-paper-live"
+  exit_code=1
 fi
 if docker_cmd exec polymarket-paper-live sh -c 'test -n "$THE_ODDS_API_KEY"' >/dev/null 2>&1; then
   printf '%s\n' "  THE_ODDS_API_KEY: visible inside polymarket-paper-live container"
 else
-  printf '%s\n' "  THE_ODDS_API_KEY: NOT visible inside the container (set .env then force-recreate; a restart alone does not reload env_file)"
+  # A key present on the host but absent in the container is a deploy defect,
+  # not a configuration preference: env_file was not reloaded.
+  printf '%s\n' "  FAIL: THE_ODDS_API_KEY is NOT visible inside the container (set .env then force-recreate; a restart alone does not reload env_file)"
+  exit_code=1
 fi
 
 printf '%s\n' ""
@@ -255,6 +331,25 @@ if [ -z "${heartbeat_age:-}" ] && [ -z "${forward_age:-}" ]; then
   printf '%s\n' "No paper heartbeat files exist yet."
   exit_code=1
 fi
+
+printf '%s\n' ""
+printf '%s\n' "Freshness ceilings (WO-122):"
+heartbeat_ceiling="$(tighter_of "$HEARTBEAT_MAX_AGE_REGISTERED" "${PM_HEALTH_HEARTBEAT_MAX_AGE_SECONDS:-}")"
+forward_ceiling="$(tighter_of "$FORWARD_CYCLE_MAX_AGE_REGISTERED" "${PM_HEALTH_FORWARD_CYCLE_MAX_AGE_SECONDS:-}")"
+dashboard_ceiling="$(tighter_of "$DASHBOARD_DATA_MAX_AGE_REGISTERED" "${PM_HEALTH_DASHBOARD_MAX_AGE_SECONDS:-}")"
+# The live loop and the daily forward cycle are alternative liveness evidence on
+# a freshly started stack, so require the FRESHER of the two to be inside its
+# own ceiling rather than demanding both.
+if [ -n "${heartbeat_age:-}" ] && [ "$heartbeat_age" -le "$heartbeat_ceiling" ]; then
+  printf '%s\n' "  ok: live heartbeat ${heartbeat_age}s (ceiling ${heartbeat_ceiling}s)"
+elif [ -n "${forward_age:-}" ] && [ "$forward_age" -le "$forward_ceiling" ]; then
+  printf '%s\n' "  ok: forward paper cycle ${forward_age}s (ceiling ${forward_ceiling}s)"
+  printf '%s\n' "  note: live heartbeat is ${heartbeat_age:-missing}s (above ${heartbeat_ceiling}s)"
+else
+  printf '%s\n' "  FAIL: neither the live heartbeat (${heartbeat_age:-missing}s / ${heartbeat_ceiling}s) nor the forward paper cycle (${forward_age:-missing}s / ${forward_ceiling}s) is fresh."
+  exit_code=1
+fi
+assert_age_within "dashboard data" "${dashboard_age:-}" "$dashboard_ceiling"
 
 rm -rf "$transport_tmp"
 trap - EXIT INT TERM

@@ -105,15 +105,24 @@ services:
       - ./inputs/polymarket:/app/inputs/polymarket
     restart: unless-stopped
     healthcheck:
+      # WO-122 (OPS-22): this tested file EXISTENCE, so a wedged loop stayed
+      # "healthy" forever as long as it had written a heartbeat once. Test
+      # FRESHNESS instead: the heartbeat within 15 minutes, or the daily forward
+      # cycle within 26 hours (a freshly started stack has the latter first).
+      # `find -newermt` is the portable-enough mtime window test available in the
+      # image; a missing file simply matches nothing.
       test:
         [
           "CMD-SHELL",
-          "test -f /app/outputs/polymarket_model_governance/local_live_loop_heartbeat.json || test -f /app/outputs/polymarket_model_governance/forward_paper_cycle.json",
+          "find /app/outputs/polymarket_model_governance/local_live_loop_heartbeat.json -newermt '-15 minutes' 2>/dev/null | grep -q . || find /app/outputs/polymarket_model_governance/forward_paper_cycle.json -newermt '-26 hours' 2>/dev/null | grep -q .",
         ]
       interval: 60s
-      timeout: 5s
+      timeout: 10s
       retries: 5
-      start_period: 180s
+      # Raised from 180s with the freshness test: a cold start must be allowed to
+      # produce its first artifact before a window test can possibly pass, or the
+      # container reports unhealthy while it is legitimately still booting.
+      start_period: 300s
 
   polymarket-dashboard:
     image: polymarket-paper-vps:latest
@@ -126,9 +135,16 @@ services:
       # The dashboard renders mounted repo code on the VPS; this marker is the
       # deployed runtime code version used by deployment-health checks.
       PM_IMAGE_BUILD_SHA: ${PM_VPS_DEPLOYED_SHA:-unknown}
+    # WO-122 (OPS-23): the render was `|| true`, so a failed render silently
+    # served the PREVIOUS generation - through deploy verification, which then
+    # asserted schema keys against stale content and passed. The serve step still
+    # starts (a reachable stale cockpit beats no cockpit), but the failure is
+    # recorded where the deploy gate and the operator can both see it.
     command: >
       sh -c "mkdir -p /app/outputs/polymarket_dashboard &&
-      python scripts/render_polymarket_dashboard.py --config /app/polymarket_predictive_config.example.yaml || true;
+      rm -f /app/outputs/polymarket_dashboard/render_failed.json;
+      python scripts/render_polymarket_dashboard.py --config /app/polymarket_predictive_config.example.yaml
+      || printf '{\"status\": \"error\", \"work_order\": \"WO-122\", \"generated_at_utc\": \"%s\", \"detail\": \"dashboard render failed at container start; the served generation is stale\"}\n' \"$$(date -u +%Y-%m-%dT%H:%M:%SZ)\" > /app/outputs/polymarket_dashboard/render_failed.json;
       python scripts/serve_polymarket_dashboard.py
       --directory /app/outputs/polymarket_dashboard
       --host 0.0.0.0

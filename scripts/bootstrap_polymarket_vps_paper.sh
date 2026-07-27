@@ -223,8 +223,15 @@ main() {
   clone_or_update_repo
   configure_env_if_new
   start_stack
-  wait_for_dashboard || true
+  # WO-122 (OPS-27): `|| true` made a bootstrap whose dashboard never came up
+  # look identical to a successful one, including its exit code.
+  dashboard_ready=true
+  wait_for_dashboard || dashboard_ready=false
   log "Run this anytime for status: bash $REPO_DIR/scripts/check_polymarket_vps_paper.sh"
+  if [ "$dashboard_ready" != true ]; then
+    log "FAIL: bootstrap finished but the dashboard never responded locally; see the compose status above."
+    return 1
+  fi
 }
 
 main "$@"

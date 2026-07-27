@@ -863,13 +863,33 @@ def test_wo127_relabelled_archive_cannot_borrow_an_inherited_waiver(tmp_path: Pa
     assert verify_and_restore_archive(cfg, Path(honest["archive_path"]), dry_run=True)["status"] == "ok"
 
     # Relabel only the declaration. The file set is untouched and still self-consistent.
-    relabelled = _rebuild_archive_with_manifest(
+    # Codex review of #364 (P2): [""] and whitespace are the interesting forgeries -
+    # every path satisfies startswith(""), so an unnormalised declaration became a
+    # wildcard that "declared" a prefix the archive never named, while the inherited
+    # marker still supplied the registered waiver. A prefix without its trailing slash
+    # normalises to a valid declaration and must still be honoured.
+    # ("audit/" is deliberately absent: that shape is refused earlier, by the
+    # declares-and-includes contradiction check, which is a different guard.)
+    for index, forged_declaration in enumerate(([], [""], ["   "], ["/"], ["../"])):
+        relabelled = _rebuild_archive_with_manifest(
+            Path(honest["archive_path"]),
+            tmp_path / f"relabelled-{index}.tar.gz",
+            manifest_updates={
+                "excluded_path_prefixes": forged_declaration,
+                "excluded_files": [],
+                "excluded_file_count": 0,
+            },
+        )
+        with pytest.raises(DisasterRecoveryError, match="does not declare excluded"):
+            verify_and_restore_archive(cfg, relabelled, dry_run=True)
+
+    # An honest declaration missing only its trailing slash still restores.
+    tolerant = _rebuild_archive_with_manifest(
         Path(honest["archive_path"]),
-        tmp_path / "relabelled.tar.gz",
-        manifest_updates={"excluded_path_prefixes": [], "excluded_files": [], "excluded_file_count": 0},
+        tmp_path / "unslashed.tar.gz",
+        manifest_updates={"excluded_path_prefixes": ["polymarket_training"]},
     )
-    with pytest.raises(DisasterRecoveryError, match="does not declare excluded"):
-        verify_and_restore_archive(cfg, relabelled, dry_run=True)
+    assert verify_and_restore_archive(cfg, tolerant, dry_run=True)["status"] == "ok"
 
 
 def test_wo127_present_but_unanchored_corpus_cannot_enter_the_archive(tmp_path: Path):

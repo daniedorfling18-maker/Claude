@@ -592,6 +592,24 @@ def create_ledger_archive(cfg: EngineConfig, *, force: bool = False) -> dict[str
     return _write_status(cfg, settings, payload)
 
 
+def _normalised_prefixes(value: Any) -> set[str]:
+    """Normalise an untrusted exclusion declaration to comparable prefixes.
+
+    Empty and whitespace-only entries are dropped - `startswith("")` is true for
+    every path, so honouring one would turn a declaration into a wildcard.
+    """
+
+    if not isinstance(value, (list, tuple)):
+        return set()
+    normalised: set[str] = set()
+    for item in value:
+        text = str(item).strip().replace("\\", "/").lstrip("/")
+        if not text:
+            continue
+        normalised.add(text if text.endswith("/") else f"{text}/")
+    return normalised
+
+
 def _safe_member_path(name: str) -> PurePosixPath:
     path = PurePosixPath(str(name or ""))
     if (
@@ -852,8 +870,20 @@ def verify_and_restore_archive(
         # before WO-123) gets no tolerance at all. Tolerance covers absence only
         # - a present file whose anchored digest changed still fails below.
         declared = manifest.get("excluded_path_prefixes")
-        declared_prefixes = (
-            {str(item) for item in declared} if isinstance(declared, (list, tuple)) else set()
+        # Codex review of #364 (P2): NORMALISE before matching. A forged manifest can
+        # declare [""], and every path satisfies startswith("") - so an archive could
+        # claim to have "declared" a prefix it never named and slip past the
+        # undeclared-omission guard below while the inherited marker still supplied
+        # the registered waiver. Empty and whitespace entries are dropped, separators
+        # normalised, and a trailing slash enforced so a prefix cannot match a sibling
+        # file by accident.
+        declared_prefixes = _normalised_prefixes(declared)
+        # Only a declaration the REGISTRY carries counts as a valid exclusion. The
+        # config-effective narrowing is deliberately NOT part of this: whether the
+        # archive validly declared something is a property of the archive, not of the
+        # host restoring it.
+        declared_registered = tuple(
+            prefix for prefix in ARCHIVE_EXCLUDED_PREFIXES if prefix in declared_prefixes
         )
         # WO-127: also intersect the CONFIG-EFFECTIVE set. A config that NARROWS
         # exclusions means more was archived, so tolerating the full registered
@@ -905,7 +935,7 @@ def verify_and_restore_archive(
                 relative
                 for relative in anchored_relative_paths(extracted_cfg, as_of_date=snapshot_date)
                 if relative.startswith(ARCHIVE_EXCLUDED_PREFIXES)
-                and not relative.startswith(tuple(declared_prefixes))
+                and not relative.startswith(declared_registered)
                 and not (extracted_output / PurePosixPath(relative)).is_file()
             )
             if undeclared_missing:

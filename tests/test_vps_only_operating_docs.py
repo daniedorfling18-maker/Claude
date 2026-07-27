@@ -30,6 +30,38 @@ def test_canonical_front_doors_are_vps_only() -> None:
     assert "manually maintained snapshot formerly stored here was retired" in current_state
 
 
+def test_wo135_sandbox_test_carve_out_stays_narrow() -> None:
+    # WO-135. Dispatched builds were arriving with every test marked "not run
+    # locally", correctly citing the VPS-only rule's ban on running test suites off
+    # the VPS. The ban is narrowed for a hermetic suite in an ephemeral agent
+    # sandbox - and this test exists so the carve-out cannot later be widened into
+    # "agents may run production paths", which is the whole thing the rule protects.
+    agents = _text("AGENTS.md")
+
+    # The prohibition itself survives verbatim.
+    assert "Do not start any of the following on the local workstation" in agents
+    assert "- Python engines, collectors, model training, test suites, brokers, or watchdogs;" in agents
+
+    # The carve-out is present, scoped to a sandbox, and mandatory.
+    assert "Amendment, 2026-07-27 — the offline suite in an agent sandbox" in agents
+    assert "ephemeral, network-isolated sandbox" in agents
+    assert "MUST run the offline `pytest` suite" in agents
+
+    # Everything with runtime side effects stays banned outside the VPS.
+    for runtime_path in (
+        "engines, collectors, model training, brokers, watchdogs, schedulers, dashboards",
+        "Docker/Compose",
+        "any run against a real `paths.output_root`",
+        "contacts a live venue, wallet, or paid API",
+    ):
+        assert runtime_path in agents, runtime_path
+
+    # And the required gate remains the only thing that verifies a change.
+    assert "A sandbox run is never verification of record." in agents
+    assert "self-hosted ARM64 required" in agents
+    assert "neither substitutes for it nor licenses a merge" in agents
+
+
 def test_legacy_local_runbooks_are_loudly_archived() -> None:
     expected_markers = {
         "docs/POLYMARKET_SHADOW_RESEARCH_RUNBOOK.md": "Retired local runbook",

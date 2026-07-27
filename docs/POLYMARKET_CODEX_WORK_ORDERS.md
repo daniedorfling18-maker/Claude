@@ -6000,8 +6000,80 @@ enumerated tests; the `Day-after check:`; and the merge routing (non-frozen →
 orchestrator after line-audit, frozen/registered → owner). A dispatch assigns
 work and is never authorization.
 
+Every dispatch also carries, per WO-135 (effective on the owner's merge of that
+amendment): **run the offline `pytest` suite in your sandbox before pushing and
+report the exact result — pass counts, or the failing tests. "Not run" is a spec
+violation, not a status.** An agent that genuinely cannot run it must say so and
+name what blocked it. This does not change what verifies a change: the self-hosted
+ARM64 required PR gate remains the sole verification of record, and a green sandbox
+run neither substitutes for it nor licenses a merge.
+
+And: **push the branch to `origin` and open the pull request.** A commit that
+exists only in a task sandbox is not a delivery. If pushing is outside what the
+task can do, say so explicitly rather than reporting created "pull-request
+metadata" — on 2026-07-20 (#299) and 2026-07-27 (#368, #369) that phrasing
+accompanied work that never reached the remote, and a silent non-delivery is the
+one outcome the queue cannot act on.
+
 **Owner-provisioned recurrence.** Recurring cycles remain the owner's to
 provision (claude.ai/code → environment → triggers), per the queue-driver section
 above. The orchestrator does not self-provision recurrence. `OPS_OWNER_NTFY_TOPIC_URL`
 carries queue-driver phone pushes; custody is unchanged — never in the repo,
 config, chat, or telemetry.
+
+## WO-135 — Let a sandboxed agent run the offline suite, and require it — `in-review` (2026-07-27; `AGENTS.md` amendment → owner merge)
+
+**Cause, measured rather than assumed.** Every WO delivered through the dispatch
+bridge on 2026-07-27 arrived with the test results marked "not run locally". Codex
+stated the reason itself: *"repository policy requires Polymarket runtime
+verification in an isolated VPS container or through the self-hosted ARM64 PR
+gate."* That is `AGENTS.md` line 13 — "Do not start any of the following on the
+local workstation: Python engines, collectors, model training, **test suites**,
+brokers, or watchdogs" — plus line 18, which offers only two sanctioned venues,
+neither of which an agent sandbox is. The agent was not cutting corners. It was
+complying, and the rule was costing us the cheapest defect filter we have.
+
+**Why the carve-out is safe.** The prohibition exists to keep runtime work and
+production artifacts on the VPS: nothing outside production may write ledgers, call
+a live venue, or produce evidence that could be mistaken for the real thing. The
+`pytest` suite does none of that — it drives temporary `paths.output_root`
+directories, recorded fixtures and stubbed HTTP throughout. So the ban on running
+it is broader than the purpose it serves, and narrowing it removes no protection.
+
+**What changed** (`AGENTS.md`, new dated amendment under the VPS-only rule):
+- An automated agent in an **ephemeral, network-isolated sandbox** MUST run the
+  offline suite before pushing and MUST state the result in the PR.
+- Everything with runtime side effects stays prohibited outside the VPS with no
+  exception, and the list is restated so the carve-out cannot be read broadly:
+  engines, collectors, model training, brokers, watchdogs, schedulers, dashboards,
+  Docker/Compose, any run against a real `paths.output_root`, and anything
+  contacting a live venue, wallet, or paid API.
+- **The self-hosted ARM64 required PR gate remains the sole verification of
+  record.** A green sandbox run is not verification, does not license a merge, and
+  does not reduce the line-audit. It exists to stop an agent spending a review
+  cycle on breakage it could have seen itself.
+- The owner's workstation is unchanged: still no test suites there.
+
+**Dispatch template amendment.** Every dispatch now states: *run the offline suite
+in your sandbox before pushing and report the exact result — pass counts, or the
+failing tests. "Not run" is a spec violation, not a status.* An agent that
+genuinely cannot run it must say so explicitly and name what blocked it.
+
+**Fail-safe direction (S5).** If the sandbox cannot run the suite, the agent
+reports that plainly and the PR is treated as unverified — never as passing. A
+sandbox result is advisory in only one direction: a failure blocks the push, a pass
+proves nothing the required gate has not confirmed.
+
+**Interleaving (S2).** Documentation only. No artifact, writer, cadence, gate,
+threshold, sizing rule, or order path changes.
+
+Tests: `tests/test_vps_only_operating_docs.py` gains assertions that the amendment
+is present, that the runtime prohibition survives it verbatim, and that the
+required-gate-is-sole-authority sentence is intact — so a later edit cannot quietly
+widen the carve-out into "agents may run production paths".
+
+**Day-after check:** the next dispatched work order's PR states a real suite result
+(counts, or named failures) instead of "not run locally"; `AGENTS.md` still contains
+"Do not start any of the following on the local workstation"; and the required PR
+gate still runs the full unfiltered suite on that PR and remains what the merge
+decision cites.

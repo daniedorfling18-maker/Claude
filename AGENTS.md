@@ -18,6 +18,34 @@ Do not start any of the following on the local workstation:
 Run verification in an isolated VPS container or through the self-hosted ARM64
 required PR gate. Run production only through the guarded VPS deployment.
 
+### Amendment, 2026-07-27 — the offline suite in an agent sandbox
+
+The prohibition above is unchanged for the owner's workstation and for every
+runtime path. It is narrowed in exactly one respect: an automated agent working in
+an **ephemeral, network-isolated sandbox** MUST run the offline `pytest` suite
+there before pushing, and MUST state the result in its pull request.
+
+This is permitted because the suite is hermetic — it drives temporary
+`paths.output_root` directories, recorded fixtures and stubbed HTTP, so it reaches
+no live API and writes no production evidence. The rule's purpose is to keep
+runtime work and production artifacts on the VPS, and running these tests does
+neither.
+
+The following remain prohibited everywhere outside the VPS, with no exception:
+engines, collectors, model training, brokers, watchdogs, schedulers, dashboards,
+Docker/Compose, any run against a real `paths.output_root`, and anything that
+contacts a live venue, wallet, or paid API.
+
+**A sandbox run is never verification of record.** The self-hosted ARM64 required
+PR gate remains the sole authority on whether a change passes, and a green sandbox
+run neither substitutes for it nor licenses a merge. The sandbox run exists so an
+agent catches its own breakage before spending a review cycle, and so that "tests
+not run" stops being a routine, accepted state in delivered work.
+
+Reason for the amendment: dispatched builds were arriving with every test marked
+"not run locally", correctly citing this rule — so defects that a two-minute local
+run would have caught were reaching review and CI instead.
+
 ## Authoritative operating state
 
 Never infer current state from prose or a Git checkout. WO-68 generates the

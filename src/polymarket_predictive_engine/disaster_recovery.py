@@ -574,7 +574,50 @@ def _read_and_validate_archive(archive_path: Path, *, size_cap_bytes: int) -> tu
             raise ValueError(f"archive size mismatch for {name}")
         if _sha256_bytes(data) != str(row.get("sha256") or ""):
             raise ValueError(f"archive digest mismatch for {name}")
+    _reject_contradictory_exclusions(manifest, actual_paths)
     return manifest, files
+
+
+def _reject_contradictory_exclusions(manifest: dict[str, Any], member_paths: set[str]) -> None:
+    """Refuse an archive that both declares a prefix excluded and ships it.
+
+    Codex review of #364 (P1). WO-127 grants boundary-scoped verification
+    tolerance from the manifest's exclusion declaration, and the marker is
+    installed BEFORE chain verification runs. So an archive that declares
+    ``polymarket_training/`` excluded while also carrying an
+    ``outputs/polymarket_training/...`` member gets that member's anchored digest
+    SKIPPED: arbitrary bytes with a self-consistent archive manifest would restore
+    with ``status: ok``. The declaration would be granting tolerance for a file
+    the archive itself supplies.
+
+    No archive this code builds can take that shape - ``_archive_source_payloads``
+    reports excluded paths instead of adding them - so the shape only arises from a
+    forged or corrupted archive, and it is rejected on the untrusted-input boundary
+    rather than reconciled later. Rejection is keyed on the DECLARED set, not the
+    registered/config intersection, so the archive is refused even when the
+    contradiction happens not to be exploitable under the current configuration.
+    """
+
+    declared = manifest.get("excluded_path_prefixes")
+    if not isinstance(declared, (list, tuple)):
+        return
+    prefixes = tuple(sorted({str(item) for item in declared if str(item)}))
+    if not prefixes:
+        return
+    contradictory = sorted(
+        name
+        for name in member_paths
+        if name.startswith("outputs/") and name[len("outputs/") :].startswith(prefixes)
+    )
+    if contradictory:
+        raise ValueError(
+            "archive declares "
+            + ", ".join(prefixes)
+            + " excluded while also including "
+            + f"{len(contradictory)} member(s) under those prefixes "
+            + f"(first: {contradictory[0]}); a declaration cannot excuse verification of a file "
+            "the archive supplies"
+        )
 
 
 def _write_restore_provenance(

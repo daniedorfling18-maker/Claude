@@ -411,15 +411,28 @@ def test_wo127_invalid_or_future_restore_boundary_is_refused(tmp_path: Path):
     _write_provenance(cfg, prefixes=["polymarket_training/"], boundary="2026-07-11")
     assert verify_ledger_chain(cfg, write_summary=False)["status"] == "ok"
 
-    # A ten-character non-date must be refused, not honoured.
-    for bogus in ("9999-99-99", "2026-13-01", "2026-02-30", "not-a-date", "20260711"):
+    # A non-canonical boundary must be refused, not honoured. "2026-7-1" is the
+    # second Codex #364 P1: it is a VALID calendar date and not in the future, yet
+    # it sorts lexically above every canonical "2026-0M-DD" row, so a string
+    # comparison excused post-boundary rows as well. "20260711" and "2026-W28-4"
+    # are the ISO spellings Python 3.11's fromisoformat also accepts.
+    for bogus in (
+        "9999-99-99",
+        "2026-13-01",
+        "2026-02-30",
+        "not-a-date",
+        "20260711",
+        "2026-W28-4",
+        "2026-7-1",
+        "2026-07-1",
+    ):
         _write_provenance(cfg, prefixes=["polymarket_training/"], boundary=bogus)
         refused = verify_ledger_chain(cfg, write_summary=False)
         assert refused["status"] == "broken", bogus
         assert refused["restore_tolerated_prefixes"] == [], bogus
         assert refused["restore_boundary_date"] is None, bogus
         # Refused, not silently dropped: the operator is told why.
-        assert "not a valid YYYY-MM-DD" in (refused["restore_provenance_rejected"] or ""), bogus
+        assert "not a canonical YYYY-MM-DD" in (refused["restore_provenance_rejected"] or ""), bogus
 
     # A syntactically valid FUTURE boundary is the same blanket excuse by another
     # route — rows that do not exist yet would be pre-boundary forever.
@@ -433,3 +446,63 @@ def test_wo127_invalid_or_future_restore_boundary_is_refused(tmp_path: Path):
     unregistered = verify_ledger_chain(cfg, write_summary=False)
     assert unregistered["status"] == "broken"
     assert "no registered excluded prefix" in (unregistered["restore_provenance_rejected"] or "")
+
+
+def test_wo127_noncanonical_boundary_cannot_excuse_a_post_boundary_row(tmp_path: Path):
+    # Codex review of #364 (second P1), demonstrated end to end: a valid,
+    # not-future, non-zero-padded boundary must not excuse a row it does not
+    # cover. Under the old lexical comparison "2026-07-12" <= "2026-7-1" was
+    # true, so tampering with post-boundary bytes verified clean.
+    cfg = _config(
+        tmp_path,
+        [{"glob": "polymarket_training/historical_bid_ask_v1.csv", "mode": "append_only"}],
+    )
+    corpus = cfg.output_root / "polymarket_training" / "historical_bid_ask_v1.csv"
+    corpus.parent.mkdir(parents=True)
+    corpus.write_bytes(b"ts,bid,ask\n1784000000,0.41,0.59\n")
+    assert anchor_ledgers(cfg, anchor_date="2026-07-12")["status"] == "ok"
+
+    # The tampered bytes are the ONLY difference from the anchored digest.
+    corpus.write_bytes(b"ts,bid,ask\n9999999999,0.01,0.99\n")
+    _write_provenance(cfg, prefixes=["polymarket_training/"], boundary="2026-7-1")
+    result = verify_ledger_chain(cfg, write_summary=False)
+    assert result["status"] == "broken"
+    assert result["first_broken_date"] == "2026-07-12"
+    assert result["restored_unverifiable_tolerated"] == 0
+    assert "not a canonical YYYY-MM-DD" in (result["restore_provenance_rejected"] or "")
+
+
+def test_wo127_unreadable_restore_marker_is_reported_not_read_as_absent(tmp_path: Path):
+    # Codex review of #364 (P2): read_json maps unparseable JSON to its default,
+    # so a truncated or hand-edited marker was indistinguishable from no marker at
+    # all - the operator got a broken chain with restore_provenance_rejected null,
+    # which is exactly the diagnostic this contract promises to provide.
+    cfg = _config(
+        tmp_path,
+        [{"glob": "polymarket_training/historical_bid_ask_v1.csv", "mode": "append_only"}],
+    )
+    corpus = cfg.output_root / "polymarket_training" / "historical_bid_ask_v1.csv"
+    corpus.parent.mkdir(parents=True)
+    corpus.write_bytes(b"ts,bid,ask\n1784000000,0.41,0.59\n")
+    assert anchor_ledgers(cfg, anchor_date="2026-07-11")["status"] == "ok"
+    corpus.unlink()
+
+    marker = cfg.output_root / "performance" / "ledger_restore_provenance.json"
+    for raw, expected in (
+        ('{"restore_boundary_date": "2026-07-11", "excluded_path', "cannot be read"),
+        ("", "cannot be read"),
+        ('["polymarket_training/"]', "not a JSON object"),
+        ("{}", "no registered excluded prefix"),
+    ):
+        marker.write_text(raw, encoding="utf-8")
+        result = verify_ledger_chain(cfg, write_summary=False)
+        assert result["status"] == "broken", raw
+        assert result["restore_tolerated_prefixes"] == [], raw
+        assert expected in (result["restore_provenance_rejected"] or ""), raw
+
+    # No marker at all is a different state: nothing was refused, because nothing
+    # was claimed. The chain is still broken - it is just not a marker problem.
+    marker.unlink()
+    absent = verify_ledger_chain(cfg, write_summary=False)
+    assert absent["status"] == "broken"
+    assert absent["restore_provenance_rejected"] is None

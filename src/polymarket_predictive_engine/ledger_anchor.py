@@ -10,13 +10,13 @@ sizing rule, policy, broker, or order path reads its outputs.
 from __future__ import annotations
 
 import csv
-from datetime import datetime
+from datetime import date
 import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
 import shutil
-from typing import Any
+from typing import Any, NamedTuple
 
 from .config import EngineConfig, load_config
 from .runtime_lock import runtime_lock
@@ -103,8 +103,33 @@ ARCHIVE_EXCLUDED_PREFIXES: tuple[str, ...] = ("polymarket_training/",)
 RESTORE_PROVENANCE_FILE = "performance/ledger_restore_provenance.json"
 
 
-def _restore_provenance(cfg: EngineConfig) -> tuple[tuple[str, ...], str, str]:
-    """Return (tolerated prefixes, restore boundary date, rejection reason).
+class _RestoreProvenance(NamedTuple):
+    """What an applied restore recorded about the tree it handed over."""
+
+    tolerated_prefixes: tuple[str, ...]
+    boundary_date: date | None
+    boundary_text: str
+    rejected_reason: str
+
+
+_NO_RESTORE_PROVENANCE = _RestoreProvenance((), None, "", "")
+
+
+def _calendar_date(text: str) -> date | None:
+    """Parse a canonical ``YYYY-MM-DD`` day, or None for anything else."""
+
+    candidate = str(text or "").strip()
+    try:
+        parsed = date.fromisoformat(candidate)
+    except ValueError:
+        return None
+    # Python 3.11's fromisoformat also accepts basic and week formats; only the
+    # canonical spelling counts, so a comparison can never be spelling-dependent.
+    return parsed if candidate == parsed.isoformat() else None
+
+
+def _restore_provenance(cfg: EngineConfig) -> _RestoreProvenance:
+    """Read the restore marker: tolerated prefixes, boundary, rejection reason.
 
     WO-127. An applied restore records which registered prefixes it could not
     restore and the snapshot date it restored to. Verification honours that
@@ -112,52 +137,114 @@ def _restore_provenance(cfg: EngineConfig) -> tuple[tuple[str, ...], str, str]:
     construction, instead of the restore check opting in and the anchor lane —
     the one that actually freezes the head — not knowing.
 
-    Trust bounds, all three necessary:
+    Trust bounds, all four necessary:
 
     1. Only prefixes in the REGISTERED set above can be excused, so a forged or
-       edited marker cannot reach anything beyond the two owner-approved
+       edited marker cannot reach anything beyond the owner-approved
        re-harvestable corpora.
     2. The boundary must be a STRICT calendar date, not merely ten characters.
        Codex review of #364 (P1): a length check accepted `9999-99-99`, and
-       because the row comparison is lexical, that sorted every historical anchor
+       because the row comparison was lexical, that sorted every historical anchor
        as pre-boundary — turning a scoped excuse into a blanket one and voiding
        the post-boundary tamper check entirely.
     3. The boundary may not be in the future. A restore cannot come from an
        archive that does not exist yet, and a future date would excuse rows that
        have not been written, which is the same blanket excuse by another route.
+    4. The boundary is returned as a `date`, and the caller compares PARSED anchor
+       dates against it. Codex review of #364 (second P1): a valid but
+       non-zero-padded `2026-7-1` parses, is not in the future, and yet sorts
+       lexically ABOVE every canonical `2026-0M-DD` row — so string comparison
+       excused post-boundary rows too. Comparing dates removes the entire class
+       rather than rejecting one spelling of it, and a non-canonical spelling is
+       additionally refused because the only writer of this marker emits
+       `date.isoformat()`.
 
     A marker that fails any of these is REJECTED, not silently ignored: the
     reason is surfaced in the verification result so an operator sees why their
-    marker did not apply instead of reading an unexplained broken chain.
+    marker did not apply instead of reading an unexplained broken chain. The same
+    applies to a marker that is present but unreadable — Codex review of #364
+    (P2) — because `read_json` maps unparseable JSON to its default, which would
+    otherwise make a truncated or hand-edited marker indistinguishable from no
+    marker at all: a broken chain with a null diagnosis.
     """
 
-    payload = read_json(_output_path_relative(cfg, RESTORE_PROVENANCE_FILE), default={}) or {}
-    if not isinstance(payload, dict) or not payload:
-        return (), "", ""
+    path = _output_path_relative(cfg, RESTORE_PROVENANCE_FILE)
+    if not path.is_file():
+        return _NO_RESTORE_PROVENANCE
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return _RestoreProvenance(
+            (),
+            None,
+            "",
+            (
+                f"restore provenance at {RESTORE_PROVENANCE_FILE} exists but cannot be read "
+                f"({type(exc).__name__}: {exc}); the marker is refused and every anchored path "
+                "is verified"
+            ),
+        )
+    if not isinstance(payload, dict):
+        return _RestoreProvenance(
+            (),
+            None,
+            "",
+            (
+                f"restore provenance at {RESTORE_PROVENANCE_FILE} is a "
+                f"{type(payload).__name__}, not a JSON object; the marker is refused and every "
+                "anchored path is verified"
+            ),
+        )
     declared = payload.get("excluded_path_prefixes")
     declared_set = {str(item) for item in declared} if isinstance(declared, (list, tuple)) else set()
     tolerated = tuple(prefix for prefix in ARCHIVE_EXCLUDED_PREFIXES if prefix in declared_set)
     raw_boundary = str(payload.get("restore_boundary_date") or "").strip()
     if not tolerated:
-        return (), "", (
-            "restore provenance declares no registered excluded prefix; nothing is excused"
-            if raw_boundary
-            else ""
+        # The marker EXISTS, so say why it excused nothing. Reaching this with an
+        # empty or prefix-less payload is a malformed marker, not the absence of
+        # one, and the two must not read alike.
+        return _RestoreProvenance(
+            (),
+            None,
+            "",
+            (
+                "restore provenance declares no registered excluded prefix; nothing is excused "
+                "and every anchored path is verified"
+            ),
         )
-    try:
-        boundary_date = datetime.strptime(raw_boundary, "%Y-%m-%d").date()
-    except ValueError:
-        return (), "", (
-            f"restore_boundary_date {raw_boundary!r} is not a valid YYYY-MM-DD calendar date; "
-            "the marker is refused and every anchored path is verified"
+    boundary_date = _calendar_date(raw_boundary)
+    if boundary_date is None:
+        return _RestoreProvenance(
+            (),
+            None,
+            "",
+            (
+                f"restore_boundary_date {raw_boundary!r} is not a canonical YYYY-MM-DD calendar "
+                "date; the marker is refused and every anchored path is verified"
+            ),
         )
-    today = datetime.strptime(now_utc()[:10], "%Y-%m-%d").date()
+    today = _calendar_date(now_utc()[:10])
+    if today is None:  # pragma: no cover - now_utc() is canonical by construction
+        return _RestoreProvenance(
+            (),
+            None,
+            "",
+            (
+                "the run clock did not yield a canonical UTC date, so the restore boundary cannot "
+                "be bounded; the marker is refused and every anchored path is verified"
+            ),
+        )
     if boundary_date > today:
-        return (), "", (
-            f"restore_boundary_date {raw_boundary} is in the future (today is {today}); "
-            "the marker is refused and every anchored path is verified"
+        return _RestoreProvenance(
+            (),
+            None,
+            "",
+            (
+                f"restore_boundary_date {raw_boundary} is in the future (today is {today}); "
+                "the marker is refused and every anchored path is verified"
+            ),
         )
-    return tolerated, raw_boundary, ""
+    return _RestoreProvenance(tolerated, boundary_date, raw_boundary, "")
 
 
 def _output_path_relative(cfg: EngineConfig, relative: str) -> Path:
@@ -381,11 +468,14 @@ def verify_ledger_chain(
     """
 
     settings = _settings(cfg)
-    tolerated, restore_boundary, provenance_rejected = _restore_provenance(cfg)
+    provenance = _restore_provenance(cfg)
+    tolerated = provenance.tolerated_prefixes
+    boundary_day = provenance.boundary_date
+    provenance_rejected = provenance.rejected_reason
     chain_path = _output_path(cfg, settings["chain_file"])
     verification_path = _output_path(cfg, settings["verification_file"])
     result = _verification_base(chain_path=chain_path, as_of_date=as_of_date)
-    result["restore_boundary_date"] = restore_boundary or None
+    result["restore_boundary_date"] = provenance.boundary_text or None
     result["restore_tolerated_prefixes"] = list(tolerated)
     # A refused marker is reported, never silently dropped: otherwise the
     # operator sees a broken chain with no hint that their marker was ignored.
@@ -397,6 +487,11 @@ def verify_ledger_chain(
         anchor_date = str(row.get("anchor_date") or "")
         if as_of_date and anchor_date > as_of_date:
             continue
+        # WO-127 (Codex #364 P1): the restore-boundary comparison below is on
+        # calendar DATES, never strings. A row whose anchor_date is not a
+        # canonical date yields None and is therefore never excused - the
+        # fail-safe direction is to verify its bytes.
+        row_day = _calendar_date(anchor_date)
         issues: list[str] = []
         try:
             manifest = _parse_manifest(row)
@@ -444,9 +539,9 @@ def verify_ledger_chain(
                 # present with fresh digests that do verify.
                 if (
                     tolerated
-                    and restore_boundary
-                    and anchor_date
-                    and anchor_date <= restore_boundary
+                    and boundary_day is not None
+                    and row_day is not None
+                    and row_day <= boundary_day
                     and relative.startswith(tolerated)
                 ):
                     result["restored_unverifiable_tolerated"] += 1

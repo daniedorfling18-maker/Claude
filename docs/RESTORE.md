@@ -41,19 +41,59 @@ of the archive bytes (476.6MB of a 505.6MB set on 2026-07-26, one file at
 
 The exclusion is scoped narrowly:
 
-- The corpus stays **anchored**, so WO-61 tamper evidence over it is unchanged.
-  Only the recovery archive is smaller.
+- The corpus stays **anchored**, so the chain keeps recording its digests and
+  every anchor written on a tree that still holds the corpus is fully verified.
+  Only the recovery archive is smaller. What a *restore* does to that evidence is
+  stated in the next section — it is not "unchanged", and it must not be read as
+  such.
 - `disaster_recovery.excluded_path_prefixes` may only **shrink** the registered
   set. Removing a prefix puts that corpus back into the archive; adding an
   unregistered prefix is ignored, so config can never quietly drop a ledger
   from recovery.
-- Restore verification tolerates these paths being **absent**, and only when the
-  archive's own manifest declares them (intersected with the registered set — an
-  archive cannot widen its own tolerance). A file that is *present* with a
-  changed anchored digest, or any missing path outside these prefixes, is still
-  a broken chain.
+- An archive that declares a prefix excluded while also **including** a file
+  under it is refused outright (WO-127). The declaration grants verification
+  tolerance, so an archive supplying the very bytes it claims to have dropped
+  would be granting itself tolerance for its own payload. No archive this code
+  builds takes that shape.
 - After a restore, the excluded corpus is re-harvested by the normal collection
   cadence. Recovery of the investor evidence ledgers does not wait on it.
+
+### What a restore does to tamper evidence over the excluded corpus (WO-127)
+
+An applied restore writes
+`outputs/performance/ledger_restore_provenance.json`, recording the excluded
+prefixes it could not restore and the archive's snapshot date as the **restore
+boundary**. `verify-ledger-chain` and the production `anchor-ledgers` run both
+read that marker, and both treat it the same way — the marker is a property of
+the tree, not an option a caller passes.
+
+For a restored tree, therefore:
+
+- Manifest entries under a **registered and declared** prefix belonging to rows
+  anchored **at or before the boundary** are **unverifiable by design**. Neither
+  absence nor a changed digest breaks the chain for those entries, and the count
+  is reported as `restored_unverifiable_tolerated` in the verification artifact
+  (and in the restore report). This is a deliberate waiver, not an oversight: the
+  archive dropped those bytes, and a re-harvest produces *different* content, so
+  the entry would otherwise flip from "missing" to "digest changed" and wedge the
+  chain permanently the first time collection ran.
+- Every entry **outside** those prefixes, and every row anchored **after** the
+  boundary, is verified exactly as before. A post-boundary row records
+  `missing_at_anchor` until re-harvest and then `present` with fresh digests that
+  do verify, so tamper evidence over the corpus resumes from the boundary
+  forward. A present file with a changed anchored digest outside the waiver is
+  still a broken chain.
+- The marker is **refused** — and the reason reported in
+  `restore_provenance_rejected` — when it names no registered prefix, is
+  unreadable or not a JSON object, or carries a boundary that is not a canonical
+  `YYYY-MM-DD` date or is in the future. A refused marker excuses nothing: every
+  anchored path is verified.
+
+Operator reading: on a restored tree, `status: ok` means *the chain verified
+except for `restored_unverifiable_tolerated` boundary-scoped entries under the
+declared prefixes*. Check that counter and `restore_boundary_date`; a non-zero
+counter on a tree that was never restored, or a boundary later than the restore
+you performed, is itself the finding.
 
 ## Fresh VPS to a verified recovery
 
@@ -102,7 +142,13 @@ The exclusion is scoped narrowly:
 8. Confirm the dashboard, scheduler, wallet reconciliation (when configured),
    cost ledger, current ledger-chain verification, and telemetry status. The
    first new daily anchor must extend the restored chain rather than start a
-   new genesis chain.
+   new genesis chain, and it must return `ok` rather than
+   `blocked_broken_chain` — on a restored tree that requires
+   `ledger_restore_provenance.json` to be present and honoured, so check
+   `restore_boundary_date`, `restore_tolerated_prefixes`, and
+   `restored_unverifiable_tolerated` in
+   `outputs/performance/ledger_anchor_verification.json` against the archive you
+   restored, and check `restore_provenance_rejected` is null.
 
 ## Routine proof and failure handling
 

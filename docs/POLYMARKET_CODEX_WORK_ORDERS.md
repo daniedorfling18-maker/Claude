@@ -5425,6 +5425,142 @@ on-window run "overrun" by construction (mismeasurement, not starvation).
   target (0) and tighten-only rule untouched; run timing unchanged — label
   only. All other jobs keep bare-interval classification.
 
+## WO-127 — A restore must not wedge the anchor lane: boundary-scoped restore provenance — `in-review` (2026-07-27, PR #364; owner merge required — changes the registered WO-61 verification contract)
+
+Registered here before merge because it introduces a new producer/consumer
+artifact and changes what `verify_ledger_chain` accepts. Codex review of #364
+(P1) correctly refused the change on the grounds that code comments and a commit
+message are not a registration.
+
+**Defect (merged, on `main` at `973edf1`).** WO-123 excluded
+`polymarket_training/` from the recovery archive while leaving it enrolled in the
+WO-61 chain, and gave `verify_ledger_chain` a caller-supplied
+`tolerated_missing_prefixes`. Only the disaster-recovery restore check passed it.
+`anchor_ledgers` — the caller that actually freezes the head — passed nothing, so
+a restore reported `status: ok` and the very next production anchor run read the
+excluded corpora as "anchored file is missing", short-circuited
+`blocked_broken_chain`, and froze the head. Recovery handed over a tree that
+wedged the tamper lane: the exact failure WO-115 spent ten days undoing.
+
+Two facts found by reading the code, both of which the audit's description
+missed and which changed the design:
+
+1. Post-restore anchor rows were already correct. The corpora are enrolled as
+   exact paths, so after a restore the manifest build takes its existing
+   no-matches branch and records `status: "missing_at_anchor"`, which
+   verification already tolerates. Nothing needed to change going forward.
+2. The break is historical rows, and it is permanent, not transient. Pre-restore
+   rows recorded `status: "present"` with `byte_length` and `prefix_sha256`, and
+   verification walks from genesis. Once the corpus is **re-harvested** those
+   rows flip from "anchored file is missing" to "anchored prefix digest changed",
+   which no absence-tolerance can excuse. A restore followed by ordinary
+   collection wedges the chain forever.
+
+**Design.** Tolerance becomes a property of the tree's recorded provenance,
+scoped to the restore boundary — not a per-caller argument, so the restore check
+and the production anchor lane agree by construction instead of by each caller
+remembering to opt in.
+
+Files: `src/polymarket_predictive_engine/ledger_anchor.py`,
+`src/polymarket_predictive_engine/disaster_recovery.py`, `docs/RESTORE.md`.
+
+- `ARCHIVE_EXCLUDED_PREFIXES` moves into `ledger_anchor.py` (`disaster_recovery`
+  already imports `ledger_anchor`; the reverse is circular), so verification can
+  intersect against the registered set directly.
+- **Producer:** an applied restore (`verify_and_restore_archive`) writes
+  `outputs/performance/ledger_restore_provenance.json` recording
+  `excluded_path_prefixes`, `restore_boundary_date` (the archive's
+  `snapshot_date`), and `restored_from_chain_head`. It is written into the
+  extracted tree **before** verification, so the verified tree and the
+  handed-over tree are the same tree.
+- **Consumers:** `verify_ledger_chain`, and therefore `anchor_ledgers`, the
+  `verify-ledger-chain` CLI, and the DR restore check. Coverage needed: the
+  marker is required only on a restored tree; its absence is the normal state and
+  means no entry is excused.
+- Manifest entries under a **registered AND declared** prefix, belonging to rows
+  anchored **at or before** the boundary, are unverifiable by design: neither
+  absence nor digest divergence breaks the chain, counted in a new
+  `restored_unverifiable_tolerated`. Rows anchored after the boundary verify
+  normally.
+- Restore tolerance intersects **manifest-declared ∩ registered ∩
+  config-effective**, so an archive cannot widen its own tolerance and a config
+  that *narrows* exclusions cannot excuse something that should have been
+  archived.
+- The `tolerated_missing_prefixes` parameter is removed.
+- An archive that declares a prefix excluded while also **including** a member
+  under it is refused at the untrusted-input boundary (Codex #364 P1): the
+  declaration grants verification tolerance, so such an archive would grant
+  itself tolerance for its own payload, and arbitrary bytes with a
+  self-consistent archive manifest would restore `ok`. `_archive_source_payloads`
+  never builds that shape.
+- Exclusion parsing moves inside `create_ledger_archive`'s `try:` — `_base_payload`
+  ran before it, so a malformed `excluded_path_prefixes` raised with no status
+  stamped, reintroducing the blind-failure class WO-122a removed.
+
+**Trust bound, stated deliberately.** A forged or hand-edited marker can only
+excuse prefixes in the **registered** set, so the worst case is exactly the
+owner-approved re-harvestable corpora and nothing else. Every other anchored path
+is verified regardless of what the marker says.
+
+**Fail-safe direction (S5).** When the marker is missing, unreadable, not a JSON
+object, declares no registered prefix, carries a non-canonical or invalid
+`restore_boundary_date`, or carries a boundary in the future, the observable
+behaviour is: **nothing is excused and every anchored path is verified** — a
+broken chain if the corpora are absent. A present-but-rejected marker also
+reports `restore_provenance_rejected` with the reason, so an operator is never
+shown an unexplained broken chain. Boundary and anchor dates are compared as
+parsed calendar **dates**, never as strings: a valid but non-canonical `2026-7-1`
+sorts lexically above every canonical `2026-0M-DD` row and would otherwise have
+excused post-boundary rows (Codex #364 P1). A row whose own `anchor_date` is not
+a canonical date is never excused.
+
+**Interleaving (S2).** New artifact: `performance/ledger_restore_provenance.json`,
+written with `utils.write_json` (temp + `os.replace`), so a concurrent reader sees
+either no marker or a complete one — never a partial one. It is written only by a
+restore, which runs on a quiesced host with the recurring stack stopped
+(`docs/RESTORE.md`), and it is never rewritten by the recurring stack. Existing
+artifacts touched: `performance/ledger_anchor_verification.json` gains
+`restored_unverifiable_tolerated`, `restore_boundary_date`,
+`restore_tolerated_prefixes`, `restore_provenance_rejected` (same writer, same
+atomic path); `performance/restore_verification_status.json` gains
+`restored_unverifiable_tolerated`, `restored_without_prefixes`,
+`restore_boundary_date`. Readers of both files that do not know the new fields are
+unaffected — no field changed meaning.
+
+**Reporting only.** No gate, threshold, sizing rule, policy, broker, or order path
+reads any of it; nothing here loosens a maker gate or the verdict engine.
+
+Tests (`tests/polymarket_predictive_engine/test_ledger_anchor.py`,
+`tests/polymarket_predictive_engine/test_disaster_recovery.py`):
+1. restore → immediate `anchor_ledgers` verifies `ok` (the regression);
+2. restore → re-harvest the corpora with different bytes → still `ok` (the
+   permanent-wedge case);
+3. a digest change on a non-excluded restored file still breaks the chain;
+4. a row anchored after the boundary is verified normally, not excused, including
+   under a non-canonical boundary;
+5. a marker declaring an unregistered prefix excuses nothing and says so;
+6. an invalid, non-canonical, or future boundary is refused with a reason;
+7. an unreadable / non-object / empty marker is refused with a reason, and is
+   distinguishable from no marker at all;
+8. an archive that both declares and includes an excluded prefix is refused,
+   whether or not its bytes match the live corpus, while the honestly-built
+   archive still restores;
+9. a malformed exclusion config stamps `status: error` instead of raising.
+
+**Day-after check:** on the deployed VPS one cycle after deploy, on a tree that
+was **not** restored, `outputs/performance/ledger_anchor_verification.json` shows
+`status: ok`, `restore_boundary_date: null`, `restore_tolerated_prefixes: []`,
+`restored_unverifiable_tolerated: 0`, `restore_provenance_rejected: null`, and no
+`outputs/performance/ledger_restore_provenance.json` exists; `anchor-ledgers`
+exits 0 and `ledger_anchor_head.json` `anchor_date` equals today, proving the head
+advanced rather than froze. Then run
+`sh scripts/restore_from_archive.sh --dry-run --repo-dir /home/opc/Claude` and
+confirm `outputs/performance/restore_verification_status.json` shows `status: ok`,
+`restored_without_prefixes: ["polymarket_training/"]`,
+`restored_unverifiable_tolerated` greater than 0 once the chain carries
+pre-boundary corpus rows, and `restore_boundary_date` equal to the archive's
+snapshot date. A non-zero `restored_unverifiable_tolerated` in the *production*
+verification artifact on a tree nobody restored is itself the finding.
 ## WO-128 — Harvest and anchor integrity: atomic snapshots, a non-destructive anchor tail, and no silent field loss — `queued` (ISSUED to Codex 2026-07-27; non-frozen except the `ledger_anchor.py` snapshot writer, which routes to owner merge)
 
 Four independent defects found in the 2026-07-27 audit of already-merged code.

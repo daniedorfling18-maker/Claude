@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+import hashlib
 import io
 import json
 import os
@@ -361,6 +362,7 @@ def _rebuild_archive_with_manifest(
     *,
     manifest_updates: dict,
     drop_paths: tuple[str, ...] = (),
+    add_paths: dict[str, bytes] | None = None,
 ) -> Path:
     """Repack an archive with a mutated manifest, keeping it internally valid.
 
@@ -380,6 +382,16 @@ def _rebuild_archive_with_manifest(
         manifest["files"] = [row for row in manifest["files"] if row["path"] not in drop_paths]
         for name in drop_paths:
             members.pop(name, None)
+    for name, data in (add_paths or {}).items():
+        members[name] = data
+        manifest["files"] = [
+            *[row for row in manifest["files"] if row["path"] != name],
+            {
+                "path": name,
+                "size_bytes": len(data),
+                "sha256": hashlib.sha256(data).hexdigest(),
+            },
+        ]
     payload = (json.dumps(manifest, indent=2, sort_keys=True) + "\n").encode("utf-8")
     with tarfile.open(destination, "w:gz", format=tarfile.PAX_FORMAT) as archive:
         for name, data in (("archive_manifest.json", payload), *sorted(members.items())):
@@ -696,3 +708,47 @@ def test_wo127_malformed_exclusion_config_stamps_error_instead_of_raising(tmp_pa
     assert status["status"] == "error"
     assert status["failure_stamped"] is True
     assert "list of path prefixes" in status["archive_exclusion_config_error"]
+
+
+def test_wo127_archive_declaring_and_including_a_prefix_is_refused(tmp_path: Path):
+    # Codex review of #364 (P1). WO-127 grants boundary-scoped verification
+    # tolerance from the manifest's exclusion declaration, and installs the marker
+    # BEFORE chain verification. So an archive that declares polymarket_training/
+    # excluded while ALSO shipping a member under it had that member's anchored
+    # digest skipped: attacker-chosen bytes with a self-consistent archive manifest
+    # would restore with status ok. No archive this code builds takes that shape
+    # (_archive_source_payloads reports excluded paths instead of adding them), so
+    # it is refused at the untrusted-input boundary.
+    cfg = _config(tmp_path)
+    # Small enough that both forged archives stay under the 1MB test cap, so the
+    # refusal below is provably the shape check and not the size guard.
+    corpus = _enroll_training_corpus(cfg, size_bytes=4096)
+    _seed_two_day_chain(cfg)
+    built = create_ledger_archive(cfg, force=True)
+    source = Path(built["archive_path"])
+    assert built["archive_excluded_paths"], "the fixture must exercise a real exclusion"
+    relative = corpus.relative_to(cfg.output_root).as_posix()
+
+    contradictory = _rebuild_archive_with_manifest(
+        source,
+        tmp_path / "contradictory.tar.gz",
+        manifest_updates={},
+        add_paths={f"outputs/{relative}": b"ts,bid,ask\n9999999999,0.01,0.99\n"},
+    )
+    with pytest.raises(DisasterRecoveryError, match="excluded while also including"):
+        verify_and_restore_archive(cfg, contradictory, dry_run=True)
+
+    # The rejection is on the archive SHAPE, so it does not depend on the bytes
+    # being wrong: even a byte-faithful copy of the live corpus is refused, because
+    # the declaration and the payload contradict each other either way.
+    faithful = _rebuild_archive_with_manifest(
+        source,
+        tmp_path / "faithful.tar.gz",
+        manifest_updates={},
+        add_paths={f"outputs/{relative}": corpus.read_bytes()},
+    )
+    with pytest.raises(DisasterRecoveryError, match="excluded while also including"):
+        verify_and_restore_archive(cfg, faithful, dry_run=True)
+
+    # And the honest archive built by this code still restores.
+    assert verify_and_restore_archive(cfg, source, dry_run=True)["status"] == "ok"

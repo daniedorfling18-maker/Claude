@@ -468,6 +468,68 @@ def test_wo133_transport_guard_writes_no_artifact_into_the_repository(tmp_path: 
     assert "outputs/performance" not in transport
 
 
+def _compose_invocation(anchor: str) -> str:
+    """The `docker compose ...` call inside a named function, continuations joined."""
+    body = _script().split(f"{anchor}() {{", 1)[1].split("\n}", 1)[0]
+    joined: list[str] = []
+    buffer = ""
+    for line in body.splitlines():
+        buffer += " " + line.strip().rstrip("\\")
+        if not line.rstrip().endswith("\\"):
+            joined.append(buffer.strip())
+            buffer = ""
+    return "\n".join(joined)
+
+
+def test_wo133_acceptance_never_passes_no_build_to_compose_run() -> None:
+    """Regression for the 2026-07-28 deploy failure, observed on the VPS.
+
+        unknown flag: --no-build
+        ERROR: deploy acceptance failed
+
+    `docker compose run` has no `--no-build` - it is an `up` flag - so acceptance
+    aborted PAST the arming boundary, taking a healthy stack down and forcing a
+    rollback. This is pinned to the observed error rather than to a belief about
+    Docker's CLI, because a belief about Docker's CLI is what caused it.
+
+    Dropping the flag is behaviour-preserving: `run` does not build by default,
+    and recreate_stack builds the image two steps earlier.
+    """
+    acceptance = _compose_invocation("run_deploy_acceptance")
+    assert "--profile deploy-acceptance run" in acceptance
+    assert "--no-build" not in acceptance
+
+    # `up` DOES accept it, and the scheduler restart must keep it - restarting the
+    # scheduler must never trigger a rebuild of the image just deployed.
+    restart = _compose_invocation("restart_scheduler")
+    assert "up -d --no-build vps-ops-scheduler" in restart
+
+
+def test_wo133_acceptance_is_time_bounded_past_the_arming_boundary() -> None:
+    # Acceptance runs with the scheduler stopped, after arming. A hang there holds
+    # the deploy open indefinitely on a quiesced stack, so it is bounded like
+    # Path A's (workflow :706).
+    acceptance = _compose_invocation("run_deploy_acceptance")
+    assert "timeout --signal=TERM --kill-after=30s 600" in acceptance
+
+
+def test_wo133_rollback_probe_window_survives_a_cold_dashboard_start() -> None:
+    """Regression for the same run's SECOND failure.
+
+    The rollback restored everything correctly and then reported FAIL /
+    MANUAL_INTERVENTION_REQUIRED because a just-recreated dashboard behind
+    Tailscale Serve had not answered within the default 5 x 2s = 10s. The same
+    URL returned 200 shortly after. A cold start is not a failed rollback.
+    """
+    body = _script()
+    assert "--https-probe-attempts 30" in body
+    assert "--https-probe-interval-seconds 2.0" in body
+
+    declared, _ = _declared_options("rollback_vps_paper_deploy.py")
+    for flag in ("--https-probe-attempts", "--https-probe-interval-seconds"):
+        assert flag in declared, flag
+
+
 def test_wo133_never_writes_an_attestation_or_claims_independent_review() -> None:
     body = _script()
     assert "merge-attestation" not in body

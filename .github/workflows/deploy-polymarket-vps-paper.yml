@@ -433,6 +433,15 @@ jobs:
             set +e
             preserve_recovery=false
             if [ "$deploy_status" -ne 0 ] && [ "${ROLLBACK_ARMED:-false}" = true ] && [ "${DEPLOY_COMMITTED:-false}" != true ]; then
+              # Probe window: the rollback re-probes the private dashboard after
+              # recreating its container, so it must outlast a cold start. The
+              # helper clamps attempts at 10 and the interval at 10.0s, so the
+              # window is bought with the interval - 10 x 7s is a 63s span, versus
+              # the ~8s the unset default gave. Observed 2026-07-28 on Path B: a
+              # rollback that restored the checkout, .env, marker, image and every
+              # container CORRECTLY still reported MANUAL_INTERVENTION_REQUIRED
+              # because the dashboard had not answered yet; the same URL returned
+              # 200 shortly after. Fails closed exactly as before if it never does.
               echo "::warning::Candidate deploy failed; restoring and revalidating the secure last-known-good stack at $original_head."
               python3 "$ROLLBACK_SCRIPT" \
                 --repo "$REPO_DIR" \
@@ -449,6 +458,8 @@ jobs:
                 --transport-validator "$ROLLBACK_TRANSPORT_VALIDATOR" \
                 --private-dashboard-url "$dashboard_private_url" \
                 --failed-target-sha "$GITHUB_SHA" \
+                --https-probe-attempts 10 \
+                --https-probe-interval-seconds 7.0 \
                 --required-service polymarket-paper-live \
                 --required-service polymarket-dashboard \
                 --required-service superbru-auto-pick-watchdog \
@@ -703,9 +714,16 @@ jobs:
             echo "::error::Recurring scheduler remained active; refusing concurrent deploy acceptance."
             exit 1
           fi
+          # NO --no-build on `compose run`: that flag belongs to `up`, and passing
+          # it aborts the run with "unknown flag: --no-build" before acceptance
+          # executes. Observed on the VPS 2026-07-28 via Path B, which carried a
+          # verbatim copy of this line. Removing it changes nothing about what
+          # runs: `run` does not build by default, and the `up -d --build` above
+          # has already built the image. The sibling callers that were always
+          # correct are scripts/restore_from_archive.sh and scripts/push_vps_archive.sh.
           timeout --signal=TERM --kill-after=30s 600 \
             $DOCKER compose -f "$COMPOSE_FILE" --profile deploy-acceptance run \
-              --rm --no-deps --no-build vps-deploy-acceptance </dev/null
+              --rm --no-deps vps-deploy-acceptance </dev/null
           $DOCKER compose -f "$COMPOSE_FILE" up -d --no-build vps-ops-scheduler
 
           # The dashboard renderer is reporting-only. Refresh it after the

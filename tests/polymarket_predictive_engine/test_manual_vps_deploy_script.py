@@ -115,10 +115,13 @@ def test_wo133_refuses_a_target_that_is_not_the_origin_main_tip(tmp_path: Path) 
     assert "is not the current origin/main tip" in result.stderr
 
 
+MARKER_RELATIVE = "outputs/performance/deployed_git_rev"
+
+
 def test_wo133_refuses_when_the_checkout_and_marker_disagree(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
-    repo.mkdir()
-    (repo / "deployed_git_rev").write_text("aaaaaaa\n", encoding="utf-8")
+    (repo / "outputs" / "performance").mkdir(parents=True)
+    (repo / MARKER_RELATIVE).write_text("aaaaaaa\n", encoding="utf-8")
     script = f"""
     set -e
     PM_MANUAL_DEPLOY_LIBRARY_ONLY=1 . {SCRIPT}
@@ -129,6 +132,153 @@ def test_wo133_refuses_when_the_checkout_and_marker_disagree(tmp_path: Path) -> 
     result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
     assert result.returncode != 0
     assert "does not match deployed marker" in result.stderr
+
+
+def test_wo133_marker_path_matches_every_other_consumer() -> None:
+    # This test exists because the first VPS run of Path B refused at guard 2 with
+    # "deployed marker /home/opc/Claude/deployed_git_rev is missing". The marker was
+    # not missing - the script was looking in the wrong place, and the tests around
+    # it built their fixtures at the same wrong path, so they could never catch it.
+    # The path is a shared contract, so it is asserted against its OTHER holders
+    # rather than restated here as another independent guess.
+    for path, needle in (
+        (".github/workflows/deploy-polymarket-vps-paper.yml", f"mv \"$marker_tmp\" {MARKER_RELATIVE}"),
+        ("scripts/bootstrap_polymarket_vps_paper.sh", f'mv "$marker_tmp" {MARKER_RELATIVE}'),
+        ("scripts/rollback_vps_paper_deploy.py", '"outputs" / "performance" / "deployed_git_rev"'),
+        ("scripts/write_vps_telemetry_manifest.py", '"outputs" / "performance" / "deployed_git_rev"'),
+    ):
+        assert needle in (ROOT / path).read_text(encoding="utf-8"), path
+
+    body = _script()
+    assert f'DEPLOYED_MARKER_RELATIVE="{MARKER_RELATIVE}"' in body
+    # And no reader may reconstruct the path by hand alongside the shared helper.
+    assert '"$REPO_DIR/deployed_git_rev"' not in body
+
+
+def test_wo133_a_missing_marker_refuses_before_anything_is_touched(tmp_path: Path) -> None:
+    # Refusing is correct when the marker is genuinely absent - but it must refuse
+    # naming the path the rest of the system uses, or the operator debugs the wrong
+    # thing (which is exactly what happened).
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    script = f"""
+    set -e
+    PM_MANUAL_DEPLOY_LIBRARY_ONLY=1 . {SCRIPT}
+    REPO_DIR={repo}
+    assert_checkout_matches_marker
+    """
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    assert result.returncode != 0
+    assert f"{repo}/{MARKER_RELATIVE} is missing" in result.stderr
+
+
+def _repo_at_guard_two(tmp_path: Path, sha: str = "aaaaaaa") -> Path:
+    repo = tmp_path / "repo"
+    (repo / "outputs" / "performance").mkdir(parents=True)
+    (repo / MARKER_RELATIVE).write_text(f"{sha}\n", encoding="utf-8")
+    (repo / ".env").write_text("PM_VPS_DEPLOYED_SHA=old\n", encoding="utf-8")
+    return repo
+
+
+def _run_guard_two(repo: Path, sha: str = "aaaaaaa") -> subprocess.CompletedProcess[str]:
+    script = f"""
+    set -e
+    PM_MANUAL_DEPLOY_LIBRARY_ONLY=1 . {SCRIPT}
+    REPO_DIR={repo}
+    git() {{ echo {sha}; }}
+    assert_checkout_matches_marker
+    """
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+
+
+def test_wo133_guard_two_passes_on_an_agreeing_writable_checkout(tmp_path: Path) -> None:
+    result = _run_guard_two(_repo_at_guard_two(tmp_path))
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    ("break_it", "expected"),
+    [
+        (lambda repo: (repo / MARKER_RELATIVE).chmod(0o444), "marker"),
+        (lambda repo: (repo / "outputs" / "performance").chmod(0o555), "performance"),
+        (lambda repo: (repo / ".env").chmod(0o444), ".env"),
+    ],
+    ids=["readonly_marker", "readonly_output_dir", "readonly_env"],
+)
+def test_wo133_unwritable_deploy_targets_refuse_before_arming(
+    tmp_path: Path, break_it, expected: str
+) -> None:
+    # Both post-arming writes are proven at guard 2. Without this the deploy arms,
+    # quiesces a healthy stack, fails on a permission error and rolls back - paying
+    # a full outage for something knowable while the host was still untouched. The
+    # containers write under outputs/ as root, so this is reachable in production.
+    if __import__("os").geteuid() == 0:
+        pytest.skip("root ignores the write bit, so the refusal cannot be observed")
+    repo = _repo_at_guard_two(tmp_path)
+    break_it(repo)
+    try:
+        result = _run_guard_two(repo)
+        assert result.returncode != 0
+        assert "is not writable by" in result.stderr
+        assert expected in result.stderr
+        assert "after the arming boundary" in result.stderr
+    finally:
+        (repo / "outputs" / "performance").chmod(0o755)
+
+
+def test_wo133_marker_write_lands_atomically_at_the_shared_path(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    (repo / "outputs" / "performance").mkdir(parents=True)
+    (repo / ".env").write_text("PM_VPS_DEPLOYED_SHA=old\nOTHER=keep\n", encoding="utf-8")
+    script = f"""
+    set -e
+    PM_MANUAL_DEPLOY_LIBRARY_ONLY=1 . {SCRIPT}
+    REPO_DIR={repo}
+    write_deploy_markers deadbeef
+    """
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert (repo / MARKER_RELATIVE).read_text(encoding="utf-8") == "deadbeef\n"
+    # No temp file survives, in either the marker or the .env write.
+    assert not list((repo / "outputs" / "performance").glob("*.tmp*"))
+    assert not list(repo.glob(".env.tmp*"))
+
+
+def test_wo133_env_write_owns_only_the_deployed_sha_key(tmp_path: Path) -> None:
+    # PM_IMAGE_BUILD_SHA is DERIVED by compose as ${PM_VPS_DEPLOYED_SHA:-unknown}
+    # for every service. Writing it into .env plants a value no container reads,
+    # and the next host-side reader that trusts .env - the pattern
+    # check_polymarket_vps_paper.sh already uses for PM_VPS_DEPLOYED_SHA - would
+    # then compare the deployed SHA against itself, which is the vacuous
+    # deployment-alignment check (TS-2) reintroduced by the back door.
+    compose = (ROOT / "docker-compose.vps-paper.yml").read_text(encoding="utf-8")
+    assert "PM_IMAGE_BUILD_SHA: ${PM_VPS_DEPLOYED_SHA:-unknown}" in compose
+    # The key may be DISCUSSED in a comment - it must never appear in executable code.
+    for line in _script().splitlines():
+        if "PM_IMAGE_BUILD_SHA" in line:
+            assert line.lstrip().startswith("#"), line
+
+    repo = tmp_path / "repo"
+    (repo / "outputs" / "performance").mkdir(parents=True)
+    (repo / ".env").write_text(
+        "OTHER=keep\nPM_VPS_DEPLOYED_SHA=old\nTHE_ODDS_API_KEY=x\n", encoding="utf-8"
+    )
+    script = f"""
+    set -e
+    PM_MANUAL_DEPLOY_LIBRARY_ONLY=1 . {SCRIPT}
+    REPO_DIR={repo}
+    write_deploy_markers deadbeef
+    """
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+    env_text = (repo / ".env").read_text(encoding="utf-8")
+    assert "PM_VPS_DEPLOYED_SHA=deadbeef" in env_text
+    assert "PM_IMAGE_BUILD_SHA" not in env_text
+    # Unrelated keys - secrets included - survive the rewrite untouched.
+    assert "OTHER=keep" in env_text
+    assert "THE_ODDS_API_KEY=x" in env_text
+    assert (repo / ".env").stat().st_mode & 0o777 == 0o600
 
 
 def test_wo133_a_failure_past_the_arming_boundary_invokes_rollback(tmp_path: Path) -> None:

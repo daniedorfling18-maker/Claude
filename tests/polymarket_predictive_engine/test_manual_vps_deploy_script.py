@@ -172,6 +172,60 @@ def test_wo133_a_missing_marker_refuses_before_anything_is_touched(tmp_path: Pat
     assert f"{repo}/{MARKER_RELATIVE} is missing" in result.stderr
 
 
+def _repo_at_guard_two(tmp_path: Path, sha: str = "aaaaaaa") -> Path:
+    repo = tmp_path / "repo"
+    (repo / "outputs" / "performance").mkdir(parents=True)
+    (repo / MARKER_RELATIVE).write_text(f"{sha}\n", encoding="utf-8")
+    (repo / ".env").write_text("PM_VPS_DEPLOYED_SHA=old\n", encoding="utf-8")
+    return repo
+
+
+def _run_guard_two(repo: Path, sha: str = "aaaaaaa") -> subprocess.CompletedProcess[str]:
+    script = f"""
+    set -e
+    PM_MANUAL_DEPLOY_LIBRARY_ONLY=1 . {SCRIPT}
+    REPO_DIR={repo}
+    git() {{ echo {sha}; }}
+    assert_checkout_matches_marker
+    """
+    return subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+
+
+def test_wo133_guard_two_passes_on_an_agreeing_writable_checkout(tmp_path: Path) -> None:
+    result = _run_guard_two(_repo_at_guard_two(tmp_path))
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    ("break_it", "expected"),
+    [
+        (lambda repo: (repo / MARKER_RELATIVE).chmod(0o444), "marker"),
+        (lambda repo: (repo / "outputs" / "performance").chmod(0o555), "performance"),
+        (lambda repo: (repo / ".env").chmod(0o444), ".env"),
+    ],
+    ids=["readonly_marker", "readonly_output_dir", "readonly_env"],
+)
+def test_wo133_unwritable_deploy_targets_refuse_before_arming(
+    tmp_path: Path, break_it, expected: str
+) -> None:
+    # Both post-arming writes are proven at guard 2. Without this the deploy arms,
+    # quiesces a healthy stack, fails on a permission error and rolls back - paying
+    # a full outage for something knowable while the host was still untouched. The
+    # containers write under outputs/ as root, so this is reachable in production.
+    if __import__("os").geteuid() == 0:
+        pytest.skip("root ignores the write bit, so the refusal cannot be observed")
+    repo = _repo_at_guard_two(tmp_path)
+    break_it(repo)
+    try:
+        result = _run_guard_two(repo)
+        assert result.returncode != 0
+        assert "is not writable by" in result.stderr
+        assert expected in result.stderr
+        assert "after the arming boundary" in result.stderr
+    finally:
+        (repo / "outputs" / "performance").chmod(0o755)
+
+
 def test_wo133_marker_write_lands_atomically_at_the_shared_path(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     (repo / "outputs" / "performance").mkdir(parents=True)

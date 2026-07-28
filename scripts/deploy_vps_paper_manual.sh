@@ -90,6 +90,17 @@ assert_checkout_matches_marker() {
     fail "checkout $head_sha does not match deployed marker $marker_sha; \
 resolve the drift before deploying"
   fi
+  # write_deploy_markers runs AFTER the arming boundary, so an unwritable marker
+  # or output directory would arm the deploy, quiesce the stack, then fail and
+  # roll back. The containers write under outputs/ as root, so this is a real
+  # possibility rather than a theoretical one. Prove the write here, where a
+  # refusal is free.
+  [ -w "$marker_file" ] || fail "deployed marker $marker_file is not writable by $(id -un); \
+the marker write happens after the arming boundary, so this refuses now instead of rolling back"
+  [ -w "$(dirname "$marker_file")" ] || fail "$(dirname "$marker_file") is not writable by $(id -un); \
+the marker write happens after the arming boundary, so this refuses now instead of rolling back"
+  [ -w "$REPO_DIR/.env" ] || fail "$REPO_DIR/.env is not writable by $(id -un); \
+PM_VPS_DEPLOYED_SHA is stamped after the arming boundary, so this refuses now instead of rolling back"
 }
 
 # --- guard 3: capacity ---------------------------------------------------------

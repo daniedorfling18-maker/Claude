@@ -6084,6 +6084,85 @@ simulated post-arming failure; and the deploy record's honesty fields
 `outputs/performance/deploy_acceptance.json` is PASS for that SHA; and
 `sh scripts/check_polymarket_vps_paper.sh` exits 0.
 
+## WO-136 — The fill replay must quote contemporaneously, not replay today's sheet into last week's regime — `queued` (ISSUED to Codex 2026-07-28 under the owner's direct instruction of 2026-07-28; reporting-only replay surface, non-frozen → orchestrator merge after line-audit)
+
+**Why now.** The first post-WO-131 production replay (2026-07-28T12:53Z,
+`maker_fill_replay.json`) reported `simulation_to_reality_haircut: 42.07` —
+realized adverse $56.27/day against a study charge of $1.34/day. Diagnosed by
+line-reading `_replay_against_states`: the number is arithmetic on phantom fills.
+The replay takes the CURRENT quote sheet's absolute prices (`quote_bid_price`
+0.32 / `quote_ask_price` 0.38, derived from the 2026-07-28 mid of 0.35) and
+replays them statically against up to `replay_days` of historical prints
+(`maker_fill_replay.py:1171-1176`). The dominant fill burst is stamped
+2026-07-23, when the contemporaneous mid was ~0.44 (fill 0.38 + measured 0.06
+markout): every ordinary BUY print in that regime reads as an adverse fill
+against a 0.38 ask no real maker would have been resting — the study re-derives
+quotes from mid daily and the WO-99 requote lane pulls them on drift. The
+cross-check: the replay implies 31.25 fills/day; `maker_live_test` models 0.01;
+the wallet has observed 0. The `reported_only` / `tighten_only` haircut policy
+correctly kept the bad number away from M-B — this WO fixes the measurement so
+the field can carry a real signal instead of training everyone to ignore it.
+
+Files: `src/polymarket_predictive_engine/maker_fill_replay.py`,
+`tests/polymarket_predictive_engine/test_maker_fill_replay.py`.
+
+1. **Quote each historical fill opportunity at the contemporaneous book state.**
+   In `_replay_against_states` (`:1158-1259`), for trades stamped BEFORE the
+   quote sheet's `generated_at_utc`, derive the simulated quote from the book
+   state already fetched for queue depth: `bid = state.midpoint -
+   quote_distance`, `ask = state.midpoint + quote_distance` (the code's own
+   existing fallback branch at `:1173-1175`, promoted from "sheet prices
+   missing" to "sheet prices not yet in force"). Round to the entry's
+   `order_price_min_tick_size` outward (bid down, ask up) when present, raw
+   otherwise, and state which was used. Trades stamped AT/AFTER the sheet's
+   `generated_at_utc` keep the sheet's absolute prices — there the sheet IS the
+   live quote.
+2. **No state, no quote.** An opportunity whose contemporaneous state is absent
+   or older than `max_state_lag_seconds` is excluded from fills and counted in a
+   new `no_contemporaneous_state_opportunities` field. It must never fall back
+   to the current sheet's absolute prices for a historical print — quoting from
+   the future is the defect this WO removes.
+3. **Name the basis and keep one release of comparability.** The summary gains
+   `quoting_basis: "contemporaneous"`, and the old computation is retained for
+   exactly one release as an explicitly-named audit block
+   (`static_sheet_realism_ratio`, `static_sheet_fills_per_day`) so the size of
+   the correction is on the record — the `share_model_legacy` precedent.
+
+**Fail-safe direction (S5).** Reporting-only throughout: the haircut remains
+`reported_only` / `tighten_only`, no gate, threshold, eligibility rule, or
+sizing path reads any of it, and this WO changes none. A missing contemporaneous
+state excludes the opportunity rather than synthesising a quote; if the
+contemporaneous computation cannot run at all the artifact reports
+`insufficient_coverage` rather than promoting the static-sheet number back to
+primary.
+
+**Interleaving (S2).** Same producer, same artifact, same cadence. Fields are
+added, none change meaning; the coverage state set the WO-121
+`maker_replay_insufficient_coverage` watchdog registration keys on
+(`covered`/`partial`/`no_simulated_fill_opportunities`/`insufficient_coverage`)
+is unchanged.
+
+Tests: (1) the 2026-07-28 regression as a recorded-shape fixture — a 0.44-mid
+regime for the historical window with a sheet quoted off a 0.35 mid: the static
+basis manufactures fills, the contemporaneous basis produces none from that
+regime, and the audit block still shows the static number; (2) a print that
+genuinely sweeps through the contemporaneous `mid + distance` ask still fills,
+with markout measured against the later contemporaneous mid; (3) trades stamped
+after the sheet's `generated_at_utc` use the sheet's absolute prices, and on a
+fixture whose entire window is post-sheet the two bases agree exactly; (4) an
+opportunity with no book state inside `max_state_lag_seconds` is excluded and
+counted, never filled; (5) the haircut policy strings (`reported_only`,
+`tighten_only`, amendment-required) survive verbatim; (6) tick rounding is
+outward (a contemporaneous bid never rounds up, an ask never rounds down).
+
+**Day-after check:** on the VPS one cycle after deploy,
+`outputs/maker_carry/maker_fill_replay.json` shows
+`quoting_basis: "contemporaneous"`, `simulated_fills_per_day` within an order of
+magnitude of `maker_live_test.modelled_fills_per_day` rather than the 31.25/day
+of the static basis, `realism_ratio` either an O(1) number or an explicit
+insufficient-coverage status, and the `static_sheet_realism_ratio` audit field
+still recording the old basis so the correction's magnitude is auditable.
+
 ## Current queue for Codex — ISSUED 2026-07-27
 
 A 2026-07-27 owner instruction — **Claude orchestrates and reviews; Codex
@@ -6119,6 +6198,7 @@ refactors:
 | 5 | **WO-132** | register correction + unresolved-threads merge precondition | owner (governance documents) |
 | 6 | **WO-130** | kill-lane and funding-evidence integrity + the #355 P1s | owner (frozen surfaces) |
 | 7 | **WO-133** | guarded manual deploy path + its `AGENTS.md` amendment | **owner** (one PR carrying a governance amendment cannot be partially merged) |
+| 8 | **WO-136** | contemporaneous-quote fill replay (kills the phantom-fill 42x haircut; issued 2026-07-28 under the owner's direct instruction) | orchestrator, after line-audit |
 
 **WO-121 — watchdog coverage for unmonitored producers** (registered 2026-07-27 as
 WO-129's named blocking prerequisite, per ENGINEERING_STANDARDS S3). WO-129 tightens

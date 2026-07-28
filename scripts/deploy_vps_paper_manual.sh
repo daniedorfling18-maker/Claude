@@ -28,6 +28,15 @@ DOCKER="${PM_DOCKER:-docker}"
 DEPLOY_RECORD_RELATIVE="performance/vps_manual_deploy.json"
 ROLLBACK_IMAGE_TAG="polymarket-paper-vps:rollback-last-known-good"
 
+# The deployed-SHA marker lives under outputs/, NOT at the repository root. This
+# path is not a local choice: the deploy workflow, rollback_vps_paper_deploy.py,
+# bootstrap_polymarket_vps_paper.sh and write_vps_telemetry_manifest.py all read
+# and write exactly this file, and a Path B that used a different location would
+# refuse on a correctly deployed host while leaving the real marker stale after a
+# successful run. See test_wo133_marker_path_matches_every_other_consumer.
+DEPLOYED_MARKER_RELATIVE="outputs/performance/deployed_git_rev"
+deployed_marker() { printf '%s/%s' "$REPO_DIR" "$DEPLOYED_MARKER_RELATIVE"; }
+
 log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
 # --- guard helpers come from the TARGET revision, not the old checkout ---------
@@ -72,7 +81,7 @@ Path B deploys reviewed merged main only"
 
 # --- guard 2: checkout and deployed marker must agree before quiescing ---------
 assert_checkout_matches_marker() {
-  marker_file="$REPO_DIR/deployed_git_rev"
+  marker_file="$(deployed_marker)"
   [ -f "$marker_file" ] || fail "deployed marker $marker_file is missing; refusing to quiesce"
   marker_sha="$(tr -d '[:space:]' < "$marker_file")"
   head_sha="$(git -C "$REPO_DIR" rev-parse HEAD)"
@@ -106,7 +115,7 @@ arm_rollback() {
   chmod 0700 "$ROLLBACK_DIR"
   install -m 0600 "$REPO_DIR/.env" "$ROLLBACK_DIR/.env.last-known-good" \
     || fail "could not snapshot .env"
-  install -m 0600 "$REPO_DIR/deployed_git_rev" "$ROLLBACK_DIR/deployed_git_rev.last-known-good" \
+  install -m 0600 "$(deployed_marker)" "$ROLLBACK_DIR/deployed_git_rev.last-known-good" \
     || fail "could not snapshot the deployed marker"
   ORIGINAL_HEAD="$(git -C "$REPO_DIR" rev-parse HEAD)"
   $DOCKER image tag polymarket-paper-vps:latest "$ROLLBACK_IMAGE_TAG" \
@@ -146,7 +155,16 @@ update_checkout() {
 # deployed-state report is a lie exactly when it matters most.
 write_deploy_markers() {
   target_sha="$1"
-  printf '%s\n' "$target_sha" > "$REPO_DIR/deployed_git_rev"
+  marker_file="$(deployed_marker)"
+  mkdir -p "$(dirname "$marker_file")"
+  marker_tmp="$marker_file.tmp.$$"
+  printf '%s\n' "$target_sha" > "$marker_tmp"
+  mv "$marker_tmp" "$marker_file"
+  # Only PM_VPS_DEPLOYED_SHA. PM_IMAGE_BUILD_SHA is DERIVED by compose as
+  # ${PM_VPS_DEPLOYED_SHA:-unknown} for every service, so writing it here would
+  # plant a .env value no container ever sees - and the next host-side reader that
+  # trusts .env the way check_polymarket_vps_paper.sh already does would compare
+  # the deployed SHA against itself. Path A writes this one key too.
   python3 - "$REPO_DIR" "$target_sha" <<'PY'
 import re
 import sys
@@ -155,12 +173,12 @@ from pathlib import Path
 repo, target = Path(sys.argv[1]), sys.argv[2]
 env_path = repo / ".env"
 text = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
-for key in ("PM_VPS_DEPLOYED_SHA", "PM_IMAGE_BUILD_SHA"):
-    line = f"{key}={target}"
-    if re.search(rf"^{key}=.*$", text, flags=re.MULTILINE):
-        text = re.sub(rf"^{key}=.*$", line, text, flags=re.MULTILINE)
-    else:
-        text = text.rstrip("\n") + "\n" + line + "\n"
+key = "PM_VPS_DEPLOYED_SHA"
+line = f"{key}={target}"
+if re.search(rf"^{key}=.*$", text, flags=re.MULTILINE):
+    text = re.sub(rf"^{key}=.*$", line, text, flags=re.MULTILINE)
+else:
+    text = text.rstrip("\n") + "\n" + line + "\n"
 temporary = env_path.with_name(env_path.name + ".tmp")
 temporary.write_text(text, encoding="utf-8")
 temporary.chmod(0o600)

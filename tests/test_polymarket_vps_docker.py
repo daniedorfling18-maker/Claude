@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import textwrap
 from pathlib import Path
@@ -286,6 +287,78 @@ def test_vps_deploy_acceptance_is_scheduler_isolated_and_stdin_closed():
         < success
     )
     assert "exec -T vps-ops-scheduler" not in text
+
+
+def _workflow_text() -> str:
+    return (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_vps_deploy_acceptance_never_passes_no_build_to_compose_run():
+    """Path A parity with WO-133's fix. Observed on the VPS 2026-07-28.
+
+    Path B carried a verbatim copy of this workflow's acceptance line and died:
+
+        unknown flag: --no-build
+        ERROR: deploy acceptance failed
+
+    `--no-build` is an `up` flag; `docker compose run` has no such option, so
+    acceptance aborts before it executes. This workflow had the identical defect,
+    unnoticed because Path A has been blocked on its acceptance_run_id gate.
+
+    Removing it changes nothing about what runs - `run` does not build by default
+    and `up -d --build` has already built the image - and it is asserted here
+    because the two sibling callers that were always correct
+    (restore_from_archive.sh, push_vps_archive.sh) prove the correct form.
+    """
+    text = _workflow_text()
+    acceptance = text[text.index("--profile deploy-acceptance run") :]
+    acceptance = acceptance[: acceptance.index("</dev/null")]
+    assert "--no-build" not in acceptance
+    assert "--rm --no-deps vps-deploy-acceptance" in acceptance
+
+    # `up` does accept it, and the scheduler restart must keep it so restarting
+    # the scheduler never rebuilds the image that was just deployed and verified.
+    assert "up -d --no-build vps-ops-scheduler" in text
+
+    for sibling in ("restore_from_archive.sh", "push_vps_archive.sh"):
+        source = (ROOT / "scripts" / sibling).read_text(encoding="utf-8")
+        run_lines = [line for line in source.splitlines() if "compose" in line and " run " in line]
+        assert run_lines, sibling
+        for line in run_lines:
+            assert "--no-build" not in line, f"{sibling}: {line}"
+
+
+def test_vps_deploy_rollback_probe_outlasts_a_cold_dashboard_start():
+    """Path A parity with WO-133's second fix.
+
+    The rollback recreates the dashboard container and then re-probes it. With no
+    overrides it inherits the helper's 5 x 2s default - a ~8s span - so a healthy
+    restore gets reported as MANUAL_INTERVENTION_REQUIRED purely because the
+    dashboard had not finished starting. Observed on Path B 2026-07-28: the
+    restore was correct in every respect and the same URL returned 200 shortly
+    after.
+
+    The window is bought with the INTERVAL because the helper clamps attempts at
+    10, so a larger attempt count is silently truncated.
+    """
+    text = _workflow_text()
+    helper = (ROOT / "scripts" / "rollback_vps_paper_deploy.py").read_text(encoding="utf-8")
+
+    attempts_cap = int(
+        re.search(r"range\(max\(1,\s*min\((\d+),\s*probe_attempts\)\)\)", helper).group(1)
+    )
+    interval_cap = float(re.search(r"min\(([\d.]+),\s*probe_interval_seconds\)", helper).group(1))
+
+    asked_attempts = int(re.search(r"--https-probe-attempts (\d+)", text).group(1))
+    asked_interval = float(re.search(r"--https-probe-interval-seconds ([\d.]+)", text).group(1))
+
+    # Requesting beyond a cap reads as a long window and behaves as a short one.
+    assert asked_attempts <= attempts_cap
+    assert asked_interval <= interval_cap
+    # Effective span: the last sleep buys no further retry.
+    assert (min(attempts_cap, asked_attempts) - 1) * min(interval_cap, asked_interval) >= 60.0
 
 
 def test_vps_deploy_requires_independent_main_attestation():

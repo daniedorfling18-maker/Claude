@@ -6163,6 +6163,91 @@ of the static basis, `realism_ratio` either an O(1) number or an explicit
 insufficient-coverage status, and the `static_sheet_realism_ratio` audit field
 still recording the old basis so the correction's magnitude is auditable.
 
+## WO-137 — Make portfolio churn visible: a per-run composition diff naming the exact reason every market left — `queued` (ISSUED to Codex 2026-07-28 under the owner's direct instruction of 2026-07-28; reporting-only, non-frozen → orchestrator merge after line-audit)
+
+**Why now.** M-A banks a day only when the day's LAST run holds target (M-A.1),
+and 27 of the 68 history runs found an empty or near-empty portfolio — the
+median run is $5.90/day, above the $3.33 target, so intermittency, not level, is
+what blocks the campaign. Measured example, 2026-07-28: the Iran-airspace
+market carried $9.71/day on $64 at the 00:24 run and was absent at 12:51, and no
+artifact can say why — `excluded_stale_examples` caps at 10 of 32 and nothing
+compares consecutive runs. The variable that decides the campaign is currently
+unobservable. Reporting only: no gate, threshold, eligibility rule, or sizing
+path changes, and none may read the new artifact.
+
+Files: `src/polymarket_predictive_engine/maker_carry_study.py`,
+`tests/polymarket_predictive_engine/test_maker_carry_study.py`.
+
+1. **Retain the full per-market disposition map the run already computes.** The
+   staleness reasons exist per market at `_candidate_staleness_reasons` (`:560`)
+   and are aggregated at `:784-876` into counts plus 10 examples; resolution
+   risk is `resolution_risk == "high"` and thin book is
+   `estimate_quality == "thin_book_untrusted"` on the candidate rows
+   (`:2191-2192`). Keep the full map in memory for the diff — reuse the exact
+   existing predicates; this WO names dispositions, it must not invent new
+   classifications or re-derive any rule.
+2. **Emit `maker_carry/portfolio_composition_diff.json`** — a NEW, UNENROLLED
+   snapshot artifact written atomically (a new anchored glob needs the owner;
+   WO-131 precedent), by `run_maker_carry_study` only, AFTER the P3-3
+   `maker_carry_ledger_commit` flock section — never inside it. Content:
+   `previous_run_at` / `current_run_at`; `entered[]`, `departed[]`, `held[]` by
+   `condition_id`; and for every departed market its disposition THIS run, one
+   of: `excluded_stale:<reason,...>` (the WO-80 reasons verbatim),
+   `excluded_resolution_risk`, `excluded_thin_book`, `measured_not_sized` (with
+   this run's `net_carry_usd_per_day`), `not_in_candidate_scan`, or
+   `not_in_rewarded_universe`. Previous-run membership comes from the LATEST
+   prior row of the existing WO-111 sidecar
+   (`maker_carry/maker_carry_portfolio_members.csv`, parsed the way
+   `_incumbent_hold` (`:1532`) already parses it) — the sidecar is enrolled
+   `append_only` in the WO-61 registry and is READ-ONLY to this WO: its writer,
+   fields, and enrollment must not change. The sidecar records only
+   `condition_id` and `markout_measured`, so "then" fields are limited to
+   exactly those — do not reconstruct historical carry or capital from
+   anywhere else.
+3. **Surface the one-line summary.** `maker_carry_study.json` gains
+   `portfolio_entered`, `portfolio_departed`, `departed_reasons` (a
+   reason→count map) and `composition_diff_status` (`ok` / `no_prior_run` /
+   `write_failed`). Fields are added only; no existing field changes meaning.
+
+**Fail-safe direction (S5).** Reporting only, and instrumentation must never
+take down the instrument's subject: a failure to compute or write the diff
+artifact logs loudly, stamps `composition_diff_status: write_failed`, and leaves
+the study's exit status, history commit, and every gate exactly as they would
+have been. A missing or unreadable members sidecar, or a genuine first run,
+reports `no_prior_run` with empty diff lists rather than guessing. A market
+whose disposition cannot be established from this run's own computed maps
+reports `disposition_unknown` — never silently omitted, never given a made-up
+reason. Non-finite carry renders as `null` and never sorts.
+
+**Interleaving (S2).** Same producer, same lane, single writer. The new artifact
+is unenrolled and written outside the P3-3 flock, after both anchored ledgers
+commit, so an interrupted diff write can never orphan or shadow a ledger row.
+`maker_carry_study.json` gains fields only; the WO-121/WO-129 watchdog
+registrations key on `status` values and are unaffected.
+
+Tests: (1) a market present in the previous sidecar row and absent from the
+current portfolio appears in `departed[]` with the exact staleness reason the
+current run's predicate produced (fixture flips `venue_close_time_past`); (2) a
+newly sized market appears in `entered[]` and `held[]` is disjoint from both;
+(3) first run / missing sidecar → `no_prior_run`, empty lists, study status and
+gates unchanged; (4) a forced diff-write failure (unwritable path) leaves the
+study exit status and history row untouched and stamps
+`composition_diff_status: write_failed`; (5) a departed market absent from this
+run's rewarded universe reports `not_in_rewarded_universe`, and one measured
+but unsized reports `measured_not_sized` with a finite carry value; (6) the new
+artifact carries `paper_trading_invoked=false` and `live_trading_invoked=false`,
+and the members sidecar's bytes are identical before and after the run in every
+diff fixture (read-only proof).
+
+**Day-after check:** on the VPS after two consecutive study runs,
+`outputs/maker_carry/portfolio_composition_diff.json` exists with
+`previous_run_at`/`current_run_at` matching the last two history rows, and every
+market that left the portfolio between them carries a named disposition. The
+next intermittency event (portfolio 1 → 0 between runs) must be explainable
+from this artifact alone, without shell archaeology — that is the acceptance
+bar, because it is the exact question the 2026-07-28 Iran-airspace departure
+could not answer.
+
 ## Current queue for Codex — ISSUED 2026-07-27
 
 A 2026-07-27 owner instruction — **Claude orchestrates and reviews; Codex
@@ -6199,6 +6284,7 @@ refactors:
 | 6 | **WO-130** | kill-lane and funding-evidence integrity + the #355 P1s | owner (frozen surfaces) |
 | 7 | **WO-133** | guarded manual deploy path + its `AGENTS.md` amendment | **owner** (one PR carrying a governance amendment cannot be partially merged) |
 | 8 | **WO-136** | contemporaneous-quote fill replay (kills the phantom-fill 42x haircut; issued 2026-07-28 under the owner's direct instruction) | orchestrator, after line-audit |
+| 9 | **WO-137** | portfolio composition diff — name the reason every market leaves (churn is the campaign's binding variable; issued 2026-07-28 under the owner's direct instruction) | orchestrator, after line-audit |
 
 **WO-121 — watchdog coverage for unmonitored producers** (registered 2026-07-27 as
 WO-129's named blocking prerequisite, per ENGINEERING_STANDARDS S3). WO-129 tightens

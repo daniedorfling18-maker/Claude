@@ -8,6 +8,7 @@ fails here rather than on the VPS.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -359,6 +360,112 @@ def test_wo133_guards_are_read_from_the_target_revision_not_the_old_checkout() -
     ):
         assert f'"$STAGE_DIR/{helper}"' in body, helper
         assert f'"$REPO_DIR/scripts/{helper}"' not in body, helper
+
+
+def _declared_options(helper: str) -> tuple[set[str], set[str]]:
+    """Every --flag the helper's argparse declares, and the subset it requires."""
+    source = (ROOT / "scripts" / helper).read_text(encoding="utf-8")
+    declared: set[str] = set()
+    required: set[str] = set()
+    for call in re.findall(r"add_argument\((.*?)\)\n", source, flags=re.DOTALL):
+        flags = re.findall(r"[\"'](--[a-z0-9-]+)[\"']", call)
+        if not flags:
+            continue
+        declared.update(flags)
+        if re.search(r"required\s*=\s*True", call):
+            required.update(flags)
+    return declared, required
+
+
+def _invocation_flags(helper: str) -> set[str]:
+    """The --flags the manual script actually passes to that helper."""
+    body = _script()
+    marker = f'"$STAGE_DIR/{helper}"'
+    assert marker in body, helper
+    # The invocation runs from the marker to the first line that is not a
+    # continuation - i.e. the first line not ending in a backslash.
+    tail = body.split(marker, 1)[1]
+    lines: list[str] = []
+    for line in tail.splitlines():
+        # The `|| fail "..."` clause is not part of the invocation. Its message
+        # may legitimately quote other commands' flags (the capacity refusal names
+        # `docker builder prune --force`), which must not read as arguments passed.
+        if line.lstrip().startswith("||"):
+            break
+        lines.append(line)
+        if not line.rstrip().endswith("\\"):
+            break
+    return set(re.findall(r"(?<![\w-])(--[a-z0-9-]+)", "\n".join(lines)))
+
+
+@pytest.mark.parametrize(
+    "helper",
+    [
+        "preflight_vps_capacity.py",
+        "validate_dashboard_private_transport.py",
+        "update_vps_checkout_preserving_runtime.py",
+        "rollback_vps_paper_deploy.py",
+    ],
+)
+def test_wo133_every_helper_invocation_matches_that_helper_s_real_parser(helper: str) -> None:
+    """The test that would have caught the first VPS run's real failure.
+
+    Path B was written against INVENTED signatures: `--repo-dir` for a preflight
+    whose flag is `--root`, `--target` for an updater whose flag is `--target-ref`,
+    `--image-tag` for a rollback whose flag is `--image-backup-tag`, and a
+    transport validator called with none of its four required inputs. Four of the
+    five staged helpers would have failed, INCLUDING the rollback utility - so a
+    failure past the arming boundary would have found its recovery path broken too.
+
+    Every earlier test asserted the ORDER of the guards, which was right, and none
+    asserted that a guard could run at all. This one reads each helper's own
+    argparse and refuses any flag it does not declare or requires and never gets.
+    """
+    declared, required = _declared_options(helper)
+    assert declared, f"could not read any options from {helper}"
+    passed = _invocation_flags(helper)
+
+    unknown = passed - declared
+    assert not unknown, f"{helper} does not accept {sorted(unknown)}"
+    missing = required - passed
+    assert not missing, f"{helper} requires {sorted(missing)} and the invocation omits them"
+
+
+def test_wo133_the_health_gate_is_driven_by_its_documented_env_contract() -> None:
+    # check_polymarket_vps_paper.sh takes no flags; it reads PM_VPS_REPO_DIR.
+    health = (ROOT / "scripts" / "check_polymarket_vps_paper.sh").read_text(encoding="utf-8")
+    assert 'REPO_DIR="${PM_VPS_REPO_DIR:-' in health
+    assert 'PM_VPS_REPO_DIR="$REPO_DIR" bash "$STAGE_DIR/check_polymarket_vps_paper.sh"' in _script()
+
+
+def test_wo133_rollback_is_given_every_helper_it_needs_from_the_target_revision() -> None:
+    # rollback_vps_paper_deploy.py shells out to a telemetry writer and a transport
+    # validator by path. Handing it paths inside the CHECKOUT would point it at the
+    # half-updated tree it is trying to undo, so both must come from the staging
+    # directory - and both must therefore be staged.
+    body = _script()
+    for helper in ("write_vps_telemetry_manifest.py", "validate_dashboard_private_transport.py"):
+        assert f"    {helper} \\" in body or f"    {helper}\n" in body, f"{helper} is not staged"
+    assert '--telemetry-writer "$STAGE_DIR/write_vps_telemetry_manifest.py"' in body
+    assert '--transport-validator "$STAGE_DIR/validate_dashboard_private_transport.py"' in body
+
+
+def test_wo133_capacity_is_measured_against_the_target_compose_not_the_running_one() -> None:
+    # A deploy that adds a service or raises a memory reservation has to be refused
+    # BEFORE it is built. Measuring the running stack's compose file cannot do that.
+    body = _script()
+    assert 'show "$target_sha:$COMPOSE_FILE" > "$STAGE_DIR/compose.yml"' in body
+    assert '--compose "$STAGE_DIR/compose.yml"' in body
+
+
+def test_wo133_transport_guard_writes_no_artifact_into_the_repository(tmp_path: Path) -> None:
+    # Guard 4 runs before the arming boundary, so its report goes to the staging
+    # directory. Writing outputs/performance/dashboard_private_transport.json here
+    # would mutate the host during a guard that is allowed to refuse for free.
+    body = _script()
+    transport = body.split("assert_private_transport() {", 1)[1].split("\n}", 1)[0]
+    assert '--output "$transport_tmp/dashboard_private_transport.json"' in transport
+    assert "outputs/performance" not in transport
 
 
 def test_wo133_never_writes_an_attestation_or_claims_independent_review() -> None:

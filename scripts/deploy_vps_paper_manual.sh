@@ -55,14 +55,39 @@ stage_target_scripts() {
     validate_dashboard_private_transport.py \
     update_vps_checkout_preserving_runtime.py \
     rollback_vps_paper_deploy.py \
+    write_vps_telemetry_manifest.py \
     check_polymarket_vps_paper.sh
   do
     git -C "$REPO_DIR" show "$target_sha:scripts/$helper" > "$STAGE_DIR/$helper" \
       || fail "cannot stage scripts/$helper from $target_sha"
   done
+  # Capacity must be measured against the TARGET revision's compose commitments,
+  # not the running stack's - a deploy that adds a service or raises a memory
+  # reservation has to be refused BEFORE it is built, which is why Path A stages
+  # the compose file the same way.
+  git -C "$REPO_DIR" show "$target_sha:$COMPOSE_FILE" > "$STAGE_DIR/compose.yml" \
+    || fail "cannot stage $COMPOSE_FILE from $target_sha"
+  chmod 0700 "$STAGE_DIR"/*.py "$STAGE_DIR"/*.sh
   log "staged target-revision guards from $target_sha in $STAGE_DIR"
 }
 fail() { log "ERROR: $*" >&2; exit 1; }
+
+if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+
+# Same reader check_polymarket_vps_paper.sh uses, so Path B resolves the
+# dashboard port and private URL exactly as the health gate does.
+env_value() {
+  key="$1"
+  file="$2"
+  if [ -f "$file" ]; then
+    value="$(grep -E "^${key}=" "$file" | tail -n 1 | cut -d= -f2- || true)"
+    case "$value" in
+      \"*\") value="${value#\"}"; value="${value%\"}" ;;
+      \'*\') value="${value#\'}"; value="${value%\'}" ;;
+    esac
+    printf '%s' "$value"
+  fi
+}
 
 # --- guard 1: the target must be the reviewed, merged main tip -----------------
 # This is what keeps Path B from becoming a way to ship unreviewed code. A
@@ -104,24 +129,84 @@ PM_VPS_DEPLOYED_SHA is stamped after the arming boundary, so this refuses now in
 }
 
 # --- guard 3: capacity ---------------------------------------------------------
+# Argument shape is Path A's (workflow :297-301), against the STAGED target
+# compose. Unlike Path A this does NOT prune the Docker builder cache or dangling
+# images first: pruning mutates the host, and everything before the arming
+# boundary must leave the host untouched so a refusal costs nothing. The refusal
+# therefore names the reclaim commands instead of running them behind your back.
 run_capacity_preflight() {
-  python3 "$STAGE_DIR/preflight_vps_capacity.py" --repo-dir "$REPO_DIR" \
-    || fail "capacity preflight refused the deploy"
+  ( cd "$REPO_DIR" && python3 "$STAGE_DIR/preflight_vps_capacity.py" \
+      --compose "$STAGE_DIR/compose.yml" \
+      --env-file .env \
+      --output outputs/performance/vps_capacity_preflight.json \
+      --root . ) \
+    || fail "capacity preflight refused the deploy. Path A reclaims space first and \
+Path B deliberately does not (it must not mutate the host before arming). If the \
+shortfall is dangling build layers, reclaim them yourself and re-run: \
+'$DOCKER builder prune --force && $DOCKER image prune --force'"
 }
 
 # --- guard 4: private transport proof, BEFORE the stack is quiesced ------------
 # Public exposure is the single thing this gate exists to prevent, and proving it
 # after quiescing would mean tearing down a healthy stack to discover the new one
 # must not be started. An uncapturable transport state fails closed.
+#
+# The validator does not gather anything itself - it judges three captured files.
+# The capture below is check_polymarket_vps_paper.sh's (:85-145), because that is
+# the caller already proven against this validator. The report is written into the
+# staging directory rather than outputs/, so this guard leaves the host untouched.
+DASHBOARD_PRIVATE_URL=""
+DASHBOARD_PORT=""
 assert_private_transport() {
-  python3 "$STAGE_DIR/validate_dashboard_private_transport.py" --repo-dir "$REPO_DIR" \
+  transport_tmp="$STAGE_DIR/transport"
+  mkdir -p "$transport_tmp"
+  printf '{}\n' > "$transport_tmp/tailscale-status.json"
+  : > "$transport_tmp/tailscale-serve-status.txt"
+  : > "$transport_tmp/dashboard-bindings.txt"
+
+  command -v tailscale >/dev/null 2>&1 \
+    || fail "Tailscale is not installed; public dashboard exposure remains forbidden"
+  $SUDO tailscale status --json > "$transport_tmp/tailscale-status.json" \
+    || fail "Tailscale status is unavailable or the node is logged out; refusing to deploy"
+  $SUDO tailscale serve status > "$transport_tmp/tailscale-serve-status.txt" \
+    || fail "Tailscale Serve status is unavailable; refusing to deploy"
+  # Funnel state is appended for the validator's public-exposure check. A funnel
+  # probe that cannot be captured must not read as "funnel is off".
+  $SUDO tailscale funnel status >> "$transport_tmp/tailscale-serve-status.txt" 2>/dev/null || true
+  $DOCKER port polymarket-dashboard 8765/tcp > "$transport_tmp/dashboard-bindings.txt" \
+    || fail "dashboard Docker binding is unavailable; refusing to deploy"
+
+  DASHBOARD_PORT="$(env_value POLYMARKET_DASHBOARD_PORT "$REPO_DIR/.env")"
+  DASHBOARD_PORT="${DASHBOARD_PORT:-8765}"
+  case "$DASHBOARD_PORT" in
+    *[!0-9]*|'') fail "invalid dashboard port '$DASHBOARD_PORT' in .env" ;;
+  esac
+  DASHBOARD_PRIVATE_URL="$(env_value PM_DASHBOARD_PUBLIC_URL "$REPO_DIR/.env")"
+  [ -n "$DASHBOARD_PRIVATE_URL" ] \
+    || fail "PM_DASHBOARD_PUBLIC_URL is not set in .env; the private transport cannot be verified"
+
+  probe_argument=""
+  if curl -fsS --max-time 10 "$DASHBOARD_PRIVATE_URL" >/dev/null 2>&1; then
+    probe_argument="--private-https-reachable"
+  fi
+
+  python3 "$STAGE_DIR/validate_dashboard_private_transport.py" \
+    --tailscale-status "$transport_tmp/tailscale-status.json" \
+    --serve-status "$transport_tmp/tailscale-serve-status.txt" \
+    --docker-bindings "$transport_tmp/dashboard-bindings.txt" \
+    --expected-port "$DASHBOARD_PORT" \
+    --configured-url "$DASHBOARD_PRIVATE_URL" \
+    ${probe_argument:+$probe_argument} \
+    --output "$transport_tmp/dashboard_private_transport.json" \
     || fail "dashboard private-transport proof failed; refusing to deploy"
 }
 
 # --- the arming boundary -------------------------------------------------------
 # Everything after this can be undone by rollback_vps_paper_deploy.py, and
 # everything before it has changed nothing on the host.
+FAILED_TARGET_SHA=""
 arm_rollback() {
+  FAILED_TARGET_SHA="$1"
   ROLLBACK_DIR="$(mktemp -d)"
   chmod 0700 "$ROLLBACK_DIR"
   install -m 0600 "$REPO_DIR/.env" "$ROLLBACK_DIR/.env.last-known-good" \
@@ -139,13 +224,29 @@ rollback_if_armed() {
   status="$1"
   if [ "$status" -ne 0 ] && [ "${ROLLBACK_ARMED:-false}" = true ]; then
     log "deploy failed after the arming boundary; restoring $ORIGINAL_HEAD"
+    # Argument shape is Path A's (workflow :437-456). --marker-was-present is
+    # unconditional here because guard 2 refuses a deploy whose marker is absent,
+    # so by this point it always existed.
     python3 "$STAGE_DIR/rollback_vps_paper_deploy.py" \
       --repo "$REPO_DIR" \
       --rollback-ref "$ORIGINAL_HEAD" \
       --branch main \
+      --compose-file "$COMPOSE_FILE" \
       --env-backup "$ROLLBACK_DIR/.env.last-known-good" \
       --marker-backup "$ROLLBACK_DIR/deployed_git_rev.last-known-good" \
-      --image-tag "$ROLLBACK_IMAGE_TAG" \
+      --marker-was-present \
+      --image-backup-tag "$ROLLBACK_IMAGE_TAG" \
+      --docker-command "$DOCKER" \
+      --telemetry-writer "$STAGE_DIR/write_vps_telemetry_manifest.py" \
+      --tailscale-command "${SUDO:+$SUDO }tailscale" \
+      --transport-validator "$STAGE_DIR/validate_dashboard_private_transport.py" \
+      --private-dashboard-url "$DASHBOARD_PRIVATE_URL" \
+      --failed-target-sha "$FAILED_TARGET_SHA" \
+      --required-service polymarket-paper-live \
+      --required-service polymarket-dashboard \
+      --required-service superbru-auto-pick-watchdog \
+      --required-service vps-ops-scheduler \
+      --report "$REPO_DIR/outputs/performance/vps_deploy_rollback.json" \
       || log "ERROR: rollback itself failed; recovery material retained in $ROLLBACK_DIR"
   fi
   exit "$status"
@@ -154,8 +255,12 @@ rollback_if_armed() {
 # --- source update -------------------------------------------------------------
 update_checkout() {
   target_sha="$1"
+  # Argument shape is Path A's (workflow :536-540). The flag is --target-ref.
   python3 "$STAGE_DIR/update_vps_checkout_preserving_runtime.py" \
-    --repo "$REPO_DIR" --target "$target_sha" \
+    --repo "$REPO_DIR" \
+    --target-ref "$target_sha" \
+    --branch main \
+    --report "$REPO_DIR/outputs/performance/vps_checkout_update.json" \
     || fail "runtime-preserving checkout update refused"
 }
 
@@ -283,7 +388,7 @@ main() {
   assert_checkout_matches_marker
   run_capacity_preflight
   assert_private_transport
-  arm_rollback
+  arm_rollback "$target_sha"
   trap 'rollback_if_armed $?' EXIT
   update_checkout "$target_sha"
   write_deploy_markers "$target_sha"

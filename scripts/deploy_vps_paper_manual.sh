@@ -228,14 +228,24 @@ rollback_if_armed() {
     # unconditional here because guard 2 refuses a deploy whose marker is absent,
     # so by this point it always existed.
     #
-    # The probe window is 60s (30 x 2s), not the 5 x 2s default. Observed
-    # 2026-07-28: the rollback restored the checkout, .env, marker, image and all
-    # four containers correctly, then reported FAIL because a just-recreated
-    # dashboard behind Tailscale Serve had not answered within 10 seconds. The
-    # same URL returned 200 shortly after. A cold start is not a failed rollback,
-    # and reporting one as MANUAL_INTERVENTION_REQUIRED sends an operator to
-    # inspect a healthy stack. This does not weaken the check: it still fails
-    # closed if the dashboard genuinely never answers.
+    # Probe window. Observed 2026-07-28: the rollback restored the checkout,
+    # .env, marker, image and all four containers correctly, then reported FAIL
+    # because a just-recreated dashboard behind Tailscale Serve had not answered
+    # within the default 5 x 2s. The same URL returned 200 shortly after. A cold
+    # start is not a failed rollback, and reporting one as
+    # MANUAL_INTERVENTION_REQUIRED sends an operator to inspect a healthy stack.
+    #
+    # The window is bought with the INTERVAL, not the attempt count, because
+    # _verify_private_dashboard_transport clamps both:
+    # range(max(1, min(10, probe_attempts))) and min(10.0, probe_interval_seconds).
+    # Asking for 30 attempts silently yields 10. 10 attempts at 7s is a ~63s
+    # retry span and stays inside the helper's own bounds, so Path A's shared
+    # defaults are untouched. See
+    # test_wo133_rollback_probe_window_is_at_least_sixty_effective_seconds, which
+    # reads those clamps rather than trusting the flags.
+    #
+    # This does not weaken the check: it still fails closed if the dashboard
+    # genuinely never answers.
     python3 "$STAGE_DIR/rollback_vps_paper_deploy.py" \
       --repo "$REPO_DIR" \
       --rollback-ref "$ORIGINAL_HEAD" \
@@ -251,8 +261,8 @@ rollback_if_armed() {
       --transport-validator "$STAGE_DIR/validate_dashboard_private_transport.py" \
       --private-dashboard-url "$DASHBOARD_PRIVATE_URL" \
       --failed-target-sha "$FAILED_TARGET_SHA" \
-      --https-probe-attempts 30 \
-      --https-probe-interval-seconds 2.0 \
+      --https-probe-attempts 10 \
+      --https-probe-interval-seconds 7.0 \
       --required-service polymarket-paper-live \
       --required-service polymarket-dashboard \
       --required-service superbru-auto-pick-watchdog \

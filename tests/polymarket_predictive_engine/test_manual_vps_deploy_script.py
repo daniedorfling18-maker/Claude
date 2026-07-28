@@ -513,21 +513,68 @@ def test_wo133_acceptance_is_time_bounded_past_the_arming_boundary() -> None:
     assert "timeout --signal=TERM --kill-after=30s 600" in acceptance
 
 
-def test_wo133_rollback_probe_window_survives_a_cold_dashboard_start() -> None:
-    """Regression for the same run's SECOND failure.
+def _effective_probe_span_seconds() -> float:
+    """The retry span the rollback ACTUALLY gets, after its own clamps.
 
-    The rollback restored everything correctly and then reported FAIL /
-    MANUAL_INTERVENTION_REQUIRED because a just-recreated dashboard behind
-    Tailscale Serve had not answered within the default 5 x 2s = 10s. The same
-    URL returned 200 shortly after. A cold start is not a failed rollback.
+    Requesting a probe window is not the same as receiving one:
+    `_verify_private_dashboard_transport` clamps BOTH inputs. So this reads the
+    clamps out of the helper and applies them to what the script asks for. The
+    span is (attempts - 1) intervals, since the last sleep buys no further retry.
     """
+    helper = (ROOT / "scripts" / "rollback_vps_paper_deploy.py").read_text(encoding="utf-8")
+    attempts_cap = int(
+        re.search(r"range\(max\(1,\s*min\((\d+),\s*probe_attempts\)\)\)", helper).group(1)
+    )
+    interval_cap = float(
+        re.search(r"min\(([\d.]+),\s*probe_interval_seconds\)", helper).group(1)
+    )
+
     body = _script()
-    assert "--https-probe-attempts 30" in body
-    assert "--https-probe-interval-seconds 2.0" in body
+    asked_attempts = int(re.search(r"--https-probe-attempts (\d+)", body).group(1))
+    asked_interval = float(re.search(r"--https-probe-interval-seconds ([\d.]+)", body).group(1))
+
+    return (min(attempts_cap, asked_attempts) - 1) * min(interval_cap, asked_interval)
+
+
+def test_wo133_rollback_probe_window_is_at_least_sixty_effective_seconds() -> None:
+    """Regression for the 2026-07-28 rollback false alarm, and for my fix to it.
+
+    The rollback restored everything correctly and still reported FAIL /
+    MANUAL_INTERVENTION_REQUIRED because a just-recreated dashboard behind
+    Tailscale Serve had not answered inside the default window. A cold start is
+    not a failed rollback.
+
+    My first fix asked for 30 attempts x 2s and claimed 60 seconds. It delivered
+    about 20: the helper clamps attempts at 10 and the interval at 10.0s, so the
+    request was silently truncated. Codex caught that on #377.
+
+    This test therefore measures the EFFECTIVE span through the helper's own
+    clamps instead of asserting the flag values back at me - which is precisely
+    what the version it replaces did wrong, and the same shape as the marker-path
+    tests that could never fail.
+    """
+    assert _effective_probe_span_seconds() >= 60.0
 
     declared, _ = _declared_options("rollback_vps_paper_deploy.py")
     for flag in ("--https-probe-attempts", "--https-probe-interval-seconds"):
         assert flag in declared, flag
+
+
+def test_wo133_probe_request_stays_inside_the_helpers_own_bounds() -> None:
+    # The span must be bought within the shared helper's contract. Exceeding a cap
+    # would mean the script asks for something it cannot get - which reads as a
+    # 60s window in review while behaving as a 20s one in production, and would
+    # otherwise require changing a file Path A also depends on.
+    helper = (ROOT / "scripts" / "rollback_vps_paper_deploy.py").read_text(encoding="utf-8")
+    attempts_cap = int(
+        re.search(r"range\(max\(1,\s*min\((\d+),\s*probe_attempts\)\)\)", helper).group(1)
+    )
+    interval_cap = float(
+        re.search(r"min\(([\d.]+),\s*probe_interval_seconds\)", helper).group(1)
+    )
+    body = _script()
+    assert int(re.search(r"--https-probe-attempts (\d+)", body).group(1)) <= attempts_cap
+    assert float(re.search(r"--https-probe-interval-seconds ([\d.]+)", body).group(1)) <= interval_cap
 
 
 def test_wo133_never_writes_an_attestation_or_claims_independent_review() -> None:

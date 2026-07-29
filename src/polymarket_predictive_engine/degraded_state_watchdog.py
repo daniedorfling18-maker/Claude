@@ -906,7 +906,7 @@ def _immediate_producer_evaluations(
                 else None
             )
             stale = artifact_age is None or artifact_age < 0 or artifact_age > DR_STATUS_MAX_AGE_SECONDS
-            degraded = bool(payload) and (degraded or remote not in {"ok", "pending"} or not compliant or stale)
+            degraded = degraded or not payload or remote not in {"ok", "pending"} or not compliant or stale
             reasons += [
                 f"remote_push_status={remote}",
                 f"rpo_compliant={compliant}",
@@ -948,7 +948,7 @@ def _immediate_producer_evaluations(
     payload = _mapping(read_json(cfg.output_root / relative, default={}) or {})
     token = _stamp(payload)
     status = str(payload.get("status") or "unobserved").lower()
-    degraded = bool(payload) and status not in OFFICIAL_BOOK_HEALTHY_STATES
+    degraded = not payload or status not in OFFICIAL_BOOK_HEALTHY_STATES
     counters = state.setdefault("counters", {})
     counter = _advance_counter(_mapping(counters.get("official_book_snapshot_partial")), token=token or generated_at, degraded=degraded)
     counters["official_book_snapshot_partial"] = counter
@@ -1114,6 +1114,8 @@ def _notification(
     active: list[dict[str, Any]],
     new: list[dict[str, Any]],
     undelivered_ids: list[str],
+    state_path: Path,
+    state: dict[str, Any],
 ) -> dict[str, Any]:
     body_path = cfg.output_root / NOTIFICATION_BODY
     lines = [
@@ -1132,7 +1134,8 @@ def _notification(
         "Human review only. Fail-closed and risk states remain unchanged; this watchdog cannot trade or cancel orders.",
     ]
     write_text_atomic(body_path, "\n".join(lines) + "\n")
-    pending = list(dict.fromkeys([*undelivered_ids, *[str(row["incident_id"]) for row in new]]))
+    active_by_id = {str(row.get("incident_id") or ""): row for row in active}
+    pending = list(dict.fromkeys([*undelivered_ids, *[str(row["incident_id"]) for row in new]]))[-MAX_NOTIFICATION_IDS:]
     url = str(os.environ.get(NTFY_ENV_VAR) or "").strip()
     attempted = bool(enabled and url and pending)
     delivery: dict[str, Any] = {
@@ -1141,14 +1144,14 @@ def _notification(
         "channel_configured": bool(url),
         "error": "",
     }
+    registrations: list[str] = []
     if attempted:
-        registrations = sorted(
-            {
-                str(row.get("registration_id") or "unknown")
-                for row in active
-                if str(row.get("incident_id") or "") in pending
-            }
-        )[:MAX_NOTIFICATION_IDS]
+        registrations = sorted({str(active_by_id.get(item, {}).get("registration_id") or "unknown") for item in pending})
+        # Crash safety: the bounded debt and the registration metadata needed
+        # to retry it are durable before the network side effect begins.
+        state["undelivered_incident_ids"] = pending
+        state["undelivered_incident_registrations"] = registrations
+        write_json(state_path, state)
         message = "Polymarket watchdog incidents: " + ", ".join(registrations)
         try:
             response = requests.post(url, data=message, timeout=10)
@@ -1158,6 +1161,11 @@ def _notification(
         except Exception as exc:  # noqa: BLE001 - alert failure must not block watchdog evidence
             delivery["error"] = type(exc).__name__
     remaining = pending if attempted and not delivery["delivered"] else []
+    remaining_registrations = registrations if remaining else []
+    if attempted and delivery["delivered"]:
+        state["undelivered_incident_ids"] = []
+        state["undelivered_incident_registrations"] = []
+        write_json(state_path, state)
     # ``notify`` remains the state-change/retry signal consumed by existing
     # artifact readers; ``delivery.attempted`` records whether a real channel
     # was configured and a transport call actually occurred.
@@ -1172,6 +1180,7 @@ def _notification(
         "pattern": "superbru_score_change_state_digest",
         "delivery": delivery,
         "undelivered_incident_ids": remaining,
+        "undelivered_incident_registrations": remaining_registrations,
     }
 
 
@@ -1236,6 +1245,9 @@ def build_degraded_state_watchdog(
                 )
                 active = [row for row in active if row.get("registration_id") != "degraded_state_watchdog_wedged"] + [wedge]
             new = _append_incidents(ledger_path, active)
+            # Minimize the race with the actual lock holder before the one
+            # unavoidable pre-send debt write.
+            state = _mapping(read_json(state_path, default={}) or {})
             notification = _notification(
                 cfg,
                 generated_at=generated_at,
@@ -1243,12 +1255,19 @@ def build_degraded_state_watchdog(
                 active=active,
                 new=new,
                 undelivered_ids=list(state.get("undelivered_incident_ids") or []),
+                state_path=state_path,
+                state=state,
             )
+            # The lock holder may have published fresh evaluator state while
+            # this skipped cycle notified. Re-read immediately before writing
+            # and merge only the carry/notification keys this path owns.
+            latest_state = _mapping(read_json(state_path, default={}) or {})
+            state = latest_state
             state.update({
-                "generated_at_utc": generated_at,
                 "carry_forward_cycles": carry_cycles,
                 "carry_forward_started_at": carry_started,
                 "undelivered_incident_ids": notification["undelivered_incident_ids"],
+                "undelivered_incident_registrations": notification["undelivered_incident_registrations"],
             })
             write_json(state_path, state)
             payload = {
@@ -1258,6 +1277,8 @@ def build_degraded_state_watchdog(
                 "evaluations": previous.get("evaluations", []),
                 "active_incidents": active,
                 "new_incidents": new,
+                "active_incident_count": len(active),
+                "new_incident_count": len(new),
                 "carry_forward_cycles": carry_cycles,
                 "carried_forward_from_utc": previous.get("generated_at_utc"),
                 "carry_forward_reason": "runtime_lock_held",
@@ -1299,12 +1320,15 @@ def build_degraded_state_watchdog(
             active=active,
             new=new,
             undelivered_ids=list(state.get("undelivered_incident_ids") or []),
+            state_path=state_path,
+            state=state,
         )
         state.update(
             {
                 "generated_at_utc": generated_at,
                 "active_incident_ids": [row["incident_id"] for row in active],
                 "undelivered_incident_ids": notification["undelivered_incident_ids"],
+                "undelivered_incident_registrations": notification["undelivered_incident_registrations"],
                 "carry_forward_cycles": 0,
                 "carry_forward_started_at": None,
                 "paper_trading_invoked": False,

@@ -456,8 +456,14 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         int(MAKER_POLICY_DEFAULTS["maker_min_book_snapshots"]),
         int(merged["maker_min_book_snapshots"]),
     )
-    merged["gate_min_runs_at_target"] = max(7, int(merged["gate_min_runs_at_target"]))
-    merged["target_net_usd_per_day"] = max(3.33, float(merged["target_net_usd_per_day"]))
+    merged["gate_min_runs_at_target"] = max(
+        int(MAKER_POLICY_DEFAULTS["gate_min_runs_at_target"]),
+        int(merged["gate_min_runs_at_target"]),
+    )
+    merged["target_net_usd_per_day"] = max(
+        float(MAKER_POLICY_DEFAULTS["target_net_usd_per_day"]),
+        float(merged["target_net_usd_per_day"]),
+    )
     return merged
 
 

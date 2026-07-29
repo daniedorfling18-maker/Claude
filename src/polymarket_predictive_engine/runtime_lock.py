@@ -49,6 +49,20 @@ def _lock_age_seconds(payload: dict[str, Any]) -> float | None:
     return max(0.0, (now - acquired_at).total_seconds())
 
 
+def _valid_lock_payload(payload: dict[str, Any]) -> bool:
+    """Only payloads carrying every ownership field may block indefinitely."""
+    try:
+        pid = int(payload.get("pid"))
+    except (TypeError, ValueError):
+        return False
+    return bool(
+        payload.get("name")
+        and pid > 0
+        and parse_timestamp(payload.get("process_started_at_utc")) is not None
+        and parse_timestamp(payload.get("acquired_at_utc")) is not None
+    )
+
+
 def _same_pid_lock_predates_current_process(payload: dict[str, Any]) -> bool:
     """Detect a persisted lock from a prior process that reused our PID.
 
@@ -131,7 +145,7 @@ def acquire_runtime_lock(
             stale_reason = f"age_seconds>{stale_after_seconds:g}"
         elif _same_pid_lock_predates_current_process(existing_payload):
             stale_reason = "same_pid_lock_predates_current_process"
-        elif not existing_payload and stale_after_seconds > 0:
+        elif not _valid_lock_payload(existing_payload) and stale_after_seconds > 0:
             # Atomic publishing means this process never creates a malformed
             # lock.  Treat an externally corrupt lock as ambiguous until its
             # filesystem age crosses the same stale ceiling, then reclaim it.

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from polymarket_predictive_engine.cli import COMMANDS
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.degraded_state_watchdog import (
@@ -14,7 +16,7 @@ from polymarket_predictive_engine.degraded_state_watchdog import (
     WALLET_HEALTHY_STATES,
     WALLET_REGISTRATION_ID,
     _settings,
-    build_degraded_state_watchdog,
+    build_degraded_state_watchdog as _build_degraded_state_watchdog,
 )
 from polymarket_predictive_engine.ledger_anchor import (
     DEFAULT_LEDGER_REGISTRY,
@@ -38,6 +40,25 @@ def _cfg(tmp_path: Path) -> EngineConfig:
         },
         path=tmp_path / "config.yaml",
     )
+
+
+def build_degraded_state_watchdog(cfg: EngineConfig, *, as_of=None):
+    """Seed unrelated producer evidence for focused legacy registrations."""
+    stamp = str(as_of or "2026-07-29T00:00:00Z")
+    dr = cfg.output_root / "performance" / "disaster_recovery_status.json"
+    books = cfg.output_root / "maker_carry" / "official_book_snapshot.json"
+    current_dr = read_json(dr, default={}) or {}
+    if not dr.exists() or current_dr.get("_test_seeded"):
+        write_json(dr, {"status": "ok", "remote_push_status": "ok", "rpo": {"compliant": True}, "generated_at_utc": stamp, "_test_seeded": True})
+    if not books.exists():
+        write_json(books, {"status": "disabled", "generated_at_utc": stamp})
+    return _build_degraded_state_watchdog(cfg, as_of=as_of)
+
+
+@pytest.fixture(autouse=True)
+def _offline_notification_environment(monkeypatch) -> None:
+    # The offline suite must never inherit the production-only notification URL.
+    monkeypatch.delenv("OPS_OWNER_NTFY_TOPIC_URL", raising=False)
 
 
 def _requote(cycle: int, *, rule: str, state: str = "pull_quotes_now") -> dict:
@@ -702,6 +723,14 @@ def test_wo129_failed_official_book_and_stale_dr_fail_closed(tmp_path: Path) -> 
     assert books["state"] == "degraded_within_tolerance"
 
 
+def test_wo129_missing_producer_artifacts_fail_closed(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    result = _build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:00:00Z")
+    by_id = {row["registration_id"]: row for row in result["evaluations"]}
+    assert by_id["disaster_recovery_not_recoverable"]["state"] == "incident"
+    assert by_id["official_book_snapshot_partial"]["state"] == "degraded_within_tolerance"
+
+
 def test_wo129_failed_ntfy_delivery_is_retried_and_cleared(tmp_path: Path, monkeypatch) -> None:
     cfg = _cfg(tmp_path)
     monkeypatch.setenv("OPS_OWNER_NTFY_TOPIC_URL", "https://ntfy.invalid/topic")
@@ -713,7 +742,14 @@ def test_wo129_failed_ntfy_delivery_is_retried_and_cleared(tmp_path: Path, monke
     class Response:
         status_code = 503
 
-    monkeypatch.setattr("polymarket_predictive_engine.degraded_state_watchdog.requests.post", lambda *a, **k: Response())
+    def post(*args, **kwargs):
+        durable = read_json(cfg.output_root / "ops_scheduler" / "degraded_state_watchdog_state.json")
+        assert durable["undelivered_incident_ids"]
+        assert durable["undelivered_incident_registrations"]
+        assert len(durable["undelivered_incident_ids"]) <= 20
+        return Response()
+
+    monkeypatch.setattr("polymarket_predictive_engine.degraded_state_watchdog.requests.post", post)
     first = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:00:01Z")
     assert first["notification"]["delivery"]["attempted"] is True
     assert first["notification"]["undelivered_incident_ids"]

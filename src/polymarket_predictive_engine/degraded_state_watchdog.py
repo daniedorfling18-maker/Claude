@@ -58,7 +58,11 @@ REGISTERED_JOB_FRESHNESS_MAX_SECONDS: dict[str, int] = {
 PUSH_STATUS_MAX_SECONDS = 2 * 60 * 60
 PRODUCER_REGISTRATIONS = (
     ("ledger_chain_integrity", "performance/ledger_anchor_verification.json", {"ok"}),
-    ("disaster_recovery_not_recoverable", "performance/disaster_recovery_status.json", {"ok", "recoverable"}),
+    # The DR producer's reachable statuses are exactly {ok, not_due, skipped_locked,
+    # error}; "not_due" is its routine healthy state (archive not due this cycle) and
+    # still passes through the remote-push/RPO clauses below. "skipped_locked" stays
+    # OUT deliberately: a held DR lock must alarm, not read healthy.
+    ("disaster_recovery_not_recoverable", "performance/disaster_recovery_status.json", {"ok", "not_due"}),
     ("maker_study_run_failed", "maker_carry/maker_carry_study.json", {"ok", "no_candidates", "disabled"}),
 )
 
@@ -137,7 +141,7 @@ def _registrations(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
         {
             "id": "disaster_recovery_not_recoverable",
             "artifact": "performance/disaster_recovery_status.json",
-            "healthy_reachable_states": ["ok", "recoverable"],
+            "healthy_reachable_states": ["ok", "not_due"],
             "degraded_condition": "archive/push/RPO is not recoverable",
             "max_consecutive_degraded_observations": 0,
             "incident_on_observation": 1,

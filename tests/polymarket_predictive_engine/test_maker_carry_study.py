@@ -38,14 +38,13 @@ from polymarket_predictive_engine.utils import (
 def test_timed_out_truncated_price_series_is_not_complete_measurement() -> None:
     """A killed fetch may yield a prefix in memory; it cannot feed M-A/M-B/M-C."""
 
-    truncated = [(1_700_000_000.0 + index * 60, 0.5) for index in range(4)]
-    assert maker_carry_study._pickoff_from_series(
-        truncated,
-        0.01,
-        10.0,
-        fidelity_minutes=1,
-        min_points=5,
-    ) is None
+    truncated = [(1_700_000_000.0 + index * 60, 0.5) for index in range(29)]
+    complete_slow = [(1_700_000_000.0 + index * 600, 0.5) for index in range(30)]
+    adverse = maker_carry_study._adverse_selection(
+        {"reaction_minutes": 1, "markout_min_prints": 1}, truncated, complete_slow, [], 0.01, 10.0, {}
+    )
+    assert adverse is not None
+    assert adverse["markout_measured"] is False
 
 
 def _config(tmp_path: Path):

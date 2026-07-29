@@ -576,16 +576,22 @@ try:
     rows = payload.get("steps", [])
     anchor = next(row for row in rows if row.get("step") == "anchor_ledgers")
     anchor_code = int(anchor.get("exit_code"))
+    tolerated_steps = {"collect_price_history", "maker_carry_study"}
+    def tolerated_timeout(row):
+        return (
+            row.get("step") in tolerated_steps
+            and row.get("status") == "timed_out"
+            and row.get("timeout_degrades_coverage") is True
+        )
     harvest_failed = any(
         row.get("step") != "anchor_ledgers"
         and (
             row.get("status") in {"failed", "skipped_deadline"}
-            or (row.get("status") == "timed_out" and not row.get("timeout_degrades_coverage"))
+            or (row.get("status") == "timed_out" and not tolerated_timeout(row))
         )
         for row in rows
     )
-    coverage_steps = payload.get("coverage_degraded_steps")
-    coverage_degraded = not isinstance(coverage_steps, list) or bool(coverage_steps)
+    coverage_degraded = any(tolerated_timeout(row) for row in rows)
     print(1 if harvest_failed else 0, anchor_code, 1 if coverage_degraded else 0)
 except (AttributeError, KeyError, OSError, StopIteration, TypeError, ValueError, json.JSONDecodeError):
     # Missing or malformed accounting fails closed under the process outcome.

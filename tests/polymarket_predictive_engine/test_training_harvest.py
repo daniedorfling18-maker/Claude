@@ -214,6 +214,62 @@ def test_scheduler_non_timeout_failure_does_not_refresh_success(tmp_path: Path) 
     assert stamps == ["training_harvest:1", "training_harvest_anchor_tail:0"]
     assert successes == []
 
+
+def test_scheduler_rederives_timeout_allowlist_and_boolean_flag(tmp_path: Path) -> None:
+    stamps, successes = _run_scheduler_harvest_probe(tmp_path, {
+        "coverage_degraded_steps": [],
+        "steps": [
+            {"step": "collect_price_history", "status": "timed_out", "exit_code": 124, "timeout_degrades_coverage": "false"},
+            {"step": "decision_policy", "status": "timed_out", "exit_code": 124, "timeout_degrades_coverage": True},
+            {"step": "anchor_ledgers", "status": "ok", "exit_code": 0},
+        ],
+    })
+    assert stamps == ["training_harvest:1", "training_harvest_anchor_tail:0"]
+    assert successes == []
+
+
+def test_operator_tightening_controls_collection_child_timeout(tmp_path: Path, monkeypatch) -> None:
+    cfg, config_path = _config(tmp_path)
+    monkeypatch.setenv("OPS_TRAINING_HARVEST_TIMEOUT_SECONDS", "300")
+    observed: dict[str, int] = {}
+
+    def runner(command: Sequence[str], timeout_seconds: int) -> int:
+        observed[_step_name(command)] = timeout_seconds
+        return 0
+
+    run_training_harvest(cfg, config_path=str(config_path), runner=runner, clock=lambda: 0.0)
+    assert observed["collect-price-history"] == 300
+    assert observed["maker-carry-study"] == 300
+
+
+def test_degraded_harvest_retries_after_retry_interval_same_day(tmp_path: Path) -> None:
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    now = int(subprocess.check_output(["date", "-u", "+%s"], text=True).strip())
+    (out_dir / "last_success_training_harvest").write_text(str(now - 90_000), encoding="utf-8")
+    (out_dir / "last_attempt_training_harvest").write_text(str(now - 1_801), encoding="utf-8")
+    subprocess.run(
+        ["sh", "-c", f"OPS_SCHEDULER_LIBRARY_ONLY=1 OPS_SCHEDULER_OUT_DIR='{out_dir}' . scripts/run_vps_ops_scheduler.sh; training_harvest_retry_ready"],
+        check=True,
+        cwd=Path.cwd(),
+    )
+
+
+def test_latency_summary_rejects_hex_tails_and_clamps_nonfinite(tmp_path: Path) -> None:
+    from polymarket_predictive_engine.training_harvest import _latency_summary
+
+    path = tmp_path / "latency.jsonl"
+    rows = [
+        {"host": "example.com", "path_tail": "a" * 32, "duration_seconds": 1},
+        {"host": "example.com", "path_tail": "b" * 64, "duration_seconds": 1},
+        {"host": "example.com", "path_tail": "prices-history", "duration_seconds": float("inf")},
+    ]
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    assert _latency_summary(path) == [{
+        "host": "example.com", "path_tail": "prices-history", "request_count": 1,
+        "p50_seconds": 0.0, "max_seconds": 0.0,
+    }]
+
 def test_deadline_skips_unstarted_work_but_not_mandatory_tail(
     tmp_path: Path,
     monkeypatch,

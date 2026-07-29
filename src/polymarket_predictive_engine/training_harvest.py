@@ -9,7 +9,9 @@ ledger-anchor tail even when an earlier child fails.
 from __future__ import annotations
 
 import json
+import math
 import os
+import re
 import statistics
 import subprocess
 import sys
@@ -38,11 +40,7 @@ DEFAULT_PRINT_STEP_TIMEOUT_SECONDS = 5 * 60
 # endpoint-dependent children receive explicit headroom rather than inheriting
 # an accidentally smaller generic setting. Exhausting either bound means
 # absent coverage, not fabricated evidence or a failed daily lane.
-COLLECTION_TIMEOUT_FLOORS = {
-    "collect_price_history": 20 * 60,
-    "maker_carry_study": 30 * 60,
-}
-COLLECTION_TIMEOUT_TOLERATED_STEPS = frozenset(COLLECTION_TIMEOUT_FLOORS)
+COLLECTION_TIMEOUT_TOLERATED_STEPS = frozenset({"collect_price_history", "maker_carry_study"})
 
 
 @dataclass(frozen=True)
@@ -177,12 +175,19 @@ def _latency_summary(path: Path) -> list[dict[str, Any]]:
             row = json.loads(line)
             host = str(row["host"])
             path_tail = str(row["path_tail"])
-            duration = max(0.0, float(row["duration_seconds"]))
+            duration = float(row["duration_seconds"])
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
             continue
         # Defense in depth: producer already strips queries/userinfo. Refuse
         # credential-shaped or identifier-shaped telemetry if a writer did not.
-        if any(char in host + path_tail for char in "?&=@:/") or len(path_tail) > 64:
+        if not math.isfinite(duration):
+            duration = 0.0
+        duration = max(0.0, duration)
+        if (
+            any(char in host + path_tail for char in "?&=@:/")
+            or len(path_tail) >= 64
+            or (len(path_tail) >= 32 and re.fullmatch(r"[0-9a-fA-F]+", path_tail))
+        ):
             continue
         grouped.setdefault((host, path_tail), []).append(duration)
     return [
@@ -248,7 +253,6 @@ def run_training_harvest(
             if step.timeout_kind == "prints"
             else settings["harvest_timeout_seconds"]
         )
-        timeout_seconds = max(timeout_seconds, COLLECTION_TIMEOUT_FLOORS.get(step.name, 0))
         row: dict[str, Any] = {
             "step": step.name,
             "command": _public_command(step),

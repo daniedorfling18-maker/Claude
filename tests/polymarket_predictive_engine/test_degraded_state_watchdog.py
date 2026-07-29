@@ -888,3 +888,20 @@ def test_wo129_lock_held_carries_incidents_then_alarms_and_recovers(tmp_path: Pa
     assert recovered["status"] == "incident"
     assert state["carry_forward_cycles"] == 0
     assert state["carry_forward_started_at"] is None
+
+
+def test_repeated_training_harvest_coverage_degradation_opens_incident(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    path = cfg.output_root / "ops_scheduler" / "training_harvest.json"
+    write_json(path, {"generated_at_utc": "2026-07-29T00:00:00Z", "coverage_degraded_steps": ["collect_price_history"]})
+    first = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:00:01Z")
+    assert not any(row["registration_id"] == "training_harvest_coverage_degraded" for row in first["active_incidents"])
+
+    write_json(path, {"generated_at_utc": "2026-07-30T00:00:00Z", "coverage_degraded_steps": ["maker_carry_study"]})
+    repeated = build_degraded_state_watchdog(cfg, as_of="2026-07-30T00:00:01Z")
+    assert any(row["registration_id"] == "training_harvest_coverage_degraded" for row in repeated["active_incidents"])
+
+    write_json(path, {"generated_at_utc": "2026-07-31T00:00:00Z", "coverage_degraded_steps": []})
+    clean = build_degraded_state_watchdog(cfg, as_of="2026-07-31T00:00:01Z")
+    evaluation = next(row for row in clean["evaluations"] if row["registration_id"] == "training_harvest_coverage_degraded")
+    assert evaluation["state"] == "healthy"

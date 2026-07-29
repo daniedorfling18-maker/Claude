@@ -56,6 +56,40 @@ file_age_seconds() {
   printf '%s' "$((now - mtime))"
 }
 
+# Registered WO-129 health ceilings. The forward-cycle fallback is allowed only
+# during the first 30 minutes after container start; thereafter the live-loop
+# heartbeat itself must be no older than 15 minutes. Forward evidence is always
+# bounded by its existing 26-hour ceiling. Invalid/negative ages fail closed.
+health_evidence_within_ceiling() {
+  heartbeat_age_value="$1"
+  heartbeat_status_value="$2"
+  forward_age_value="$3"
+  uptime_seconds_value="$4"
+  if [ "$heartbeat_age_value" != "missing" ]; then
+    case "$heartbeat_age_value" in ''|*[!0-9]*) return 1 ;; esac
+    # An observed heartbeat is authoritative: it must be both fresh and healthy.
+    # Startup fallback is only for a heartbeat that has not been observed yet.
+    [ "$heartbeat_age_value" -le 900 ] || return 1
+    # The live-loop producer writes "ok" after a healthy completed cycle and
+    # "error" when that cycle raises. Reject every status except the producer's
+    # healthy value (including unknown future values).
+    [ "$heartbeat_status_value" = "ok" ] || return 1
+    return 0
+  fi
+  case "$forward_age_value:$uptime_seconds_value" in *[!0-9:]*|*::*) return 1 ;; esac
+  [ "$uptime_seconds_value" -le 1800 ] && [ "$forward_age_value" -le 93600 ]
+}
+
+if [ "${PM_HEALTH_LIBRARY_ONLY:-0}" = "1" ]; then
+  case "${0##*/}" in
+    check_polymarket_vps_paper.sh)
+      printf '%s\n' "PM_HEALTH_LIBRARY_ONLY is a source-only test seam; refusing executed mode." >&2
+      exit 2
+      ;;
+  esac
+  return 0
+fi
+
 cd "$REPO_DIR"
 
 port="$(env_value POLYMARKET_DASHBOARD_PORT .env)"
@@ -246,13 +280,32 @@ fi
 heartbeat_age="$(file_age_seconds "$heartbeat")"
 forward_age="$(file_age_seconds "$forward_cycle")"
 dashboard_age="$(file_age_seconds "$dashboard_data")"
+container_started_at="$(docker_cmd inspect -f '{{.State.StartedAt}}' polymarket-paper-live 2>/dev/null || true)"
+container_started_epoch=""
+if [ -n "$container_started_at" ]; then
+  container_started_epoch="$(date -d "$container_started_at" +%s 2>/dev/null || true)"
+fi
+heartbeat_status="$(python3 - "$heartbeat" <<'PY'
+import json, sys
+try:
+    value = json.load(open(sys.argv[1], encoding="utf-8"))
+    print(str(value.get("status") or "").strip().lower())
+except (OSError, ValueError, AttributeError):
+    print("")
+PY
+)"
+now_epoch="$(date +%s)"
+container_uptime=""
+if [ -n "${container_started_epoch:-}" ] && [ "$container_started_epoch" -le "$now_epoch" ]; then
+  container_uptime="$((now_epoch - container_started_epoch))"
+fi
 
 printf '%s\n' "Live heartbeat age: ${heartbeat_age:-missing}s"
 printf '%s\n' "Forward paper cycle age: ${forward_age:-missing}s"
 printf '%s\n' "Dashboard data age: ${dashboard_age:-missing}s"
 
-if [ -z "${heartbeat_age:-}" ] && [ -z "${forward_age:-}" ]; then
-  printf '%s\n' "No paper heartbeat files exist yet."
+if ! health_evidence_within_ceiling "${heartbeat_age:-missing}" "${heartbeat_status:-missing}" "${forward_age:-missing}" "${container_uptime:-missing}"; then
+  printf '%s\n' "Paper live-loop evidence breaches its registered ceiling (heartbeat 900s; forward fallback 93600s only during first 1800s after start)."
   exit_code=1
 fi
 

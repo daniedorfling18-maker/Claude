@@ -445,6 +445,25 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
     # IPS and the enforced study cannot drift apart.
     merged.update(MAKER_POLICY_DEFAULTS)
     merged.update({k: v for k, v in raw.items() if v is not None})
+    # WO-129: these four registered evidence-gate minima are tighten-only.
+    # Configuration may demand more evidence, but may never lower (or disable)
+    # the registered requirement.
+    merged["maker_min_book_history_hours"] = max(
+        float(MAKER_POLICY_DEFAULTS["maker_min_book_history_hours"]),
+        float(merged["maker_min_book_history_hours"]),
+    )
+    merged["maker_min_book_snapshots"] = max(
+        int(MAKER_POLICY_DEFAULTS["maker_min_book_snapshots"]),
+        int(merged["maker_min_book_snapshots"]),
+    )
+    merged["gate_min_runs_at_target"] = max(
+        int(MAKER_POLICY_DEFAULTS["gate_min_runs_at_target"]),
+        int(merged["gate_min_runs_at_target"]),
+    )
+    merged["target_net_usd_per_day"] = max(
+        float(MAKER_POLICY_DEFAULTS["target_net_usd_per_day"]),
+        float(merged["target_net_usd_per_day"]),
+    )
     return merged
 
 
@@ -1520,9 +1539,6 @@ def _measurement_eligible(row: dict[str, Any], settings: dict[str, Any]) -> bool
     are tighten-only (raising either can only shrink the eligible set)."""
     min_hours = float(settings.get("maker_min_book_history_hours", 0.0) or 0.0)
     min_snaps = int(settings.get("maker_min_book_snapshots", 0) or 0)
-    if min_hours <= 0.0 and min_snaps <= 0:
-        # Depth gate disabled (both thresholds zero) -> no depth requirement.
-        return True
     hours = safe_float(row.get("book_history_hours"))
     snaps = safe_float(row.get("book_snapshot_count"))
     if hours is None or snaps is None:

@@ -380,7 +380,9 @@ def test_scheduler_contract_turns_nonzero_exit_into_immediate_owner_incident(tmp
 
     scheduler = next(row for row in result["evaluations"] if row["registration_id"] == "scheduler_nonzero_exit")
     assert scheduler["state"] == "incident"
-    assert result["new_incident_count"] == 1
+    # Missing producer evidence now also fails closed; assert the scheduler
+    # contract by identity rather than assuming it is the only incident.
+    assert any(row["registration_id"] == "scheduler_nonzero_exit" for row in result["new_incidents"])
     assert result["notification"]["notify"] is True
 
 

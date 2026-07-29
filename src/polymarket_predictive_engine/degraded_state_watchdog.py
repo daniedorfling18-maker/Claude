@@ -10,16 +10,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+import requests
+
 from .config import EngineConfig, load_config
 from .runtime_lock import runtime_lock
-from .utils import append_csv_rows, ensure_dir, now_utc, read_csv_rows, read_json, write_json
+from .utils import append_csv_rows, now_utc, parse_timestamp, read_csv_rows, read_json, write_json, write_text_atomic
 
 
-WORK_ORDER = "WO-78+WO-83+WO-84+WO-85+WO-86+WO-121"
+WORK_ORDER = "WO-78+WO-83+WO-84+WO-85+WO-86+WO-121+WO-129"
 OUTPUT_FILE = "ops_scheduler/degraded_state_watchdog.json"
 STATE_FILE = "ops_scheduler/degraded_state_watchdog_state.json"
 INCIDENT_LEDGER = "performance/degraded_state_incidents.csv"
@@ -27,6 +30,10 @@ NOTIFICATION_BODY = "ops_scheduler/degraded_state_notification.md"
 WALLET_REGISTRATION_ID = "wallet_reconciliation_not_clean"
 LEGACY_WALLET_REGISTRATION_ID = "wallet_reconciliation_partial"
 WALLET_HEALTHY_STATES = frozenset({"clean", "explained"})
+OFFICIAL_BOOK_HEALTHY_STATES = frozenset({"ok", "disabled", "no_portfolio"})
+DR_STATUS_MAX_AGE_SECONDS = 6 * 60 * 60
+NTFY_ENV_VAR = "OPS_OWNER_NTFY_TOPIC_URL"
+MAX_NOTIFICATION_IDS = 20
 
 # A maximum is the number of consecutive degraded observations tolerated.
 # Therefore max=3 trips on observation four, exactly matching "> 3 cycles".
@@ -161,8 +168,8 @@ def _registrations(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
         {
             "id": "official_book_snapshot_partial",
             "artifact": "maker_carry/official_book_snapshot.json",
-            "healthy_reachable_states": ["ok", "disabled", "no_candidates"],
-            "degraded_condition": "persistent partial collection",
+            "healthy_reachable_states": sorted(OFFICIAL_BOOK_HEALTHY_STATES),
+            "degraded_condition": "persistent status outside the explicit healthy allowlist",
             "max_consecutive_degraded_observations": settings["official_book_snapshot_partial_max_consecutive_cycles"],
             "incident_on_observation": settings["official_book_snapshot_partial_max_consecutive_cycles"] + 1,
             "observation_unit": "snapshot cycle",
@@ -891,8 +898,20 @@ def _immediate_producer_evaluations(
         elif registration_id == "disaster_recovery_not_recoverable":
             remote = str(payload.get("remote_push_status") or _mapping(payload.get("remote_push")).get("status") or "unobserved").lower()
             compliant = _mapping(payload.get("rpo")).get("compliant") is True
-            degraded = bool(payload) and (degraded or remote not in {"ok", "pending"} or not compliant)
-            reasons += [f"remote_push_status={remote}", f"rpo_compliant={compliant}"]
+            generated = parse_timestamp(payload.get("generated_at_utc"))
+            observed_at = parse_timestamp(generated_at)
+            artifact_age = (
+                (observed_at - generated).total_seconds()
+                if generated is not None and observed_at is not None
+                else None
+            )
+            stale = artifact_age is None or artifact_age < 0 or artifact_age > DR_STATUS_MAX_AGE_SECONDS
+            degraded = degraded or not payload or remote not in {"ok", "pending"} or not compliant or stale
+            reasons += [
+                f"remote_push_status={remote}",
+                f"rpo_compliant={compliant}",
+                f"status_artifact_age_seconds={artifact_age}",
+            ]
         evaluations.append(
             {
                 "registration_id": registration_id,
@@ -900,6 +919,14 @@ def _immediate_producer_evaluations(
                 "observation_token": None if token == "unobserved" else token,
                 "observed_state": status,
                 "state": "incident" if degraded else "healthy",
+                **(
+                    {
+                        "status_artifact_age_seconds": artifact_age,
+                        "status_artifact_max_age_seconds": DR_STATUS_MAX_AGE_SECONDS,
+                    }
+                    if registration_id == "disaster_recovery_not_recoverable"
+                    else {}
+                ),
             }
         )
         if degraded:
@@ -921,7 +948,7 @@ def _immediate_producer_evaluations(
     payload = _mapping(read_json(cfg.output_root / relative, default={}) or {})
     token = _stamp(payload)
     status = str(payload.get("status") or "unobserved").lower()
-    degraded = bool(payload) and status in {"partial", "failed", "unobserved"}
+    degraded = not payload or status not in OFFICIAL_BOOK_HEALTHY_STATES
     counters = state.setdefault("counters", {})
     counter = _advance_counter(_mapping(counters.get("official_book_snapshot_partial")), token=token or generated_at, degraded=degraded)
     counters["official_book_snapshot_partial"] = counter
@@ -936,7 +963,7 @@ def _immediate_producer_evaluations(
             observation_token=token or "unobserved",
             episode_start=str(counter["episode_start_token"]),
             degraded_state=status,
-            reason="official-book collection remained partial or unobserved",
+            reason=f"official-book status {status} remained outside the healthy allowlist",
             count=count,
             maximum=maximum,
         )
@@ -1086,6 +1113,10 @@ def _notification(
     enabled: bool,
     active: list[dict[str, Any]],
     new: list[dict[str, Any]],
+    undelivered_ids: list[str],
+    undelivered_registrations: list[str],
+    state_path: Path,
+    state: dict[str, Any],
 ) -> dict[str, Any]:
     body_path = cfg.output_root / NOTIFICATION_BODY
     lines = [
@@ -1103,9 +1134,62 @@ def _notification(
         "",
         "Human review only. Fail-closed and risk states remain unchanged; this watchdog cannot trade or cancel orders.",
     ]
-    ensure_dir(body_path.parent)
-    body_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    notify = bool(enabled and new)
+    write_text_atomic(body_path, "\n".join(lines) + "\n")
+    active_by_id = {str(row.get("incident_id") or ""): row for row in active}
+    pending = list(dict.fromkeys([*undelivered_ids, *[str(row["incident_id"]) for row in new]]))[-MAX_NOTIFICATION_IDS:]
+    url = str(os.environ.get(NTFY_ENV_VAR) or "").strip()
+    attempted = bool(enabled and url and pending)
+    delivery: dict[str, Any] = {
+        "attempted": attempted,
+        "delivered": False,
+        "channel_configured": bool(url),
+        "error": "",
+    }
+    # Registration ids are persisted alongside delivery debt because an
+    # incident may recover before its retry succeeds.  A retry must retain the
+    # original bounded registration metadata rather than degrading to the
+    # unhelpful (and lossy) ``unknown`` label.
+    registrations = sorted(
+        {
+            *[str(item) for item in undelivered_registrations if str(item)],
+            *[
+                str(active_by_id.get(item, {}).get("registration_id") or "unknown")
+                for item in pending
+                if item not in undelivered_ids
+            ],
+        }
+    )[:MAX_NOTIFICATION_IDS]
+    if attempted:
+        # Crash safety: the bounded debt and the registration metadata needed
+        # to retry it are durable before the network side effect begins.
+        state["undelivered_incident_ids"] = pending
+        state["undelivered_incident_registrations"] = registrations
+        write_json(state_path, state)
+        message = "Polymarket watchdog incidents: " + ", ".join(registrations)
+        try:
+            response = requests.post(url, data=message, timeout=10)
+            delivery["delivered"] = response.status_code < 300
+            if not delivery["delivered"]:
+                delivery["error"] = f"http_status_{response.status_code}"
+        except Exception as exc:  # noqa: BLE001 - alert failure must not block watchdog evidence
+            delivery["error"] = type(exc).__name__
+    if attempted:
+        remaining = pending if not delivery["delivered"] else []
+        remaining_registrations = registrations if remaining else []
+    else:
+        # A temporarily missing/disabled channel must not erase durable debt
+        # from an earlier failed attempt. Conversely, new incidents do not
+        # become debt until a configured channel actually attempts delivery.
+        remaining = list(dict.fromkeys(undelivered_ids))[-MAX_NOTIFICATION_IDS:]
+        remaining_registrations = list(dict.fromkeys(str(item) for item in undelivered_registrations))[-MAX_NOTIFICATION_IDS:]
+    if attempted and delivery["delivered"]:
+        state["undelivered_incident_ids"] = []
+        state["undelivered_incident_registrations"] = []
+        write_json(state_path, state)
+    # ``notify`` remains the state-change/retry signal consumed by existing
+    # artifact readers; ``delivery.attempted`` records whether a real channel
+    # was configured and a transport call actually occurred.
+    notify = bool(enabled and pending)
     return {
         "enabled": enabled,
         "eligible": bool(new),
@@ -1114,6 +1198,9 @@ def _notification(
         "subject": f"Polymarket degraded-state incidents: {len(active)} active",
         "body_file": str(body_path),
         "pattern": "superbru_score_change_state_digest",
+        "delivery": delivery,
+        "undelivered_incident_ids": remaining,
+        "undelivered_incident_registrations": remaining_registrations,
     }
 
 
@@ -1158,15 +1245,67 @@ def build_degraded_state_watchdog(
         stale_after_seconds=float(settings["lock_stale_seconds"]),
     ) as lock:
         if not lock.acquired:
+            previous = _mapping(read_json(output_path, default={}) or {})
+            state = _mapping(read_json(state_path, default={}) or {})
+            carry_cycles = _nonnegative_int(state.get("carry_forward_cycles"), 0) + 1
+            carry_started = str(state.get("carry_forward_started_at") or generated_at)
+            active = [dict(row) for row in previous.get("active_incidents", []) if isinstance(row, Mapping)]
+            if carry_cycles > 3:
+                wedge = _incident(
+                    generated_at=generated_at,
+                    registration_id="degraded_state_watchdog_wedged",
+                    entity="degraded_state_watchdog",
+                    source_artifact=OUTPUT_FILE,
+                    observation_token=generated_at,
+                    episode_start=carry_started,
+                    degraded_state="lock_held",
+                    reason="watchdog evaluation carried forward for more than 3 consecutive cycles",
+                    count=carry_cycles,
+                    maximum=3,
+                )
+                active = [row for row in active if row.get("registration_id") != "degraded_state_watchdog_wedged"] + [wedge]
+            new = _append_incidents(ledger_path, active)
+            # Minimize the race with the actual lock holder before the one
+            # unavoidable pre-send debt write.
+            state = _mapping(read_json(state_path, default={}) or {})
+            notification = _notification(
+                cfg,
+                generated_at=generated_at,
+                enabled=bool(settings["notification_enabled"]),
+                active=active,
+                new=new,
+                undelivered_ids=list(state.get("undelivered_incident_ids") or []),
+                undelivered_registrations=list(state.get("undelivered_incident_registrations") or []),
+                state_path=state_path,
+                state=state,
+            )
+            # The lock holder may have published fresh evaluator state while
+            # this skipped cycle notified. Re-read immediately before writing
+            # and merge only the carry/notification keys this path owns.
+            latest_state = _mapping(read_json(state_path, default={}) or {})
+            state = latest_state
+            state.update({
+                "carry_forward_cycles": carry_cycles,
+                "carry_forward_started_at": carry_started,
+                "undelivered_incident_ids": notification["undelivered_incident_ids"],
+                "undelivered_incident_registrations": notification["undelivered_incident_registrations"],
+            })
+            write_json(state_path, state)
             payload = {
                 **base,
                 "status": "skipped_lock_held",
                 "registrations": _registrations(settings),
-                "evaluations": [],
-                "active_incidents": [],
-                "new_incidents": [],
+                "evaluations": previous.get("evaluations", []),
+                "active_incidents": active,
+                "new_incidents": new,
+                "active_incident_count": len(active),
+                "new_incident_count": len(new),
+                "carry_forward_cycles": carry_cycles,
+                "carried_forward_from_utc": previous.get("carried_forward_from_utc")
+                or previous.get("generated_at_utc"),
+                "carry_forward_reason": "runtime_lock_held",
                 "lock": lock.as_dict(),
-                "notification": {"enabled": settings["notification_enabled"], "eligible": False, "notify": False},
+                "notification": notification,
             }
             write_json(output_path, payload)
             return payload
@@ -1202,11 +1341,19 @@ def build_degraded_state_watchdog(
             enabled=bool(settings["notification_enabled"]),
             active=active,
             new=new,
+            undelivered_ids=list(state.get("undelivered_incident_ids") or []),
+            undelivered_registrations=list(state.get("undelivered_incident_registrations") or []),
+            state_path=state_path,
+            state=state,
         )
         state.update(
             {
                 "generated_at_utc": generated_at,
                 "active_incident_ids": [row["incident_id"] for row in active],
+                "undelivered_incident_ids": notification["undelivered_incident_ids"],
+                "undelivered_incident_registrations": notification["undelivered_incident_registrations"],
+                "carry_forward_cycles": 0,
+                "carry_forward_started_at": None,
                 "paper_trading_invoked": False,
                 "live_trading_invoked": False,
             }

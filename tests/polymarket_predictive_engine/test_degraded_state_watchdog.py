@@ -14,13 +14,14 @@ from polymarket_predictive_engine.degraded_state_watchdog import (
     WALLET_HEALTHY_STATES,
     WALLET_REGISTRATION_ID,
     _settings,
-    build_degraded_state_watchdog,
+    build_degraded_state_watchdog as _build_degraded_state_watchdog,
 )
 from polymarket_predictive_engine.ledger_anchor import (
     DEFAULT_LEDGER_REGISTRY,
     anchor_ledgers,
     verify_ledger_chain,
 )
+from polymarket_predictive_engine.runtime_lock import acquire_runtime_lock, release_runtime_lock
 from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_json
 
 
@@ -37,6 +38,19 @@ def _cfg(tmp_path: Path) -> EngineConfig:
         },
         path=tmp_path / "config.yaml",
     )
+
+
+def build_degraded_state_watchdog(cfg: EngineConfig, *, as_of=None):
+    """Seed unrelated producer evidence for focused legacy registrations."""
+    stamp = str(as_of or "2026-07-29T00:00:00Z")
+    dr = cfg.output_root / "performance" / "disaster_recovery_status.json"
+    books = cfg.output_root / "maker_carry" / "official_book_snapshot.json"
+    current_dr = read_json(dr, default={}) or {}
+    if not dr.exists() or current_dr.get("_test_seeded"):
+        write_json(dr, {"status": "ok", "remote_push_status": "ok", "rpo": {"compliant": True}, "generated_at_utc": stamp, "_test_seeded": True})
+    if not books.exists():
+        write_json(books, {"status": "disabled", "generated_at_utc": stamp})
+    return _build_degraded_state_watchdog(cfg, as_of=as_of)
 
 
 def _requote(cycle: int, *, rule: str, state: str = "pull_quotes_now") -> dict:
@@ -679,3 +693,140 @@ def test_wo121fix_dr_allowlist_names_only_producer_reachable_statuses() -> None:
     assert allowlist <= reachable, f"allowlisted statuses not reachable: {allowlist - reachable}"
     assert "recoverable" not in reachable
     assert "skipped_locked" in reachable and "skipped_locked" not in allowlist
+
+
+def test_wo129_failed_official_book_and_stale_dr_fail_closed(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "maker_carry" / "official_book_snapshot.json",
+        {"status": "failed", "generated_at_utc": "2026-07-29T00:00:00Z"},
+    )
+    write_json(
+        cfg.output_root / "performance" / "disaster_recovery_status.json",
+        {"status": "ok", "remote_push_status": "ok", "rpo": {"compliant": True},
+         "generated_at_utc": "2026-07-28T00:00:00Z"},
+    )
+    result = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:00:00Z")
+    dr = next(row for row in result["evaluations"] if row["registration_id"] == "disaster_recovery_not_recoverable")
+    books = next(row for row in result["evaluations"] if row["registration_id"] == "official_book_snapshot_partial")
+    assert dr["state"] == "incident"
+    assert dr["status_artifact_age_seconds"] == 86400
+    assert books["observed_state"] == "failed"
+    assert books["state"] == "degraded_within_tolerance"
+
+
+def test_wo129_missing_producer_artifacts_fail_closed(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    result = _build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:00:00Z")
+    by_id = {row["registration_id"]: row for row in result["evaluations"]}
+    assert by_id["disaster_recovery_not_recoverable"]["state"] == "incident"
+    assert by_id["official_book_snapshot_partial"]["state"] == "degraded_within_tolerance"
+
+
+def test_wo129_failed_ntfy_delivery_is_retried_and_cleared(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path)
+    monkeypatch.setenv("OPS_OWNER_NTFY_TOPIC_URL", "https://ntfy.invalid/topic")
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"status": "failed", "generated_at_utc": "2026-07-29T00:00:00Z"},
+    )
+
+    class Response:
+        status_code = 503
+
+    messages: list[str] = []
+
+    def post(_url, *, data, **kwargs):
+        messages.append(data)
+        durable = read_json(cfg.output_root / "ops_scheduler" / "degraded_state_watchdog_state.json")
+        assert durable["undelivered_incident_ids"]
+        assert durable["undelivered_incident_registrations"]
+        assert len(durable["undelivered_incident_ids"]) <= 20
+        return Response()
+
+    monkeypatch.setattr("polymarket_predictive_engine.degraded_state_watchdog.requests.post", post)
+    first = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:00:01Z")
+    assert first["notification"]["delivery"]["attempted"] is True
+    assert first["notification"]["undelivered_incident_ids"]
+
+    # The incident can recover before transport does.  Its durable retry must
+    # still retain the original registration id instead of sending "unknown".
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"status": "ok", "generated_at_utc": "2026-07-29T00:01:00Z"},
+    )
+    Response.status_code = 200
+    second = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:01:01Z")
+    assert second["new_incidents"] == []
+    assert second["notification"]["delivery"]["delivered"] is True
+    assert second["notification"]["undelivered_incident_ids"] == []
+    assert "maker_study_run_failed" in messages[-1]
+    assert "unknown" not in messages[-1]
+
+
+def test_wo129_retry_debt_survives_temporarily_missing_channel(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path)
+    monkeypatch.setenv("OPS_OWNER_NTFY_TOPIC_URL", "https://ntfy.invalid/topic")
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"status": "failed", "generated_at_utc": "2026-07-29T00:00:00Z"},
+    )
+
+    class Response:
+        status_code = 503
+
+    monkeypatch.setattr("polymarket_predictive_engine.degraded_state_watchdog.requests.post", lambda *args, **kwargs: Response())
+    failed = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:00:01Z")
+    debt = failed["notification"]["undelivered_incident_ids"]
+    registrations = failed["notification"]["undelivered_incident_registrations"]
+    assert debt and registrations
+
+    monkeypatch.delenv("OPS_OWNER_NTFY_TOPIC_URL")
+    no_attempt = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:01:01Z")
+    assert no_attempt["notification"]["delivery"]["attempted"] is False
+    assert no_attempt["notification"]["undelivered_incident_ids"] == debt
+    assert no_attempt["notification"]["undelivered_incident_registrations"] == registrations
+
+
+def test_wo129_no_channel_does_not_create_new_retry_debt(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"status": "failed", "generated_at_utc": "2026-07-29T00:00:00Z"},
+    )
+    result = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:00:01Z")
+    assert result["new_incidents"]
+    assert result["notification"]["delivery"]["attempted"] is False
+    assert result["notification"]["undelivered_incident_ids"] == []
+    assert result["notification"]["undelivered_incident_registrations"] == []
+
+
+def test_wo129_lock_held_carries_incidents_then_alarms_and_recovers(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"status": "failed", "generated_at_utc": "2026-07-29T00:00:00Z"},
+    )
+    observed = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:00:01Z")
+    original_ids = {row["incident_id"] for row in observed["active_incidents"]}
+    lock = acquire_runtime_lock(cfg, "degraded_state_watchdog", stale_after_seconds=999999)
+    try:
+        carried = [
+            build_degraded_state_watchdog(cfg, as_of=f"2026-07-29T00:0{cycle}:01Z")
+            for cycle in range(1, 5)
+        ]
+    finally:
+        release_runtime_lock(lock)
+
+    assert original_ids <= {row["incident_id"] for row in carried[0]["active_incidents"]}
+    assert carried[0]["evaluations"] == observed["evaluations"]
+    assert carried[0]["carried_forward_from_utc"] == observed["generated_at_utc"]
+    assert carried[1]["carried_forward_from_utc"] == observed["generated_at_utc"]
+    assert carried[-1]["carry_forward_cycles"] == 4
+    assert any(row["registration_id"] == "degraded_state_watchdog_wedged" for row in carried[-1]["active_incidents"])
+
+    recovered = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:05:01Z")
+    state = read_json(cfg.output_root / "ops_scheduler" / "degraded_state_watchdog_state.json")
+    assert recovered["status"] == "incident"
+    assert state["carry_forward_cycles"] == 0
+    assert state["carry_forward_started_at"] is None

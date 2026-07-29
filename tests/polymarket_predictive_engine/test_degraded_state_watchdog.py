@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from polymarket_predictive_engine.cli import COMMANDS
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.degraded_state_watchdog import (
@@ -53,12 +51,6 @@ def build_degraded_state_watchdog(cfg: EngineConfig, *, as_of=None):
     if not books.exists():
         write_json(books, {"status": "disabled", "generated_at_utc": stamp})
     return _build_degraded_state_watchdog(cfg, as_of=as_of)
-
-
-@pytest.fixture(autouse=True)
-def _offline_notification_environment(monkeypatch) -> None:
-    # The offline suite must never inherit the production-only notification URL.
-    monkeypatch.delenv("OPS_OWNER_NTFY_TOPIC_URL", raising=False)
 
 
 def _requote(cycle: int, *, rule: str, state: str = "pull_quotes_now") -> dict:
@@ -828,6 +820,8 @@ def test_wo129_lock_held_carries_incidents_then_alarms_and_recovers(tmp_path: Pa
 
     assert original_ids <= {row["incident_id"] for row in carried[0]["active_incidents"]}
     assert carried[0]["evaluations"] == observed["evaluations"]
+    assert carried[0]["carried_forward_from_utc"] == observed["generated_at_utc"]
+    assert carried[1]["carried_forward_from_utc"] == observed["generated_at_utc"]
     assert carried[-1]["carry_forward_cycles"] == 4
     assert any(row["registration_id"] == "degraded_state_watchdog_wedged" for row in carried[-1]["active_incidents"])
 

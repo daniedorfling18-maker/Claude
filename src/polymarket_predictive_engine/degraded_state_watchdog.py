@@ -1301,7 +1301,8 @@ def build_degraded_state_watchdog(
                 "active_incident_count": len(active),
                 "new_incident_count": len(new),
                 "carry_forward_cycles": carry_cycles,
-                "carried_forward_from_utc": previous.get("generated_at_utc"),
+                "carried_forward_from_utc": previous.get("carried_forward_from_utc")
+                or previous.get("generated_at_utc"),
                 "carry_forward_reason": "runtime_lock_held",
                 "lock": lock.as_dict(),
                 "notification": notification,

@@ -6285,7 +6285,7 @@ refactors:
 | 7 | **WO-133** | guarded manual deploy path + its `AGENTS.md` amendment | **owner** (one PR carrying a governance amendment cannot be partially merged) |
 | 8 | **WO-136** | contemporaneous-quote fill replay (kills the phantom-fill 42x haircut; issued 2026-07-28 under the owner's direct instruction) | orchestrator, after line-audit |
 | 9 | **WO-137** | portfolio composition diff — name the reason every market leaves (churn is the campaign's binding variable; issued 2026-07-28 under the owner's direct instruction) | orchestrator, after line-audit |
-| 10 | **WO-140** | zero-coverage collection must be visible in the receipt; retry backoff from completion (replaces the withdrawn WO-138 — see its epitaph in this entry) | owner (scheduler surface) |
+| 10 | **WO-140** | zero-coverage collection must be visible in the receipt (replaces the withdrawn WO-138; its retry-backoff item was cut in review — see the entry) | owner (scheduler surface) |
 
 **WO-121 — watchdog coverage for unmonitored producers** (registered 2026-07-27 as
 WO-129's named blocking prerequisite, per ENGINEERING_STANDARDS S3). WO-129 tightens
@@ -6410,7 +6410,7 @@ gate still runs the full unfiltered suite on that PR and remains what the merge
 decision cites.
 
 
-## WO-140 — A clean exit code is not clean coverage — `queued` (registered 2026-07-29 BEFORE dispatch; scheduler surface → owner merge after line-audit)
+## WO-140 — A clean exit code is not clean coverage — `queued` (registered 2026-07-29 BEFORE dispatch; ONE item, after review cut the second; scheduler surface → owner merge after line-audit)
 
 **This work order replaces WO-138, which was withdrawn unbuilt.** The epitaph is
 part of the registration because the failure was in specification, not in
@@ -6461,66 +6461,85 @@ output is reported as unknown coverage, never as full coverage.
   is an evidence-visibility defect, not a gate defect, and the fix must not
   pretend otherwise by touching gate inputs.
 
-140.2 — **retry backoff measured from COMPLETION, with interruption semantics.**
-`touch_attempt_stamp` is written before the child runs, so a harvest slower than
-`HARVEST_RETRY_INTERVAL` re-launches immediately on the next scheduler
-iteration — sustained back-to-back load against the very endpoint that is
-already slow, making the outage worse instead of recovering from it. Backoff
-runs from the previous attempt's END. Absent completion evidence is an
-interruption, not a fresh start, because both naive readings are wrong: treating
-it as infinitely old re-launches a full harvest on every scheduler restart,
-while treating it as not-ready would block the first-ever harvest forever. The
-Backing off from the prior ATTEMPT stamp is not sufficient either: if the
-interrupted harvest had already run longer than the interval, that stamp is old
-enough to trigger the immediate relaunch this clause exists to prevent, while
-refusing indefinitely on malformed or far-future evidence would stop any run
-from ever replacing it.
+**140.2 was cut on 2026-07-29, before dispatch, and is recorded rather than
+silently dropped.** It would have moved the harvest's retry backoff from the
+pre-run attempt stamp to the previous attempt's completion. Two rounds of Codex
+review found five successive defects in the clause, each a real interaction with
+scheduler machinery the orchestrator had mis-modelled:
 
-  The registered behaviour therefore uses a bounded RECOVERY clock. On first
-observing an interruption — an attempt stamp with no completion stamp, or a
-malformed or future-dated stamp — the scheduler records a recovery timestamp
-once, at that moment, and the retry becomes due one `HARVEST_RETRY_INTERVAL`
-after it. That blocks the immediate relaunch and still guarantees the lane
-recovers within a bounded, testable time rather than never. Missing completion
-with NO prior attempt remains a genuine first run and proceeds immediately.
+  * an interruption is not "an attempt stamp with no completion stamp" — a prior
+    success leaves its completion stamp behind, so the common case is an attempt
+    NEWER than the last completion, which the predicate would have missed;
+  * a recovery timestamp recorded "once" has no defined lifecycle, so a second
+    interruption reuses a stale one and relaunches immediately anyway;
+  * the backoff test never said the harvest had FAILED — a successful harvest
+    refreshes its success stamp and must wait the full `HARVEST_INTERVAL`, so
+    the clause as written would have made every slow-but-successful daily
+    harvest fire an extra same-day run, changing cadence inside a work order
+    that promises no success-semantics change;
+  * the universal "a timed-out child prevents the success stamp" wording would
+    have undone WO-128's deliberate `anchor_ledgers` exception, re-running an
+    entire multi-minute harvest for an anchor-only failure;
+  * and the recovery clock introduced a new shared write path without naming its
+    artifact, write method, or interleaving behaviour, which S2 requires.
+
+The value was always marginal: the scenario needs a harvest that FAILS
+repeatedly during an outage, and a failed harvest retrying after
+`HARVEST_RETRY_INTERVAL` is the designed behaviour — another attempt at the
+data, usually what is wanted. Weighed against four interacting clocks
+(`HARVEST_INTERVAL`, `HARVEST_RETRY_INTERVAL`, the attempt stamp, the completion
+stamp) plus WO-128's independent anchor tail, it is not worth the blast radius.
+If retry storms during an outage are ever OBSERVED in production rather than
+theorised, they earn their own work order with those stamp semantics mapped
+first.
 
 **Explicitly NOT in scope, recorded so it is not rebuilt.** No tolerated-step
 list; no `coverage_degraded` / `coverage_degraded_steps` / `successful_completion`
 / `success_eligible` fields or plumbing; no degraded-coverage watchdog
 registration; no timeout floors overriding an operator's tightening; no rewrite
 of `training_harvest.py`'s `WORK_ORDER` stamp (its registered producer remains
-WO-85); and no per-endpoint latency summary — per-child `duration_seconds`
-already localises a slow child, so that summary was marginal evidence dragging a
-spool file, an artifact contract, and a hygiene surface behind it.
+WO-85); no per-endpoint latency summary — per-child `duration_seconds` already
+localises a slow child, so that summary was marginal evidence dragging a spool
+file and an artifact contract behind it; and no change to retry backoff, the
+attempt or completion stamps, `HARVEST_INTERVAL`, `HARVEST_RETRY_INTERVAL`, or
+WO-128's independent anchor-tail accounting.
 
-**Fail-safe direction (S5).** This work order adds reporting and one backoff
-clock. It must not change which runs count as successful, must not change any
-freshness or exit-code semantics, must not mark a market measured, and must not
+**Fail-safe direction (S5).** This work order adds reporting to one artifact. It
+must not change which runs count as successful, must not change any freshness,
+retry, or exit-code semantics, must not mark a market measured, and must not
 alter an M-A/M-B/M-C input. Unknown coverage is reported as unknown, never as
-full. An incomplete harvest continues to report itself as incomplete.
+full. An incomplete harvest continues to report itself exactly as it does today.
 
 **Tests.** (1) a collection child that finishes with exit 0 having written only
-`fetch_error` rows is reported in the receipt with collected=0 and its failure
-tally — a clean exit code must not read as clean coverage; (2) a fully
-successful child reports requested == collected and an empty tally; (3) absent
-or unparseable collector output reports unknown coverage, not full coverage;
-(4) every child row still carries `duration_seconds` — a REGRESSION assertion on
-existing behaviour, not evidence of new work; (5) a harvest lasting longer than
-`HARVEST_RETRY_INTERVAL` does not re-launch immediately, and the retry does fire
-once that interval has elapsed since COMPLETION; (6) a CLOCK-ADVANCE test on the recovery clock: an
-observed interruption blocks the immediate retry, and the retry becomes due once
-`HARVEST_RETRY_INTERVAL` has elapsed since the recovery timestamp — including
-when the interrupted harvest had already outlived that interval, which is the
-case a plain attempt-stamp backoff gets wrong; (7) missing completion with no
-prior attempt proceeds immediately; (8) a malformed or future-dated stamp is
-treated as an interruption and still recovers on the bounded clock rather than
-refusing forever; (9) a timed-out child still produces a nonzero
-harvest exit, no success stamp, and no `status.json` freshness refresh — proving
-no tolerance mechanism was reintroduced.
+`fetch_error` rows is reported with `collected = 0` and its failure tally — a
+clean exit code must not read as clean coverage; (2) a fully successful child
+reports `requested == collected` and an empty failure tally; (2b) a child whose
+requests ALL succeed but return empty histories reports `collected = 0` and
+tallies `empty_history` — the case that defeats any subtraction-based
+implementation; (2c) a mixed run tallies each status kind separately and counts
+only non-empty histories as collected; (3) absent or unparseable collector
+output reports unknown coverage, not full coverage; (3b) a parseable summary
+left behind by a PREVIOUS run, when the current collector was killed before its
+own write, reports unknown coverage rather than that run's counts; (4) every
+child row still carries `duration_seconds` — a REGRESSION assertion on existing
+behaviour, not evidence of new work; (5) the harvest's exit code, success stamp,
+freshness refresh, and retry timing are UNCHANGED by this work order, asserted
+against the pre-change behaviour for both a clean and a failing child, including
+that WO-128's `anchor_ledgers` exception still keeps an anchor-only failure out
+of `HARVEST_CODE`.
 
 **Day-after check:** the next scheduled harvest's `training_harvest.json` shows,
-for each collection child, requested and collected counts plus a failure tally
-alongside the existing `duration_seconds` — and if `prices-history` is still
-slow, the receipt shows collected well below requested while the harvest reports
-its failure honestly through the existing `scheduler_nonzero_exit` and
-`scheduler_completion_freshness` registrations.
+for each collection child, an exact `requested` count, an exact `collected`
+count, and a per-status tally naming each kind (`ok`, `fetch_error`,
+`empty_history`, and any other the collector emits), alongside the existing
+`duration_seconds`. If `prices-history` is still slow, `collected` sits well
+below `requested` with the shortfall attributed by status; if it has recovered,
+`collected == requested` with an empty failure tally. Either way the owner reads
+the answer from those fields without opening code.
+
+The check deliberately does NOT expect `scheduler_nonzero_exit` or
+`scheduler_completion_freshness` to fire on a zero-coverage run: the collector
+catches its own request errors and exits 0, so the harvest legitimately
+succeeds, and this work order changes no success semantics. That is the whole
+point — the receipt is what makes zero coverage visible, and demanding an
+incident that cannot fire would make this check unpassable for a correct build.

@@ -442,8 +442,8 @@ def test_band_ineligible_candidate_is_excluded_from_portfolio(tmp_path, monkeypa
     row = read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_candidates.csv")[0]
     assert row["band_eligible"] == "False"
     assert row["estimate_quality"] == "band_ineligible"
-    assert "book_history_hours" in row
-    assert "book_snapshot_count" in row
+    assert row["book_history_hours"] == "0.0"
+    assert row["book_snapshot_count"] == "0"
     assert summary["portfolio_markets"] == 0
 def test_supplementary_fee_and_rebate_tables_are_category_aware(tmp_path):
     cfg = _config(tmp_path)

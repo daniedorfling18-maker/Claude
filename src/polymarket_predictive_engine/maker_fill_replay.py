@@ -466,7 +466,7 @@ def _recent_book_markets(
             # being considered. It sorts behind every known modification time.
             return float("inf")
 
-    for path in sorted(books_dir.glob("*.csv.gz"), key=_mtime_desc):
+    for path in sorted(books_dir.glob("*.csv.gz"), key=lambda p: (_mtime_desc(p), p.name)):
         condition_id = path.name[: -len(".csv.gz")]  # .stem strips only ".gz"
         if condition_id in exclude:
             continue
@@ -541,23 +541,27 @@ def _candidate_seed_markets(
     # sizer's non-depth predicates, without reimplementing or changing the
     # sizer. Missing/malformed fields simply keep a row in the legacy ranking;
     # they never remove it or shrink the tranche.
-    sizeable: list[tuple[float, float, str, str]] = []
+    tier1: list[tuple[float, float, str, str]] = []
+    tier2: list[tuple[float, float, str, str]] = []
     remainder: list[tuple[float, float, str, str]] = []
     for entry in ranked:
         carry = -entry[0]
         row = candidates[entry[2]]
         band_eligible = str(row.get("band_eligible") or "").strip().lower()
-        qualifies = (
+        clears_common_predicates = (
             isfinite(carry)
             and carry > 0.0
-            and str(row.get("estimate_quality") or "").strip()
-            in {"book_and_history", "single_window_history"}
             and band_eligible == "true"
             and str(row.get("resolution_risk") or "").strip().lower() != "high"
-            and str(row.get("resolution_risk") or "").strip().lower() in {"low", "medium"}
         )
-        (sizeable if qualifies else remainder).append(entry)
-    ranked = sizeable + remainder
+        estimate_quality = str(row.get("estimate_quality") or "").strip()
+        if clears_common_predicates and estimate_quality == "book_and_history":
+            tier1.append(entry)
+        elif clears_common_predicates and estimate_quality == "single_window_history":
+            tier2.append(entry)
+        else:
+            remainder.append(entry)
+    ranked = tier1 + tier2 + remainder
     return (
         [
             {"condition_id": condition_id, "token_id": token_id}

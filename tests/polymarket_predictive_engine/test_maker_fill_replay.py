@@ -770,12 +770,57 @@ def test_wo139_persistent_tranche_is_newest_first_not_condition_id_order(tmp_pat
     assert [row["condition_id"] for row in recent] == ["0xffff", "0xaaa"]
 
 
+def test_wo139_persistent_tranche_uses_name_to_break_mtime_ties(tmp_path):
+    cfg = _config(tmp_path)
+    settings = maker_fill_replay._settings(cfg)
+    _recent_book_file(cfg, "0xffff", "tokLast")
+    _recent_book_file(cfg, "0xaaa", "tokFirst")
+    books = cfg.output_root / "maker_carry" / "official_books"
+    tied_mtime = maker_fill_replay.time.time() - 10
+    for path in books.glob("*.csv.gz"):
+        os.utime(path, (tied_mtime, tied_mtime))
+
+    recent = maker_fill_replay._recent_book_markets(cfg, settings, exclude=set())
+
+    assert [row["condition_id"] for row in recent] == ["0xaaa", "0xffff"]
+
+
+def test_wo139_persistent_tranche_window_uses_evaluation_clock(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    settings = maker_fill_replay._settings(cfg)
+    settings["regime_days"] = 7
+    _recent_book_file(cfg, "0xfixed", "tokFixed")
+    archive = cfg.output_root / "maker_carry" / "official_books" / "0xfixed.csv.gz"
+    archive_mtime = 1_000_000.0
+    os.utime(archive, (archive_mtime, archive_mtime))
+
+    monkeypatch.setattr(maker_fill_replay.time, "time", lambda: archive_mtime + 6.9 * 86400)
+    assert [row["condition_id"] for row in maker_fill_replay._recent_book_markets(
+        cfg, settings, exclude=set()
+    )] == ["0xfixed"]
+
+    monkeypatch.setattr(maker_fill_replay.time, "time", lambda: archive_mtime + 7.1 * 86400)
+    assert maker_fill_replay._recent_book_markets(cfg, settings, exclude=set()) == []
+
+
+def test_wo139_persistent_tranche_ignores_stat_failure(tmp_path):
+    cfg = _config(tmp_path)
+    settings = maker_fill_replay._settings(cfg)
+    _recent_book_file(cfg, "0xvalid", "tokValid")
+    books = cfg.output_root / "maker_carry" / "official_books"
+    (books / "0xbroken.csv.gz").symlink_to(books / "missing.csv.gz")
+
+    recent = maker_fill_replay._recent_book_markets(cfg, settings, exclude=set())
+
+    assert recent == [{"condition_id": "0xvalid", "token_id": "tokValid"}]
+
+
 def test_wo139_seed_budget_prioritizes_sizeable_rows_without_shrinking():
     rows = {
         "0xthin": {"token_id": "thin", "net_carry_usd_per_day": "10", "yield_rank": "1",
-                    "estimate_quality": "book_and_history", "band_eligible": "True", "resolution_risk": "high"},
+                    "estimate_quality": "thin_book_untrusted", "band_eligible": "True", "resolution_risk": "low"},
         "0xsize": {"token_id": "size", "net_carry_usd_per_day": "3", "yield_rank": "2",
-                    "estimate_quality": "single_window_history", "band_eligible": "True", "resolution_risk": "medium"},
+                    "estimate_quality": "book_and_history", "band_eligible": "True", "resolution_risk": "medium"},
         "0xraw": {"token_id": "raw", "net_carry_usd_per_day": "2", "yield_rank": "3"},
     }
 
@@ -783,6 +828,19 @@ def test_wo139_seed_budget_prioritizes_sizeable_rows_without_shrinking():
 
     assert [row["condition_id"] for row in seeds] == ["0xsize", "0xthin"]
     assert len(seeds) == 2
+
+
+def test_wo139_tier1_precedes_higher_carry_tier2_and_accepts_blank_risk():
+    rows = {
+        "0xtier2": {"token_id": "tier2", "net_carry_usd_per_day": "100", "yield_rank": "1",
+                     "estimate_quality": "single_window_history", "band_eligible": "True", "resolution_risk": "low"},
+        "0xtier1": {"token_id": "tier1", "net_carry_usd_per_day": "5", "yield_rank": "2",
+                     "estimate_quality": "book_and_history", "band_eligible": "True", "resolution_risk": ""},
+    }
+
+    seeds, _ = maker_fill_replay._candidate_seed_markets(rows, exclude=set(), cap=1)
+
+    assert seeds == [{"condition_id": "0xtier1", "token_id": "tier1"}]
 
 
 def test_wo139_seed_budget_fills_remainder_in_raw_order_and_keeps_malformed_rows():

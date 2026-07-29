@@ -22,7 +22,7 @@ from .runtime_lock import runtime_lock
 from .utils import append_csv_rows, now_utc, parse_timestamp, read_csv_rows, read_json, write_json, write_text_atomic
 
 
-WORK_ORDER = "WO-78+WO-83+WO-84+WO-85+WO-86+WO-121+WO-129"
+WORK_ORDER = "WO-78+WO-83+WO-84+WO-85+WO-86+WO-121+WO-129+WO-138"
 OUTPUT_FILE = "ops_scheduler/degraded_state_watchdog.json"
 STATE_FILE = "ops_scheduler/degraded_state_watchdog_state.json"
 INCIDENT_LEDGER = "performance/degraded_state_incidents.csv"
@@ -34,6 +34,11 @@ OFFICIAL_BOOK_HEALTHY_STATES = frozenset({"ok", "disabled", "no_portfolio"})
 DR_STATUS_MAX_AGE_SECONDS = 6 * 60 * 60
 NTFY_ENV_VAR = "OPS_OWNER_NTFY_TOPIC_URL"
 MAX_NOTIFICATION_IDS = 20
+TRAINING_HARVEST_DEGRADED_MAX_CONSECUTIVE_RUNS = 1
+TRAINING_HARVEST_RECEIPT_MAX_AGE_SECONDS = 25 * 60 * 60
+TRAINING_HARVEST_TERMINAL_STATUSES = frozenset(
+    {"ok", "coverage_degraded", "partial_failure", "deadline_exceeded"}
+)
 
 # A maximum is the number of consecutive degraded observations tolerated.
 # Therefore max=3 trips on observation four, exactly matching "> 3 cycles".
@@ -239,6 +244,26 @@ def _registrations(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
             "observation_unit": "watchdog wall-clock observation",
             "evaluation_policy": "immediate incident once completion age exceeds the fixed per-job maximum",
             "registered_job_maximum_seconds": REGISTERED_JOB_FRESHNESS_MAX_SECONDS,
+        },
+        {
+            "id": "training_harvest_coverage_degraded",
+            "artifact": "ops_scheduler/training_harvest.json",
+            "healthy_reachable_states": ["coverage_degraded_steps is an empty list"],
+            "degraded_condition": "coverage_degraded_steps is nonempty, missing, or unreadable; receipt disappearance after its first observation is degraded",
+            "max_consecutive_degraded_observations": TRAINING_HARVEST_DEGRADED_MAX_CONSECUTIVE_RUNS,
+            "incident_on_observation": TRAINING_HARVEST_DEGRADED_MAX_CONSECUTIVE_RUNS + 1,
+            "observation_unit": "distinct training harvest",
+            "evaluation_policy": (
+                "fixed repeated-completed-run ceiling; fresh non-terminal receipts are not observations; "
+                "initial absence is unobserved; disappearance after observation and stale or malformed receipts fail closed"
+            ),
+            "producer": "polymarket_predictive_engine.training_harvest.run_training_harvest",
+            "required_schema": {
+                "status": "terminal status",
+                "generated_at_utc": "UTC timestamp",
+                "coverage_degraded_steps": "list[str]",
+            },
+            "receipt_maximum_age_seconds": TRAINING_HARVEST_RECEIPT_MAX_AGE_SECONDS,
         },
         {
             "id": "kill_input_stale_live_stage",
@@ -631,6 +656,134 @@ def _evaluate_scheduler_freshness(
             "state": "incident" if stale_jobs else "healthy_or_initializing",
             "jobs": evaluations,
             "stale_jobs": stale_jobs,
+        },
+        incidents,
+    )
+
+
+def _evaluate_training_harvest_coverage(
+    cfg: EngineConfig,
+    state: dict[str, Any],
+    settings: Mapping[str, Any],
+    generated_at: str,
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    """Alarm on repeated coverage-degraded harvest receipts."""
+
+    del settings  # fixed ceiling; configuration cannot widen it
+    relative = "ops_scheduler/training_harvest.json"
+    path = cfg.output_root / relative
+    exists = path.exists()
+    raw_payload = read_json(path, default=None) if exists else None
+    payload = _mapping(raw_payload)
+    try:
+        fallback_token = f"mtime_ns:{path.stat().st_mtime_ns}"
+    except OSError:
+        fallback_token = "receipt_absent_or_unreadable"
+    token = _stamp(payload) or fallback_token
+    observed_at = _parse_stamp(generated_at) or datetime.now(timezone.utc)
+    receipt_at = _parse_stamp(payload.get("generated_at_utc"))
+    age_seconds = (observed_at - receipt_at).total_seconds() if receipt_at else None
+    stale = (
+        age_seconds is None
+        or age_seconds < 0
+        or age_seconds > TRAINING_HARVEST_RECEIPT_MAX_AGE_SECONDS
+    )
+    status = str(payload.get("status") or "").strip()
+    terminal = status in TRAINING_HARVEST_TERMINAL_STATUSES
+    malformed_payload = not isinstance(raw_payload, Mapping)
+
+    counters = state.setdefault("counters", {})
+    previous_counter = _mapping(counters.get("training_harvest_coverage_degraded"))
+    maximum = TRAINING_HARVEST_DEGRADED_MAX_CONSECUTIVE_RUNS
+
+    if not exists and not previous_counter.get("last_observation_token"):
+        return (
+            {
+                "registration_id": "training_harvest_coverage_degraded",
+                "artifact": relative,
+                "state": "unobserved",
+                "observation_token": None,
+                "receipt_status": None,
+                "receipt_age_seconds": None,
+                "receipt_max_age_seconds": TRAINING_HARVEST_RECEIPT_MAX_AGE_SECONDS,
+                "consecutive_degraded_observations": 0,
+                "max_consecutive_degraded_observations": maximum,
+            },
+            {},
+        )
+
+    # Progress writes refresh generated_at_utc after every child. They are
+    # safety-pulse visibility, not additional harvest outcomes. Preserve the
+    # completed-harvest counter until this run becomes terminal.
+    if status and not terminal and not stale and not malformed_payload:
+        count = _nonnegative_int(previous_counter.get("consecutive_degraded_observations"), 0)
+        return (
+            {
+                "registration_id": "training_harvest_coverage_degraded",
+                "artifact": relative,
+                "state": "in_progress_unobserved",
+                "observation_token": None,
+                "receipt_status": status,
+                "receipt_age_seconds": round(age_seconds, 3) if age_seconds is not None else None,
+                "receipt_max_age_seconds": TRAINING_HARVEST_RECEIPT_MAX_AGE_SECONDS,
+                "consecutive_degraded_observations": count,
+                "max_consecutive_degraded_observations": maximum,
+            },
+            {},
+        )
+
+    value = payload.get("coverage_degraded_steps")
+    field_valid = isinstance(value, list) and all(isinstance(item, str) and item for item in value)
+    degraded_steps = list(value) if field_valid else []
+    bad_input = not exists or malformed_payload or stale or not status or not field_valid
+    degraded = bad_input or not terminal or bool(degraded_steps)
+    counter = _advance_counter(
+        previous_counter,
+        token=token,
+        degraded=degraded,
+    )
+    counters["training_harvest_coverage_degraded"] = counter
+    count = int(counter["consecutive_degraded_observations"])
+    incidents: dict[str, dict[str, Any]] = {}
+    if degraded and (bad_input or count > maximum):
+        row = _incident(
+            generated_at=generated_at,
+            registration_id="training_harvest_coverage_degraded",
+            entity="training_harvest",
+            source_artifact=relative,
+            observation_token=token,
+            episode_start=str(counter["episode_start_token"]),
+            degraded_state=(
+                "receipt_absent_stale_or_malformed"
+                if bad_input
+                else "coverage_degraded"
+                if field_valid
+                else "coverage_field_missing_or_unreadable"
+            ),
+            reason=(
+                "training harvest receipt was absent, stale, malformed, or wedged"
+                if bad_input
+                else "training harvest coverage was degraded on repeated completed runs"
+            ),
+            count=count,
+            maximum=0 if bad_input else maximum,
+        )
+        incidents[row["incident_id"]] = row
+    return (
+        {
+            "registration_id": "training_harvest_coverage_degraded",
+            "artifact": relative,
+            "state": "incident" if incidents else ("degraded_within_tolerance" if degraded else "healthy"),
+            "observation_token": token,
+            "receipt_status": status or None,
+            "receipt_terminal": terminal,
+            "receipt_age_seconds": round(age_seconds, 3) if age_seconds is not None else None,
+            "receipt_max_age_seconds": TRAINING_HARVEST_RECEIPT_MAX_AGE_SECONDS,
+            "receipt_maximum_age_seconds": TRAINING_HARVEST_RECEIPT_MAX_AGE_SECONDS,
+            "coverage_degraded_steps": degraded_steps if field_valid else None,
+            "coverage_degraded_steps_readable": field_valid,
+            "consecutive_degraded_observations": count,
+            "max_consecutive_degraded_observations": maximum,
         },
         incidents,
     )
@@ -1318,6 +1471,7 @@ def build_degraded_state_watchdog(
             _evaluate_maker_replay,
             _evaluate_scheduler,
             _evaluate_scheduler_freshness,
+            _evaluate_training_harvest_coverage,
             _evaluate_kill_input_staleness,
             _evaluate_wallet,
             _evaluate_operating_state,

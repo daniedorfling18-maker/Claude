@@ -25,7 +25,7 @@ from .config import EngineConfig
 from .utils import now_utc, write_json
 
 
-WORK_ORDER = "WO-85"
+WORK_ORDER = "WO-138"
 OUTPUT_FILE = "ops_scheduler/training_harvest.json"
 
 # Registered 2026-07-15 under WO-85. Configuration may make the deadline
@@ -35,6 +35,12 @@ OUTPUT_FILE = "ops_scheduler/training_harvest.json"
 REGISTERED_MAX_DEADLINE_SECONDS = 6 * 60 * 60
 DEFAULT_STEP_TIMEOUT_SECONDS = 30 * 60
 DEFAULT_PRINT_STEP_TIMEOUT_SECONDS = 5 * 60
+
+# A timeout is coverage-only only for the pure price-history collector. The
+# maker-carry study produces registered gate evidence, so its timeout remains a
+# loud harvest failure rather than allowing stale study artifacts downstream.
+COLLECTION_TIMEOUT_TOLERATED_STEPS = frozenset({"collect_price_history"})
+
 
 @dataclass(frozen=True)
 class HarvestStep:
@@ -236,6 +242,11 @@ def run_training_harvest(
             "status": "absent",
             "publication_contract": "dot-prefixed JSONL matches neither telemetry *.json nor credential-guard allowed suffixes",
         },
+        "coverage_fail_safe": (
+            "A slow or timed-out collection child degrades coverage only: it never marks a market measured, "
+            "fabricates a price series, admits a partial series as complete, or alters M-A/M-B/M-C inputs; "
+            "incomplete child output remains absent and downstream reads absence as not-measured."
+        ),
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
     }
@@ -258,6 +269,7 @@ def run_training_harvest(
             "duration_seconds": 0.0,
             "exit_code": None,
             "status": "pending",
+            "timeout_degrades_coverage": False,
         }
         rows.append(row)
         if elapsed_before >= settings["deadline_seconds"] and not step.mandatory_tail:
@@ -287,12 +299,14 @@ def run_training_harvest(
                 os.environ.pop("PM_HARVEST_LATENCY_LOG", None)
             else:
                 os.environ["PM_HARVEST_LATENCY_LOG"] = previous_latency_log
+        tolerated_timeout = exit_code == 124 and step.name in COLLECTION_TIMEOUT_TOLERATED_STEPS
         row.update(
             {
                 "completed_at_utc": timestamp_fn(),
                 "duration_seconds": round(max(0.0, monotonic() - step_started), 3),
                 "exit_code": exit_code,
                 "status": "ok" if exit_code == 0 else ("timed_out" if exit_code == 124 else "failed"),
+                "timeout_degrades_coverage": tolerated_timeout,
             }
         )
         if error_type:
@@ -302,7 +316,13 @@ def run_training_harvest(
         payload["latency_transport"]["status"] = "observed" if payload["upstream_latency"] else "absent"
         write_json(artifact_path, payload)
 
-    failed = [row["step"] for row in rows if row["status"] in {"failed", "timed_out"}]
+    failed = [
+        row["step"]
+        for row in rows
+        if row["status"] == "failed"
+        or (row["status"] == "timed_out" and not row["timeout_degrades_coverage"])
+    ]
+    coverage_degraded = [row["step"] for row in rows if row["timeout_degrades_coverage"]]
     skipped = [row["step"] for row in rows if row["status"] == "skipped_deadline"]
     mandatory_tail = [row for row in rows if row["mandatory_tail"]]
     if failed:
@@ -310,7 +330,7 @@ def run_training_harvest(
     elif skipped:
         status = "deadline_exceeded"
     else:
-        status = "ok"
+        status = "coverage_degraded" if coverage_degraded else "ok"
     completed_at = timestamp_fn()
     payload.update(
         {
@@ -319,9 +339,11 @@ def run_training_harvest(
             "completed_at_utc": completed_at,
             "duration_seconds": round(max(0.0, monotonic() - started_clock), 3),
             "failed_steps": failed,
+            "coverage_degraded_steps": coverage_degraded,
             "skipped_deadline_steps": skipped,
             "successful_steps": sum(row["status"] == "ok" for row in rows),
             "mandatory_tail_completed": all(row["status"] == "ok" for row in mandatory_tail),
+            "successful_completion": status in {"ok", "coverage_degraded"},
         }
     )
     write_json(artifact_path, payload)

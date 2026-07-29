@@ -1114,6 +1114,7 @@ def _notification(
     active: list[dict[str, Any]],
     new: list[dict[str, Any]],
     undelivered_ids: list[str],
+    undelivered_registrations: list[str],
     state_path: Path,
     state: dict[str, Any],
 ) -> dict[str, Any]:
@@ -1144,9 +1145,21 @@ def _notification(
         "channel_configured": bool(url),
         "error": "",
     }
-    registrations: list[str] = []
+    # Registration ids are persisted alongside delivery debt because an
+    # incident may recover before its retry succeeds.  A retry must retain the
+    # original bounded registration metadata rather than degrading to the
+    # unhelpful (and lossy) ``unknown`` label.
+    registrations = sorted(
+        {
+            *[str(item) for item in undelivered_registrations if str(item)],
+            *[
+                str(active_by_id.get(item, {}).get("registration_id") or "unknown")
+                for item in pending
+                if item not in undelivered_ids
+            ],
+        }
+    )[:MAX_NOTIFICATION_IDS]
     if attempted:
-        registrations = sorted({str(active_by_id.get(item, {}).get("registration_id") or "unknown") for item in pending})
         # Crash safety: the bounded debt and the registration metadata needed
         # to retry it are durable before the network side effect begins.
         state["undelivered_incident_ids"] = pending
@@ -1255,6 +1268,7 @@ def build_degraded_state_watchdog(
                 active=active,
                 new=new,
                 undelivered_ids=list(state.get("undelivered_incident_ids") or []),
+                undelivered_registrations=list(state.get("undelivered_incident_registrations") or []),
                 state_path=state_path,
                 state=state,
             )
@@ -1320,6 +1334,7 @@ def build_degraded_state_watchdog(
             active=active,
             new=new,
             undelivered_ids=list(state.get("undelivered_incident_ids") or []),
+            undelivered_registrations=list(state.get("undelivered_incident_registrations") or []),
             state_path=state_path,
             state=state,
         )

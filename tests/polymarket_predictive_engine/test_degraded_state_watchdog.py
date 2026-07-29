@@ -742,7 +742,10 @@ def test_wo129_failed_ntfy_delivery_is_retried_and_cleared(tmp_path: Path, monke
     class Response:
         status_code = 503
 
-    def post(*args, **kwargs):
+    messages: list[str] = []
+
+    def post(_url, *, data, **kwargs):
+        messages.append(data)
         durable = read_json(cfg.output_root / "ops_scheduler" / "degraded_state_watchdog_state.json")
         assert durable["undelivered_incident_ids"]
         assert durable["undelivered_incident_registrations"]
@@ -754,11 +757,19 @@ def test_wo129_failed_ntfy_delivery_is_retried_and_cleared(tmp_path: Path, monke
     assert first["notification"]["delivery"]["attempted"] is True
     assert first["notification"]["undelivered_incident_ids"]
 
+    # The incident can recover before transport does.  Its durable retry must
+    # still retain the original registration id instead of sending "unknown".
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"status": "ok", "generated_at_utc": "2026-07-29T00:01:00Z"},
+    )
     Response.status_code = 200
     second = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:01:01Z")
     assert second["new_incidents"] == []
     assert second["notification"]["delivery"]["delivered"] is True
     assert second["notification"]["undelivered_incident_ids"] == []
+    assert "maker_study_run_failed" in messages[-1]
+    assert "unknown" not in messages[-1]
 
 
 def test_wo129_lock_held_carries_incidents_then_alarms_and_recovers(tmp_path: Path) -> None:

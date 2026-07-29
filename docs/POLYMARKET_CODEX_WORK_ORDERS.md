@@ -6285,6 +6285,8 @@ refactors:
 | 7 | **WO-133** | guarded manual deploy path + its `AGENTS.md` amendment | **owner** (one PR carrying a governance amendment cannot be partially merged) |
 | 8 | **WO-136** | contemporaneous-quote fill replay (kills the phantom-fill 42x haircut; issued 2026-07-28 under the owner's direct instruction) | orchestrator, after line-audit |
 | 9 | **WO-137** | portfolio composition diff — name the reason every market leaves (churn is the campaign's binding variable; issued 2026-07-28 under the owner's direct instruction) | orchestrator, after line-audit |
+| 10 | **WO-138** | training harvest survives a slow upstream: bounded collection children, per-child durations, endpoint-latency evidence (dispatched 2026-07-29 under the owner's standing instruction to keep the pipeline moving; registered here after the fact — see the provenance note) | owner (scheduler surface) |
+| 11 | **WO-139** | spend the official-book seeding budget on markets that can actually be sized (dispatched 2026-07-29, same provenance note) | owner (study module) |
 
 **WO-121 — watchdog coverage for unmonitored producers** (registered 2026-07-27 as
 WO-129's named blocking prerequisite, per ENGINEERING_STANDARDS S3). WO-129 tightens
@@ -6407,3 +6409,154 @@ widen the carve-out into "agents may run production paths".
 "Do not start any of the following on the local workstation"; and the required PR
 gate still runs the full unfiltered suite on that PR and remains what the merge
 decision cites.
+
+
+## WO-138 — The training harvest must survive a slow upstream — `queued` (dispatched to Codex 2026-07-29; scheduler surface → owner merge after line-audit)
+
+**Provenance note, recorded because it matters more than the WO.** WO-138 and
+WO-139 were dispatched to Codex on 2026-07-29 *before* these register entries
+existed, which is a breach of the registered bridge rule that the orchestrator
+"may never dispatch unregistered work". The breach is the orchestrator's, not
+Codex's — it was caught by Codex's own review of PR #393, not by the
+orchestrator. Nothing about this entry, or the owner's standing instruction to
+keep the pipeline moving, constitutes owner authorization of either work order:
+merge routing for both is the owner's, and this text records a dispatch, never
+an approval.
+
+**Why now.** Measured 2026-07-29 with in-container instrumentation:
+`clob.polymarket.com/prices-history` degraded from ~0.3s to ~5-10s per uncached
+fetch (p50 5.1s, max 10.3s, all HTTP 200, `cf-cache-status: EXPIRED`, no
+rate-limit headers; reproduced from a second network location). The 13:37Z
+`training_harvest` failed with exit 1 after ~49 minutes, and both the
+`collect-price-history` child (460s baseline) and the `maker-carry-study` child
+(69.9s warm baseline, 844s measured that day) scale with that endpoint. The
+harvest is the daily lane that feeds the campaign's evidence; a hard failure
+there costs a day of it, and the failure repeats nightly until upstream
+recovers.
+
+**Scope (collection/ops only — no gate, threshold, or eligibility change).**
+Files: `scripts/run_vps_ops_scheduler.sh`,
+`src/polymarket_predictive_engine/training_harvest.py`, the price-history
+collection path, a latency-summary helper, and their tests.
+
+138.1 — a COLLECTION child that exhausts its bound is recorded `timed_out` in
+`outputs/ops_scheduler/training_harvest.json` and the harvest CONTINUES to its
+remaining children instead of aborting the lane. A child that fails for any
+non-timeout reason keeps today's fail-loud behaviour. WO-128.2's separation of
+harvest and anchor-tail accounting is unchanged.
+
+138.2 — every child row carries `duration_seconds` beside its status/exit code,
+matching the field the deploy-acceptance artifact gained in #391 (that field is
+what reduced a multi-hour forensic session to a one-file read).
+
+138.3 — a compact per-endpoint latency summary (host, path tail, request count,
+p50, max) is recorded in the harvest receipt so "the venue is slow" is evidence
+in an artifact rather than an investigation. No query strings, no URL userinfo,
+no full token ids, nothing credential-shaped: this artifact publishes to the
+telemetry branch and the WO-73 guard governs it.
+
+138.4 — **a tolerated timeout must not refresh the harvest's success stamp.**
+Added 2026-07-29 after Codex's review of PR #393 found the first build's
+`harvest_failed`-false path refreshing `last_success_training_harvest`, which
+`scheduler_completion_freshness` reads and nothing else contradicts — a
+permanently slow upstream would have read fresh forever while no price history
+was collected. Degraded coverage therefore leaves the success stamp
+unrefreshed (surfacing through the existing 25h ceiling, no new config surface),
+and a watchdog registration reads `coverage_degraded_steps` so repeated
+degradation opens an incident before that ceiling. Fixed threshold in code;
+configuration may alarm sooner, never later.
+
+**Fail-safe direction (S5).** A slow or timed-out collection child degrades
+COVERAGE only. It must never mark a market measured, never fabricate or complete
+a partial price series, never let a truncated series read as whole, and never
+alter an M-A/M-B/M-C input. Data that could not be collected is absent, and
+absent data reads as not-measured downstream. A harvest that is quietly
+incomplete is worse than one that fails loudly, which is why 138.4 exists.
+
+**Tests.** (1) a tolerated timeout stamps its child row, runs the later
+children, and leaves the success stamp unrefreshed; (2) a clean harvest
+refreshes it; (3) a non-timeout child failure still fails loudly and does not
+refresh; (4) every child row carries `duration_seconds`; (5) the latency summary
+contains no credential-shaped value and no full token id; (6) a truncated price
+series from a timed-out child is not treated as complete by the study's consumer
+path; (7) the new watchdog registration opens an incident on repeated
+`coverage_degraded_steps` and stays healthy on a clean run.
+
+**Day-after check:** on the next scheduled harvest, `training_harvest.json`
+shows per-child durations and, if upstream is still slow, a `timed_out`
+collection child with the harvest completing its remaining children — while
+`maker_carry_study.json` status stays `ok` and the harvest's success stamp is
+NOT refreshed for that run.
+
+## WO-139 — Spend the official-book seeding budget on markets that can actually be sized — `queued` (dispatched to Codex 2026-07-29; study module → owner merge after line-audit; see the WO-138 provenance note)
+
+**Why now.** M-A banks a day only if the day's LAST run holds target, and M-B.1
+requires the SAME market present across two consecutive cycles; both are starved
+by a portfolio that oscillates between 0 and 1 markets. Measured 2026-07-29 from
+live telemetry and a code trace: the book-seeding watchlist is 51 slots
+(portfolio 1 + persistent 25 + seeds 25), and 26 of the 29 watchlist slots that
+overlapped that day's candidate set were on markets that can never be sized —
+for two independent and unrelated reasons.
+
+**Scope (collection/reporting only — no gate, threshold, or eligibility change).**
+Files: `src/polymarket_predictive_engine/maker_fill_replay.py`,
+`src/polymarket_predictive_engine/maker_carry_study.py` (CSV columns only), tests.
+
+139.1 — `_candidate_seed_markets` (`maker_fill_replay.py:511-529`) ranks seeds by
+raw `net_carry_usd_per_day` alone, reading none of the sizer's other predicates,
+so that day's top two seed slots went to markets with `estimated_reward_share`
+0.978 and 1.000 — permanently `thin_book_untrusted` at the sizer
+(`maker_carry_study.py:1696`, `max_trusted_reward_share` 0.05). Order candidates
+that already clear the sizer's NON-depth predicates first (`net_carry > 0`,
+`estimate_quality` in {`book_and_history`, `single_window_history`},
+`band_eligible`, `resolution_risk != "high"`), by carry desc, then fill any
+remaining slots from the existing raw-carry order. This REALLOCATES slots: the
+number of markets polled never falls, and a market that would be polled today
+when slots are free is still polled.
+
+139.2 — `_recent_book_markets` (`:436-475`) uses file mtime only as a filter and
+then iterates `sorted(books_dir.glob("*.csv.gz"))` — lexicographic hex
+`condition_id` — after which `snapshot_official_books` truncates with
+`persistent[:persistent_cap]` (`:700`). The 25 persistent slots were verifiably
+an unbroken hex prefix (`0x003a…`-`0x2d1492…`), so ~82% of the address space can
+never hold a persistent slot; the docstring at `:449-450` already claims mtime
+ordering. Sort by mtime descending before truncation; a `stat` failure sorts
+last rather than raising.
+
+139.3 — `book_history_hours` and `book_snapshot_count` are computed at
+`maker_carry_study.py:2180-2184` but omitted from `CANDIDATE_FIELDS`
+(`:328-387`), so `maker_carry_candidates.csv` cannot show why a candidate is
+depth-ineligible. Add both columns. Reporting-only: no gate reads that CSV.
+
+**Fail-safe direction (S5).** Seeding and archiving are collection-only. Nothing
+here may mark a market measured, alter `_measurement_eligible`, change any
+`maker_min_book_*` / `max_trusted_reward_share` / M-A / M-B / M-C threshold, or
+change which candidates the sizer accepts. The module's existing contract holds:
+configuration may make the system poll MORE, never blind it
+(`maker_fill_replay.py:88-90`). If a reordering input is missing or malformed,
+fall back to current behaviour rather than dropping a market from the watchlist.
+
+**Explicitly out of scope, recorded so it is not attempted.** Two adjacent
+"fixes" surfaced in the same diagnosis and are refused here: (a) lowering
+`max_trusted_reward_share` or `MB_TIER0_MIN_CONFIRMED_FILLS` to make M-B.1
+reachable — both are registered gates, and the tension between them (we may only
+quote deep books, where we are never filled) is a real finding for the owner,
+not a threshold to move; (b) adding a new objective LOW class to
+`_base_resolution_class` to widen the universe — the WO-51 screen may escalate
+LOW to MEDIUM and never the reverse.
+
+**Tests.** (1) with top raw-carry entries thin-book/high-risk and lower-carry
+entries sizeable, the seed tranche polls the sizeable ones first and the total
+polled count is unchanged; (2) when fewer than the cap qualify, remaining slots
+are still filled from the raw-carry order — no shrinkage; (3) malformed or
+missing eligibility fields fall back to current ordering without dropping
+markets; (4) the persistent tranche returns the most recently written archives,
+proven with a fixture whose mtime order is the REVERSE of its lexicographic
+`condition_id` order — the pre-fix code must fail this test; (5)
+`maker_carry_candidates.csv` carries both depth columns; (6) an existing
+sizer/eligibility test passes unchanged, proving no gate moved.
+
+**Day-after check:** `official_book_snapshot.json` shows a seeded watchlist of
+low/medium-risk, band-eligible, non-thin-book candidates rather than
+share-near-1.0 markets, and `maker_carry_candidates.csv` shows
+`book_history_hours` and `book_snapshot_count` for every row.

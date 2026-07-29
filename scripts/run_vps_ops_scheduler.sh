@@ -562,11 +562,39 @@ run_training_harvest() {
   JOB_PID=$!
   wait_with_safety_pulses "$JOB_PID" training_harvest
   CODE=$?
-  stamp_status training_harvest "$CODE" "WO-85 resilient per-step harvest; see ops_scheduler/training_harvest.json; bounded corpus retention + ledger anchor always attempted" "$HARVEST_STARTED_AT"
-  if [ "$CODE" -eq 0 ]; then
+  # WO-128: the Python orchestrator attempts anchoring last, but an anchor-only
+  # failure must not cause hours of successful collection to run again. Derive
+  # independent outcomes from its per-step artifact and stamp both loudly.
+  set -- $(OUT_DIR="$OUT_DIR" OVERALL_CODE="$CODE" python - <<'PY'
+import json
+import os
+from pathlib import Path
+
+overall = int(os.environ["OVERALL_CODE"])
+try:
+    payload = json.loads((Path(os.environ["OUT_DIR"]) / "training_harvest.json").read_text(encoding="utf-8"))
+    rows = payload.get("steps", [])
+    anchor = next(row for row in rows if row.get("step") == "anchor_ledgers")
+    anchor_code = int(anchor.get("exit_code"))
+    harvest_failed = any(
+        row.get("step") != "anchor_ledgers"
+        and row.get("status") in {"failed", "timed_out", "skipped_deadline"}
+        for row in rows
+    )
+    print(1 if harvest_failed else 0, anchor_code)
+except (AttributeError, KeyError, OSError, StopIteration, TypeError, ValueError, json.JSONDecodeError):
+    # Missing or malformed accounting fails closed under the process outcome.
+    print(overall, overall)
+PY
+  )
+  HARVEST_CODE="$1"
+  ANCHOR_TAIL_CODE="$2"
+  stamp_status training_harvest "$HARVEST_CODE" "WO-85 resilient per-step harvest excluding independently stamped anchor tail; see ops_scheduler/training_harvest.json" "$HARVEST_STARTED_AT"
+  stamp_status training_harvest_anchor_tail "$ANCHOR_TAIL_CODE" "WO-128 independent anchor-ledgers tail from training harvest; failure remains visible without repeating collection" "$HARVEST_STARTED_AT"
+  if [ "$HARVEST_CODE" -eq 0 ]; then
     touch_success_stamp training_harvest
   fi
-  log "training_harvest: exit $CODE"
+  log "training_harvest: harvest exit $HARVEST_CODE; anchor tail exit $ANCHOR_TAIL_CODE; process exit $CODE"
 }
 
 run_maker_study_intraday() {

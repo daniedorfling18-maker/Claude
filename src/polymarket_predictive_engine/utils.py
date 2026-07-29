@@ -8,10 +8,11 @@ import os
 import re
 import subprocess
 import time
+import warnings
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, NamedTuple, Sequence
 
 ISO_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
@@ -200,31 +201,68 @@ def append_csv_rows(
     return path
 
 
+class LegacyHeaderAppend(NamedTuple):
+    """Result of append_csv_rows_matching_existing_header (WO-128.3)."""
+
+    path: Path
+    dropped_fields: tuple[str, ...]
+
+
 def append_csv_rows_matching_existing_header(
     path: str | Path,
     rows: Iterable[Mapping[str, Any]],
     *,
     fieldnames: Sequence[str],
-) -> Path:
+) -> LegacyHeaderAppend:
     """Append-only write that tolerates a legacy on-disk header (WO-119).
 
     For a WO-61 ``append_only`` ledger whose historical file may carry an
     older, narrower header: appending under the CURRENT canonical fieldnames
     would either raise (append_csv_rows) or force a full rewrite (write_csv,
     which breaks every prior anchor prefix - the WO-115 incident class).
-    Instead, append under the header already on disk, dropping keys the
-    legacy schema cannot hold; a schema change still requires a new versioned
-    ledger path. Falls back to the canonical fieldnames for a new/empty file.
+    Instead, append under the header already on disk.
+
+    WO-128.3 (as narrowed in the register on 2026-07-27): the append always
+    succeeds - WO-119's tolerance is the contract - but a field carrying a
+    non-empty value that the legacy header cannot hold is dropped LOUDLY:
+    named in a warning and returned in ``dropped_fields`` so the caller can
+    record it in its reported result. Refusing here would contradict WO-119,
+    and a versioned-path migration is an owner surface this helper must not
+    improvise. A field empty in every appended row reports nothing - that is
+    a no-op, not data loss. Falls back to the canonical fieldnames for a
+    new/empty file.
     """
 
     path = Path(path)
+    materialized_rows = list(rows)
     if path.exists() and path.stat().st_size > 0:
         effective = csv_columns(path)
         if not effective:
             effective = [str(field) for field in fieldnames]
     else:
         effective = [str(field) for field in fieldnames]
-    return append_csv_rows(path, rows, fieldnames=effective)
+    dropped_nonempty = tuple(
+        sorted(
+            {
+                str(key)
+                for row in materialized_rows
+                for key, value in row.items()
+                if str(key) not in effective and serialize_value(value) != ""
+            }
+        )
+    )
+    if dropped_nonempty:
+        warnings.warn(
+            f"legacy CSV header at {path} cannot persist non-empty fields "
+            f"{', '.join(dropped_nonempty)}; the values were dropped from the "
+            "appended rows. A genuine schema widening on an append_only ledger "
+            "needs a new versioned ledger path (unregistered as of WO-128.3).",
+            stacklevel=2,
+        )
+    return LegacyHeaderAppend(
+        path=append_csv_rows(path, materialized_rows, fieldnames=effective),
+        dropped_fields=dropped_nonempty,
+    )
 
 
 def serialize_value(value: Any) -> str:

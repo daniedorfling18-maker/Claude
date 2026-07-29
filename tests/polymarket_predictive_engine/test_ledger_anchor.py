@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
 
+import pytest
 import yaml
 
 from polymarket_predictive_engine.cli import COMMANDS, main as cli_main
@@ -147,6 +149,57 @@ def test_mutable_source_uses_immutable_daily_snapshots(tmp_path: Path):
     verification = verify_ledger_chain(cfg)
     assert verification["status"] == "broken"
     assert verification["first_broken_date"] == "2026-07-10"
+
+
+def test_snapshot_copy_failure_never_publishes_partial_canonical_path(tmp_path: Path, monkeypatch):
+    cfg = _config(tmp_path, [{"glob": "audit/policy.json", "mode": "snapshot"}])
+    source = cfg.output_root / "audit" / "policy.json"
+    source.parent.mkdir(parents=True)
+    source.write_text('{"decision":"wait"}\n', encoding="utf-8")
+    canonical = (
+        cfg.output_root
+        / "performance"
+        / "ledger_anchor_snapshots"
+        / "2026-07-10"
+        / "audit"
+        / "policy.json"
+    )
+    real_copyfile = shutil.copyfile
+
+    def interrupted_copy(src, dst):
+        Path(dst).write_bytes(b"truncated")
+        raise OSError("simulated interrupted copy")
+
+    monkeypatch.setattr(shutil, "copyfile", interrupted_copy)
+    with pytest.raises(OSError, match="simulated interrupted copy"):
+        anchor_ledgers(cfg, anchor_date="2026-07-10")
+    assert not canonical.exists()
+    assert not list(canonical.parent.glob("*.tmp"))
+
+    monkeypatch.setattr(shutil, "copyfile", real_copyfile)
+    assert anchor_ledgers(cfg, anchor_date="2026-07-10")["status"] == "ok"
+    assert canonical.read_bytes() == source.read_bytes()
+
+
+def test_truncated_existing_snapshot_remains_immutable_and_is_rejected(tmp_path: Path):
+    cfg = _config(tmp_path, [{"glob": "audit/policy.json", "mode": "snapshot"}])
+    source = cfg.output_root / "audit" / "policy.json"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"complete snapshot payload\n")
+    canonical = (
+        cfg.output_root
+        / "performance"
+        / "ledger_anchor_snapshots"
+        / "2026-07-10"
+        / "audit"
+        / "policy.json"
+    )
+    canonical.parent.mkdir(parents=True)
+    canonical.write_bytes(b"short")
+
+    with pytest.raises(FileExistsError, match="immutable daily ledger snapshot already differs"):
+        anchor_ledgers(cfg, anchor_date="2026-07-10")
+    assert canonical.read_bytes() == b"short"
 
 
 def test_as_of_verification_ignores_bytes_anchored_only_later(tmp_path: Path):

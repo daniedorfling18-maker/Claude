@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import shutil
+import tempfile
 from typing import Any, NamedTuple
 
 from .config import EngineConfig, load_config
@@ -459,7 +460,20 @@ def _collect_manifest(cfg: EngineConfig, settings: dict[str, Any], anchor_date: 
                     if verification.stat().st_size != source_length or _sha256_prefix(verification, source_length) != _sha256_prefix(source, source_length):
                         raise FileExistsError(f"immutable daily ledger snapshot already differs: {verification}")
                 else:
-                    shutil.copyfile(source, verification)
+                    # Publish immutable snapshots only after a complete sibling
+                    # copy exists.  A timeout or full disk may leave the temp
+                    # incomplete, but can never expose a truncated canonical
+                    # snapshot that all later runs must refuse to replace.
+                    descriptor, temporary_name = tempfile.mkstemp(
+                        prefix=f".{verification.name}.", suffix=".tmp", dir=verification.parent
+                    )
+                    os.close(descriptor)
+                    temporary = Path(temporary_name)
+                    try:
+                        shutil.copyfile(source, temporary)
+                        os.replace(temporary, verification)
+                    finally:
+                        temporary.unlink(missing_ok=True)
                 verification_relative = verification.resolve().relative_to(root_resolved).as_posix()
             byte_length = verification.stat().st_size
             manifest.append(

@@ -143,8 +143,26 @@ def test_scheduler_rearms_harvest_from_successful_completion_not_start() -> None
     assert "if training_harvest_retry_ready; then" in loop
     assert "touch_attempt_stamp training_harvest" in harvest_block
     assert "touch_stamp training_harvest" not in harvest_block
-    assert 'if [ "$CODE" -eq 0 ]; then\n    touch_success_stamp training_harvest' in function
+    # WO-128.2: re-arming keys off the HARVEST outcome specifically - an
+    # anchor-tail failure must not re-run the multi-minute collection, so the
+    # success stamp cannot depend on the combined process $CODE.
+    assert 'if [ "$HARVEST_CODE" -eq 0 ]; then\n    touch_success_stamp training_harvest' in function
     assert function.index("stamp_status training_harvest") < function.index(
         "touch_success_stamp training_harvest"
     )
     assert 'TRAINING_AGE="$(seconds_since_success_stamp training_harvest)"' in script
+
+
+def test_scheduler_stamps_harvest_and_anchor_tail_independently() -> None:
+    script = Path("scripts/run_vps_ops_scheduler.sh").read_text(encoding="utf-8")
+    function = script.split("run_training_harvest() {", 1)[1].split(
+        "run_maker_study_intraday() {", 1
+    )[0]
+
+    assert 'row.get("step") != "anchor_ledgers"' in function
+    assert 'stamp_status training_harvest "$HARVEST_CODE"' in function
+    assert 'stamp_status training_harvest_anchor_tail "$ANCHOR_TAIL_CODE"' in function
+    assert 'if [ "$HARVEST_CODE" -eq 0 ]; then\n    touch_success_stamp training_harvest' in function
+    assert function.index("stamp_status training_harvest ") < function.index(
+        "touch_success_stamp training_harvest"
+    )

@@ -113,8 +113,7 @@ stamp_status() {
   if [ -z "$EXPLICIT_SKIP_KIND" ]; then
     EXPLICIT_SKIP_KIND="$JOB_SCHEDULE_SKIP_KIND"
   fi
-  SUCCESS_ELIGIBLE="${6:-true}"
-  JOB="$1" EXIT_CODE="$2" DETAIL="${3:-}" STARTED_AT="${4:-}" SKIP_KIND="$EXPLICIT_SKIP_KIND" SUCCESS_ELIGIBLE="$SUCCESS_ELIGIBLE" OUT_DIR="$OUT_DIR" python - <<'PY'
+  JOB="$1" EXIT_CODE="$2" DETAIL="${3:-}" STARTED_AT="${4:-}" SKIP_KIND="$EXPLICIT_SKIP_KIND" OUT_DIR="$OUT_DIR" python - <<'PY'
 import json
 import os
 from datetime import datetime, timezone
@@ -136,7 +135,6 @@ except ValueError:
     started = None
 detail = os.environ.get("DETAIL", "")
 exit_code = int(os.environ["EXIT_CODE"])
-success_eligible = os.environ.get("SUCCESS_ELIGIBLE") == "true"
 skip_kind = os.environ.get("SKIP_KIND", "").strip().lower()
 if exit_code == 124 and not skip_kind:
     skip_kind = "overrun"
@@ -158,7 +156,7 @@ jobs[job_name] = {
     "duration_seconds": round((now - started).total_seconds(), 3) if started else None,
     "last_exit_code": exit_code,
     # Failed attempts must not make a periodic job look freshly successful.
-    "last_success_utc": now.isoformat() if exit_code == 0 and success_eligible else str(previous.get("last_success_utc") or ""),
+    "last_success_utc": now.isoformat() if exit_code == 0 else str(previous.get("last_success_utc") or ""),
     "detail": detail,
     "skip_kind": skip_kind or "none",
     "skipped_intentional": skipped_intentional,
@@ -279,9 +277,29 @@ seconds_since_attempt_stamp() {
   echo "$AGE"
 }
 
+touch_completion_stamp() {
+  date -u +%s > "$OUT_DIR/last_completion_$1"
+}
+
+seconds_since_completion_stamp() {
+  COMPLETION_STAMP="$OUT_DIR/last_completion_$1"
+  if [ ! -f "$COMPLETION_STAMP" ]; then
+    echo 999999999
+    return
+  fi
+  NOW=$(date -u +%s)
+  THEN=$(cat "$COMPLETION_STAMP" 2>/dev/null || echo 0)
+  case "${THEN:-}" in
+    ''|*[!0-9]*) THEN=0 ;;
+  esac
+  AGE=$((NOW - THEN))
+  if [ "$AGE" -lt 0 ]; then AGE=0; fi
+  echo "$AGE"
+}
+
 training_harvest_retry_ready() {
   [ "$(seconds_since_success_stamp training_harvest)" -ge "$HARVEST_INTERVAL" ] || return 1
-  [ "$(seconds_since_attempt_stamp training_harvest)" -ge "$HARVEST_RETRY_INTERVAL" ]
+  [ "$(seconds_since_completion_stamp training_harvest)" -ge "$HARVEST_RETRY_INTERVAL" ]
 }
 
 successful_schedule_skip_kind() {
@@ -578,43 +596,25 @@ try:
     rows = payload.get("steps", [])
     anchor = next(row for row in rows if row.get("step") == "anchor_ledgers")
     anchor_code = int(anchor.get("exit_code"))
-    tolerated_steps = {"collect_price_history", "maker_carry_study"}
-    def tolerated_timeout(row):
-        return (
-            row.get("step") in tolerated_steps
-            and row.get("status") == "timed_out"
-            and row.get("timeout_degrades_coverage") is True
-        )
     harvest_failed = any(
         row.get("step") != "anchor_ledgers"
-        and (
-            row.get("status") in {"failed", "skipped_deadline"}
-            or (row.get("status") == "timed_out" and not tolerated_timeout(row))
-        )
+        and row.get("status") in {"failed", "timed_out", "skipped_deadline"}
         for row in rows
     )
-    coverage_steps = payload.get("coverage_degraded_steps")
-    coverage_degraded = (
-        not isinstance(coverage_steps, list)
-        or bool(coverage_steps)
-        or any(tolerated_timeout(row) for row in rows)
-    )
-    print(1 if harvest_failed else 0, anchor_code, 1 if coverage_degraded else 0)
+    print(1 if harvest_failed else 0, anchor_code)
 except (AttributeError, KeyError, OSError, StopIteration, TypeError, ValueError, json.JSONDecodeError):
     # Missing or malformed accounting fails closed under the process outcome.
-    print(overall, overall, 1)
+    print(overall, overall)
 PY
   )
   HARVEST_CODE="$1"
   ANCHOR_TAIL_CODE="$2"
-  COVERAGE_DEGRADED="$3"
-  SUCCESS_ELIGIBLE=true
-  if [ "$COVERAGE_DEGRADED" -ne 0 ]; then SUCCESS_ELIGIBLE=false; fi
-  stamp_status training_harvest "$HARVEST_CODE" "WO-85 resilient per-step harvest excluding independently stamped anchor tail; see ops_scheduler/training_harvest.json" "$HARVEST_STARTED_AT" "" "$SUCCESS_ELIGIBLE"
+  stamp_status training_harvest "$HARVEST_CODE" "WO-85 resilient per-step harvest excluding independently stamped anchor tail; see ops_scheduler/training_harvest.json" "$HARVEST_STARTED_AT"
   stamp_status training_harvest_anchor_tail "$ANCHOR_TAIL_CODE" "WO-128 independent anchor-ledgers tail from training harvest; failure remains visible without repeating collection" "$HARVEST_STARTED_AT"
-  if [ "$HARVEST_CODE" -eq 0 ] && [ "$COVERAGE_DEGRADED" -eq 0 ]; then
+  if [ "$HARVEST_CODE" -eq 0 ]; then
     touch_success_stamp training_harvest
   fi
+  touch_completion_stamp training_harvest
   log "training_harvest: harvest exit $HARVEST_CODE; anchor tail exit $ANCHOR_TAIL_CODE; process exit $CODE"
 }
 

@@ -31,6 +31,8 @@ def record_upstream_latency(url: str, duration_seconds: float) -> None:
         "path_tail": path_tail,
         "duration_seconds": round(max(0.0, float(duration_seconds)), 6)
         if math.isfinite(float(duration_seconds)) else 0.0,
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
     }
     encoded = (json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
     try:

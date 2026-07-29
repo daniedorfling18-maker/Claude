@@ -401,11 +401,17 @@ def collect_price_history(
         for row in quality
         if row.get("collection_priority") == COLLECTION_PRIORITY_FOCUS_FINAL and row.get("status") == "ok"
     )
+    quality_status_counts = {
+        status: sum(1 for row in quality if row.get("status") == status)
+        for status in ("ok", "empty_history", "fetch_error")
+    }
     summary = {
         "work_order": "WO-91",
         "requested_tokens": len(clean_rows),
         "snapshot_rows": len(snapshots),
         "quality_rows": len(quality),
+        "collected_tokens": quality_status_counts["ok"],
+        "quality_status_counts": quality_status_counts,
         "empty_history_count": empty,
         "error_count": errors,
         **selection,

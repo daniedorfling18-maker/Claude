@@ -8,6 +8,7 @@ ledger-anchor tail even when an earlier child fails.
 
 from __future__ import annotations
 
+import atexit
 import json
 import math
 import os
@@ -25,7 +26,7 @@ from .config import EngineConfig
 from .utils import now_utc, write_json
 
 
-WORK_ORDER = "WO-138"
+WORK_ORDER = "WO-85"
 OUTPUT_FILE = "ops_scheduler/training_harvest.json"
 
 # Registered 2026-07-15 under WO-85. Configuration may make the deadline
@@ -35,12 +36,6 @@ OUTPUT_FILE = "ops_scheduler/training_harvest.json"
 REGISTERED_MAX_DEADLINE_SECONDS = 6 * 60 * 60
 DEFAULT_STEP_TIMEOUT_SECONDS = 30 * 60
 DEFAULT_PRINT_STEP_TIMEOUT_SECONDS = 5 * 60
-
-# Measured warm VPS baselines on 2026-07-29 were 460s and 69.9s. These
-# endpoint-dependent children receive explicit headroom rather than inheriting
-# an accidentally smaller generic setting. Exhausting either bound means
-# absent coverage, not fabricated evidence or a failed daily lane.
-COLLECTION_TIMEOUT_TOLERATED_STEPS = frozenset({"collect_price_history", "maker_carry_study"})
 
 
 @dataclass(frozen=True)
@@ -202,6 +197,32 @@ def _latency_summary(path: Path) -> list[dict[str, Any]]:
     ]
 
 
+def _price_history_coverage(cfg: EngineConfig) -> dict[str, Any]:
+    """Read the collector's own terminal coverage result for the child row."""
+
+    path = cfg.governance_root / "historical_price_history_summary.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        counts = payload["quality_status_counts"]
+        return {
+            "status": "observed",
+            "requested_count": int(payload["requested_tokens"]),
+            "collected_count": int(payload["collected_tokens"]),
+            "quality_status_counts": {
+                "ok": int(counts.get("ok", 0)),
+                "empty_history": int(counts.get("empty_history", 0)),
+                "fetch_error": int(counts.get("fetch_error", 0)),
+            },
+        }
+    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+        return {
+            "status": "unavailable",
+            "requested_count": None,
+            "collected_count": None,
+            "quality_status_counts": None,
+        }
+
+
 def run_training_harvest(
     cfg: EngineConfig,
     *,
@@ -220,6 +241,11 @@ def run_training_harvest(
     latency_path = cfg.output_root / "ops_scheduler" / ".training_harvest_latency.jsonl"
     latency_path.parent.mkdir(parents=True, exist_ok=True)
     latency_path.unlink(missing_ok=True)
+
+    def cleanup_latency_spool() -> None:
+        latency_path.unlink(missing_ok=True)
+
+    atexit.register(cleanup_latency_spool)
     started_at = timestamp_fn()
     started_clock = monotonic()
     rows: list[dict[str, Any]] = []
@@ -270,7 +296,6 @@ def run_training_harvest(
             "duration_seconds": 0.0,
             "exit_code": None,
             "status": "pending",
-            "timeout_degrades_coverage": False,
         }
         rows.append(row)
         if elapsed_before >= settings["deadline_seconds"] and not step.mandatory_tail:
@@ -300,16 +325,21 @@ def run_training_harvest(
                 os.environ.pop("PM_HARVEST_LATENCY_LOG", None)
             else:
                 os.environ["PM_HARVEST_LATENCY_LOG"] = previous_latency_log
-        tolerated_timeout = exit_code == 124 and step.name in COLLECTION_TIMEOUT_TOLERATED_STEPS
         row.update(
             {
                 "completed_at_utc": timestamp_fn(),
                 "duration_seconds": round(max(0.0, monotonic() - step_started), 3),
                 "exit_code": exit_code,
                 "status": "ok" if exit_code == 0 else ("timed_out" if exit_code == 124 else "failed"),
-                "timeout_degrades_coverage": tolerated_timeout,
             }
         )
+        if step.name == "collect_price_history":
+            row["coverage"] = _price_history_coverage(cfg) if exit_code == 0 else {
+                "status": "child_failed",
+                "requested_count": None,
+                "collected_count": None,
+                "quality_status_counts": None,
+            }
         if error_type:
             row["error_type"] = error_type
         payload["generated_at_utc"] = timestamp_fn()
@@ -320,10 +350,8 @@ def run_training_harvest(
     failed = [
         row["step"]
         for row in rows
-        if row["status"] == "failed"
-        or (row["status"] == "timed_out" and not row["timeout_degrades_coverage"])
+        if row["status"] in {"failed", "timed_out"}
     ]
-    coverage_degraded = [row["step"] for row in rows if row["timeout_degrades_coverage"]]
     skipped = [row["step"] for row in rows if row["status"] == "skipped_deadline"]
     mandatory_tail = [row for row in rows if row["mandatory_tail"]]
     if failed:
@@ -331,7 +359,7 @@ def run_training_harvest(
     elif skipped:
         status = "deadline_exceeded"
     else:
-        status = "coverage_degraded" if coverage_degraded else "ok"
+        status = "ok"
     completed_at = timestamp_fn()
     payload.update(
         {
@@ -340,13 +368,12 @@ def run_training_harvest(
             "completed_at_utc": completed_at,
             "duration_seconds": round(max(0.0, monotonic() - started_clock), 3),
             "failed_steps": failed,
-            "coverage_degraded_steps": coverage_degraded,
             "skipped_deadline_steps": skipped,
             "successful_steps": sum(row["status"] == "ok" for row in rows),
             "mandatory_tail_completed": all(row["status"] == "ok" for row in mandatory_tail),
-            "successful_completion": status in {"ok", "coverage_degraded"},
         }
     )
     write_json(artifact_path, payload)
-    latency_path.unlink(missing_ok=True)
+    cleanup_latency_spool()
+    atexit.unregister(cleanup_latency_spool)
     return payload

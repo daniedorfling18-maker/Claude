@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import gzip
+import os
 from pathlib import Path
 
 import yaml
@@ -750,6 +751,53 @@ def _recent_book_file(cfg, cond: str, tok: str) -> None:
         [{"condition_id": cond, "asset_id": tok, "source_timestamp": "1000.0", "observation_timestamp": "960.0", "hash": "h0", "best_bid": "0.48", "best_ask": "0.52", "midpoint": "0.5", "top_bid_size": "20", "top_ask_size": "20", "bids_json": "[]", "asks_json": "[]", "collected_at_utc": "1970-01-01T00:16:00Z"}],
         fieldnames=_BOOK_FIELDS,
     )
+
+
+def test_wo139_persistent_tranche_is_newest_first_not_condition_id_order(tmp_path):
+    cfg = _config(tmp_path)
+    settings = maker_fill_replay._settings(cfg)
+    settings["regime_days"] = 7
+    _recent_book_file(cfg, "0xaaa", "tokOld")
+    _recent_book_file(cfg, "0xffff", "tokNew")
+    books = cfg.output_root / "maker_carry" / "official_books"
+    now = maker_fill_replay.time.time()
+    # Reverse lexicographic order: the lexicographically last id is newest.
+    os.utime(books / "0xaaa.csv.gz", (now - 20, now - 20))
+    os.utime(books / "0xffff.csv.gz", (now - 10, now - 10))
+
+    recent = maker_fill_replay._recent_book_markets(cfg, settings, exclude=set())
+
+    assert [row["condition_id"] for row in recent] == ["0xffff", "0xaaa"]
+
+
+def test_wo139_seed_budget_prioritizes_sizeable_rows_without_shrinking():
+    rows = {
+        "0xthin": {"token_id": "thin", "net_carry_usd_per_day": "10", "yield_rank": "1",
+                    "estimate_quality": "book_and_history", "band_eligible": "True", "resolution_risk": "high"},
+        "0xsize": {"token_id": "size", "net_carry_usd_per_day": "3", "yield_rank": "2",
+                    "estimate_quality": "single_window_history", "band_eligible": "True", "resolution_risk": "medium"},
+        "0xraw": {"token_id": "raw", "net_carry_usd_per_day": "2", "yield_rank": "3"},
+    }
+
+    seeds, _ = maker_fill_replay._candidate_seed_markets(rows, exclude=set(), cap=2)
+
+    assert [row["condition_id"] for row in seeds] == ["0xsize", "0xthin"]
+    assert len(seeds) == 2
+
+
+def test_wo139_seed_budget_fills_remainder_in_raw_order_and_keeps_malformed_rows():
+    rows = {
+        "0xraw1": {"token_id": "raw1", "net_carry_usd_per_day": "9", "yield_rank": "1",
+                   "estimate_quality": "???", "band_eligible": "maybe", "resolution_risk": ""},
+        "0xraw2": {"token_id": "raw2", "net_carry_usd_per_day": "8", "yield_rank": "2"},
+        "0xsize": {"token_id": "size", "net_carry_usd_per_day": "1", "yield_rank": "3",
+                   "estimate_quality": "book_and_history", "band_eligible": "True", "resolution_risk": "low"},
+    }
+
+    seeds, _ = maker_fill_replay._candidate_seed_markets(rows, exclude=set(), cap=3)
+
+    assert [row["condition_id"] for row in seeds] == ["0xsize", "0xraw1", "0xraw2"]
+    assert len(seeds) == len(rows)
 
 
 def test_scheduled_collector_refreshes_persistent_books_when_portfolio_empty(tmp_path, monkeypatch):

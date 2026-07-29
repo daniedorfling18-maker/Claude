@@ -457,7 +457,16 @@ def _recent_book_markets(
     now = time.time()
     candidates = _candidate_map(cfg)
     watchlist: list[dict[str, Any]] = []
-    for path in sorted(books_dir.glob("*.csv.gz")):
+
+    def _mtime_desc(path: Path) -> float:
+        try:
+            return -path.stat().st_mtime
+        except OSError:
+            # An unreadable entry must not prevent the remaining archives from
+            # being considered. It sorts behind every known modification time.
+            return float("inf")
+
+    for path in sorted(books_dir.glob("*.csv.gz"), key=_mtime_desc):
         condition_id = path.name[: -len(".csv.gz")]  # .stem strips only ".gz"
         if condition_id in exclude:
             continue
@@ -528,6 +537,27 @@ def _candidate_seed_markets(
             )
         )
     ranked.sort()
+    # WO-139: spend the fixed collection budget on rows that already clear the
+    # sizer's non-depth predicates, without reimplementing or changing the
+    # sizer. Missing/malformed fields simply keep a row in the legacy ranking;
+    # they never remove it or shrink the tranche.
+    sizeable: list[tuple[float, float, str, str]] = []
+    remainder: list[tuple[float, float, str, str]] = []
+    for entry in ranked:
+        carry = -entry[0]
+        row = candidates[entry[2]]
+        band_eligible = str(row.get("band_eligible") or "").strip().lower()
+        qualifies = (
+            isfinite(carry)
+            and carry > 0.0
+            and str(row.get("estimate_quality") or "").strip()
+            in {"book_and_history", "single_window_history"}
+            and band_eligible == "true"
+            and str(row.get("resolution_risk") or "").strip().lower() != "high"
+            and str(row.get("resolution_risk") or "").strip().lower() in {"low", "medium"}
+        )
+        (sizeable if qualifies else remainder).append(entry)
+    ranked = sizeable + remainder
     return (
         [
             {"condition_id": condition_id, "token_id": token_id}

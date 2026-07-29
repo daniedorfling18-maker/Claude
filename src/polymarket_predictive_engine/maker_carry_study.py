@@ -384,6 +384,8 @@ CANDIDATE_FIELDS = [
     "net_carry_usd_per_day",
     "capital_usd",
     "estimate_quality",
+    "book_history_hours",
+    "book_snapshot_count",
 ]
 
 

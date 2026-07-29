@@ -161,6 +161,11 @@ work or capital.
 - One work order per branch and PR. Do not combine WOs or add drive-by refactors.
 - Preserve unrelated/user changes in every checkout.
 - Use the required PR gate; do not merge red checks.
+- Unresolved inline review threads block merge, even when the required PR gate
+  is green. Resolve a thread only when its finding is fixed on current `main`
+  or demonstrably superseded; a finding merely being no longer reachable in
+  the diff is not a reason to resolve it. If a thread's status cannot be
+  established, it counts as unresolved and blocks merge.
 - Run target tests and the full suite in an isolated ARM64/Python 3.11 VPS
   checkout when the change warrants it. Record exact results in the PR/WO status.
 - OWNER AUTHORIZATION IS NEVER AGENT-WRITABLE. A change to any frozen or

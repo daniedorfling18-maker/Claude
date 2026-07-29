@@ -5351,7 +5351,7 @@ income - completes the income picture without touching gates), **WO-49**
 BLOCKED until the maker gates read evidence-supported. WO-33 remains last
 overall pending the leakage review.
 
-## WO-114 — VPS ops hygiene: seasonal-job disable switch, ops-log rotation, dashboard-setup readiness wait — `done` (2026-07-21, PR #354, owner merge)
+## WO-114 — VPS ops hygiene: seasonal-job disable switch, ops-log rotation, dashboard-setup readiness wait — `done` (2026-07-21, PR #354)
 
 Orchestrator-built, owner-merged. Non-frozen ops scripts only; no gate,
 threshold, policy, registry, verdict, or order path.
@@ -5367,7 +5367,7 @@ Deployed 2026-07-21; verified in production: locked_card_refresh flipped to
 `intentional 0`, both degraded incidents cleared; 190 MB log rotated to `.1`;
 configure script has passed first-try on both subsequent deploys.
 
-## WO-115 — Unbreak ledger anchoring: snapshot-enroll the rewritten carry history, fail loud on blocked chains — `done` (2026-07-26, PR #356 commit 6e04263, owner merge; registered WO-61 surface)
+## WO-115 — Unbreak ledger anchoring: snapshot-enroll the rewritten carry history, fail loud on blocked chains — `done` (2026-07-26, PR #356 commit 6e04263; registered WO-61 surface)
 
 Root cause of the chain freeze at 2026-07-16: `maker_carry/maker_carry_history.csv`
 was enrolled `append_only`, but its committer legitimately REWRITES the file
@@ -5391,7 +5391,7 @@ only visible as the slow `ledger_anchor_age` SLO breach, ~10 days).
   `ledger_anchor_snapshots/`). New chain verified:
   anchor_date 2026-07-26, chain_head 9fc5ff0a..., previous_chain_head all-zeros.
 
-## WO-116 — Seed official-book collection for top-ranked candidates before selection — `done` (2026-07-26, PR #356 commit 31a3e95, owner merge)
+## WO-116 — Seed official-book collection for top-ranked candidates before selection — `done` (2026-07-26, PR #356 commit 31a3e95)
 
 The WO-113 measurement-eligibility gate is correct, but collection was
 portfolio-only plus the WO-104 mtime tranche (re-polls only markets that
@@ -5411,7 +5411,7 @@ $3.33/day target), stalling M-A at 3/7 against the 2026-08-19 terminal date.
   portfolio-only (coverage_ratio semantics unchanged); snapshot summary now
   reports per-tranche counts.
 
-## WO-117 — Window-aware overrun classification for the harvest-gated maker study — `done` (2026-07-26, PR #356 commit 98f4033, owner merge)
+## WO-117 — Window-aware overrun classification for the harvest-gated maker study — `done` (2026-07-26, PR #356 commit 98f4033)
 
 Telemetry 2026-07-25: the scheduler_overrun_cycles SLO breach (10 consecutive)
 came ENTIRELY from `maker_study_intraday` — every other job's consecutive
@@ -5425,7 +5425,7 @@ on-window run "overrun" by construction (mismeasurement, not starvation).
   target (0) and tighten-only rule untouched; run timing unchanged — label
   only. All other jobs keep bare-interval classification.
 
-## WO-127 — A restore must not wedge the anchor lane: boundary-scoped restore provenance — `in-review` (2026-07-27, PR #364; owner merge required — changes the registered WO-61 verification contract)
+## WO-127 — A restore must not wedge the anchor lane: boundary-scoped restore provenance — `done` (2026-07-27, PR #364; changes the registered WO-61 verification contract)
 
 Registered here before merge because it introduces a new producer/consumer
 artifact and changes what `verify_ledger_chain` accepts. Codex review of #364
@@ -5562,7 +5562,7 @@ confirm `outputs/performance/restore_verification_status.json` shows `status: ok
 pre-boundary corpus rows, and `restore_boundary_date` equal to the archive's
 snapshot date. A non-zero `restored_unverifiable_tolerated` in the *production*
 verification artifact on a tree nobody restored is itself the finding.
-## WO-128 — Harvest and anchor integrity: atomic snapshots, a non-destructive anchor tail, and no silent field loss — `queued` (ISSUED to Codex 2026-07-27; non-frozen except the `ledger_anchor.py` snapshot writer, which routes to owner merge)
+## WO-128 — Harvest and anchor integrity: atomic snapshots, a non-destructive anchor tail, and no silent field loss — `in-review` (2026-07-27, PR #371; non-frozen except the `ledger_anchor.py` snapshot writer, which routes to owner merge)
 
 Four independent defects found in the 2026-07-27 audit of already-merged code.
 All four are integrity defects in the tamper/evidence lane, none changes a gate.
@@ -5910,7 +5910,7 @@ carries a finite score from an `ok` producer; a synthetic
 `maker_live_test.json` in `disabled` state (staged in a scratch output root, never
 on the live tree) yields `no_data` and STOP rather than fresh/clear.
 
-## WO-131 — Restore the candidate-seeding budget and make the seasoning runway visible — `queued` (ISSUED to Codex 2026-07-27; collection-only, non-frozen → orchestrator merge after line-audit)
+## WO-131 — Restore the candidate-seeding budget and make the seasoning runway visible — `done` (2026-07-28, PR #373; collection-only, non-frozen)
 
 **Campaign-critical.** M-A is 5/7 distinct days with the 2026-08-19 terminal date
 23 days out, and the 2026-07-27T00:08 run shows `latest_run_at_target: false`
@@ -5993,7 +5993,7 @@ dead tokens. Within 48 hours of that, `maker_carry_study.json`
 `portfolio_markets` must exceed 0 — if it does not, the seeding fix was not the
 binding constraint and the finding is re-opened.
 
-## WO-132 — Correct the work-order register and make unresolved review threads block merge — `queued` (ISSUED to Codex 2026-07-27; governance documents → owner merge, and the orchestrator must not self-merge it)
+## WO-132 — Correct the work-order register and make unresolved review threads block merge — `in-review` (2026-07-29; governance documents → owner merge, and the orchestrator must not self-merge it)
 
 Files: `docs/POLYMARKET_CODEX_WORK_ORDERS.md`, `AGENTS.md`.
 
@@ -6025,7 +6025,18 @@ reviewer can check every `done` claim against the merge commit it names — and
 `AGENTS.md` states the unresolved-thread merge precondition in its
 work-order/Git discipline section.
 
-## WO-133 — Legitimise the manual VPS deploy path — `queued` (ISSUED to Codex 2026-07-27; **the whole PR routes to owner merge**, because it contains an `AGENTS.md` amendment and a PR cannot be partially merged)
+**Legacy-thread triage status (2026-07-29).** The 34 unresolved threads reported
+on already-merged PRs #356--#363 cannot be enumerated from this network-isolated
+sandbox: the private repository's review-thread API is unavailable without
+authenticated GitHub API access. All 34 therefore remain unresolved and block
+merge under the fail-safe rule above. No identity, finding, dismissal, or WO
+disposition is inferred from a PR number or from local Git history. The
+authenticated line-auditor must place each thread into exactly one of the three
+registered dispositions before resolving it: an existing WO (named), a proposed
+new finding (described but not registered here), or a dismissal with a stated
+reason.
+
+## WO-133 — Legitimise the manual VPS deploy path — `done` (2026-07-28, PR #374 with corrective PRs #375, #376, #377, and #378; governance amendment)
 
 A 2026-07-27 owner request to legitimise the manual deploy path is recorded here
 for owner review and becomes repository authorization only through the owner's
@@ -6084,7 +6095,7 @@ simulated post-arming failure; and the deploy record's honesty fields
 `outputs/performance/deploy_acceptance.json` is PASS for that SHA; and
 `sh scripts/check_polymarket_vps_paper.sh` exits 0.
 
-## WO-136 — The fill replay must quote contemporaneously, not replay today's sheet into last week's regime — `queued` (ISSUED to Codex 2026-07-28 under the owner's direct instruction of 2026-07-28; reporting-only replay surface, non-frozen → orchestrator merge after line-audit)
+## WO-136 — The fill replay must quote contemporaneously, not replay today's sheet into last week's regime — `done` (2026-07-29, PR #383; reporting-only replay surface, non-frozen)
 
 **Why now.** The first post-WO-131 production replay (2026-07-28T12:53Z,
 `maker_fill_replay.json`) reported `simulation_to_reality_haircut: 42.07` —
@@ -6163,7 +6174,7 @@ of the static basis, `realism_ratio` either an O(1) number or an explicit
 insufficient-coverage status, and the `static_sheet_realism_ratio` audit field
 still recording the old basis so the correction's magnitude is auditable.
 
-## WO-137 — Make portfolio churn visible: a per-run composition diff naming the exact reason every market left — `queued` (ISSUED to Codex 2026-07-28 under the owner's direct instruction of 2026-07-28; reporting-only, non-frozen → orchestrator merge after line-audit)
+## WO-137 — Make portfolio churn visible: a per-run composition diff naming the exact reason every market left — `done` (2026-07-29, PR #384; reporting-only, non-frozen)
 
 **Why now.** M-A banks a day only when the day's LAST run holds target (M-A.1),
 and 27 of the 68 history runs found an empty or near-empty portfolio — the
@@ -6306,13 +6317,14 @@ health. Day-after check: `outputs/ops_scheduler/degraded_state_watchdog.json` li
 every new registration with a non-null observation token or an explicit
 `unobserved`, `registered_job_maximum_seconds` covers all 11 scheduler jobs, and both
 push scripts have written a status artifact whose age is surfaced in
-`operating_state.json`. An implementation of this scope was drafted locally by the
-orchestrator and is NOT merged; treat this registered text as authoritative and
-build against `main`.
+`operating_state.json`. The earlier local orchestrator draft was not merged; the
+completed implementation is identified in the completion record below.
 
-WO-127 (restore-chain recoverability) is in review as PR #364 and stays with the
-orchestrator through owner merge; it is a prerequisite for deploying `main`, which
-currently carries the restore→wedge defect.
+**Completion record:** WO-121 is `done` (2026-07-29, PR #385). The implementation
+replaced the earlier unmerged draft; PR #362 remains attributable only to WO-123.
+
+WO-127 (restore-chain recoverability) is complete in PR #364. Its completion
+record is in the dedicated section above.
 
 **Review-thread rule (binding on every WO above).** A WO PR is not mergeable
 while any Codex review thread on it is unresolved. The reviewing step must read
@@ -6351,7 +6363,7 @@ above. The orchestrator does not self-provision recurrence. `OPS_OWNER_NTFY_TOPI
 carries queue-driver phone pushes; custody is unchanged — never in the repo,
 config, chat, or telemetry.
 
-## WO-135 — Let a sandboxed agent run the offline suite, and require it — `in-review` (2026-07-27; `AGENTS.md` amendment → owner merge)
+## WO-135 — Let a sandboxed agent run the offline suite, and require it — `done` (2026-07-27, PR #370; `AGENTS.md` amendment)
 
 **Cause, measured rather than assumed.** Every WO delivered through the dispatch
 bridge on 2026-07-27 arrived with the test results marked "not run locally". Codex

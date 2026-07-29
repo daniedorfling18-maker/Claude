@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -118,6 +119,46 @@ def test_work_order_queue_distinguishes_non_buildable_states() -> None:
     assert "Fail-safe direction:" in wo91
     assert "Day-after check:" in wo91
     assert "recorded CLOB `/prices-history` payload" in wo91
+
+
+def test_wo132_register_claims_are_auditable_and_actor_neutral() -> None:
+    work_orders = _text("docs/POLYMARKET_CODEX_WORK_ORDERS.md")
+    headings = tuple(
+        line for line in work_orders.splitlines() if line.startswith("## WO-")
+    )
+
+    for heading in headings:
+        if "`done`" in heading and "PR #" in heading:
+            assert re.search(r"PR #[1-9][0-9]*", heading), heading
+
+        # Completion records identify the reviewable PR, not an actor whose
+        # authorization a documentation edit is not entitled to assert.
+        if "`done`" in heading:
+            assert "owner merge" not in heading.lower(), heading
+            assert "orchestrator merge" not in heading.lower(), heading
+
+    expected_states = {
+        "WO-121": ("`done`", "PR #385"),
+        "WO-128": ("`in-review`", "PR #371"),
+        "WO-131": ("`done`", "PR #373"),
+        "WO-132": ("`in-review`", None),
+        "WO-133": ("`done`", "PR #374"),
+        "WO-136": ("`done`", "PR #383"),
+        "WO-137": ("`done`", "PR #384"),
+    }
+    for wo, (state, pr) in expected_states.items():
+        if wo == "WO-121":
+            record = work_orders.split("**Completion record:** WO-121", 1)[1].splitlines()[0]
+        else:
+            record = next(line for line in headings if line.startswith(f"## {wo} "))
+        assert state in record, record
+        if pr is not None:
+            assert pr in record, record
+
+    assert "WO-129 — Watchdog false health" in work_orders
+    wo129 = next(line for line in headings if line.startswith("## WO-129 "))
+    assert "`queued`" in wo129
+    assert "PR #" not in wo129
 
 
 def test_maker_module_does_not_write_owner_authorization_claims() -> None:

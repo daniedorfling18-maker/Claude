@@ -28,7 +28,14 @@ jobs:
     # 2026-07-09: raised 30 -> 40. Deploy durations crept 25.5 -> 29 -> 29.5 min
     # through 2026-07-08 (image rebuild + slow VPS) and the 04:27 UTC run was
     # cancelled at the 30-min cap mid-rollout.
-    timeout-minutes: 40
+    # 2026-07-29: raised 40 -> 70. The acceptance stage's outer bound rose to
+    # 1500s (measured prices-history upstream slowdown; see
+    # scripts/run_vps_deploy_acceptance.sh), so the job cap must clear
+    # worst-case checkout+build (~10m) + the 20-minute governance wait + the
+    # 25-minute acceptance ceiling + health/rollback headroom, or the runner
+    # is cancelled mid-rollout before DEPLOY_COMMITTED - the exact unverified-
+    # deploy failure this cap's history documents twice above.
+    timeout-minutes: 70
 
     steps:
       - name: Check out accepted deployment verifier
@@ -721,7 +728,7 @@ jobs:
           # runs: `run` does not build by default, and the `up -d --build` above
           # has already built the image. The sibling callers that were always
           # correct are scripts/restore_from_archive.sh and scripts/push_vps_archive.sh.
-          timeout --signal=TERM --kill-after=30s 900 \
+          timeout --signal=TERM --kill-after=30s 1500 \
             $DOCKER compose -f "$COMPOSE_FILE" --profile deploy-acceptance run \
               --rm --no-deps vps-deploy-acceptance </dev/null
           $DOCKER compose -f "$COMPOSE_FILE" up -d --no-build vps-ops-scheduler

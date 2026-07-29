@@ -249,10 +249,15 @@ def test_vps_deploy_runs_real_data_acceptance_after_restart_and_before_success()
     assert "reconcile-wallet" in acceptance_script
     assert "executor-ops-monitor" in acceptance_script
     assert "operating-state" in acceptance_script
-    assert 'COMMAND_TIMEOUT="${DEPLOY_ACCEPTANCE_COMMAND_TIMEOUT_SECONDS:-300}"' in acceptance_script
-    assert 'TOTAL_TIMEOUT="${DEPLOY_ACCEPTANCE_TOTAL_TIMEOUT_SECONDS:-720}"' in acceptance_script
+    assert 'COMMAND_TIMEOUT="${DEPLOY_ACCEPTANCE_COMMAND_TIMEOUT_SECONDS:-900}"' in acceptance_script
+    assert 'TOTAL_TIMEOUT="${DEPLOY_ACCEPTANCE_TOTAL_TIMEOUT_SECONDS:-1200}"' in acceptance_script
     assert "run_bounded" in acceptance_script
-    assert "timeout --signal=TERM --kill-after=30s 900" in text
+    # Every producer must record wall seconds beside its exit code: the
+    # 2026-07-29 prices-history upstream slowdown took a forensic VPS session
+    # to localize precisely because this artifact held exit codes only.
+    assert 'run_producer maker_carry_study' in acceptance_script
+    assert '"duration_seconds": int(os.environ[f"{name}_seconds"])' in acceptance_script
+    assert "timeout --signal=TERM --kill-after=30s 1500" in text
     assert 'acceptance_status" != "PASS"' in text
     assert "automatic rollback is armed for $original_head" in text
     assert 'install -d -m 0775 -o "$(id -u)" -g "$(id -g)"' in text
@@ -334,6 +339,29 @@ def test_vps_deploy_acceptance_outer_wrappers_outlast_the_inner_budget():
                 f"{path.name}: outer acceptance wrapper {bound}s must exceed the "
                 f"script's total budget {total}s with margin"
             )
+
+    # Codex review P1 on #391: the workflow's job-level cap sits ABOVE all of
+    # these clocks, and its own comment history records two mid-rollout
+    # cancellations from exactly this drift. Whatever the numbers become, the
+    # job cap must clear the acceptance ceiling plus the documented rest of a
+    # worst-case rollout (checkout+build ~10m, 20m governance wait,
+    # health/rollback headroom ~5m).
+    workflow = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(
+        encoding="utf-8"
+    )
+    job_cap_minutes = int(re.search(r"timeout-minutes:\s*(\d+)", workflow).group(1))
+    acceptance_outer = max(
+        int(match)
+        for match in re.findall(
+            r"timeout --signal=TERM --kill-after=30s (\d+)\s*\\\n\s*\$DOCKER compose[^\n]*deploy-acceptance",
+            workflow,
+        )
+    )
+    assert job_cap_minutes * 60 >= acceptance_outer + 35 * 60, (
+        f"workflow timeout-minutes {job_cap_minutes} cannot cover the {acceptance_outer}s "
+        "acceptance ceiling plus a worst-case rollout; the runner would be "
+        "cancelled mid-deploy, before rollback"
+    )
 
 
 def test_vps_deploy_acceptance_never_passes_no_build_to_compose_run():

@@ -135,9 +135,7 @@ def _write_complete_evidence(cfg: EngineConfig) -> None:
             {
                 "order_id": "order-1",
                 "strategy_name": "price_action_round_trip",
-                "source_signal_json": json.dumps(
-                    {"price_action_entry_source": "paper_confirmation_current_candidate"}
-                ),
+                "source_signal_json": json.dumps({"price_action_entry_source": "paper_confirmation_current_candidate"}),
             }
         ],
         fieldnames=["order_id", "strategy_name", "source_signal_json"],
@@ -147,11 +145,7 @@ def _write_complete_evidence(cfg: EngineConfig) -> None:
         [],
         fieldnames=["order_id", "created_at_utc"],
     )
-    owner_text = (
-        "## Owner amendments\n\n"
-        "AUTONOMOUS_MAKER_EXECUTION_AUTHORISED = true\n"
-        "AUTONOMOUS_MAKER_EXECUTION_AUTHORISED_AT = 2026-07-12\n"
-    )
+    owner_text = "## Owner amendments\n\nAUTONOMOUS_MAKER_EXECUTION_AUTHORISED = true\nAUTONOMOUS_MAKER_EXECUTION_AUTHORISED_AT = 2026-07-12\n"
     (cfg.path.parent / "AGENTS.md").write_text(owner_text, encoding="utf-8")
     (cfg.path.parent / "CLAUDE.md").write_text("Follow AGENTS.md.\n", encoding="utf-8")
     docs = cfg.path.parent / "docs"
@@ -202,9 +196,7 @@ def test_operating_state_derives_rows_and_wo67_preconditions(tmp_path: Path, mon
         "P5": "met",
     }
     assert "consecutive_live_ok_days=7" in preconditions["P2"]["evidence"]
-    assert result["paper_activity_lanes"] == {
-        "price_action_round_trip:paper_confirmation_current_candidate": 2
-    }
+    assert result["paper_activity_lanes"] == {"price_action_round_trip:paper_confirmation_current_candidate": 2}
     assert result["paper_trading_invoked"] is False
     assert result["live_trading_invoked"] is False
     assert read_json(cfg.output_root / "performance" / "operating_state.json") == result
@@ -277,7 +269,7 @@ def test_operating_state_missing_artifacts_are_unknown_never_guessed(tmp_path: P
     assert rows["deploy_acceptance"]["state"] == "NOT_RUN"
     assert "vps_telemetry_manifest" in result["missing_inputs"]
     assert all(row["state"] == "UNKNOWN" for row in result["wo67_preconditions"])
-    assert result["slo"]["unknown_count"] == 7
+    assert result["slo"]["unknown_count"] == 9
     assert all(row["breach"] is None for row in result["slo"]["rows"])
 
 
@@ -290,27 +282,22 @@ def test_p3_and_p5_exact_doc_patterns_distinguish_signed_unsigned_and_unreadable
     assert _key_custody_approval(repo)[0] == "UNKNOWN"
 
     (repo / "AGENTS.md").write_text(
-        "## Owner amendments\n\nAUTONOMOUS_MAKER_EXECUTION_AUTHORISED = false\n"
-        "AUTONOMOUS_MAKER_EXECUTION_AUTHORISED_AT = YYYY-MM-DD\n",
+        "## Owner amendments\n\nAUTONOMOUS_MAKER_EXECUTION_AUTHORISED = false\nAUTONOMOUS_MAKER_EXECUTION_AUTHORISED_AT = YYYY-MM-DD\n",
         encoding="utf-8",
     )
     (docs / "KEY_CUSTODY_DESIGN_WO67_P5.md").write_text(
-        "**Status: DRAFT for owner approval.**\n\n"
-        "## Amendment A1 — single project account\n\n**Status: UNSIGNED.**\n",
+        "**Status: DRAFT for owner approval.**\n\n## Amendment A1 — single project account\n\n**Status: UNSIGNED.**\n",
         encoding="utf-8",
     )
     assert _owner_authorisation(repo)[0] == "not_met"
     assert _key_custody_approval(repo)[0] == "not_met"
 
     (repo / "AGENTS.md").write_text(
-        "## Owner amendments\n\nAUTONOMOUS_MAKER_EXECUTION_AUTHORISED = true\n"
-        "AUTONOMOUS_MAKER_EXECUTION_AUTHORISED_AT = 2026-07-17\n",
+        "## Owner amendments\n\nAUTONOMOUS_MAKER_EXECUTION_AUTHORISED = true\nAUTONOMOUS_MAKER_EXECUTION_AUTHORISED_AT = 2026-07-17\n",
         encoding="utf-8",
     )
     (docs / "KEY_CUSTODY_DESIGN_WO67_P5.md").write_text(
-        "**Status: APPROVED — Owner, 2026-07-13.**\n\n"
-        "## Amendment A1 — single project account\n\n"
-        "**Status: APPROVED — Owner, 2026-07-13.**\n",
+        "**Status: APPROVED — Owner, 2026-07-13.**\n\n## Amendment A1 — single project account\n\n**Status: APPROVED — Owner, 2026-07-13.**\n",
         encoding="utf-8",
     )
     assert _owner_authorisation(repo)[0] == "met"
@@ -501,11 +488,7 @@ def test_front_door_drift_test_trips_on_planted_stale_claim() -> None:
 
 
 def test_readme_drift_after_historical_heading_is_still_rejected() -> None:
-    readme = (
-        "Generated state: `outputs/performance/operating_state.md`\n"
-        "\n## What we learned\n"
-        "\nLast project state update: 2026-07-01\n"
-    )
+    readme = "Generated state: `outputs/performance/operating_state.md`\n\n## What we learned\n\nLast project state update: 2026-07-01\n"
     agents = "Generated state: `outputs/performance/operating_state.md`\n\n## Run model\n"
 
     violations = front_door_drift_violations(

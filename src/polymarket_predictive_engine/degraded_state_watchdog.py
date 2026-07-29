@@ -8,20 +8,18 @@ changes a gate, quote state, broker, sizing rule, or order path.
 
 from __future__ import annotations
 
-import csv
 import hashlib
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
 from .config import EngineConfig, load_config
 from .runtime_lock import runtime_lock
-from .utils import ensure_dir, now_utc, read_csv_rows, read_json, serialize_value, write_json
+from .utils import append_csv_rows, ensure_dir, now_utc, read_csv_rows, read_json, write_json
 
 
-WORK_ORDER = "WO-78+WO-83+WO-84+WO-85+WO-86"
+WORK_ORDER = "WO-78+WO-83+WO-84+WO-85+WO-86+WO-121"
 OUTPUT_FILE = "ops_scheduler/degraded_state_watchdog.json"
 STATE_FILE = "ops_scheduler/degraded_state_watchdog_state.json"
 INCIDENT_LEDGER = "performance/degraded_state_incidents.csv"
@@ -38,6 +36,7 @@ REGISTERED_MAXIMA: dict[str, int] = {
     "wallet_not_clean_max_consecutive_harvests": 2,
     "operating_unknown_max_consecutive_cycles": 0,
     "maker_replay_insufficient_coverage_max_consecutive_cycles": 3,
+    "official_book_snapshot_partial_max_consecutive_cycles": 3,
 }
 
 # WO-85 (registered 2026-07-15): every recurring scheduler lane has a
@@ -52,7 +51,16 @@ REGISTERED_JOB_FRESHNESS_MAX_SECONDS: dict[str, int] = {
     "trade_prints": 20 * 60,
     "executor_ops_monitor": 15 * 60,
     "degraded_state_watchdog": 15 * 60,
+    "ledger_anchor": 26 * 60 * 60,
+    "maker_safety_refresh": 60 * 60,
 }
+
+PUSH_STATUS_MAX_SECONDS = 2 * 60 * 60
+PRODUCER_REGISTRATIONS = (
+    ("ledger_chain_integrity", "performance/ledger_anchor_verification.json", {"ok"}),
+    ("disaster_recovery_not_recoverable", "performance/disaster_recovery_status.json", {"ok", "recoverable"}),
+    ("maker_study_run_failed", "maker_carry/maker_carry_study.json", {"ok", "no_candidates", "disabled"}),
+)
 
 MISSING_INPUT_RULES = frozenset(
     {
@@ -117,6 +125,66 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
 def _registrations(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
     return [
         {
+            "id": "ledger_chain_integrity",
+            "artifact": "performance/ledger_anchor_verification.json",
+            "healthy_reachable_states": ["ok and verified"],
+            "degraded_condition": "chain is absent, broken, or unverified",
+            "max_consecutive_degraded_observations": 0,
+            "incident_on_observation": 1,
+            "observation_unit": "verification",
+            "evaluation_policy": "explicit verified healthy allowlist",
+        },
+        {
+            "id": "disaster_recovery_not_recoverable",
+            "artifact": "performance/disaster_recovery_status.json",
+            "healthy_reachable_states": ["ok", "recoverable"],
+            "degraded_condition": "archive/push/RPO is not recoverable",
+            "max_consecutive_degraded_observations": 0,
+            "incident_on_observation": 1,
+            "observation_unit": "DR run",
+            "evaluation_policy": "explicit healthy allowlists and compliant RPO",
+        },
+        {
+            "id": "maker_study_run_failed",
+            "artifact": "maker_carry/maker_carry_study.json",
+            "healthy_reachable_states": ["ok", "no_candidates", "disabled"],
+            "degraded_condition": "missing or failed status",
+            "max_consecutive_degraded_observations": 0,
+            "incident_on_observation": 1,
+            "observation_unit": "study run",
+            "evaluation_policy": "explicit healthy status allowlist",
+        },
+        {
+            "id": "official_book_snapshot_partial",
+            "artifact": "maker_carry/official_book_snapshot.json",
+            "healthy_reachable_states": ["ok", "disabled", "no_candidates"],
+            "degraded_condition": "persistent partial collection",
+            "max_consecutive_degraded_observations": settings["official_book_snapshot_partial_max_consecutive_cycles"],
+            "incident_on_observation": settings["official_book_snapshot_partial_max_consecutive_cycles"] + 1,
+            "observation_unit": "snapshot cycle",
+            "evaluation_policy": "distinct-cycle persistence",
+        },
+        {
+            "id": "operating_state_slo_breach",
+            "artifact": "performance/operating_state.json",
+            "healthy_reachable_states": ["all registered SLO rows present and OK"],
+            "degraded_condition": "breached, unknown, or omitted SLO",
+            "max_consecutive_degraded_observations": 0,
+            "incident_on_observation": 1,
+            "observation_unit": "operating-state run",
+            "evaluation_policy": "registered row completeness and explicit OK",
+        },
+        {
+            "id": "publication_bridge_unhealthy",
+            "artifact": "performance/*_push_status.json",
+            "healthy_reachable_states": ["ok within fixed grace"],
+            "degraded_condition": "missing, failed, or stale host publication",
+            "max_consecutive_degraded_observations": 0,
+            "incident_on_observation": 1,
+            "observation_unit": "wall-clock observation",
+            "evaluation_policy": "fixed two-hour grace; configuration cannot widen",
+        },
+        {
             "id": "requote_missing_inputs",
             "artifact": "maker_carry/requote_alerts.json",
             "healthy_reachable_states": [
@@ -125,9 +193,7 @@ def _registrations(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
                 "pull_quotes_now_or_STOP_with_risk_reason_only",
             ],
             "degraded_condition": "pull_quotes_now/STOP with a registered missing-input rule",
-            "max_consecutive_degraded_observations": settings[
-                "requote_missing_input_max_consecutive_cycles"
-            ],
+            "max_consecutive_degraded_observations": settings["requote_missing_input_max_consecutive_cycles"],
             "incident_on_observation": settings["requote_missing_input_max_consecutive_cycles"] + 1,
             "observation_unit": "producer cycle",
             "evaluation_policy": "registered missing-input predicate with legitimate risk-state exemption",
@@ -137,13 +203,8 @@ def _registrations(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
             "artifact": "maker_carry/maker_fill_replay.json",
             "healthy_reachable_states": ["covered", "partial", "no_simulated_fill_opportunities"],
             "degraded_condition": "nonzero simulated fill opportunities with zero 5m replay coverage",
-            "max_consecutive_degraded_observations": settings[
-                "maker_replay_insufficient_coverage_max_consecutive_cycles"
-            ],
-            "incident_on_observation": settings[
-                "maker_replay_insufficient_coverage_max_consecutive_cycles"
-            ]
-            + 1,
+            "max_consecutive_degraded_observations": settings["maker_replay_insufficient_coverage_max_consecutive_cycles"],
+            "incident_on_observation": settings["maker_replay_insufficient_coverage_max_consecutive_cycles"] + 1,
             "observation_unit": "distinct maker replay",
             "evaluation_policy": "registered zero-coverage predicate with no-opportunity exemption",
         },
@@ -152,9 +213,7 @@ def _registrations(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
             "artifact": "ops_scheduler/status.json",
             "healthy_reachable_states": ["last_exit_code=0"],
             "degraded_condition": "any job last_exit_code != 0",
-            "max_consecutive_degraded_observations": settings[
-                "scheduler_nonzero_max_consecutive_cycles"
-            ],
+            "max_consecutive_degraded_observations": settings["scheduler_nonzero_max_consecutive_cycles"],
             "incident_on_observation": settings["scheduler_nonzero_max_consecutive_cycles"] + 1,
             "observation_unit": "job completion",
             "evaluation_policy": "zero-exit allowlist",
@@ -185,9 +244,7 @@ def _registrations(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
             "artifact": "performance/wallet_reconciliation.json",
             "healthy_reachable_states": sorted(WALLET_HEALTHY_STATES),
             "degraded_condition": "any observed reconciliation status outside the registered healthy allowlist",
-            "max_consecutive_degraded_observations": settings[
-                "wallet_not_clean_max_consecutive_harvests"
-            ],
+            "max_consecutive_degraded_observations": settings["wallet_not_clean_max_consecutive_harvests"],
             "incident_on_observation": settings["wallet_not_clean_max_consecutive_harvests"] + 1,
             "observation_unit": "distinct harvest",
             "evaluation_policy": "healthy-status allowlist; unknown sibling states fail closed",
@@ -198,9 +255,7 @@ def _registrations(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
             "artifact": "performance/operating_state.json",
             "healthy_reachable_states": ["row state is known", "UNKNOWN before any known observation"],
             "degraded_condition": "previously known row becomes UNKNOWN",
-            "max_consecutive_degraded_observations": settings[
-                "operating_unknown_max_consecutive_cycles"
-            ],
+            "max_consecutive_degraded_observations": settings["operating_unknown_max_consecutive_cycles"],
             "incident_on_observation": settings["operating_unknown_max_consecutive_cycles"] + 1,
             "observation_unit": "generated operating-state run",
             "evaluation_policy": "known-to-UNKNOWN transition predicate",
@@ -410,7 +465,10 @@ def _evaluate_scheduler(
     for job_name, raw_job in sorted(jobs.items()):
         job = _mapping(raw_job)
         try:
-            exit_code = int(job.get("last_exit_code", 0))
+            # .get, not [..]: a job record with the field entirely ABSENT (a torn
+            # status.json write - the exact OPS-6 case) must read as a failure,
+            # not raise KeyError out of the watchdog.
+            exit_code = int(job.get("last_exit_code"))
         except (TypeError, ValueError):
             exit_code = 1
         token = str(job.get("last_run_utc") or job.get("started_at_utc") or _stamp(job))
@@ -547,10 +605,7 @@ def _evaluate_scheduler_freshness(
             observation_token=observation_token,
             episode_start=observation_token,
             degraded_state=observed_state,
-            reason=(
-                f"scheduler job {job_name} has no successful completion within "
-                f"{maximum} seconds; measured age {round(age_seconds, 3)} seconds"
-            ),
+            reason=(f"scheduler job {job_name} has no successful completion within {maximum} seconds; measured age {round(age_seconds, 3)} seconds"),
             count=1,
             maximum=0,
         )
@@ -671,8 +726,7 @@ def _evaluate_maker_replay(
             episode_start=str(counter["episode_start_token"]),
             degraded_state=observed,
             reason=(
-                "maker replay has simulated fill opportunities but no covered 5m official-book window; "
-                "a zero realism ratio must not be interpreted as evidence"
+                "maker replay has simulated fill opportunities but no covered 5m official-book window; a zero realism ratio must not be interpreted as evidence"
             ),
             count=count,
             maximum=maximum,
@@ -706,9 +760,7 @@ def _evaluate_wallet(
     degraded = bool(token) and normalized_status not in WALLET_HEALTHY_STATES
     counters = state.setdefault("counters", {})
     migrated_legacy_counter = WALLET_REGISTRATION_ID not in counters and LEGACY_WALLET_REGISTRATION_ID in counters
-    previous_counter = _mapping(
-        counters.get(WALLET_REGISTRATION_ID, counters.get(LEGACY_WALLET_REGISTRATION_ID))
-    )
+    previous_counter = _mapping(counters.get(WALLET_REGISTRATION_ID, counters.get(LEGACY_WALLET_REGISTRATION_ID)))
     counter = _advance_counter(
         previous_counter,
         token=token,
@@ -731,10 +783,7 @@ def _evaluate_wallet(
             reason=str(
                 payload.get("discrepancy_note")
                 or payload.get("note")
-                or (
-                    f"wallet reconciliation status {status!r} is outside healthy allowlist "
-                    + ", ".join(sorted(WALLET_HEALTHY_STATES))
-                )
+                or (f"wallet reconciliation status {status!r} is outside healthy allowlist " + ", ".join(sorted(WALLET_HEALTHY_STATES)))
             ),
             count=count,
             maximum=maximum,
@@ -818,6 +867,203 @@ def _evaluate_operating_state(
     )
 
 
+def _immediate_producer_evaluations(
+    cfg: EngineConfig, state: dict[str, Any], settings: Mapping[str, Any], generated_at: str
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Evaluate WO-121 producers with explicit, fail-closed allowlists."""
+    del settings
+    evaluations: list[dict[str, Any]] = []
+    incidents: dict[str, dict[str, Any]] = {}
+    for registration_id, relative, healthy in PRODUCER_REGISTRATIONS:
+        payload = _mapping(read_json(cfg.output_root / relative, default={}) or {})
+        token = _stamp(payload) or "unobserved"
+        status = str(payload.get("status") or "unobserved").strip().lower()
+        degraded = bool(payload) and status not in healthy
+        reasons = [f"status={status}"]
+        if registration_id == "ledger_chain_integrity":
+            verified = payload.get("verified") is True or bool(payload.get("verified_through_date"))
+            degraded = bool(payload) and (degraded or not verified)
+            reasons.append(f"verified={verified}")
+        elif registration_id == "disaster_recovery_not_recoverable":
+            remote = str(payload.get("remote_push_status") or _mapping(payload.get("remote_push")).get("status") or "unobserved").lower()
+            compliant = _mapping(payload.get("rpo")).get("compliant") is True
+            degraded = bool(payload) and (degraded or remote not in {"ok", "pending"} or not compliant)
+            reasons += [f"remote_push_status={remote}", f"rpo_compliant={compliant}"]
+        evaluations.append(
+            {
+                "registration_id": registration_id,
+                "artifact": relative,
+                "observation_token": None if token == "unobserved" else token,
+                "observed_state": status,
+                "state": "incident" if degraded else "healthy",
+            }
+        )
+        if degraded:
+            row = _incident(
+                generated_at=generated_at,
+                registration_id=registration_id,
+                entity=registration_id,
+                source_artifact=relative,
+                observation_token=token,
+                episode_start=token,
+                degraded_state=status,
+                reason="; ".join(reasons),
+                count=1,
+                maximum=0,
+            )
+            incidents[row["incident_id"]] = row
+
+    relative = "maker_carry/official_book_snapshot.json"
+    payload = _mapping(read_json(cfg.output_root / relative, default={}) or {})
+    token = _stamp(payload)
+    status = str(payload.get("status") or "unobserved").lower()
+    degraded = bool(payload) and status in {"partial", "failed", "unobserved"}
+    counters = state.setdefault("counters", {})
+    counter = _advance_counter(_mapping(counters.get("official_book_snapshot_partial")), token=token or generated_at, degraded=degraded)
+    counters["official_book_snapshot_partial"] = counter
+    maximum = REGISTERED_MAXIMA["official_book_snapshot_partial_max_consecutive_cycles"]
+    count = int(counter["consecutive_degraded_observations"])
+    if degraded and count > maximum:
+        row = _incident(
+            generated_at=generated_at,
+            registration_id="official_book_snapshot_partial",
+            entity="official_book_snapshot",
+            source_artifact=relative,
+            observation_token=token or "unobserved",
+            episode_start=str(counter["episode_start_token"]),
+            degraded_state=status,
+            reason="official-book collection remained partial or unobserved",
+            count=count,
+            maximum=maximum,
+        )
+        incidents[row["incident_id"]] = row
+    evaluations.append(
+        {
+            "registration_id": "official_book_snapshot_partial",
+            "artifact": relative,
+            "observation_token": token or None,
+            "observed_state": status,
+            "consecutive_degraded_observations": count,
+            "max_consecutive_degraded_observations": maximum,
+            "state": "incident" if degraded and count > maximum else ("degraded_within_tolerance" if degraded else "healthy"),
+        }
+    )
+    return evaluations, incidents
+
+
+def _evaluate_slos_and_pushes(cfg: EngineConfig, state: dict[str, Any], generated_at: str) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    evaluations: list[dict[str, Any]] = []
+    incidents: dict[str, dict[str, Any]] = {}
+    relative = "performance/operating_state.json"
+    payload = _mapping(read_json(cfg.output_root / relative, default={}) or {})
+    token = _stamp(payload) or "unobserved"
+    rows = {str(r.get("id")): r for r in _mapping(payload.get("slo")).get("rows", []) if isinstance(r, Mapping)}
+    required = {
+        "quote_sheet_age",
+        "governance_refresh_duration",
+        "scheduler_overrun_cycles",
+        "websocket_gap",
+        "dashboard_staleness",
+        "reconciliation_age",
+        "ledger_anchor_age",
+    }
+    # A missing operating-state artifact (or an empty SLO block) means every
+    # required row is unproven. The registered fail-safe direction is "absent,
+    # stale, or unparseable input is an incident, never health" - but a freshly
+    # bootstrapped host has legitimately not produced operating state yet, so
+    # absence gets the SAME fixed two-hour grace the publication bridges use
+    # below (config cannot widen it), and then every required id reports as
+    # failing. Non-empty rows are evaluated strictly with no grace: a torn or
+    # partial block is missing evidence, not a bootstrap.
+    slo_first_unobserved = state.setdefault("slo_first_unobserved", {})
+    if rows:
+        slo_first_unobserved.pop("operating_state", None)
+        bad = sorted(
+            identifier
+            for identifier in required
+            if identifier not in rows or rows[identifier].get("breach") is not False
+        )
+    else:
+        now_for_slo = _parse_stamp(generated_at) or datetime.now(timezone.utc)
+        first = str(slo_first_unobserved.get("operating_state") or generated_at)
+        slo_first_unobserved["operating_state"] = first
+        missing_age = max(0.0, (now_for_slo - (_parse_stamp(first) or now_for_slo)).total_seconds())
+        bad = sorted(required) if missing_age > PUSH_STATUS_MAX_SECONDS else []
+    if bad:
+        row = _incident(
+            generated_at=generated_at,
+            registration_id="operating_state_slo_breach",
+            entity="operating_state_slo",
+            source_artifact=relative,
+            observation_token=token,
+            episode_start=token,
+            degraded_state="breach_or_missing",
+            reason="SLO rows breached, unknown, or missing: " + ", ".join(bad),
+            count=1,
+            maximum=0,
+        )
+        incidents[row["incident_id"]] = row
+    evaluations.append(
+        {
+            "registration_id": "operating_state_slo_breach",
+            "artifact": relative,
+            "observation_token": None if token == "unobserved" else token,
+            "state": "incident" if bad else "healthy",
+            "failed_rows": bad,
+        }
+    )
+
+    now = _parse_stamp(generated_at) or datetime.now(timezone.utc)
+    first_unobserved = state.setdefault("publication_bridge_first_unobserved", {})
+    bridge_rows = []
+    for name in ("anchor", "telemetry"):
+        rel = f"performance/{name}_push_status.json"
+        status_payload = _mapping(read_json(cfg.output_root / rel, default={}) or {})
+        stamp = _stamp(status_payload)
+        parsed = _parse_stamp(stamp)
+        age = (now - parsed).total_seconds() if parsed else None
+        status = str(status_payload.get("status") or "unobserved").lower()
+        if age is None and not payload:
+            # The host-bridge grace clock begins only once operating-state
+            # evidence proves this installation is active.
+            bad_bridge = False
+        elif age is None:
+            first = str(first_unobserved.get(name) or generated_at)
+            first_unobserved[name] = first
+            missing_age = max(0.0, (now - (_parse_stamp(first) or now)).total_seconds())
+            bad_bridge = missing_age > PUSH_STATUS_MAX_SECONDS
+        else:
+            first_unobserved.pop(name, None)
+            bad_bridge = age > PUSH_STATUS_MAX_SECONDS or status != "ok"
+        bridge_rows.append(
+            {"bridge": name, "status": status, "observation_token": stamp or None, "age_seconds": age, "state": "incident" if bad_bridge else "healthy"}
+        )
+        if bad_bridge:
+            observation = stamp or "unobserved"
+            row = _incident(
+                generated_at=generated_at,
+                registration_id="publication_bridge_unhealthy",
+                entity=name,
+                source_artifact=rel,
+                observation_token=observation,
+                episode_start=observation,
+                degraded_state=status,
+                reason=f"{name} publication status is missing, failed, or older than {PUSH_STATUS_MAX_SECONDS} seconds",
+                count=1,
+                maximum=0,
+            )
+            incidents[row["incident_id"]] = row
+    evaluations.append(
+        {
+            "registration_id": "publication_bridge_unhealthy",
+            "artifact": "performance/*_push_status.json",
+            "state": "incident" if any(r["state"] == "incident" for r in bridge_rows) else "healthy",
+            "bridges": bridge_rows,
+        }
+    )
+    return evaluations, incidents
+
+
 def _append_incidents(path: Path, incidents: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not incidents:
         return []
@@ -825,16 +1071,7 @@ def _append_incidents(path: Path, incidents: list[dict[str, Any]]) -> list[dict[
     new_rows = [row for row in incidents if str(row.get("incident_id") or "") not in existing_ids]
     if not new_rows:
         return []
-    ensure_dir(path.parent)
-    write_header = not path.exists() or path.stat().st_size == 0
-    with path.open("a", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=INCIDENT_FIELDS, extrasaction="ignore")
-        if write_header:
-            writer.writeheader()
-        for row in new_rows:
-            writer.writerow({key: serialize_value(row.get(key, "")) for key in INCIDENT_FIELDS})
-        handle.flush()
-        os.fsync(handle.fileno())
+    append_csv_rows(path, new_rows, fieldnames=INCIDENT_FIELDS)
     return new_rows
 
 
@@ -855,10 +1092,7 @@ def _notification(
         "",
     ]
     for row in active:
-        lines.append(
-            f"- **{row.get('registration_id')} / {row.get('entity')}**: {row.get('reason')} "
-            f"(source `{row.get('source_artifact')}`)"
-        )
+        lines.append(f"- **{row.get('registration_id')} / {row.get('entity')}**: {row.get('reason')} (source `{row.get('source_artifact')}`)")
     if not active:
         lines.append("- No active semantic-health incidents.")
     lines += [
@@ -948,6 +1182,13 @@ def build_degraded_state_watchdog(
             evaluation, incidents = evaluator(cfg, state, settings, generated_at)
             evaluations.append(evaluation)
             active_by_id.update(incidents)
+
+        producer_evaluations, producer_incidents = _immediate_producer_evaluations(cfg, state, settings, generated_at)
+        evaluations.extend(producer_evaluations)
+        active_by_id.update(producer_incidents)
+        slo_evaluations, slo_incidents = _evaluate_slos_and_pushes(cfg, state, generated_at)
+        evaluations.extend(slo_evaluations)
+        active_by_id.update(slo_incidents)
 
         active = sorted(active_by_id.values(), key=lambda row: (row["registration_id"], row["entity"]))
         new = _append_incidents(ledger_path, active)

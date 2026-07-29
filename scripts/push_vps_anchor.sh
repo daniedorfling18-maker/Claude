@@ -13,11 +13,21 @@ BRANCH="${VPS_ANCHOR_BRANCH:-vps-anchor}"
 HEAD_FILE="${VPS_ANCHOR_HEAD_FILE:-$REPO_DIR/outputs/performance/ledger_anchor_head.json}"
 LOCK_DIR="${TMPDIR:-/tmp}/push_vps_anchor.lock"
 GIT_DIR="$REPO_DIR/.git"
+STATUS_FILE="${VPS_ANCHOR_STATUS_FILE:-$REPO_DIR/outputs/performance/anchor_push_status.json}"
+PUSH_STATUS="failed"
+stamp_status() {
+  mkdir -p "$(dirname "$STATUS_FILE")" 2>/dev/null || return 0
+  tmp="$STATUS_FILE.tmp.$$"
+  printf '{"generated_at_utc":"%s","status":"%s","paper_trading_invoked":false,"live_trading_invoked":false}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PUSH_STATUS" > "$tmp" && mv "$tmp" "$STATUS_FILE"
+}
+trap stamp_status EXIT
 
 [ -d "$GIT_DIR" ] || { echo "no git repo at $REPO_DIR" >&2; exit 0; }
 [ -s "$HEAD_FILE" ] || { echo "no ledger anchor head at $HEAD_FILE" >&2; exit 0; }
 
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  PUSH_STATUS="lock_held"
   echo "another anchor push is running; skipping" >&2
   exit 0
 fi
@@ -26,7 +36,8 @@ cleanup() {
   rmdir "$LOCK_DIR" 2>/dev/null || true
   [ -n "$SNAP" ] && rm -rf "$SNAP"
 }
-trap cleanup EXIT INT TERM
+trap 'cleanup; stamp_status' EXIT
+trap 'cleanup; exit 1' INT TERM
 
 ANCHOR_DATE=$(python - "$HEAD_FILE" <<'PY'
 import json
@@ -89,6 +100,7 @@ fi
 
 # Deliberately no leading '+' refspec: history rewrites are forbidden here.
 if git --git-dir="$GIT_DIR" push -q origin "$COMMIT:refs/heads/$BRANCH"; then
+  PUSH_STATUS="ok"
   echo "$ANCHOR_DATE pushed durable ledger anchor $COMMIT to $BRANCH"
 else
   echo "$ANCHOR_DATE anchor push failed; will retry next cycle" >&2

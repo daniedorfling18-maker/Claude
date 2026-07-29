@@ -6504,18 +6504,27 @@ freshness representations. Both must reflect incomplete collection:
 
   **An in-progress harvest is not an observation** (added 2026-07-29 after
   Codex's review of PR #393 found the fail-closed rule above generating false
-  alarms). The harvest omits `coverage_degraded_steps` until finalization while
-  refreshing `generated_at_utc` after every child, and `wait_with_safety_pulses`
-  runs the watchdog every five minutes during the harvest — so a healthy
-  multi-pulse harvest would otherwise increment the counter and page the owner
-  before its own clean receipt arrived. A receipt whose status is non-terminal
-  and whose stamp is INSIDE the age ceiling is skipped entirely: not degraded,
-  not healthy, not counted. The counter keys to distinct COMPLETED harvests, so
-  one harvest contributes exactly one observation however many pulses observe
-  it. A receipt stuck non-terminal BEYOND the ceiling is the wedged-harvest case
-  and must alarm — rule 1 may not swallow it. False alarms are not a lesser
-  failure than false health here: an alarm the owner learns to ignore is a
-  watchdog that has stopped working.
+  alarms; narrowed the same day after its review of PR #394 found the first
+  wording swallowing malformed receipts). The harvest omits
+  `coverage_degraded_steps` until finalization while refreshing
+  `generated_at_utc` after every child, and `wait_with_safety_pulses` runs the
+  watchdog every five minutes during the harvest — so a healthy multi-pulse
+  harvest would otherwise increment the counter and page the owner before its
+  own clean receipt arrived.
+
+  The exemption is therefore keyed to the producer's EXACT in-progress status
+  literal, not to "non-terminal": a receipt is skipped only when its status
+  equals that one known running value AND its in-progress fields are internally
+  consistent AND its stamp is inside the age ceiling. A receipt whose status is
+  absent, unknown, or misspelled is MALFORMED and alarms immediately no matter
+  how fresh its stamp — the preceding fail-closed rule governs it, and a
+  freshly-stamped garbage status must never buy silence. A skipped receipt is
+  not degraded, not healthy, and not counted; the counter keys to distinct
+  COMPLETED harvests, so one harvest contributes exactly one observation however
+  many pulses observe it. A receipt stuck at the running literal BEYOND the
+  ceiling is the wedged-harvest case and must alarm — this exemption may not
+  swallow it. False alarms are not a lesser failure than false health here: an
+  alarm the owner learns to ignore is a watchdog that has stopped working.
 
 **Fail-safe direction (S5).** A slow or timed-out collection child degrades
 COVERAGE only. It must never mark a market measured, never fabricate or complete
@@ -6528,18 +6537,28 @@ incomplete is worse than one that fails loudly, which is why 138.4 exists.
 children, and leaves BOTH the `status.json` `last_success_utc` and the
 filesystem success stamp unrefreshed; (2) a clean harvest refreshes both;
 (3) a non-timeout child failure still fails loudly and refreshes neither;
-(4) every child row carries `duration_seconds`; (5) the latency summary contains
-no credential-shaped value, no full token id, no path tail that is pure hex of
-length >= 32, no tail of length >= 64, and no non-finite duration; (6) a
+(4) every child row carries `duration_seconds`; (5) the latency summary is FUNCTIONAL, not merely
+safe: given a known set of child request records on the declared transport, the
+receipt carries the exact expected `host`, `path_tail`, `request_count`, `p50`
+and `max` values — a summary that is always empty or always "unavailable" must
+fail this test — and separately it contains no credential-shaped value, no full
+token id, no path tail that is pure hex of length >= 32, no tail of length >= 64,
+and no non-finite duration; (6) a
 truncated price series from a timed-out child is not treated as complete by the
 study's consumer path — asserted against the PRODUCTION `min_points` and
 `_adverse_selection`, ending in `markout_measured is False`, not against a
 lowered test-only threshold; (7) the new watchdog registration opens an incident
 on repeated `coverage_degraded_steps`, stays healthy on a clean run, and fails
 CLOSED on an absent, stale, malformed, or non-list field; (7b) a healthy harvest
-observed across three consecutive pulses while non-terminal produces zero
-incidents and exactly one observation on completion, while a receipt stuck
-non-terminal past the ceiling opens an incident; (8) the tolerated list
+observed across three consecutive pulses at the running literal produces zero
+incidents and exactly one observation on completion, while a receipt stuck at
+that literal past the ceiling opens an incident, and a receipt with an absent or
+unknown status alarms immediately however fresh its stamp; (7c) the receipt-age
+window is pinned by a CLOCK-ADVANCE test, not by naming a stale case: one
+receipt held at a fixed stamp reads healthy when observed inside the ceiling and
+alarms when the evaluation clock is advanced past it, which is what proves the
+recency is anchored to the receipt's own timestamp with the right boundary
+semantics; (8) the tolerated list
 is enumerated — a tolerated step, a non-tolerated step with the same timeout
 kind, and a step whose name begins with `collect_` but is not on the list all
 behave per 138.1; (9) an operator tightening of the harvest timeout is NOT
@@ -6548,8 +6567,16 @@ clamp in the same module); (10) the same-day retry still fires after
 `HARVEST_RETRY_INTERVAL` following a degraded run.
 
 **Day-after check:** on the next scheduled harvest, `training_harvest.json`
-shows per-child durations and, if upstream is still slow, a `timed_out`
-tolerated child with the harvest completing its remaining children — while
-`maker_carry_study.json` status stays `ok`, NEITHER freshness representation is
-refreshed for that run, and the degraded-coverage watchdog registration is
-visible in `degraded_state_watchdog.json`.
+shows per-child durations and a latency summary carrying real `host` /
+`path_tail` / `request_count` / `p50` / `max` values for the prices-history
+endpoint; if upstream is still slow, a `timed_out` tolerated child appears with
+the harvest completing its remaining children, NEITHER freshness representation
+is refreshed for that run, and the degraded-coverage watchdog registration is
+visible in `degraded_state_watchdog.json`. The maker-study expectation is
+conditional on that child's outcome, because the producer writes atomically:
+when the study child COMPLETES, `maker_carry_study.json` carries a status from
+its full registered healthy allowlist — `ok`, `no_candidates`, or `disabled`,
+any of which is a legitimate outcome of a valid run — and when the study child
+TIMES OUT the producer never writes at all, so the invariant is that the prior
+artifact and its `generated_at_utc` are unchanged, not that its status happened
+to be `ok`.

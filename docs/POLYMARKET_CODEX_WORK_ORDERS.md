@@ -6441,11 +6441,29 @@ collection path, a latency-summary helper, and their tests.
 138.1 — a child on the REGISTERED TOLERATED LIST that exhausts its bound is
 recorded `timed_out` in `outputs/ops_scheduler/training_harvest.json` and the
 harvest CONTINUES to its remaining children instead of aborting the lane. The
-tolerated list is exactly two steps — **`collect_price_history` and
-`maker_carry_study`** — enumerated by name. `HarvestStep` carries no COLLECTION
-classification, so no prefix match, name heuristic, or "looks like collection"
-rule may stand in for this list: a step whose name merely begins with `collect_`
-but is not enumerated is NOT tolerated. Any child that fails for a non-timeout
+tolerated list is exactly ONE step — **`collect_price_history`** — enumerated by
+name. `HarvestStep` carries no COLLECTION classification, so no prefix match,
+name heuristic, or "looks like collection" rule may stand in for this list: a
+step whose name merely begins with `collect_` but is not enumerated is NOT
+tolerated.
+
+  **Why one step and not two** (narrowed 2026-07-29 after Codex's review of PR
+  #393 found the two-step list reaching gate evidence). The first draft also
+  tolerated `maker_carry_study`, and that was wrong in kind, not degree. A
+  timed-out `collect_price_history` is a pure COLLECTION gap: less data lands on
+  disk, and the existing fail-safe already carries it — absent price history
+  reads `no_price_history` → `markout_measured: False` → not sizeable → M-gates
+  pending. A timed-out `maker_carry_study` is something else entirely: it is the
+  PRODUCER of the registered gate evidence, it writes atomically so the PRIOR
+  `maker_carry_study.json` and candidate CSV survive intact, and
+  `reward_epoch_sample` / `decision_policy` read them without rejecting a stale
+  `generated_at_utc` — so a "coverage-degraded" harvest could reuse yesterday's
+  M-A/M-B/M-C state while reporting successful completion. Gate-adjacent
+  staleness wearing a green badge is exactly what this work order was opened to
+  prevent, so the study takes the ordinary fail-loud path: nonzero, neither
+  freshness representation refreshed, same-day retry armed. The general rule
+  this encodes: **a collector may be tolerated, a producer of gate evidence may
+  not.** Any child that fails for a non-timeout
 reason keeps today's fail-loud behaviour. WO-128.2's separation of harvest and
 anchor-tail accounting is unchanged. The decision point that re-arms the lane
 must re-derive this allowlist by step name rather than trusting a boolean written
@@ -6526,6 +6544,20 @@ freshness representations. Both must reflect incomplete collection:
   swallow it. False alarms are not a lesser failure than false health here: an
   alarm the owner learns to ignore is a watchdog that has stopped working.
 
+  **A receipt that disappears after being observed stays alarmed.** `unobserved`
+  is reserved for genuine initialisation — no prior observation in the
+  watchdog's persisted state. Once a completed harvest has been observed, a
+  missing `training_harvest.json` is DEGRADED, not unobserved: active incidents
+  are rebuilt every cycle, so treating disappearance as unobserved would let
+  deleting the receipt silently clear an open coverage incident.
+
+  **Degraded-retry backoff is measured from COMPLETION, not from the attempt
+  stamp.** `touch_attempt_stamp` is written before the child runs, so a harvest
+  slower than `HARVEST_RETRY_INTERVAL` would otherwise re-launch immediately on
+  the next scheduler iteration — sustained back-to-back load against the very
+  endpoint that is already slow, making the outage worse rather than recovering
+  from it.
+
 **Fail-safe direction (S5).** A slow or timed-out collection child degrades
 COVERAGE only. It must never mark a market measured, never fabricate or complete
 a partial price series, never let a truncated series read as whole, and never
@@ -6564,7 +6596,13 @@ kind, and a step whose name begins with `collect_` but is not on the list all
 behave per 138.1; (9) an operator tightening of the harvest timeout is NOT
 overridden by any floor (clamp direction is tighten-only, matching the deadline
 clamp in the same module); (10) the same-day retry still fires after
-`HARVEST_RETRY_INTERVAL` following a degraded run.
+`HARVEST_RETRY_INTERVAL` measured from the previous attempt's COMPLETION, and a
+degraded harvest lasting longer than that interval does not re-launch
+immediately; (11) a `maker_carry_study` timeout takes the fail-loud path —
+nonzero, neither freshness representation refreshed — proving the tolerated list
+is the single collector; (12) after a completed harvest has been observed,
+deleting `training_harvest.json` opens or preserves an incident rather than
+reading `unobserved`.
 
 **Day-after check:** on the next scheduled harvest, `training_harvest.json`
 shows per-child durations and a latency summary carrying real `host` /

@@ -6285,6 +6285,7 @@ refactors:
 | 7 | **WO-133** | guarded manual deploy path + its `AGENTS.md` amendment | **owner** (one PR carrying a governance amendment cannot be partially merged) |
 | 8 | **WO-136** | contemporaneous-quote fill replay (kills the phantom-fill 42x haircut; issued 2026-07-28 under the owner's direct instruction) | orchestrator, after line-audit |
 | 9 | **WO-137** | portfolio composition diff — name the reason every market leaves (churn is the campaign's binding variable; issued 2026-07-28 under the owner's direct instruction) | orchestrator, after line-audit |
+| 10 | **WO-140** | zero-coverage collection must be visible in the receipt; retry backoff from completion (replaces the withdrawn WO-138 — see its epitaph in this entry) | owner (scheduler surface) |
 
 **WO-121 — watchdog coverage for unmonitored producers** (registered 2026-07-27 as
 WO-129's named blocking prerequisite, per ENGINEERING_STANDARDS S3). WO-129 tightens
@@ -6407,3 +6408,106 @@ widen the carve-out into "agents may run production paths".
 "Do not start any of the following on the local workstation"; and the required PR
 gate still runs the full unfiltered suite on that PR and remains what the merge
 decision cites.
+
+
+## WO-140 — A clean exit code is not clean coverage — `queued` (registered 2026-07-29 BEFORE dispatch; scheduler surface → owner merge after line-audit)
+
+**This work order replaces WO-138, which was withdrawn unbuilt.** The epitaph is
+part of the registration because the failure was in specification, not in
+building, and the next person to write a work order should see it.
+
+WO-138 was dispatched on 2026-07-29 to make the training harvest "survive" a
+slow upstream, and it rested on three claims. All three were false, all three
+were the orchestrator's, and all three were caught by Codex's PR review rather
+than by the orchestrator's own line-audit:
+
+  * *"The receipt records exit codes and nothing else — no child durations."*
+    `run_training_harvest` has always initialised `duration_seconds` per child
+    and replaced it with monotonic elapsed time before persisting
+    (`training_harvest.py:206,234,259`); the live receipt carries it. The
+    orchestrator had read those durations earlier the same day.
+  * *"A hard failure costs a day of evidence."* The harvest loop never aborted
+    on a failed child, before or after the work order. Later children always
+    ran. A nonzero exit already buys a watchdog incident, no success stamp so
+    the same-day retry arms, and an honest receipt — which is the system
+    working.
+  * The tolerated-timeout mechanism was keyed to process exit **124**, which
+    `collect_price_history` never returns: it catches each request exception,
+    writes `fetch_error` rows, and exits 0.
+
+Six review rounds each bolted another exemption onto that mechanism before it
+was abandoned. What survived scrutiny is the two items below, which is what
+should have been written on the first day. **A timed-out or failing child is a
+failed child; nothing here changes that.**
+
+**Scope (reporting and one backoff clock — no gate, threshold, eligibility, or
+success-semantics change).** Files: `scripts/run_vps_ops_scheduler.sh`,
+`src/polymarket_predictive_engine/training_harvest.py`, the price-history
+collection path, and their tests.
+
+140.1 — **zero-coverage collection must be visible.** `collect_price_history`
+catches every request exception, writes `fetch_error` quality rows, and returns
+normally (`price_history_collector.py:373-425`), so a child that collected
+NOTHING exits 0 and reads clean in every artifact and every watchdog. The
+harvest receipt must carry, per collection child, its requested count, its
+collected count, and a tally of failure kinds. Absent or unparseable collector
+output is reported as unknown coverage, never as full coverage.
+
+  Reporting only, deliberately. Downstream is already fail-safe: absent price
+  history reads `no_price_history` → `markout_measured: False` → not sizeable →
+  M-gates pending, which the WO-138 line-audit traced end to end
+  (`maker_carry_study.py` `_price_series` → `_pickoff_from_series` →
+  `_adverse_selection` → `_size_portfolio` → `portfolio_markout_measured`). This
+  is an evidence-visibility defect, not a gate defect, and the fix must not
+  pretend otherwise by touching gate inputs.
+
+140.2 — **retry backoff measured from COMPLETION, with interruption semantics.**
+`touch_attempt_stamp` is written before the child runs, so a harvest slower than
+`HARVEST_RETRY_INTERVAL` re-launches immediately on the next scheduler
+iteration — sustained back-to-back load against the very endpoint that is
+already slow, making the outage worse instead of recovering from it. Backoff
+runs from the previous attempt's END. Absent completion evidence is an
+interruption, not a fresh start, because both naive readings are wrong: treating
+it as infinitely old re-launches a full harvest on every scheduler restart,
+while treating it as not-ready would block the first-ever harvest forever. The
+registered behaviour is therefore: missing completion WITH a prior attempt stamp
+backs off from that attempt stamp; missing completion with NO prior attempt is a
+genuine first run and proceeds immediately; a malformed or future-dated stamp is
+treated as an interruption, never as licence to run now.
+
+**Explicitly NOT in scope, recorded so it is not rebuilt.** No tolerated-step
+list; no `coverage_degraded` / `coverage_degraded_steps` / `successful_completion`
+/ `success_eligible` fields or plumbing; no degraded-coverage watchdog
+registration; no timeout floors overriding an operator's tightening; no rewrite
+of `training_harvest.py`'s `WORK_ORDER` stamp (its registered producer remains
+WO-85); and no per-endpoint latency summary — per-child `duration_seconds`
+already localises a slow child, so that summary was marginal evidence dragging a
+spool file, an artifact contract, and a hygiene surface behind it.
+
+**Fail-safe direction (S5).** This work order adds reporting and one backoff
+clock. It must not change which runs count as successful, must not change any
+freshness or exit-code semantics, must not mark a market measured, and must not
+alter an M-A/M-B/M-C input. Unknown coverage is reported as unknown, never as
+full. An incomplete harvest continues to report itself as incomplete.
+
+**Tests.** (1) a collection child that finishes with exit 0 having written only
+`fetch_error` rows is reported in the receipt with collected=0 and its failure
+tally — a clean exit code must not read as clean coverage; (2) a fully
+successful child reports requested == collected and an empty tally; (3) absent
+or unparseable collector output reports unknown coverage, not full coverage;
+(4) every child row still carries `duration_seconds` — a REGRESSION assertion on
+existing behaviour, not evidence of new work; (5) a harvest lasting longer than
+`HARVEST_RETRY_INTERVAL` does not re-launch immediately, and the retry does fire
+once that interval has elapsed since COMPLETION; (6) missing completion with a
+prior attempt stamp backs off from that attempt; (7) missing completion with no
+prior attempt proceeds immediately; (8) a malformed or future-dated stamp is
+treated as an interruption; (9) a timed-out child still produces a nonzero
+harvest exit, no success stamp, and no `status.json` freshness refresh — proving
+no tolerance mechanism was reintroduced.
+
+**Day-after check:** the next scheduled harvest's `training_harvest.json` shows,
+for each collection child, requested and collected counts plus a failure tally
+alongside the existing `duration_seconds` — and if `prices-history` is still
+slow, the receipt shows collected well below requested while the harvest reports
+its failure honestly through the existing `scheduler_nonzero_exit` and
+`scheduler_completion_freshness` registrations.

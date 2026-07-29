@@ -154,35 +154,65 @@ def test_latency_summary_strips_query_token_and_credentials(tmp_path: Path, monk
     assert "user" not in serialized
 
 
-def test_scheduler_library_mode_stamps_coverage_timeout_as_success(tmp_path: Path) -> None:
+def _run_scheduler_harvest_probe(tmp_path: Path, payload: dict) -> tuple[list[str], list[str]]:
     out_dir = tmp_path / "ops"
     out_dir.mkdir()
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     fake_python = fake_bin / "python"
     fake_python.write_text(
-        "#!/bin/sh\nif [ \"$1\" != \"-m\" ]; then exec " + sys.executable + " \"$@\"; fi\nprintf '%s\\n' '"
-        '{"steps":[{"step":"collect_price_history","status":"timed_out","exit_code":124,'
-        '"timeout_degrades_coverage":true},{"step":"maker_carry_study","status":"ok","exit_code":0},'
-        '{"step":"anchor_ledgers","status":"ok","exit_code":0}]}'
-        f"' >'{out_dir}/training_harvest.json'\n",
+        "#!/bin/sh\nif [ \"$1\" != \"-m\" ]; then exec " + sys.executable
+        + " \"$@\"; fi\nprintf '%s\\n' '" + json.dumps(payload)
+        + f"' >'{out_dir}/training_harvest.json'\n",
         encoding="utf-8",
     )
     fake_python.chmod(0o755)
     probe = f"""
 OPS_SCHEDULER_LIBRARY_ONLY=1 OPS_SCHEDULER_OUT_DIR='{out_dir}' PATH='{fake_bin}':$PATH . scripts/run_vps_ops_scheduler.sh
 wait_with_safety_pulses() {{ wait "$1"; }}
-stamp_status() {{ printf '%s:%s\\n' "$1" "$2" >>'{tmp_path}/stamps'; }}
-touch_success_stamp() {{ printf '%s\\n' "$1" >>'{tmp_path}/success'; }}
+stamp_status() {{ printf '%s:%s\n' "$1" "$2" >>'{tmp_path}/stamps'; }}
+touch_success_stamp() {{ printf '%s\n' "$1" >>'{tmp_path}/success'; }}
 run_training_harvest
 """
     subprocess.run(["sh", "-c", probe], check=True, cwd=Path.cwd())
-    assert (tmp_path / "stamps").read_text(encoding="utf-8").splitlines() == [
-        "training_harvest:0",
-        "training_harvest_anchor_tail:0",
-    ]
-    assert (tmp_path / "success").read_text(encoding="utf-8").strip() == "training_harvest"
+    stamps = (tmp_path / "stamps").read_text(encoding="utf-8").splitlines()
+    success_path = tmp_path / "success"
+    successes = success_path.read_text(encoding="utf-8").splitlines() if success_path.exists() else []
+    return stamps, successes
 
+
+def test_scheduler_coverage_timeout_stamps_row_without_refreshing_success(tmp_path: Path) -> None:
+    stamps, successes = _run_scheduler_harvest_probe(tmp_path, {
+        "coverage_degraded_steps": ["collect_price_history"],
+        "steps": [
+            {"step": "collect_price_history", "status": "timed_out", "exit_code": 124, "timeout_degrades_coverage": True},
+            {"step": "maker_carry_study", "status": "ok", "exit_code": 0},
+            {"step": "anchor_ledgers", "status": "ok", "exit_code": 0},
+        ],
+    })
+    assert stamps == ["training_harvest:0", "training_harvest_anchor_tail:0"]
+    assert successes == []
+
+
+def test_scheduler_clean_harvest_refreshes_success_stamp(tmp_path: Path) -> None:
+    stamps, successes = _run_scheduler_harvest_probe(tmp_path, {
+        "coverage_degraded_steps": [],
+        "steps": [{"step": "anchor_ledgers", "status": "ok", "exit_code": 0}],
+    })
+    assert stamps == ["training_harvest:0", "training_harvest_anchor_tail:0"]
+    assert successes == ["training_harvest"]
+
+
+def test_scheduler_non_timeout_failure_does_not_refresh_success(tmp_path: Path) -> None:
+    stamps, successes = _run_scheduler_harvest_probe(tmp_path, {
+        "coverage_degraded_steps": [],
+        "steps": [
+            {"step": "collect_price_history", "status": "failed", "exit_code": 7},
+            {"step": "anchor_ledgers", "status": "ok", "exit_code": 0},
+        ],
+    })
+    assert stamps == ["training_harvest:1", "training_harvest_anchor_tail:0"]
+    assert successes == []
 
 def test_deadline_skips_unstarted_work_but_not_mandatory_tail(
     tmp_path: Path,
@@ -259,7 +289,7 @@ def test_scheduler_rearms_harvest_from_successful_completion_not_start() -> None
     # WO-128.2: re-arming keys off the HARVEST outcome specifically - an
     # anchor-tail failure must not re-run the multi-minute collection, so the
     # success stamp cannot depend on the combined process $CODE.
-    assert 'if [ "$HARVEST_CODE" -eq 0 ]; then\n    touch_success_stamp training_harvest' in function
+    assert 'if [ "$HARVEST_CODE" -eq 0 ] && [ "$COVERAGE_DEGRADED" -eq 0 ]; then' in function
     assert function.index("stamp_status training_harvest") < function.index(
         "touch_success_stamp training_harvest"
     )
@@ -275,7 +305,7 @@ def test_scheduler_stamps_harvest_and_anchor_tail_independently() -> None:
     assert 'row.get("step") != "anchor_ledgers"' in function
     assert 'stamp_status training_harvest "$HARVEST_CODE"' in function
     assert 'stamp_status training_harvest_anchor_tail "$ANCHOR_TAIL_CODE"' in function
-    assert 'if [ "$HARVEST_CODE" -eq 0 ]; then\n    touch_success_stamp training_harvest' in function
+    assert 'if [ "$HARVEST_CODE" -eq 0 ] && [ "$COVERAGE_DEGRADED" -eq 0 ]; then' in function
     assert function.index("stamp_status training_harvest ") < function.index(
         "touch_success_stamp training_harvest"
     )

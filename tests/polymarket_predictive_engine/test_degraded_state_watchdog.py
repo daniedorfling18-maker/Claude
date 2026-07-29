@@ -498,6 +498,64 @@ def test_training_harvest_completion_older_than_25_hours_is_incident(
     assert result["status"] == "incident"
 
 
+def test_repeated_training_harvest_coverage_degradation_opens_incident_and_clean_resets(
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg(tmp_path)
+    artifact = cfg.output_root / "ops_scheduler" / "training_harvest.json"
+    write_json(
+        artifact,
+        {
+            "generated_at_utc": "2026-07-29T01:00:00Z",
+            "coverage_degraded_steps": ["collect_price_history"],
+        },
+    )
+    first = build_degraded_state_watchdog(cfg, as_of="2026-07-29T01:01:00Z")
+    first_eval = next(row for row in first["evaluations"] if row["registration_id"] == "training_harvest_coverage_degraded")
+    assert first_eval["state"] == "degraded_within_tolerance"
+    assert first_eval["consecutive_degraded_observations"] == 1
+
+    write_json(
+        artifact,
+        {
+            "generated_at_utc": "2026-07-30T01:00:00Z",
+            "coverage_degraded_steps": ["maker_carry_study"],
+        },
+    )
+    repeated = build_degraded_state_watchdog(cfg, as_of="2026-07-30T01:01:00Z")
+    repeated_eval = next(row for row in repeated["evaluations"] if row["registration_id"] == "training_harvest_coverage_degraded")
+    assert repeated_eval["state"] == "incident"
+    assert repeated_eval["consecutive_degraded_observations"] == 2
+    assert any(row["registration_id"] == "training_harvest_coverage_degraded" for row in repeated["active_incidents"])
+
+    write_json(
+        artifact,
+        {"generated_at_utc": "2026-07-31T01:00:00Z", "coverage_degraded_steps": []},
+    )
+    clean = build_degraded_state_watchdog(cfg, as_of="2026-07-31T01:01:00Z")
+    clean_eval = next(row for row in clean["evaluations"] if row["registration_id"] == "training_harvest_coverage_degraded")
+    assert clean_eval["state"] == "healthy"
+    assert clean_eval["consecutive_degraded_observations"] == 0
+    assert not any(row["registration_id"] == "training_harvest_coverage_degraded" for row in clean["active_incidents"])
+
+
+def test_training_harvest_coverage_field_missing_fails_closed_once_artifact_exists(
+    tmp_path: Path,
+) -> None:
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "ops_scheduler" / "training_harvest.json",
+        {"generated_at_utc": "2026-07-29T02:00:00Z"},
+    )
+
+    result = build_degraded_state_watchdog(cfg, as_of="2026-07-29T02:01:00Z")
+    evaluation = next(row for row in result["evaluations"] if row["registration_id"] == "training_harvest_coverage_degraded")
+
+    assert evaluation["state"] == "degraded_within_tolerance"
+    assert evaluation["coverage_degraded_steps_readable"] is False
+    assert evaluation["consecutive_degraded_observations"] == 1
+
+
 def test_cli_scheduler_dashboard_and_operating_state_are_wired() -> None:
     scheduler = Path("scripts/run_vps_ops_scheduler.sh").read_text(encoding="utf-8")
     dashboard = Path("src/polymarket_predictive_engine/dashboard.py").read_text(encoding="utf-8")

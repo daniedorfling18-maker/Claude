@@ -584,17 +584,20 @@ try:
         )
         for row in rows
     )
-    print(1 if harvest_failed else 0, anchor_code)
+    coverage_steps = payload.get("coverage_degraded_steps")
+    coverage_degraded = not isinstance(coverage_steps, list) or bool(coverage_steps)
+    print(1 if harvest_failed else 0, anchor_code, 1 if coverage_degraded else 0)
 except (AttributeError, KeyError, OSError, StopIteration, TypeError, ValueError, json.JSONDecodeError):
     # Missing or malformed accounting fails closed under the process outcome.
-    print(overall, overall)
+    print(overall, overall, 1)
 PY
   )
   HARVEST_CODE="$1"
   ANCHOR_TAIL_CODE="$2"
+  COVERAGE_DEGRADED="$3"
   stamp_status training_harvest "$HARVEST_CODE" "WO-85 resilient per-step harvest excluding independently stamped anchor tail; see ops_scheduler/training_harvest.json" "$HARVEST_STARTED_AT"
   stamp_status training_harvest_anchor_tail "$ANCHOR_TAIL_CODE" "WO-128 independent anchor-ledgers tail from training harvest; failure remains visible without repeating collection" "$HARVEST_STARTED_AT"
-  if [ "$HARVEST_CODE" -eq 0 ]; then
+  if [ "$HARVEST_CODE" -eq 0 ] && [ "$COVERAGE_DEGRADED" -eq 0 ]; then
     touch_success_stamp training_harvest
   fi
   log "training_harvest: harvest exit $HARVEST_CODE; anchor tail exit $ANCHOR_TAIL_CODE; process exit $CODE"

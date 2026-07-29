@@ -22,7 +22,7 @@ from .runtime_lock import runtime_lock
 from .utils import append_csv_rows, now_utc, parse_timestamp, read_csv_rows, read_json, write_json, write_text_atomic
 
 
-WORK_ORDER = "WO-78+WO-83+WO-84+WO-85+WO-86+WO-121+WO-129"
+WORK_ORDER = "WO-78+WO-83+WO-84+WO-85+WO-86+WO-121+WO-129+WO-138"
 OUTPUT_FILE = "ops_scheduler/degraded_state_watchdog.json"
 STATE_FILE = "ops_scheduler/degraded_state_watchdog_state.json"
 INCIDENT_LEDGER = "performance/degraded_state_incidents.csv"
@@ -34,6 +34,7 @@ OFFICIAL_BOOK_HEALTHY_STATES = frozenset({"ok", "disabled", "no_portfolio"})
 DR_STATUS_MAX_AGE_SECONDS = 6 * 60 * 60
 NTFY_ENV_VAR = "OPS_OWNER_NTFY_TOPIC_URL"
 MAX_NOTIFICATION_IDS = 20
+TRAINING_HARVEST_DEGRADED_MAX_CONSECUTIVE_RUNS = 1
 
 # A maximum is the number of consecutive degraded observations tolerated.
 # Therefore max=3 trips on observation four, exactly matching "> 3 cycles".
@@ -239,6 +240,16 @@ def _registrations(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
             "observation_unit": "watchdog wall-clock observation",
             "evaluation_policy": "immediate incident once completion age exceeds the fixed per-job maximum",
             "registered_job_maximum_seconds": REGISTERED_JOB_FRESHNESS_MAX_SECONDS,
+        },
+        {
+            "id": "training_harvest_coverage_degraded",
+            "artifact": "ops_scheduler/training_harvest.json",
+            "healthy_reachable_states": ["coverage_degraded_steps is an empty list"],
+            "degraded_condition": "coverage_degraded_steps is nonempty, missing, or unreadable once the artifact exists",
+            "max_consecutive_degraded_observations": TRAINING_HARVEST_DEGRADED_MAX_CONSECUTIVE_RUNS,
+            "incident_on_observation": TRAINING_HARVEST_DEGRADED_MAX_CONSECUTIVE_RUNS + 1,
+            "observation_unit": "distinct training harvest",
+            "evaluation_policy": "fixed repeated-run ceiling; missing or unreadable field fails closed",
         },
         {
             "id": "kill_input_stale_live_stage",
@@ -631,6 +642,78 @@ def _evaluate_scheduler_freshness(
             "state": "incident" if stale_jobs else "healthy_or_initializing",
             "jobs": evaluations,
             "stale_jobs": stale_jobs,
+        },
+        incidents,
+    )
+
+
+def _evaluate_training_harvest_coverage(
+    cfg: EngineConfig,
+    state: dict[str, Any],
+    settings: Mapping[str, Any],
+    generated_at: str,
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    """Alarm on repeated coverage-degraded harvest receipts."""
+
+    del settings  # fixed ceiling; configuration cannot widen it
+    relative = "ops_scheduler/training_harvest.json"
+    path = cfg.output_root / relative
+    if not path.exists():
+        return (
+            {
+                "registration_id": "training_harvest_coverage_degraded",
+                "artifact": relative,
+                "state": "unobserved",
+                "consecutive_degraded_observations": 0,
+                "max_consecutive_degraded_observations": TRAINING_HARVEST_DEGRADED_MAX_CONSECUTIVE_RUNS,
+            },
+            {},
+        )
+
+    payload = _mapping(read_json(path, default={}) or {})
+    try:
+        fallback_token = f"mtime_ns:{path.stat().st_mtime_ns}"
+    except OSError:
+        fallback_token = f"unreadable_at:{generated_at}"
+    token = _stamp(payload) or fallback_token
+    value = payload.get("coverage_degraded_steps")
+    field_valid = isinstance(value, list)
+    degraded_steps = [str(item) for item in value if str(item)] if field_valid else []
+    degraded = not field_valid or bool(degraded_steps)
+    counters = state.setdefault("counters", {})
+    counter = _advance_counter(
+        _mapping(counters.get("training_harvest_coverage_degraded")),
+        token=token,
+        degraded=degraded,
+    )
+    counters["training_harvest_coverage_degraded"] = counter
+    count = int(counter["consecutive_degraded_observations"])
+    maximum = TRAINING_HARVEST_DEGRADED_MAX_CONSECUTIVE_RUNS
+    incidents: dict[str, dict[str, Any]] = {}
+    if degraded and count > maximum:
+        row = _incident(
+            generated_at=generated_at,
+            registration_id="training_harvest_coverage_degraded",
+            entity="training_harvest",
+            source_artifact=relative,
+            observation_token=token,
+            episode_start=str(counter["episode_start_token"]),
+            degraded_state="coverage_degraded" if field_valid else "coverage_field_missing_or_unreadable",
+            reason="training harvest coverage was degraded on repeated runs",
+            count=count,
+            maximum=maximum,
+        )
+        incidents[row["incident_id"]] = row
+    return (
+        {
+            "registration_id": "training_harvest_coverage_degraded",
+            "artifact": relative,
+            "state": "incident" if incidents else ("degraded_within_tolerance" if degraded else "healthy"),
+            "observation_token": token,
+            "coverage_degraded_steps": degraded_steps if field_valid else None,
+            "coverage_degraded_steps_readable": field_valid,
+            "consecutive_degraded_observations": count,
+            "max_consecutive_degraded_observations": maximum,
         },
         incidents,
     )
@@ -1318,6 +1401,7 @@ def build_degraded_state_watchdog(
             _evaluate_maker_replay,
             _evaluate_scheduler,
             _evaluate_scheduler_freshness,
+            _evaluate_training_harvest_coverage,
             _evaluate_kill_input_staleness,
             _evaluate_wallet,
             _evaluate_operating_state,

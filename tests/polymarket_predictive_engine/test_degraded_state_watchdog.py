@@ -820,8 +820,9 @@ def test_wo129_lock_held_carries_incidents_then_alarms_and_recovers(tmp_path: Pa
 
     assert original_ids <= {row["incident_id"] for row in carried[0]["active_incidents"]}
     assert carried[0]["evaluations"] == observed["evaluations"]
-    assert carried[0]["carried_forward_from_utc"] == observed["generated_at_utc"]
-    assert carried[1]["carried_forward_from_utc"] == observed["generated_at_utc"]
+    assert [row["carried_forward_from_utc"] for row in carried] == [
+        observed["generated_at_utc"]
+    ] * 4
     assert carried[-1]["carry_forward_cycles"] == 4
     assert any(row["registration_id"] == "degraded_state_watchdog_wedged" for row in carried[-1]["active_incidents"])
 

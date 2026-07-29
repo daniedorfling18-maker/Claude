@@ -6410,211 +6410,112 @@ gate still runs the full unfiltered suite on that PR and remains what the merge
 decision cites.
 
 
-## WO-138 — The training harvest must survive a slow upstream — `queued` (dispatched to Codex 2026-07-29; scheduler surface → owner merge after line-audit)
+## WO-138 — Make a slow upstream visible in the harvest receipt — `queued` (dispatched to Codex 2026-07-29; scheduler surface → owner merge after line-audit)
 
 **Provenance note, recorded because it matters more than the WO.** WO-138 and
-WO-139 were dispatched to Codex on 2026-07-29 *before* these register entries
+WO-139 were dispatched to Codex on 2026-07-29 *before* their register entries
 existed, which is a breach of the registered bridge rule that the orchestrator
 "may never dispatch unregistered work". The breach is the orchestrator's, not
 Codex's — it was caught by Codex's own review of PR #393, not by the
 orchestrator. Nothing about this entry, or the owner's standing instruction to
-keep the pipeline moving, constitutes owner authorization of either work order:
-merge routing for both is the owner's, and this text records a dispatch, never
-an approval.
+keep the pipeline moving, constitutes owner authorization: merge routing is the
+owner's, and this text records a dispatch, never an approval.
+
+**Scope was cut in half on the day it was written, and that story is the
+entry.** The first draft's central mechanism was a *tolerated timeout*: a
+"collection" child that exhausted its bound would be recorded `timed_out`, the
+harvest would continue, and the run would still report success. Six successive
+Codex review findings each bolted another exception onto that mechanism — it had
+to be excluded from the filesystem success stamp, then from `status.json`'s
+`last_success_utc`, then from `_evaluate_scheduler_freshness`'s legacy
+migration, then given its own completion-based backoff clock, then its own CLI
+exit semantics, then a fresh watchdog registration to re-detect the degradation
+it had just suppressed. A design that needs six exemptions to stay honest is not
+converging.
+
+The premise was also simply false. It claimed "a hard failure costs a day of
+evidence" — but the harvest loop **never aborted on a failed child**, before or
+after this work order. Later children always ran. A nonzero harvest exit already
+costs exactly: one watchdog incident (visibility, wanted), no success stamp so
+the same-day retry arms (wanted), and an honest receipt. On a genuinely slow
+upstream that is the system working, not failing. **A timed-out child is a
+failed child.** The registered scope is therefore only what was actually
+missing: evidence, and a bounded retry.
 
 **Why now.** Measured 2026-07-29 with in-container instrumentation:
 `clob.polymarket.com/prices-history` degraded from ~0.3s to ~5-10s per uncached
 fetch (p50 5.1s, max 10.3s, all HTTP 200, `cf-cache-status: EXPIRED`, no
 rate-limit headers; reproduced from a second network location). The 13:37Z
-`training_harvest` failed with exit 1 after ~49 minutes, and both the
-`collect-price-history` child (460s baseline) and the `maker-carry-study` child
-(69.9s warm baseline, 844s measured that day) scale with that endpoint. The
-harvest is the daily lane that feeds the campaign's evidence; a hard failure
-there costs a day of it, and the failure repeats nightly until upstream
-recovers.
+`training_harvest` failed after ~49 minutes. Establishing that took a
+multi-hour forensic session on the VPS *because the receipt recorded exit codes
+and nothing else* — no child durations, no endpoint latencies. That is the gap.
 
-**Scope (collection/ops only — no gate, threshold, or eligibility change).**
-Files: `scripts/run_vps_ops_scheduler.sh`,
+**Scope (observability and backoff only — no gate, threshold, eligibility, or
+success-semantics change).** Files: `scripts/run_vps_ops_scheduler.sh`,
 `src/polymarket_predictive_engine/training_harvest.py`, the price-history
 collection path, a latency-summary helper, and their tests.
 
-138.1 — a child on the REGISTERED TOLERATED LIST that exhausts its bound is
-recorded `timed_out` in `outputs/ops_scheduler/training_harvest.json` and the
-harvest CONTINUES to its remaining children instead of aborting the lane. The
-tolerated list is exactly ONE step — **`collect_price_history`** — enumerated by
-name. `HarvestStep` carries no COLLECTION classification, so no prefix match,
-name heuristic, or "looks like collection" rule may stand in for this list: a
-step whose name merely begins with `collect_` but is not enumerated is NOT
-tolerated.
+138.1 — every child row in `outputs/ops_scheduler/training_harvest.json` carries
+`duration_seconds` beside its status and exit code, matching the field the
+deploy-acceptance artifact gained in #391 — the field that reduced a multi-hour
+investigation to a one-file read.
 
-  **Why one step and not two** (narrowed 2026-07-29 after Codex's review of PR
-  #393 found the two-step list reaching gate evidence). The first draft also
-  tolerated `maker_carry_study`, and that was wrong in kind, not degree. A
-  timed-out `collect_price_history` is a pure COLLECTION gap: less data lands on
-  disk, and the existing fail-safe already carries it — absent price history
-  reads `no_price_history` → `markout_measured: False` → not sizeable → M-gates
-  pending. A timed-out `maker_carry_study` is something else entirely: it is the
-  PRODUCER of the registered gate evidence, it writes atomically so the PRIOR
-  `maker_carry_study.json` and candidate CSV survive intact, and
-  `reward_epoch_sample` / `decision_policy` read them without rejecting a stale
-  `generated_at_utc` — so a "coverage-degraded" harvest could reuse yesterday's
-  M-A/M-B/M-C state while reporting successful completion. Gate-adjacent
-  staleness wearing a green badge is exactly what this work order was opened to
-  prevent, so the study takes the ordinary fail-loud path: nonzero, neither
-  freshness representation refreshed, same-day retry armed. The general rule
-  this encodes: **a collector may be tolerated, a producer of gate evidence may
-  not.** Any child that fails for a non-timeout
-reason keeps today's fail-loud behaviour. WO-128.2's separation of harvest and
-anchor-tail accounting is unchanged. The decision point that re-arms the lane
-must re-derive this allowlist by step name rather than trusting a boolean written
-into the artifact, and must require that flag to be exactly boolean `true` — a
-string or number is not a boolean.
+138.2 — a compact per-endpoint latency summary (host, path tail, request count,
+p50, max) in the same receipt, so "the venue is slow" is evidence rather than an
+investigation. **The transport is declared, not assumed:** harvest children are
+separate subprocesses, so the harvest creates a spool file before its first
+child and removes it after the last, children append one bounded record per
+request, and the harvest aggregates the spool into the receipt. When the spool
+is absent or unreadable the receipt says so explicitly rather than omitting the
+block silently. The spool is NEVER published — it must match neither the
+telemetry `*.json` glob nor `credential_guard.ALLOWED_SUFFIXES`. Nothing
+credential-shaped reaches the receipt: no query strings, no URL userinfo, no
+full token ids; a path tail that is pure hex of length >= 32, or any tail of
+length >= 64, is rejected outright, and non-finite durations are clamped. A
+single unclassified 64-hex value in a published artifact blocks every telemetry
+push — that has happened before and cost >22h of blindness.
 
-138.2 — every child row carries `duration_seconds` beside its status/exit code,
-matching the field the deploy-acceptance artifact gained in #391 (that field is
-what reduced a multi-hour forensic session to a one-file read).
+138.3 — degraded-retry backoff is measured from the previous attempt's
+COMPLETION, not from `touch_attempt_stamp`, which is written before the child
+runs. Without this, a harvest slower than `HARVEST_RETRY_INTERVAL` re-launches
+immediately on the next scheduler iteration, producing sustained back-to-back
+load against the very endpoint that is already slow — making the outage worse
+instead of recovering from it.
 
-138.3 — a compact per-endpoint latency summary (host, path tail, request count,
-p50, max) is recorded in the harvest receipt so "the venue is slow" is evidence
-in an artifact rather than an investigation. **Because every harvest child runs
-as a separate subprocess, the transport must be declared, not assumed:** the
-harvest creates a spool file before its first child and removes it after the
-last, children append one bounded record per request, and the harvest aggregates
-the spool into the receipt. When the spool is absent or unreadable the receipt
-says so explicitly rather than omitting the block silently. The spool is NEVER
-published — it must match neither the telemetry `*.json` glob
-(`push_vps_telemetry.sh`) nor `credential_guard.ALLOWED_SUFFIXES`. No query
-strings, no URL userinfo, no full token ids, nothing credential-shaped reaches
-the receipt: a path tail that is pure hex of length >= 32, or any tail of length
->= 64, is rejected outright, and non-finite durations are clamped. This artifact
-publishes to the telemetry branch and the WO-73 guard governs it — a single
-unclassified 64-hex value in it blocks every telemetry push, which has happened
-before and cost >22h of blindness.
+**Explicitly NOT in scope, recorded so it is not rebuilt.** No tolerated-step
+list; no `coverage_degraded` / `coverage_degraded_steps` / `successful_completion`
+/ `success_eligible` fields or plumbing; no degraded-coverage watchdog
+registration; no timeout floors overriding an operator's tightening; no rewrite
+of `training_harvest.py`'s `WORK_ORDER` stamp (the artifact's registered
+producer remains WO-85 — WO-128 amended the same file without rewriting it).
+A timed-out child stays a failed child, and the existing `scheduler_nonzero_exit`
+and `scheduler_completion_freshness` registrations alarm on it exactly as they
+already do.
 
-138.4 — **a tolerated timeout must not let the lane read fresh.** Added
-2026-07-29 after Codex's review of PR #393 found the first build refreshing
-freshness on a degraded run, and corrected again the same day after Codex's
-review of PR #394 found the first correction naming only one of the two
-freshness representations. Both must reflect incomplete collection:
+**Fail-safe direction (S5).** This work order adds reporting and one backoff
+clock. It must not change which runs count as successful, must not change any
+freshness or exit-code semantics, must not mark a market measured, and must not
+alter an M-A/M-B/M-C input. Data that could not be collected is absent, absent
+data reads as not-measured downstream, and an incomplete harvest reports itself
+as incomplete.
 
-  * `outputs/ops_scheduler/status.json` per-job `last_success_utc` — what
-    `degraded_state_watchdog.scheduler_completion_freshness` actually reads.
-    `stamp_status` refreshes it on any zero harvest code, independently of the
-    filesystem stamp, so a build that leaves the stamp alone while reporting
-    zero still reads green forever. That is not compliance.
-  * the filesystem success stamp read by `seconds_since_success_stamp` /
-    `training_harvest_retry_ready` — which governs the 30-minute same-day retry.
-    Refreshing it locks a coverage gap in for a full 24 hours and is a
-    regression against the pre-WO-138 behaviour, where a timed-out harvest
-    retried the same day and often got the data.
-
-  Degraded coverage therefore surfaces through the existing 25h ceiling with no
-  new config surface, and the same-day retry is preserved. A watchdog
-  registration additionally reads `coverage_degraded_steps` so repeated
-  degradation opens an incident before that ceiling. **That registration's
-  contract on bad input is part of this clause, not an implementation detail:**
-  the field is a list of step names written by the harvest receipt; the
-  registration fails CLOSED when the receipt is absent, when it is older than a
-  fixed age ceiling, when the field is missing, or when it is present but not a
-  list. A missing field must never default to an empty list and read healthy —
-  that default is precisely the false-health this clause exists to prevent.
-  Fixed thresholds in code; configuration may alarm sooner, never later.
-
-  **An in-progress harvest is not an observation** (added 2026-07-29 after
-  Codex's review of PR #393 found the fail-closed rule above generating false
-  alarms; narrowed the same day after its review of PR #394 found the first
-  wording swallowing malformed receipts). The harvest omits
-  `coverage_degraded_steps` until finalization while refreshing
-  `generated_at_utc` after every child, and `wait_with_safety_pulses` runs the
-  watchdog every five minutes during the harvest — so a healthy multi-pulse
-  harvest would otherwise increment the counter and page the owner before its
-  own clean receipt arrived.
-
-  The exemption is therefore keyed to the producer's EXACT in-progress status
-  literal, not to "non-terminal": a receipt is skipped only when its status
-  equals that one known running value AND its in-progress fields are internally
-  consistent AND its stamp is inside the age ceiling. A receipt whose status is
-  absent, unknown, or misspelled is MALFORMED and alarms immediately no matter
-  how fresh its stamp — the preceding fail-closed rule governs it, and a
-  freshly-stamped garbage status must never buy silence. A skipped receipt is
-  not degraded, not healthy, and not counted; the counter keys to distinct
-  COMPLETED harvests, so one harvest contributes exactly one observation however
-  many pulses observe it. A receipt stuck at the running literal BEYOND the
-  ceiling is the wedged-harvest case and must alarm — this exemption may not
-  swallow it. False alarms are not a lesser failure than false health here: an
-  alarm the owner learns to ignore is a watchdog that has stopped working.
-
-  **A receipt that disappears after being observed stays alarmed.** `unobserved`
-  is reserved for genuine initialisation — no prior observation in the
-  watchdog's persisted state. Once a completed harvest has been observed, a
-  missing `training_harvest.json` is DEGRADED, not unobserved: active incidents
-  are rebuilt every cycle, so treating disappearance as unobserved would let
-  deleting the receipt silently clear an open coverage incident.
-
-  **Degraded-retry backoff is measured from COMPLETION, not from the attempt
-  stamp.** `touch_attempt_stamp` is written before the child runs, so a harvest
-  slower than `HARVEST_RETRY_INTERVAL` would otherwise re-launch immediately on
-  the next scheduler iteration — sustained back-to-back load against the very
-  endpoint that is already slow, making the outage worse rather than recovering
-  from it.
-
-**Fail-safe direction (S5).** A slow or timed-out collection child degrades
-COVERAGE only. It must never mark a market measured, never fabricate or complete
-a partial price series, never let a truncated series read as whole, and never
-alter an M-A/M-B/M-C input. Data that could not be collected is absent, and
-absent data reads as not-measured downstream. A harvest that is quietly
-incomplete is worse than one that fails loudly, which is why 138.4 exists.
-
-**Tests.** (1) a tolerated timeout stamps its child row, runs the later
-children, and leaves BOTH the `status.json` `last_success_utc` and the
-filesystem success stamp unrefreshed; (2) a clean harvest refreshes both;
-(3) a non-timeout child failure still fails loudly and refreshes neither;
-(4) every child row carries `duration_seconds`; (5) the latency summary is FUNCTIONAL, not merely
-safe: given a known set of child request records on the declared transport, the
-receipt carries the exact expected `host`, `path_tail`, `request_count`, `p50`
-and `max` values — a summary that is always empty or always "unavailable" must
-fail this test — and separately it contains no credential-shaped value, no full
-token id, no path tail that is pure hex of length >= 32, no tail of length >= 64,
-and no non-finite duration; (6) a
-truncated price series from a timed-out child is not treated as complete by the
-study's consumer path — asserted against the PRODUCTION `min_points` and
-`_adverse_selection`, ending in `markout_measured is False`, not against a
-lowered test-only threshold; (7) the new watchdog registration opens an incident
-on repeated `coverage_degraded_steps`, stays healthy on a clean run, and fails
-CLOSED on an absent, stale, malformed, or non-list field; (7b) a healthy harvest
-observed across three consecutive pulses at the running literal produces zero
-incidents and exactly one observation on completion, while a receipt stuck at
-that literal past the ceiling opens an incident, and a receipt with an absent or
-unknown status alarms immediately however fresh its stamp; (7c) the receipt-age
-window is pinned by a CLOCK-ADVANCE test, not by naming a stale case: one
-receipt held at a fixed stamp reads healthy when observed inside the ceiling and
-alarms when the evaluation clock is advanced past it, which is what proves the
-recency is anchored to the receipt's own timestamp with the right boundary
-semantics; (8) the tolerated list
-is enumerated — a tolerated step, a non-tolerated step with the same timeout
-kind, and a step whose name begins with `collect_` but is not on the list all
-behave per 138.1; (9) an operator tightening of the harvest timeout is NOT
-overridden by any floor (clamp direction is tighten-only, matching the deadline
-clamp in the same module); (10) the same-day retry still fires after
-`HARVEST_RETRY_INTERVAL` measured from the previous attempt's COMPLETION, and a
-degraded harvest lasting longer than that interval does not re-launch
-immediately; (11) a `maker_carry_study` timeout takes the fail-loud path —
-nonzero, neither freshness representation refreshed — proving the tolerated list
-is the single collector; (12) after a completed harvest has been observed,
-deleting `training_harvest.json` opens or preserves an incident rather than
-reading `unobserved`.
+**Tests.** (1) every child row carries `duration_seconds`; (2) the latency
+summary is FUNCTIONAL — given a known set of child records on the declared
+transport, the receipt carries the exact expected `host`, `path_tail`,
+`request_count`, `p50` and `max`, so a summary that is always empty or always
+"unavailable" fails; (3) the summary contains no credential-shaped value, no
+full token id, no pure-hex tail >= 32, no tail >= 64, and no non-finite
+duration; (4) the spool is removed after the run and matches no published glob;
+(5) a timed-out child still produces a nonzero harvest exit, no success stamp,
+and no `status.json` freshness refresh — i.e. the tolerance mechanism is gone;
+(6) a harvest lasting longer than `HARVEST_RETRY_INTERVAL` does not re-launch
+immediately, and the retry does fire once that interval has elapsed since
+COMPLETION; (7) an operator tightening of the harvest timeout is not overridden
+by any floor.
 
 **Day-after check:** on the next scheduled harvest, `training_harvest.json`
-shows per-child durations and a latency summary carrying real `host` /
+shows per-child `duration_seconds` and a latency summary carrying real `host` /
 `path_tail` / `request_count` / `p50` / `max` values for the prices-history
-endpoint; if upstream is still slow, a `timed_out` tolerated child appears with
-the harvest completing its remaining children, NEITHER freshness representation
-is refreshed for that run, and the degraded-coverage watchdog registration is
-visible in `degraded_state_watchdog.json`. The maker-study expectation is
-conditional on that child's outcome, because the producer writes atomically:
-when the study child COMPLETES, `maker_carry_study.json` carries a status from
-its full registered healthy allowlist — `ok`, `no_candidates`, or `disabled`,
-any of which is a legitimate outcome of a valid run — and when the study child
-TIMES OUT the producer never writes at all, so the invariant is that the prior
-artifact and its `generated_at_utc` are unchanged, not that its status happened
-to be `ok`.
+endpoint. If upstream is still slow the harvest reports its failure honestly —
+nonzero, no success stamp, the existing scheduler registrations alarming — and
+the receipt now says WHICH child and HOW slow, which is the entire point.

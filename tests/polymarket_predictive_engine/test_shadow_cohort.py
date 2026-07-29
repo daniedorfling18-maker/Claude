@@ -15,6 +15,55 @@ def _unlocked_shadow_update_calls(source: str) -> list[int]:
         for child in ast.iter_child_nodes(parent):
             parents[child] = parent
 
+    def _is_acquired_attr(node: ast.AST, lock_name: str) -> bool:
+        return (
+            isinstance(node, ast.Attribute)
+            and node.attr == "acquired"
+            and isinstance(node.value, ast.Name)
+            and node.value.id == lock_name
+        )
+
+    def _is_not_acquired(node: ast.AST, lock_name: str) -> bool:
+        return (
+            isinstance(node, ast.UnaryOp)
+            and isinstance(node.op, ast.Not)
+            and _is_acquired_attr(node.operand, lock_name)
+        )
+
+    def _contains(root: ast.AST, target: ast.AST) -> bool:
+        return any(descendant is target for descendant in ast.walk(root))
+
+    def _acquired_guarded(node: ast.AST, with_node: ast.With, lock_name: str) -> bool:
+        # Lexical nesting is NOT the serialization contract: runtime_lock
+        # deliberately ENTERS the block with acquired=False when the lock is
+        # held (skip-when-held), so a call inside the with-block can still race
+        # an existing writer unless control flow checks the acquisition. The
+        # two production shapes are accepted:
+        #   A) the call sits under `if lock.acquired:` (or in the else branch
+        #      of `if not lock.acquired:`), or
+        #   B) an earlier statement of the with-body is `if not lock.acquired:`
+        #      ending in return/raise/continue/break, dominating the call.
+        ancestor = parents.get(node)
+        while ancestor is not None and ancestor is not with_node:
+            if isinstance(ancestor, ast.If):
+                in_body = any(_contains(stmt, node) for stmt in ancestor.body)
+                if _is_acquired_attr(ancestor.test, lock_name) and in_body:
+                    return True
+                if _is_not_acquired(ancestor.test, lock_name) and not in_body:
+                    return True
+            ancestor = parents.get(ancestor)
+        for statement in with_node.body:
+            if _contains(statement, node):
+                break
+            if (
+                isinstance(statement, ast.If)
+                and _is_not_acquired(statement.test, lock_name)
+                and statement.body
+                and isinstance(statement.body[-1], (ast.Return, ast.Raise, ast.Continue, ast.Break))
+            ):
+                return True
+        return False
+
     def inside_prediction_lock(node: ast.AST) -> bool:
         ancestor = parents.get(node)
         while ancestor is not None:
@@ -30,7 +79,11 @@ def _unlocked_shadow_update_calls(source: str) -> list[int]:
                             for arg in call.args
                         )
                     ):
-                        return True
+                        lock_target = item.optional_vars
+                        if isinstance(lock_target, ast.Name) and _acquired_guarded(
+                            node, ancestor, lock_target.id
+                        ):
+                            return True
             ancestor = parents.get(ancestor)
         return False
 
@@ -65,6 +118,36 @@ def _unlocked_shadow_update_calls(source: str) -> list[int]:
 def test_all_source_shadow_update_callers_hold_prediction_cycle_lock() -> None:
     deliberately_unlocked = "def bad(cfg, rows):\n    update_shadow_cohort_evidence(cfg, rows)\n"
     assert _unlocked_shadow_update_calls(deliberately_unlocked) == [2]
+
+    # Codex review P2 on the first fix round: lexical nesting alone must NOT
+    # satisfy the guard, because runtime_lock enters the block with
+    # acquired=False when the lock is held. This caller passes the naive scan
+    # and races an existing writer in production.
+    nested_but_unchecked = (
+        "def risky(cfg, rows):\n"
+        '    with runtime_lock(cfg, "prediction_cycle") as lock:\n'
+        "        update_shadow_cohort_evidence(cfg, rows)\n"
+    )
+    assert _unlocked_shadow_update_calls(nested_but_unchecked) == [3]
+
+    # Both production guard shapes stay accepted: longshot_bias's
+    # `if lock.acquired:` branch and paper_cycle's dominating early skip.
+    acquired_branch = (
+        "def good(cfg, rows):\n"
+        '    with runtime_lock(cfg, "prediction_cycle") as lock:\n'
+        "        if lock.acquired:\n"
+        "            update_shadow_cohort_evidence(cfg, rows)\n"
+    )
+    assert _unlocked_shadow_update_calls(acquired_branch) == []
+
+    early_skip = (
+        "def good(cfg, rows):\n"
+        '    with runtime_lock(cfg, "prediction_cycle") as lock:\n'
+        "        if not lock.acquired:\n"
+        "            return None\n"
+        "        return update_shadow_cohort_evidence(cfg, rows)\n"
+    )
+    assert _unlocked_shadow_update_calls(early_skip) == []
 
     violations: list[str] = []
     for path in Path("src").rglob("*.py"):

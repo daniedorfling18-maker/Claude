@@ -28,6 +28,15 @@ BRANCH="${VPS_TELEMETRY_BRANCH:-vps-telemetry}"
 MAX_FILE_KB="${VPS_TELEMETRY_MAX_FILE_KB:-300}"
 CSV_TAIL_LINES="${VPS_TELEMETRY_CSV_TAIL_LINES:-200}"
 LOCK_DIR="${TMPDIR:-/tmp}/push_vps_telemetry.lock"
+STATUS_FILE="${VPS_TELEMETRY_STATUS_FILE:-$REPO_DIR/outputs/performance/telemetry_push_status.json}"
+PUSH_STATUS="failed"
+stamp_status() {
+  mkdir -p "$(dirname "$STATUS_FILE")" 2>/dev/null || return 0
+  tmp="$STATUS_FILE.tmp.$$"
+  printf '{"generated_at_utc":"%s","status":"%s","paper_trading_invoked":false,"live_trading_invoked":false}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PUSH_STATUS" > "$tmp" && mv "$tmp" "$STATUS_FILE"
+}
+trap stamp_status EXIT
 
 GIT_DIR="$REPO_DIR/.git"
 [ -d "$GIT_DIR" ] || { echo "no git repo at $REPO_DIR" >&2; exit 0; }
@@ -62,6 +71,7 @@ fi
 
 # mkdir is atomic: poor-man's flock that works on any POSIX sh.
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  PUSH_STATUS="lock_held"
   echo "another telemetry push is running; skipping" >&2
   exit 0
 fi
@@ -70,7 +80,8 @@ cleanup() {
   rmdir "$LOCK_DIR" 2>/dev/null || true
   [ -n "$SNAP" ] && rm -rf "$SNAP"
 }
-trap cleanup EXIT INT TERM
+trap 'cleanup; stamp_status' EXIT
+trap 'cleanup; exit 1' INT TERM
 
 SNAP=$(mktemp -d) || exit 0
 STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -159,6 +170,7 @@ COMMIT=$(git --git-dir="$GIT_DIR" \
   -c user.name="vps-telemetry" -c user.email="vps-telemetry@localhost" \
   commit-tree -m "vps telemetry snapshot $STAMP [skip ci]" "$TREE") || exit 0
 if git --git-dir="$GIT_DIR" push -q origin "+$COMMIT:refs/heads/$BRANCH"; then
+  PUSH_STATUS="ok"
   echo "$STAMP pushed telemetry snapshot $COMMIT to $BRANCH"
 else
   echo "$STAMP push failed (network or credential scope); will retry next cycle" >&2

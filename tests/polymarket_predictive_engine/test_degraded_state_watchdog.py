@@ -69,13 +69,11 @@ def test_registered_maxima_only_tighten() -> None:
 
     settings = _settings(cfg)
 
-    assert settings["requote_missing_input_max_consecutive_cycles"] == REGISTERED_MAXIMA[
-        "requote_missing_input_max_consecutive_cycles"
-    ]
+    assert settings["requote_missing_input_max_consecutive_cycles"] == REGISTERED_MAXIMA["requote_missing_input_max_consecutive_cycles"]
     assert settings["wallet_not_clean_max_consecutive_harvests"] == 1
-    assert settings["maker_replay_insufficient_coverage_max_consecutive_cycles"] == REGISTERED_MAXIMA[
-        "maker_replay_insufficient_coverage_max_consecutive_cycles"
-    ]
+    assert (
+        settings["maker_replay_insufficient_coverage_max_consecutive_cycles"] == REGISTERED_MAXIMA["maker_replay_insufficient_coverage_max_consecutive_cycles"]
+    )
 
     legacy = EngineConfig(
         raw={"degraded_state_watchdog": {"wallet_partial_max_consecutive_harvests": 1}},
@@ -114,9 +112,7 @@ def test_legitimate_risk_reason_and_transient_missing_input_do_not_incident(tmp_
         write_json(path, _requote(cycle, rule="scheduled_event_within_window"))
         result = build_degraded_state_watchdog(cfg, as_of=f"2026-07-13T00:0{cycle}:30Z")
         assert result["status"] == "ok"
-    assert result["evaluations"][0]["risk_rules_ignored_by_watchdog"] == [
-        "scheduled_event_within_window"
-    ]
+    assert result["evaluations"][0]["risk_rules_ignored_by_watchdog"] == ["scheduled_event_within_window"]
 
     for cycle in range(7, 10):
         write_json(path, _requote(cycle, rule="incomplete_order_ticket"))
@@ -182,11 +178,7 @@ def test_persistent_maker_replay_insufficient_coverage_trips_on_fourth_replay(tm
         results.append(build_degraded_state_watchdog(cfg, as_of=f"2026-07-13T00:0{cycle}:30Z"))
 
     assert [result["status"] for result in results] == ["ok", "ok", "ok", "incident"]
-    evaluation = next(
-        row
-        for row in results[-1]["evaluations"]
-        if row["registration_id"] == "maker_replay_insufficient_coverage"
-    )
+    evaluation = next(row for row in results[-1]["evaluations"] if row["registration_id"] == "maker_replay_insufficient_coverage")
     assert evaluation["consecutive_degraded_observations"] == 4
     assert results[-1]["active_incidents"][0]["entity"] == "maker_fill_replay"
 
@@ -255,16 +247,8 @@ def test_live_kill_input_staleness_is_immediate_incident_and_owner_alert(tmp_pat
     )
 
     result = build_degraded_state_watchdog(cfg, as_of="2026-07-14T11:00:01Z")
-    evaluation = next(
-        row
-        for row in result["evaluations"]
-        if row["registration_id"] == "kill_input_stale_live_stage"
-    )
-    incident = next(
-        row
-        for row in result["active_incidents"]
-        if row["registration_id"] == "kill_input_stale_live_stage"
-    )
+    evaluation = next(row for row in result["evaluations"] if row["registration_id"] == "kill_input_stale_live_stage")
+    incident = next(row for row in result["active_incidents"] if row["registration_id"] == "kill_input_stale_live_stage")
 
     assert result["status"] == "incident"
     assert result["new_incident_count"] == 1
@@ -298,9 +282,7 @@ def test_wallet_partial_counts_distinct_harvests_not_watchdog_polls(tmp_path: Pa
         if harvest < 3:
             assert result["status"] == "ok"
             polled = build_degraded_state_watchdog(cfg, as_of=f"2026-07-{10 + harvest}T02:04:01Z")
-            wallet_eval = next(
-                row for row in polled["evaluations"] if row["registration_id"] == WALLET_REGISTRATION_ID
-            )
+            wallet_eval = next(row for row in polled["evaluations"] if row["registration_id"] == WALLET_REGISTRATION_ID)
             assert wallet_eval["consecutive_degraded_observations"] == harvest
 
     assert result["status"] == "incident"
@@ -406,9 +388,7 @@ def test_previously_known_operating_row_becoming_unknown_is_incident(tmp_path: P
     regressed = build_degraded_state_watchdog(cfg, as_of="2026-07-13T03:05:01Z")
 
     assert regressed["status"] == "incident"
-    operating_eval = next(
-        row for row in regressed["evaluations"] if row["registration_id"] == "operating_state_unknown_regression"
-    )
+    operating_eval = next(row for row in regressed["evaluations"] if row["registration_id"] == "operating_state_unknown_regression")
     assert operating_eval["regressed_rows"] == ["source_vs_deployed_sha"]
 
 
@@ -453,20 +433,13 @@ def test_training_harvest_completion_older_than_25_hours_is_incident(
 
     result = build_degraded_state_watchdog(cfg, as_of="2026-07-15T01:00:01Z")
 
-    freshness = next(
-        row
-        for row in result["evaluations"]
-        if row["registration_id"] == "scheduler_completion_freshness"
-    )
+    freshness = next(row for row in result["evaluations"] if row["registration_id"] == "scheduler_completion_freshness")
     harvest = next(row for row in freshness["jobs"] if row["job"] == "training_harvest")
     assert harvest["age_seconds"] == 90_001.0
     assert harvest["maximum_age_seconds"] == 90_000
     assert harvest["state"] == "stale"
     incident = next(
-        row
-        for row in result["active_incidents"]
-        if row["registration_id"] == "scheduler_completion_freshness"
-        and row["entity"] == "training_harvest"
+        row for row in result["active_incidents"] if row["registration_id"] == "scheduler_completion_freshness" and row["entity"] == "training_harvest"
     )
     assert incident["owner_notification_eligible"] is True
     assert result["status"] == "incident"
@@ -496,3 +469,29 @@ def test_persisted_watchdog_contract_has_no_trading_invocation(tmp_path: Path) -
     assert persisted["order_placement_invoked"] is False
     assert persisted["order_amendment_invoked"] is False
     assert persisted["order_cancellation_invoked"] is False
+
+
+def test_wo121_fail_closed_producers_and_slo_are_incidents(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    write_json(cfg.output_root / "performance" / "ledger_anchor_verification.json", {"status": "broken", "generated_at_utc": "2026-07-29T00:00:00Z"})
+    write_json(
+        cfg.output_root / "performance" / "disaster_recovery_status.json",
+        {"status": "ok", "remote_push_status": "ok", "rpo": {"compliant": False}, "generated_at_utc": "2026-07-29T00:00:00Z"},
+    )
+    write_json(cfg.output_root / "maker_carry" / "maker_carry_study.json", {"status": "failed", "generated_at_utc": "2026-07-29T00:00:00Z"})
+    write_json(
+        cfg.output_root / "performance" / "operating_state.json",
+        {"generated_at_utc": "2026-07-29T00:00:00Z", "slo": {"rows": [{"id": "quote_sheet_age", "breach": True}]}},
+    )
+    result = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:00:01Z")
+    ids = {row["registration_id"] for row in result["active_incidents"]}
+    assert {"ledger_chain_integrity", "disaster_recovery_not_recoverable", "maker_study_run_failed", "operating_state_slo_breach"} <= ids
+
+
+def test_wo121_missing_publication_status_trips_after_grace(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    write_json(cfg.output_root / "performance" / "operating_state.json", {"generated_at_utc": "2026-07-29T00:00:00Z", "slo": {"rows": []}})
+    first = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:00:00Z")
+    assert not any(row["registration_id"] == "publication_bridge_unhealthy" for row in first["active_incidents"])
+    late = build_degraded_state_watchdog(cfg, as_of="2026-07-29T02:00:01Z")
+    assert {row["entity"] for row in late["active_incidents"] if row["registration_id"] == "publication_bridge_unhealthy"} == {"anchor", "telemetry"}

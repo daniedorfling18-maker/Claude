@@ -53,6 +53,8 @@ REGISTERED_SLO_TARGETS: dict[str, float] = {
     "dashboard_max_age_seconds": 300,
     "reconciliation_max_age_seconds": 26 * 3600,
     "ledger_anchor_max_age_seconds": 36 * 3600,
+    "anchor_push_max_age_seconds": 2 * 3600,
+    "telemetry_push_max_age_seconds": 2 * 3600,
 }
 
 _DRIFT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -134,6 +136,10 @@ def _path_timestamp(path: Path, *, fields: tuple[str, ...] = ()) -> tuple[dateti
             parsed = parse_timestamp(raw)
             if parsed is not None:
                 return parsed, raw
+        if fields:
+            # A malformed/error JSON stub is not a successful observation;
+            # its filesystem mtime must never launder it as fresh.
+            return None, ""
     stamp = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
     return stamp, stamp.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -266,6 +272,10 @@ def _build_slo_block(cfg: EngineConfig, *, as_of: datetime) -> dict[str, Any]:
     reconciliation_at, reconciliation_raw = _path_timestamp(reconciliation_path, fields=("generated_at_utc",))
     anchor_path = output_root / "performance" / "ledger_anchor_head.json"
     anchor_at, anchor_raw = _path_timestamp(anchor_path, fields=("anchored_at_utc", "generated_at_utc"))
+    anchor_push_path = output_root / "performance" / "anchor_push_status.json"
+    anchor_push_at, anchor_push_raw = _path_timestamp(anchor_push_path, fields=("generated_at_utc",))
+    telemetry_push_path = output_root / "performance" / "telemetry_push_status.json"
+    telemetry_push_at, telemetry_push_raw = _path_timestamp(telemetry_push_path, fields=("generated_at_utc",))
 
     rows = [
         _age_slo_row(
@@ -330,6 +340,16 @@ def _build_slo_block(cfg: EngineConfig, *, as_of: datetime) -> dict[str, Any]:
             observed_raw=anchor_raw,
             as_of=as_of,
             source=str(anchor_path),
+        ),
+        _age_slo_row(
+            "anchor_push_age", "Ledger-anchor publication age",
+            target=targets["anchor_push_max_age_seconds"], observed=anchor_push_at,
+            observed_raw=anchor_push_raw, as_of=as_of, source=str(anchor_push_path),
+        ),
+        _age_slo_row(
+            "telemetry_push_age", "Telemetry publication age",
+            target=targets["telemetry_push_max_age_seconds"], observed=telemetry_push_at,
+            observed_raw=telemetry_push_raw, as_of=as_of, source=str(telemetry_push_path),
         ),
     ]
     breach_count = sum(row["breach"] is True for row in rows)

@@ -677,10 +677,10 @@ def test_long_scheduler_job_wait_keeps_safety_pulse_live(tmp_path):
     assert "watchdog" in pulses
 
 
-def test_failed_training_harvest_rearms_after_bounded_retry_backoff(tmp_path):
+def test_failed_training_harvest_rearms_after_completion_based_retry_backoff(tmp_path):
     out_dir = tmp_path / "ops"
     out_dir.mkdir()
-    attempt_stamp = out_dir / "last_attempt_training_harvest"
+    completion_stamp = out_dir / "last_completion_training_harvest"
     script = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
     env = {
         **os.environ,
@@ -691,7 +691,7 @@ def test_failed_training_harvest_rearms_after_bounded_retry_backoff(tmp_path):
 
     # A future stamp is defensively clamped to age zero, so it remains inside
     # the retry window even under the suite's fixed wall clock.
-    attempt_stamp.write_text("9999999999\n", encoding="utf-8")
+    completion_stamp.write_text("9999999999\n", encoding="utf-8")
     blocked = subprocess.run(
         ["sh", "-c", '. "$1"; training_harvest_retry_ready', "sh", str(script)],
         env=env,
@@ -701,7 +701,7 @@ def test_failed_training_harvest_rearms_after_bounded_retry_backoff(tmp_path):
     )
     assert blocked.returncode == 1
 
-    attempt_stamp.write_text("1\n", encoding="utf-8")
+    completion_stamp.write_text("1\n", encoding="utf-8")
     ready = subprocess.run(
         ["sh", "-c", '. "$1"; training_harvest_retry_ready', "sh", str(script)],
         env=env,

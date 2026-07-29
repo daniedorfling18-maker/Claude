@@ -60,9 +60,10 @@ def test_heartbeat_healthy_allowlist_names_only_producer_reachable_statuses() ->
                     statuses.add(str(value.value))
 
     assert statuses == {"ok", "error"}
-    healthy_allowlist = {"ok"}
-    assert healthy_allowlist <= statuses
-    assert "error" not in healthy_allowlist
+    accepted_statuses = {
+        status for status in statuses if _health("1", status, "missing", "5000").returncode == 0
+    }
+    assert accepted_statuses == {"ok"}
 
 
 def test_library_only_seam_refuses_executed_mode() -> None:

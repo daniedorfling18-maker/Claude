@@ -83,6 +83,7 @@ import gzip
 import json
 import math
 import os
+import sys
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
@@ -784,6 +785,7 @@ def _rewarded_universe(
     excluded_stale = 0
     excluded_by_reason: dict[str, int] = {}
     excluded_examples: list[dict[str, Any]] = []
+    excluded_stale_reasons: dict[str, list[str]] = {}
     for page in range(int(settings["universe_pages"])):
         try:
             response = requests.get(
@@ -818,6 +820,9 @@ def _rewarded_universe(
                 continue
             stale_reasons = _candidate_staleness_reasons(market, as_of=as_of)
             if stale_reasons:
+                condition_id = str(market.get("conditionId") or "").strip()
+                if condition_id:
+                    excluded_stale_reasons[condition_id] = list(stale_reasons)
                 excluded_stale += 1
                 for reason in stale_reasons:
                     excluded_by_reason[reason] = excluded_by_reason.get(reason, 0) + 1
@@ -874,6 +879,7 @@ def _rewarded_universe(
         "excluded_stale": excluded_stale,
         "excluded_stale_by_reason": excluded_by_reason,
         "excluded_stale_examples": excluded_examples,
+        "excluded_stale_reasons": excluded_stale_reasons,
     }
 
 
@@ -1564,6 +1570,102 @@ def _incumbent_hold(out_root: Path) -> tuple[set[str], dict[str, int]]:
     return latest_members, hold
 
 
+def _latest_portfolio_members(out_root: Path) -> tuple[str, dict[str, bool]] | None:
+    """Read the latest valid WO-111 sidecar row without modifying the ledger."""
+    rows = read_csv_rows(out_root / "maker_carry_portfolio_members.csv")
+    for row in reversed(rows):
+        generated_at = str(row.get("generated_at_utc") or "").strip()
+        try:
+            members = json.loads(row.get("portfolio_members") or "")
+        except (TypeError, ValueError):
+            continue
+        if not generated_at or not isinstance(members, list):
+            continue
+        parsed = {
+            str(member.get("condition_id") or "").strip(): bool(member.get("markout_measured"))
+            for member in members
+            if isinstance(member, dict) and str(member.get("condition_id") or "").strip()
+        }
+        return generated_at, parsed
+    return None
+
+
+def _portfolio_composition_diff(
+    *,
+    previous: tuple[str, dict[str, bool]] | None,
+    current_run_at: str,
+    portfolio: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    rewarded_universe: list[dict[str, Any]],
+    measurement_universe: list[dict[str, Any]],
+    stale_reasons: dict[str, list[str]],
+) -> tuple[dict[str, Any], str]:
+    """Build WO-137 reporting from this run's already-computed dispositions."""
+    empty = {
+        "previous_run_at": None,
+        "current_run_at": current_run_at,
+        "entered": [],
+        "departed": [],
+        "held": [],
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+    if previous is None:
+        return empty, "no_prior_run"
+
+    previous_run_at, previous_members = previous
+    current = {
+        str(row.get("condition_id") or "").strip()
+        for row in portfolio
+        if str(row.get("condition_id") or "").strip()
+    }
+    prior = set(previous_members)
+    candidate_by_id = {
+        str(row.get("condition_id") or "").strip(): row
+        for row in candidates
+        if str(row.get("condition_id") or "").strip()
+    }
+    rewarded_ids = {
+        str(row.get("condition_id") or "").strip() for row in rewarded_universe
+    }
+    measured_ids = {
+        str(row.get("condition_id") or "").strip() for row in measurement_universe
+    }
+    departed: list[dict[str, Any]] = []
+    for condition_id in sorted(prior - current):
+        candidate = candidate_by_id.get(condition_id)
+        carry = safe_float(candidate.get("net_carry_usd_per_day")) if candidate else None
+        if condition_id in stale_reasons:
+            disposition = "excluded_stale:" + ",".join(stale_reasons[condition_id])
+        elif candidate and candidate.get("resolution_risk") == "high":
+            disposition = "excluded_resolution_risk"
+        elif candidate and candidate.get("estimate_quality") == "thin_book_untrusted":
+            disposition = "excluded_thin_book"
+        elif candidate:
+            disposition = "measured_not_sized"
+        elif condition_id in rewarded_ids and condition_id not in measured_ids:
+            disposition = "not_in_candidate_scan"
+        elif condition_id not in rewarded_ids:
+            disposition = "not_in_rewarded_universe"
+        else:
+            disposition = "disposition_unknown"
+        row: dict[str, Any] = {
+            "condition_id": condition_id,
+            "markout_measured": previous_members[condition_id],
+            "disposition": disposition,
+        }
+        if disposition == "measured_not_sized":
+            row["net_carry_usd_per_day"] = carry if carry is not None and math.isfinite(carry) else None
+        departed.append(row)
+    return {
+        **empty,
+        "previous_run_at": previous_run_at,
+        "entered": [{"condition_id": cid} for cid in sorted(current - prior)],
+        "departed": departed,
+        "held": [{"condition_id": cid} for cid in sorted(current & prior)],
+    }, "ok"
+
+
 def _size_portfolio(
     settings: dict[str, Any],
     candidates: list[dict[str, Any]],
@@ -2081,6 +2183,14 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         candidate["book_history_hours"] = round(span_hours, 4)
         candidate["book_snapshot_count"] = snapshot_count
     incumbents, incumbent_hold_days = _incumbent_hold(out_root)
+    # WO-137 reads the latest membership evidence before this run appends its
+    # row. The append-only sidecar remains owned solely by the WO-111 writer.
+    previous_portfolio_error: Exception | None = None
+    try:
+        previous_portfolio = _latest_portfolio_members(out_root)
+    except Exception as exc:  # noqa: BLE001 - reporting must not take down the study
+        previous_portfolio = None
+        previous_portfolio_error = exc
 
     # Registered sizing is still evaluated only at capital_cap_usd. WO-57
     # reuses this exact function for supplementary planning caps below.
@@ -2192,6 +2302,10 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
             "candidates_resolution_high_risk": sum(1 for r in candidates if r.get("resolution_risk") == "high"),
             "portfolio_markets": len(portfolio),
             "portfolio": portfolio,
+            "portfolio_entered": 0,
+            "portfolio_departed": 0,
+            "departed_reasons": {},
+            "composition_diff_status": "no_prior_run",
             "portfolio_capital_usd": round(capital, 2),
             "portfolio_net_carry_usd_per_day": net_total,
             "portfolio_markout_measured": portfolio_markout_measured,
@@ -2340,6 +2454,36 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
     }
     if not ledger_committed:
         _force_maker_gates_pending_uncommitted(summary)
+
+    # WO-137 reporting deliberately runs after the P3-3 flock section. A bad
+    # snapshot can neither interrupt nor roll back either evidence ledger.
+    try:
+        if previous_portfolio_error is not None:
+            raise previous_portfolio_error
+        composition_diff, composition_status = _portfolio_composition_diff(
+            previous=previous_portfolio,
+            current_run_at=str(summary["generated_at_utc"]),
+            portfolio=portfolio,
+            candidates=candidates,
+            rewarded_universe=universe,
+            measurement_universe=measurement_universe,
+            stale_reasons=stale_diagnostic["excluded_stale_reasons"],
+        )
+        write_json(out_root / "portfolio_composition_diff.json", composition_diff)
+        summary["portfolio_entered"] = len(composition_diff["entered"])
+        summary["portfolio_departed"] = len(composition_diff["departed"])
+        departed_reasons: dict[str, int] = {}
+        for row in composition_diff["departed"]:
+            reason = str(row["disposition"])
+            departed_reasons[reason] = departed_reasons.get(reason, 0) + 1
+        summary["departed_reasons"] = departed_reasons
+        summary["composition_diff_status"] = composition_status
+    except Exception as exc:  # noqa: BLE001 - instrumentation must fail open
+        print(
+            f"maker carry composition diff write failed: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        summary["composition_diff_status"] = "write_failed"
     write_json(summary_path, summary)
     _write_quote_sheet(out_root, summary, settings)
     return summary

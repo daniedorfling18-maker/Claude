@@ -598,3 +598,84 @@ def test_wo121_missing_publication_status_trips_after_grace(tmp_path: Path) -> N
     assert not any(row["registration_id"] == "publication_bridge_unhealthy" for row in first["active_incidents"])
     late = build_degraded_state_watchdog(cfg, as_of="2026-07-29T02:00:01Z")
     assert {row["entity"] for row in late["active_incidents"] if row["registration_id"] == "publication_bridge_unhealthy"} == {"anchor", "telemetry"}
+
+def test_wo121fix_dr_not_due_is_healthy_not_an_incident(tmp_path: Path) -> None:
+    # The exact payload the 2026-07-28 deploy log showed firing a
+    # disaster_recovery_not_recoverable incident: archive simply not due yet,
+    # remote push ok, RPO compliant. "not_due" is the DR producer's ROUTINE
+    # healthy state between daily archive windows; the pre-fix allowlist
+    # {"ok", "recoverable"} named a status the producer never writes and
+    # missed the one it writes most.
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "performance" / "disaster_recovery_status.json",
+        {
+            "status": "not_due",
+            "remote_push_status": "ok",
+            "rpo": {"compliant": True},
+            "generated_at_utc": "2026-07-29T00:00:00Z",
+        },
+    )
+    result = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:00:01Z")
+    dr_eval = next(
+        row for row in result["evaluations"]
+        if row["registration_id"] == "disaster_recovery_not_recoverable"
+    )
+    assert dr_eval["state"] == "healthy"
+    assert not any(
+        row["registration_id"] == "disaster_recovery_not_recoverable"
+        for row in result["active_incidents"]
+    )
+
+
+def test_wo121fix_dr_not_due_with_bad_rpo_or_push_still_incidents(tmp_path: Path) -> None:
+    # Adding not_due to the allowlist must not blunt the real health clauses:
+    # a not_due payload whose RPO is non-compliant or whose remote push failed
+    # is still an incident.
+    cfg = _cfg(tmp_path)
+    path = cfg.output_root / "performance" / "disaster_recovery_status.json"
+    write_json(
+        path,
+        {"status": "not_due", "remote_push_status": "ok", "rpo": {"compliant": False},
+         "generated_at_utc": "2026-07-29T00:00:00Z"},
+    )
+    bad_rpo = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:00:01Z")
+    assert any(
+        row["registration_id"] == "disaster_recovery_not_recoverable"
+        for row in bad_rpo["active_incidents"]
+    )
+    write_json(
+        path,
+        {"status": "not_due", "remote_push_status": "failed", "rpo": {"compliant": True},
+         "generated_at_utc": "2026-07-29T00:10:00Z"},
+    )
+    bad_push = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:10:01Z")
+    assert any(
+        row["registration_id"] == "disaster_recovery_not_recoverable"
+        for row in bad_push["active_incidents"]
+    )
+
+
+def test_wo121fix_dr_allowlist_names_only_producer_reachable_statuses() -> None:
+    # Registration honesty: every allowlisted status must be one the DR
+    # producer actually writes, or the registration documents a fiction. The
+    # pre-fix list contained "recoverable", which no code path ever produces,
+    # while the reachable healthy state "not_due" was missing - the recipe for
+    # a permanently lit false incident. "skipped_locked" is reachable but
+    # deliberately NOT allowlisted: a held DR lock must alarm.
+    import re
+
+    from polymarket_predictive_engine.degraded_state_watchdog import PRODUCER_REGISTRATIONS
+
+    source = Path("src/polymarket_predictive_engine/disaster_recovery.py").read_text(encoding="utf-8")
+    reachable = set(re.findall(r'payload\["status"\]\s*=\s*"(\w+)"', source))
+    reachable |= set(re.findall(r'"status":\s*"(\w+)"', source))
+
+    allowlist = next(
+        healthy for registration_id, _, healthy in PRODUCER_REGISTRATIONS
+        if registration_id == "disaster_recovery_not_recoverable"
+    )
+    assert allowlist == {"ok", "not_due"}
+    assert allowlist <= reachable, f"allowlisted statuses not reachable: {allowlist - reachable}"
+    assert "recoverable" not in reachable
+    assert "skipped_locked" in reachable and "skipped_locked" not in allowlist

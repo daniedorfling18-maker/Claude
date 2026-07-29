@@ -15,7 +15,14 @@ LOCK_DIR="${TMPDIR:-/tmp}/push_vps_anchor.lock"
 GIT_DIR="$REPO_DIR/.git"
 STATUS_FILE="${VPS_ANCHOR_STATUS_FILE:-$REPO_DIR/outputs/performance/anchor_push_status.json}"
 PUSH_STATUS="failed"
+STAMP_ENABLED=1
 stamp_status() {
+  # A run that lost the lock race must NOT stamp: overwriting the concurrent
+  # run's outcome with "lock_held" would erase a fresh "ok" and fire the
+  # publication-bridge incident on a healthy host. If the lock dir is ever
+  # wedged (crash between mkdir and cleanup), no run stamps again and the
+  # stamp goes stale, which the watchdog's fixed two-hour grace still catches.
+  [ "$STAMP_ENABLED" = "1" ] || return 0
   mkdir -p "$(dirname "$STATUS_FILE")" 2>/dev/null || return 0
   tmp="$STATUS_FILE.tmp.$$"
   printf '{"generated_at_utc":"%s","status":"%s","paper_trading_invoked":false,"live_trading_invoked":false}\n' \
@@ -27,7 +34,7 @@ trap stamp_status EXIT
 [ -s "$HEAD_FILE" ] || { echo "no ledger anchor head at $HEAD_FILE" >&2; exit 0; }
 
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-  PUSH_STATUS="lock_held"
+  STAMP_ENABLED=0
   echo "another anchor push is running; skipping" >&2
   exit 0
 fi
@@ -67,6 +74,12 @@ if [ -n "$PARENT" ]; then
   if git --git-dir="$GIT_DIR" show "$PARENT:anchors/$ANCHOR_DATE.json" > "$EXISTING" 2>/dev/null; then
     if cmp -s "$EXISTING" "$HEAD_FILE"; then
       rm -f "$EXISTING"
+      # Today's anchor is already durably published with identical bytes: the
+      # lane's contract is satisfied, so this is the ROUTINE healthy outcome of
+      # every scheduled run after the day's first successful push. Stamping it
+      # "failed" (the pre-fix behaviour) kept the publication-bridge incident
+      # permanently lit on a healthy host.
+      PUSH_STATUS="ok"
       echo "$ANCHOR_DATE already present on $BRANCH"
       exit 0
     fi

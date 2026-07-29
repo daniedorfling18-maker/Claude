@@ -1173,8 +1173,15 @@ def _notification(
                 delivery["error"] = f"http_status_{response.status_code}"
         except Exception as exc:  # noqa: BLE001 - alert failure must not block watchdog evidence
             delivery["error"] = type(exc).__name__
-    remaining = pending if attempted and not delivery["delivered"] else []
-    remaining_registrations = registrations if remaining else []
+    if attempted:
+        remaining = pending if not delivery["delivered"] else []
+        remaining_registrations = registrations if remaining else []
+    else:
+        # A temporarily missing/disabled channel must not erase durable debt
+        # from an earlier failed attempt. Conversely, new incidents do not
+        # become debt until a configured channel actually attempts delivery.
+        remaining = list(dict.fromkeys(undelivered_ids))[-MAX_NOTIFICATION_IDS:]
+        remaining_registrations = list(dict.fromkeys(str(item) for item in undelivered_registrations))[-MAX_NOTIFICATION_IDS:]
     if attempted and delivery["delivered"]:
         state["undelivered_incident_ids"] = []
         state["undelivered_incident_registrations"] = []

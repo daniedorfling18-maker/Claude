@@ -70,7 +70,10 @@ health_evidence_within_ceiling() {
     # An observed heartbeat is authoritative: it must be both fresh and healthy.
     # Startup fallback is only for a heartbeat that has not been observed yet.
     [ "$heartbeat_age_value" -le 900 ] || return 1
-    [ "$heartbeat_status_value" = "running" ] || return 1
+    # The live-loop producer writes "ok" after a healthy completed cycle and
+    # "error" when that cycle raises. Reject every status except the producer's
+    # healthy value (including unknown future values).
+    [ "$heartbeat_status_value" = "ok" ] || return 1
     return 0
   fi
   case "$forward_age_value:$uptime_seconds_value" in *[!0-9:]*|*::*) return 1 ;; esac

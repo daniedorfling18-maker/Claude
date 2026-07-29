@@ -772,6 +772,43 @@ def test_wo129_failed_ntfy_delivery_is_retried_and_cleared(tmp_path: Path, monke
     assert "unknown" not in messages[-1]
 
 
+def test_wo129_retry_debt_survives_temporarily_missing_channel(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path)
+    monkeypatch.setenv("OPS_OWNER_NTFY_TOPIC_URL", "https://ntfy.invalid/topic")
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"status": "failed", "generated_at_utc": "2026-07-29T00:00:00Z"},
+    )
+
+    class Response:
+        status_code = 503
+
+    monkeypatch.setattr("polymarket_predictive_engine.degraded_state_watchdog.requests.post", lambda *args, **kwargs: Response())
+    failed = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:00:01Z")
+    debt = failed["notification"]["undelivered_incident_ids"]
+    registrations = failed["notification"]["undelivered_incident_registrations"]
+    assert debt and registrations
+
+    monkeypatch.delenv("OPS_OWNER_NTFY_TOPIC_URL")
+    no_attempt = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:01:01Z")
+    assert no_attempt["notification"]["delivery"]["attempted"] is False
+    assert no_attempt["notification"]["undelivered_incident_ids"] == debt
+    assert no_attempt["notification"]["undelivered_incident_registrations"] == registrations
+
+
+def test_wo129_no_channel_does_not_create_new_retry_debt(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"status": "failed", "generated_at_utc": "2026-07-29T00:00:00Z"},
+    )
+    result = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:00:01Z")
+    assert result["new_incidents"]
+    assert result["notification"]["delivery"]["attempted"] is False
+    assert result["notification"]["undelivered_incident_ids"] == []
+    assert result["notification"]["undelivered_incident_registrations"] == []
+
+
 def test_wo129_lock_held_carries_incidents_then_alarms_and_recovers(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
     write_json(

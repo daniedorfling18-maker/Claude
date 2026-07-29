@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import os
 import subprocess
 from pathlib import Path
@@ -27,11 +28,41 @@ def test_missing_heartbeat_uses_bounded_startup_fallback() -> None:
 
 
 def test_observed_heartbeat_is_authoritative_and_fails_closed() -> None:
-    assert _health("900", "running", "missing", "5000").returncode == 0
-    assert _health("901", "running", "100", "100").returncode != 0
+    assert _health("900", "ok", "missing", "5000").returncode == 0
+    assert _health("901", "ok", "100", "100").returncode != 0
     assert _health("1", "error", "100", "100").returncode != 0
-    assert _health("nope", "running", "100", "100").returncode != 0
-    assert _health("-1", "running", "100", "100").returncode != 0
+    assert _health("1", "running", "100", "100").returncode != 0
+    assert _health("1", "unknown", "100", "100").returncode != 0
+    assert _health("nope", "ok", "100", "100").returncode != 0
+    assert _health("-1", "ok", "100", "100").returncode != 0
+
+
+def test_heartbeat_healthy_allowlist_names_only_producer_reachable_statuses() -> None:
+    producer = SCRIPT.with_name("run_polymarket_local_live_loop.py")
+    tree = ast.parse(producer.read_text(encoding="utf-8"))
+    named_payloads: dict[str, ast.Dict] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if isinstance(node.value, ast.Dict):
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        named_payloads[target.id] = node.value
+
+    statuses: set[str] = set()
+    for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
+        if len(call.args) < 2 or "local_live_loop_heartbeat.json" not in ast.unparse(call.args[0]):
+            continue
+        payload = named_payloads.get(call.args[1].id) if isinstance(call.args[1], ast.Name) else call.args[1]
+        if isinstance(payload, ast.Dict):
+            for key, value in zip(payload.keys, payload.values):
+                if isinstance(key, ast.Constant) and key.value == "status" and isinstance(value, ast.Constant):
+                    statuses.add(str(value.value))
+
+    assert statuses == {"ok", "error"}
+    healthy_allowlist = {"ok"}
+    assert healthy_allowlist <= statuses
+    assert "error" not in healthy_allowlist
 
 
 def test_library_only_seam_refuses_executed_mode() -> None:

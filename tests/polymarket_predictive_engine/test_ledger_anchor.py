@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import shutil
 
+import pytest
 import yaml
 
 from polymarket_predictive_engine.cli import COMMANDS, main as cli_main

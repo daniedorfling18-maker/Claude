@@ -1106,11 +1106,16 @@ def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str,
     # shadow_fills.csv is append_only-enrolled, and the old full rewrite here
     # re-serialised history whenever the fill schema widened - the exact
     # WO-115 chain-break class.
-    append_csv_rows_matching_existing_header(
+    fill_append = append_csv_rows_matching_existing_header(
         _fills_path(cfg),
         fills[preexisting_fill_count:],
         fieldnames=SHADOW_FILL_FIELDS,
     )
+    if fill_append.dropped_fields:
+        # WO-128.3: the legacy-header tolerance (WO-119) is kept, but a field
+        # it could not persist is recorded in the reported result rather than
+        # vanishing - the visible trace that a versioned ledger path is due.
+        summary["shadow_fill_fields_dropped_by_legacy_header"] = list(fill_append.dropped_fields)
     summary_file = str(settings.get("summary_file", "shadow_signal_cohort_pnl.json"))
     write_json(cfg.governance_root / summary_file, summary)
     _write_shadow_pnl_history(cfg, summary)

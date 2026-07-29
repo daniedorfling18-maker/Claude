@@ -68,7 +68,10 @@ def test_all_source_shadow_update_callers_hold_prediction_cycle_lock() -> None:
 
     violations: list[str] = []
     for path in Path("src").rglob("*.py"):
-        for line in _unlocked_shadow_update_calls(path.read_text(encoding="utf-8")):
+        # utf-8-sig: several repository sources carry a UTF-8 BOM, which plain
+        # utf-8 hands to ast.parse as U+FEFF and the whole scan dies with a
+        # SyntaxError instead of reporting lock violations.
+        for line in _unlocked_shadow_update_calls(path.read_text(encoding="utf-8-sig")):
             violations.append(f"{path}:{line}")
     assert violations == []
 from polymarket_predictive_engine.utils import read_csv_rows

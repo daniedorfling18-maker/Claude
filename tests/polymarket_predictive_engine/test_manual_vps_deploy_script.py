@@ -510,7 +510,7 @@ def test_wo133_acceptance_is_time_bounded_past_the_arming_boundary() -> None:
     # the deploy open indefinitely on a quiesced stack, so it is bounded like
     # Path A's (workflow :706).
     acceptance = _compose_invocation("run_deploy_acceptance")
-    assert "timeout --signal=TERM --kill-after=30s 600" in acceptance
+    assert "timeout --signal=TERM --kill-after=30s 900" in acceptance
 
 
 def _effective_probe_span_seconds() -> float:

@@ -249,9 +249,10 @@ def test_vps_deploy_runs_real_data_acceptance_after_restart_and_before_success()
     assert "reconcile-wallet" in acceptance_script
     assert "executor-ops-monitor" in acceptance_script
     assert "operating-state" in acceptance_script
-    assert 'TOTAL_TIMEOUT="${DEPLOY_ACCEPTANCE_TOTAL_TIMEOUT_SECONDS:-420}"' in acceptance_script
+    assert 'COMMAND_TIMEOUT="${DEPLOY_ACCEPTANCE_COMMAND_TIMEOUT_SECONDS:-300}"' in acceptance_script
+    assert 'TOTAL_TIMEOUT="${DEPLOY_ACCEPTANCE_TOTAL_TIMEOUT_SECONDS:-720}"' in acceptance_script
     assert "run_bounded" in acceptance_script
-    assert "timeout --signal=TERM --kill-after=30s 600" in text
+    assert "timeout --signal=TERM --kill-after=30s 900" in text
     assert 'acceptance_status" != "PASS"' in text
     assert "automatic rollback is armed for $original_head" in text
     assert 'install -d -m 0775 -o "$(id -u)" -g "$(id -g)"' in text
@@ -293,6 +294,46 @@ def _workflow_text() -> str:
     return (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(
         encoding="utf-8"
     )
+
+
+def test_vps_deploy_acceptance_outer_wrappers_outlast_the_inner_budget():
+    """The acceptance lane has THREE nested clocks: the per-command bound, the
+    script's total budget, and the deploy paths' outer `timeout` around the
+    whole compose run. The ca8c3a3 deploy (2026-07-28) failed on the innermost
+    one killing a healthy 70s-baseline study at 120s under post-recreate
+    contention. Whatever the numbers become, the ordering must hold:
+    command <= total, and both deploy paths' outer wrappers must exceed the
+    total by real margin (container start + report writing), or a slow-but-
+    passing acceptance is killed from outside and reads as a deploy failure.
+    """
+    acceptance = (ROOT / "scripts" / "run_vps_deploy_acceptance.sh").read_text(encoding="utf-8")
+    command = int(re.search(r"DEPLOY_ACCEPTANCE_COMMAND_TIMEOUT_SECONDS:-(\d+)", acceptance).group(1))
+    total = int(re.search(r"DEPLOY_ACCEPTANCE_TOTAL_TIMEOUT_SECONDS:-(\d+)", acceptance).group(1))
+    assert command <= total
+
+    # Warm baselines measured on the VPS 2026-07-28 (training_harvest.json):
+    # study 69.9s, fill-replay 47.6s. The per-command bound must hold at least
+    # ~2x the slowest warm producer or deploy-time contention re-kills it.
+    assert command >= 240
+
+    for path in (
+        ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml",
+        ROOT / "scripts" / "deploy_vps_paper_manual.sh",
+    ):
+        text = path.read_text(encoding="utf-8")
+        outer_bounds = [
+            int(match)
+            for match in re.findall(
+                r"timeout --signal=TERM --kill-after=30s (\d+)\s*\\\n\s*\$DOCKER compose[^\n]*deploy-acceptance",
+                text,
+            )
+        ]
+        assert outer_bounds, f"no outer acceptance timeout found in {path.name}"
+        for bound in outer_bounds:
+            assert bound >= total + 120, (
+                f"{path.name}: outer acceptance wrapper {bound}s must exceed the "
+                f"script's total budget {total}s with margin"
+            )
 
 
 def test_vps_deploy_acceptance_never_passes_no_build_to_compose_run():

@@ -6285,7 +6285,7 @@ refactors:
 | 7 | **WO-133** | guarded manual deploy path + its `AGENTS.md` amendment | **owner** (one PR carrying a governance amendment cannot be partially merged) |
 | 8 | **WO-136** | contemporaneous-quote fill replay (kills the phantom-fill 42x haircut; issued 2026-07-28 under the owner's direct instruction) | orchestrator, after line-audit |
 | 9 | **WO-137** | portfolio composition diff — name the reason every market leaves (churn is the campaign's binding variable; issued 2026-07-28 under the owner's direct instruction) | orchestrator, after line-audit |
-| 10 | **WO-138** | training harvest survives a slow upstream: bounded collection children, per-child durations, endpoint-latency evidence (dispatched 2026-07-29 under the owner's standing instruction to keep the pipeline moving; registered here after the fact — see the provenance note) | owner (scheduler surface) |
+| 10 | **WO-138** | make a slow upstream visible: per-endpoint latency evidence, the collector's own coverage result, completion-based retry backoff — NO tolerated-timeout semantics, a timed-out child stays a failed child (dispatched 2026-07-29 before registration; scope cut twice after review — see the provenance note) | owner (scheduler surface) |
 
 **WO-121 — watchdog coverage for unmonitored producers** (registered 2026-07-27 as
 WO-129's named blocking prerequisite, per ENGINEERING_STANDARDS S3). WO-129 tightens
@@ -6446,28 +6446,59 @@ missing: evidence, and a bounded retry.
 `clob.polymarket.com/prices-history` degraded from ~0.3s to ~5-10s per uncached
 fetch (p50 5.1s, max 10.3s, all HTTP 200, `cf-cache-status: EXPIRED`, no
 rate-limit headers; reproduced from a second network location). The 13:37Z
-`training_harvest` failed after ~49 minutes. Establishing that took a
-multi-hour forensic session on the VPS *because the receipt recorded exit codes
-and nothing else* — no child durations, no endpoint latencies. That is the gap.
+`training_harvest` failed after ~49 minutes, and establishing that took a
+multi-hour forensic session on the VPS.
+
+**Correction, recorded because the first draft was wrong twice more.** That draft
+said the session was needed "because the receipt recorded exit codes and nothing
+else — no child durations". False: `run_training_harvest` has always initialised
+`duration_seconds` on every child row and replaced it with monotonic elapsed
+time before persisting (`training_harvest.py:206,234,259`), and the live receipt
+carries it. The orchestrator had in fact READ those durations earlier the same
+day and then wrote a work order claiming they were absent; Codex's review of PR
+#394 caught it. The draft also keyed its mechanism to process exit 124, which
+`collect_price_history` never returns. Two of the three things this work order
+originally claimed to fix were therefore not broken. What IS missing is narrow
+and real: per-ENDPOINT latency, the collector's own coverage result, and a
+bounded retry.
 
 **Scope (observability and backoff only — no gate, threshold, eligibility, or
 success-semantics change).** Files: `scripts/run_vps_ops_scheduler.sh`,
 `src/polymarket_predictive_engine/training_harvest.py`, the price-history
 collection path, a latency-summary helper, and their tests.
 
-138.1 — every child row in `outputs/ops_scheduler/training_harvest.json` carries
-`duration_seconds` beside its status and exit code, matching the field the
-deploy-acceptance artifact gained in #391 — the field that reduced a multi-hour
-investigation to a one-file read.
+138.1 — **preservation, not addition:** every child row in
+`outputs/ops_scheduler/training_harvest.json` must still carry
+`duration_seconds`. This already works and this work order must not disturb it;
+it is listed so a regression is caught, and it is explicitly NOT something a
+build may claim as delivered work.
 
 138.2 — a compact per-endpoint latency summary (host, path tail, request count,
 p50, max) in the same receipt, so "the venue is slow" is evidence rather than an
-investigation. **The transport is declared, not assumed:** harvest children are
-separate subprocesses, so the harvest creates a spool file before its first
-child and removes it after the last, children append one bounded record per
-request, and the harvest aggregates the spool into the receipt. When the spool
-is absent or unreadable the receipt says so explicitly rather than omitting the
-block silently. The spool is NEVER published — it must match neither the
+investigation. **The receipt schema is registered, not left to the
+implementation:** the summary lives at the receipt's top-level key
+`upstream_latency`, whose value is a LIST of entries, each an object with exactly
+`host` (str), `path_tail` (str), `request_count` (int), `p50_seconds` (float)
+and `max_seconds` (float). When the spool is absent, unreadable, or malformed
+the key is present with the explicit value `{"status": "unavailable"}` — never
+omitted, never an empty list, because a silently missing block and a genuinely
+quiet endpoint must not look alike.
+
+**The transport is declared, not assumed:** harvest children are separate
+subprocesses, so the harvest creates a RUN-SCOPED spool (unique per invocation)
+before its first child, children append one bounded record per request, and the
+harvest aggregates that spool into the receipt and removes it. Run-scoping is
+load-bearing: an interrupted harvest leaves its spool behind, and without a
+per-run path the next run would either aggregate the previous run's timings into
+a receipt claiming to describe current upstream conditions, or delete a spool a
+concurrent invocation still needs. Stale spools from earlier runs are ignored and
+cleaned up, never merged.
+
+**Latency is recorded for FAILED requests too.** The requests this work order
+exists to see are the slow ones, and the slowest are the ones that time out or
+raise — a build that appends a record only after a successful response would
+omit exactly the evidence wanted and understate the maximum. Recording happens on
+a `finally`-equivalent path covering both outcomes. The spool is NEVER published — it must match neither the
 telemetry `*.json` glob nor `credential_guard.ALLOWED_SUFFIXES` — and every
 spool row carries the mandatory `paper_trading_invoked: false` and
 `live_trading_invoked: false` flags. "Transient by intent" does not exempt a
@@ -6498,6 +6529,17 @@ immediately on the next scheduler iteration, producing sustained back-to-back
 load against the very endpoint that is already slow — making the outage worse
 instead of recovering from it.
 
+  **Absent completion evidence is an interruption, not a fresh start.** When the
+  scheduler is killed or restarted mid-harvest no completion timestamp exists,
+  and the two naive readings are both wrong: treating it as infinitely old
+  re-launches a full harvest on every restart, while treating it as not-ready
+  would block the first-ever harvest forever. The registered behaviour: a missing
+  completion stamp WITH a prior attempt stamp is an interruption — the backoff
+  runs from that attempt stamp, so a crash-looping scheduler cannot hammer the
+  endpoint; a missing completion stamp with NO prior attempt is genuine
+  first-run and proceeds immediately; a malformed or future-dated stamp is
+  treated as an interruption (conservative), never as licence to run now.
+
 **Explicitly NOT in scope, recorded so it is not rebuilt.** No tolerated-step
 list; no `coverage_degraded` / `coverage_degraded_steps` / `successful_completion`
 / `success_eligible` fields or plumbing; no degraded-coverage watchdog
@@ -6515,8 +6557,9 @@ alter an M-A/M-B/M-C input. Data that could not be collected is absent, absent
 data reads as not-measured downstream, and an incomplete harvest reports itself
 as incomplete.
 
-**Tests.** (1) every child row carries `duration_seconds`; (2) the latency
-summary is FUNCTIONAL — given a known set of child records on the declared
+**Tests.** (1) every child row still carries `duration_seconds` — a
+REGRESSION assertion on existing behaviour, not evidence of new work; (2) the
+latency summary is FUNCTIONAL — given a known set of child records on the declared
 transport, the receipt carries the exact expected `host`, `path_tail`,
 `request_count`, `p50` and `max`, so a summary that is always empty or always
 "unavailable" fails; (3) the summary contains no credential-shaped value, no
@@ -6532,7 +6575,16 @@ written only `fetch_error` rows is reported in the receipt as collecting
 nothing, with its requested/collected counts and error tally — a clean exit code
 must not read as clean coverage; (9) every latency-spool row carries both
 trading-invocation flags, and the spool is removed after an abnormal exit as
-well as a normal one.
+well as a normal one; (10) a request that RAISES (timeout or network error) is
+still recorded, and its duration reaches `max_seconds` — the test must fail a
+build that records only successful responses; (11) an interrupted run's leftover
+spool is neither aggregated into nor deleted by a later run, proven with a stale
+spool present at start; (12) the receipt carries `upstream_latency` with the
+registered entry schema, and exactly `{"status": "unavailable"}` when the spool
+is absent, unreadable, or malformed; (13) retry behaviour with a missing
+completion stamp: with a prior attempt stamp the backoff runs from it, with no
+prior attempt the first run proceeds, and a malformed or future stamp is treated
+as an interruption.
 
 **Day-after check:** on the next scheduled harvest, `training_harvest.json`
 shows per-child `duration_seconds` and a latency summary carrying real `host` /

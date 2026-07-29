@@ -221,11 +221,27 @@ def test_scheduler_rederives_timeout_allowlist_and_boolean_flag(tmp_path: Path) 
         "steps": [
             {"step": "collect_price_history", "status": "timed_out", "exit_code": 124, "timeout_degrades_coverage": "false"},
             {"step": "decision_policy", "status": "timed_out", "exit_code": 124, "timeout_degrades_coverage": True},
+            {"step": "collect_extra", "status": "timed_out", "exit_code": 124, "timeout_degrades_coverage": True},
             {"step": "anchor_ledgers", "status": "ok", "exit_code": 0},
         ],
     })
     assert stamps == ["training_harvest:1", "training_harvest_anchor_tail:0"]
     assert successes == []
+
+
+def test_degraded_harvest_does_not_refresh_status_last_success(tmp_path: Path) -> None:
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    probe = f"""
+OPS_SCHEDULER_LIBRARY_ONLY=1 OPS_SCHEDULER_OUT_DIR='{out_dir}' . scripts/run_vps_ops_scheduler.sh
+stamp_status training_harvest 0 clean 2026-07-29T00:00:00Z '' true
+stamp_status training_harvest 0 degraded 2026-07-29T01:00:00Z '' false
+"""
+    subprocess.run(["sh", "-c", probe], check=True, cwd=Path.cwd())
+    job = json.loads((out_dir / "status.json").read_text(encoding="utf-8"))["jobs"]["training_harvest"]
+    assert job["last_exit_code"] == 0
+    assert job["detail"] == "degraded"
+    assert job["last_success_utc"] < job["last_run_utc"]
 
 
 def test_operator_tightening_controls_collection_child_timeout(tmp_path: Path, monkeypatch) -> None:

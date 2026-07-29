@@ -236,6 +236,13 @@ def run_training_harvest(
         ),
         "steps": rows,
         "upstream_latency": [],
+        "latency_transport": {
+            "producer": "harvest child HTTP consumers via PM_HARVEST_LATENCY_LOG",
+            "private_spool": ".training_harvest_latency.jsonl",
+            "lifecycle": "created empty at harvest start and removed after the final receipt",
+            "status": "absent",
+            "publication_contract": "dot-prefixed JSONL matches neither telemetry *.json nor credential-guard allowed suffixes",
+        },
         "coverage_fail_safe": (
             "A slow or timed-out collection child degrades coverage only: it never marks a market measured, "
             "fabricates a price series, admits a partial series as complete, or alters M-A/M-B/M-C inputs; "
@@ -307,6 +314,7 @@ def run_training_harvest(
             row["error_type"] = error_type
         payload["generated_at_utc"] = timestamp_fn()
         payload["upstream_latency"] = _latency_summary(latency_path)
+        payload["latency_transport"]["status"] = "observed" if payload["upstream_latency"] else "absent"
         write_json(artifact_path, payload)
 
     failed = [

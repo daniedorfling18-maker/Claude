@@ -113,7 +113,8 @@ stamp_status() {
   if [ -z "$EXPLICIT_SKIP_KIND" ]; then
     EXPLICIT_SKIP_KIND="$JOB_SCHEDULE_SKIP_KIND"
   fi
-  JOB="$1" EXIT_CODE="$2" DETAIL="${3:-}" STARTED_AT="${4:-}" SKIP_KIND="$EXPLICIT_SKIP_KIND" OUT_DIR="$OUT_DIR" python - <<'PY'
+  SUCCESS_ELIGIBLE="${6:-true}"
+  JOB="$1" EXIT_CODE="$2" DETAIL="${3:-}" STARTED_AT="${4:-}" SKIP_KIND="$EXPLICIT_SKIP_KIND" SUCCESS_ELIGIBLE="$SUCCESS_ELIGIBLE" OUT_DIR="$OUT_DIR" python - <<'PY'
 import json
 import os
 from datetime import datetime, timezone
@@ -135,6 +136,7 @@ except ValueError:
     started = None
 detail = os.environ.get("DETAIL", "")
 exit_code = int(os.environ["EXIT_CODE"])
+success_eligible = os.environ.get("SUCCESS_ELIGIBLE") == "true"
 skip_kind = os.environ.get("SKIP_KIND", "").strip().lower()
 if exit_code == 124 and not skip_kind:
     skip_kind = "overrun"
@@ -156,7 +158,7 @@ jobs[job_name] = {
     "duration_seconds": round((now - started).total_seconds(), 3) if started else None,
     "last_exit_code": exit_code,
     # Failed attempts must not make a periodic job look freshly successful.
-    "last_success_utc": now.isoformat() if exit_code == 0 else str(previous.get("last_success_utc") or ""),
+    "last_success_utc": now.isoformat() if exit_code == 0 and success_eligible else str(previous.get("last_success_utc") or ""),
     "detail": detail,
     "skip_kind": skip_kind or "none",
     "skipped_intentional": skipped_intentional,
@@ -591,7 +593,12 @@ try:
         )
         for row in rows
     )
-    coverage_degraded = any(tolerated_timeout(row) for row in rows)
+    coverage_steps = payload.get("coverage_degraded_steps")
+    coverage_degraded = (
+        not isinstance(coverage_steps, list)
+        or bool(coverage_steps)
+        or any(tolerated_timeout(row) for row in rows)
+    )
     print(1 if harvest_failed else 0, anchor_code, 1 if coverage_degraded else 0)
 except (AttributeError, KeyError, OSError, StopIteration, TypeError, ValueError, json.JSONDecodeError):
     # Missing or malformed accounting fails closed under the process outcome.
@@ -601,7 +608,9 @@ PY
   HARVEST_CODE="$1"
   ANCHOR_TAIL_CODE="$2"
   COVERAGE_DEGRADED="$3"
-  stamp_status training_harvest "$HARVEST_CODE" "WO-85 resilient per-step harvest excluding independently stamped anchor tail; see ops_scheduler/training_harvest.json" "$HARVEST_STARTED_AT"
+  SUCCESS_ELIGIBLE=true
+  if [ "$COVERAGE_DEGRADED" -ne 0 ]; then SUCCESS_ELIGIBLE=false; fi
+  stamp_status training_harvest "$HARVEST_CODE" "WO-85 resilient per-step harvest excluding independently stamped anchor tail; see ops_scheduler/training_harvest.json" "$HARVEST_STARTED_AT" "" "$SUCCESS_ELIGIBLE"
   stamp_status training_harvest_anchor_tail "$ANCHOR_TAIL_CODE" "WO-128 independent anchor-ledgers tail from training harvest; failure remains visible without repeating collection" "$HARVEST_STARTED_AT"
   if [ "$HARVEST_CODE" -eq 0 ] && [ "$COVERAGE_DEGRADED" -eq 0 ]; then
     touch_success_stamp training_harvest

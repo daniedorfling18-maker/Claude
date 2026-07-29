@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -28,7 +29,8 @@ def record_upstream_latency(url: str, duration_seconds: float) -> None:
     row = {
         "host": host,
         "path_tail": path_tail,
-        "duration_seconds": round(max(0.0, float(duration_seconds)), 6),
+        "duration_seconds": round(max(0.0, float(duration_seconds)), 6)
+        if math.isfinite(float(duration_seconds)) else 0.0,
     }
     encoded = (json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
     try:

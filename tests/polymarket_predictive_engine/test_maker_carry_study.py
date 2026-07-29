@@ -40,11 +40,14 @@ def test_timed_out_truncated_price_series_is_not_complete_measurement() -> None:
 
     truncated = [(1_700_000_000.0 + index * 60, 0.5) for index in range(29)]
     complete_slow = [(1_700_000_000.0 + index * 600, 0.5) for index in range(30)]
-    adverse = maker_carry_study._adverse_selection(
-        {"reaction_minutes": 1, "markout_min_prints": 1}, truncated, complete_slow, [], 0.01, 10.0, {}
+    result = maker_carry_study._adverse_selection(
+        {"reaction_minutes": 1, "markout_min_prints": 30, "markout_horizon_minutes": 5},
+        truncated, complete_slow, [], 0.01, 10.0, {}
     )
-    assert adverse is not None
-    assert adverse["markout_measured"] is False
+    assert result is not None
+    assert result["history_points"] == 30
+    assert result["markout_measured"] is False
+    assert result["adverse_usd_per_day_1min_24h"] is None
 
 
 def _config(tmp_path: Path):

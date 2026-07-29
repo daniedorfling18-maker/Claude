@@ -35,6 +35,7 @@ DR_STATUS_MAX_AGE_SECONDS = 6 * 60 * 60
 NTFY_ENV_VAR = "OPS_OWNER_NTFY_TOPIC_URL"
 MAX_NOTIFICATION_IDS = 20
 TRAINING_HARVEST_DEGRADED_MAX_CONSECUTIVE_RUNS = 1
+TRAINING_HARVEST_RECEIPT_MAX_AGE_SECONDS = 25 * 60 * 60
 
 # A maximum is the number of consecutive degraded observations tolerated.
 # Therefore max=3 trips on observation four, exactly matching "> 3 cycles".
@@ -250,6 +251,9 @@ def _registrations(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
             "incident_on_observation": TRAINING_HARVEST_DEGRADED_MAX_CONSECUTIVE_RUNS + 1,
             "observation_unit": "distinct training harvest",
             "evaluation_policy": "fixed repeated-run ceiling; missing or unreadable field fails closed",
+            "producer": "polymarket_predictive_engine.training_harvest.run_training_harvest",
+            "required_schema": {"generated_at_utc": "UTC timestamp", "coverage_degraded_steps": "list[str]"},
+            "receipt_maximum_age_seconds": TRAINING_HARVEST_RECEIPT_MAX_AGE_SECONDS,
         },
         {
             "id": "kill_input_stale_live_stage",
@@ -658,18 +662,6 @@ def _evaluate_training_harvest_coverage(
     del settings  # fixed ceiling; configuration cannot widen it
     relative = "ops_scheduler/training_harvest.json"
     path = cfg.output_root / relative
-    if not path.exists():
-        return (
-            {
-                "registration_id": "training_harvest_coverage_degraded",
-                "artifact": relative,
-                "state": "unobserved",
-                "consecutive_degraded_observations": 0,
-                "max_consecutive_degraded_observations": TRAINING_HARVEST_DEGRADED_MAX_CONSECUTIVE_RUNS,
-            },
-            {},
-        )
-
     payload = _mapping(read_json(path, default={}) or {})
     try:
         fallback_token = f"mtime_ns:{path.stat().st_mtime_ns}"
@@ -677,9 +669,19 @@ def _evaluate_training_harvest_coverage(
         fallback_token = f"unreadable_at:{generated_at}"
     token = _stamp(payload) or fallback_token
     value = payload.get("coverage_degraded_steps")
-    field_valid = isinstance(value, list)
-    degraded_steps = [str(item) for item in value if str(item)] if field_valid else []
-    degraded = not field_valid or bool(degraded_steps)
+    field_valid = isinstance(value, list) and all(isinstance(item, str) and item for item in value)
+    receipt_at = _parse_stamp(payload.get("generated_at_utc"))
+    observed_at = _parse_stamp(generated_at) or datetime.now(timezone.utc)
+    raw_age_seconds = (observed_at - receipt_at).total_seconds() if receipt_at else None
+    age_seconds = max(0.0, raw_age_seconds) if raw_age_seconds is not None else None
+    stale = (
+        raw_age_seconds is None
+        or raw_age_seconds < 0
+        or raw_age_seconds > TRAINING_HARVEST_RECEIPT_MAX_AGE_SECONDS
+    )
+    degraded_steps = list(value) if field_valid else []
+    bad_input = not path.exists() or not payload or not field_valid or stale
+    degraded = bad_input or bool(degraded_steps)
     counters = state.setdefault("counters", {})
     counter = _advance_counter(
         _mapping(counters.get("training_harvest_coverage_degraded")),
@@ -690,7 +692,7 @@ def _evaluate_training_harvest_coverage(
     count = int(counter["consecutive_degraded_observations"])
     maximum = TRAINING_HARVEST_DEGRADED_MAX_CONSECUTIVE_RUNS
     incidents: dict[str, dict[str, Any]] = {}
-    if degraded and count > maximum:
+    if degraded and (bad_input or count > maximum):
         row = _incident(
             generated_at=generated_at,
             registration_id="training_harvest_coverage_degraded",
@@ -698,8 +700,8 @@ def _evaluate_training_harvest_coverage(
             source_artifact=relative,
             observation_token=token,
             episode_start=str(counter["episode_start_token"]),
-            degraded_state="coverage_degraded" if field_valid else "coverage_field_missing_or_unreadable",
-            reason="training harvest coverage was degraded on repeated runs",
+            degraded_state="receipt_absent_stale_or_malformed" if bad_input else "coverage_degraded",
+            reason="training harvest receipt was absent, stale, malformed, or repeatedly coverage-degraded",
             count=count,
             maximum=maximum,
         )
@@ -712,6 +714,8 @@ def _evaluate_training_harvest_coverage(
             "observation_token": token,
             "coverage_degraded_steps": degraded_steps if field_valid else None,
             "coverage_degraded_steps_readable": field_valid,
+            "receipt_age_seconds": round(age_seconds, 3) if age_seconds is not None else None,
+            "receipt_maximum_age_seconds": TRAINING_HARVEST_RECEIPT_MAX_AGE_SECONDS,
             "consecutive_degraded_observations": count,
             "max_consecutive_degraded_observations": maximum,
         },

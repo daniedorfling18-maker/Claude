@@ -6502,6 +6502,21 @@ freshness representations. Both must reflect incomplete collection:
   that default is precisely the false-health this clause exists to prevent.
   Fixed thresholds in code; configuration may alarm sooner, never later.
 
+  **An in-progress harvest is not an observation** (added 2026-07-29 after
+  Codex's review of PR #393 found the fail-closed rule above generating false
+  alarms). The harvest omits `coverage_degraded_steps` until finalization while
+  refreshing `generated_at_utc` after every child, and `wait_with_safety_pulses`
+  runs the watchdog every five minutes during the harvest — so a healthy
+  multi-pulse harvest would otherwise increment the counter and page the owner
+  before its own clean receipt arrived. A receipt whose status is non-terminal
+  and whose stamp is INSIDE the age ceiling is skipped entirely: not degraded,
+  not healthy, not counted. The counter keys to distinct COMPLETED harvests, so
+  one harvest contributes exactly one observation however many pulses observe
+  it. A receipt stuck non-terminal BEYOND the ceiling is the wedged-harvest case
+  and must alarm — rule 1 may not swallow it. False alarms are not a lesser
+  failure than false health here: an alarm the owner learns to ignore is a
+  watchdog that has stopped working.
+
 **Fail-safe direction (S5).** A slow or timed-out collection child degrades
 COVERAGE only. It must never mark a market measured, never fabricate or complete
 a partial price series, never let a truncated series read as whole, and never
@@ -6521,7 +6536,10 @@ study's consumer path — asserted against the PRODUCTION `min_points` and
 `_adverse_selection`, ending in `markout_measured is False`, not against a
 lowered test-only threshold; (7) the new watchdog registration opens an incident
 on repeated `coverage_degraded_steps`, stays healthy on a clean run, and fails
-CLOSED on an absent, stale, malformed, or non-list field; (8) the tolerated list
+CLOSED on an absent, stale, malformed, or non-list field; (7b) a healthy harvest
+observed across three consecutive pulses while non-terminal produces zero
+incidents and exactly one observation on completion, while a receipt stuck
+non-terminal past the ceiling opens an incident; (8) the tolerated list
 is enumerated — a tolerated step, a non-tolerated step with the same timeout
 kind, and a step whose name begins with `collect_` but is not on the list all
 behave per 138.1; (9) an operator tightening of the harvest timeout is NOT

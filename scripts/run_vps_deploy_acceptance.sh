@@ -11,8 +11,18 @@ set -u
 
 CONFIG_PATH="${POLYMARKET_CONFIG_PATH:-/app/polymarket_predictive_config.example.yaml}"
 OUT_PATH="${DEPLOY_ACCEPTANCE_CYCLE_PATH:-/app/outputs/ops_scheduler/deploy_acceptance_cycle.json}"
-COMMAND_TIMEOUT="${DEPLOY_ACCEPTANCE_COMMAND_TIMEOUT_SECONDS:-120}"
-TOTAL_TIMEOUT="${DEPLOY_ACCEPTANCE_TOTAL_TIMEOUT_SECONDS:-420}"
+# Budget calibration (2026-07-29): the 120s per-command bound TERM-killed a
+# HEALTHY maker-carry-study during the ca8c3a3 deploy. Measured baselines from
+# VPS telemetry (training_harvest.json, 2026-07-28): study 69.9s and
+# maker-fill-replay 47.6s on a warm, idle host - and acceptance runs cold,
+# immediately after an image build and full container recreation, where CPU
+# contention roughly doubles both (the replay also legitimately doubles for
+# one release after WO-136's static-sheet audit pass). 300s/720s keep every
+# producer bounded at ~4x its warm baseline while the deploy paths' outer
+# wrappers (900s in both the workflow and the manual script) still kill a
+# genuine hang. The PASS predicate is unchanged: every producer must exit 0.
+COMMAND_TIMEOUT="${DEPLOY_ACCEPTANCE_COMMAND_TIMEOUT_SECONDS:-300}"
+TOTAL_TIMEOUT="${DEPLOY_ACCEPTANCE_TOTAL_TIMEOUT_SECONDS:-720}"
 
 case "$COMMAND_TIMEOUT:$TOTAL_TIMEOUT" in
   *[!0-9:]*|:*|*:) printf '%s\n' "deploy acceptance timeouts must be positive integers" >&2; exit 64 ;;

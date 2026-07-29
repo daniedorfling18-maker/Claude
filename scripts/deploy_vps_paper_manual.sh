@@ -342,7 +342,7 @@ recreate_stack() {
 # the arming boundary with the scheduler stopped.
 run_deploy_acceptance() {
   $DOCKER compose -f "$REPO_DIR/$COMPOSE_FILE" stop vps-ops-scheduler || true
-  timeout --signal=TERM --kill-after=30s 600 \
+  timeout --signal=TERM --kill-after=30s 900 \
     $DOCKER compose -f "$REPO_DIR/$COMPOSE_FILE" --profile deploy-acceptance run \
     --rm --no-deps vps-deploy-acceptance </dev/null \
     || fail "deploy acceptance failed"

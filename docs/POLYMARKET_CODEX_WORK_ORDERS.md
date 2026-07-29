@@ -6285,6 +6285,7 @@ refactors:
 | 7 | **WO-133** | guarded manual deploy path + its `AGENTS.md` amendment | **owner** (one PR carrying a governance amendment cannot be partially merged) |
 | 8 | **WO-136** | contemporaneous-quote fill replay (kills the phantom-fill 42x haircut; issued 2026-07-28 under the owner's direct instruction) | orchestrator, after line-audit |
 | 9 | **WO-137** | portfolio composition diff — name the reason every market leaves (churn is the campaign's binding variable; issued 2026-07-28 under the owner's direct instruction) | orchestrator, after line-audit |
+| 11 | **WO-139** | spend the official-book seeding budget on markets that can actually be sized (dispatched 2026-07-29 before registration — see the WO-138 registration's provenance note) | owner (study module) |
 
 **WO-121 — watchdog coverage for unmonitored producers** (registered 2026-07-27 as
 WO-129's named blocking prerequisite, per ENGINEERING_STANDARDS S3). WO-129 tightens
@@ -6407,3 +6408,94 @@ widen the carve-out into "agents may run production paths".
 "Do not start any of the following on the local workstation"; and the required PR
 gate still runs the full unfiltered suite on that PR and remains what the merge
 decision cites.
+
+## WO-139 — Spend the official-book seeding budget on markets that can actually be sized — `queued` (dispatched to Codex 2026-07-29; study module → owner merge after line-audit; see the provenance note in the WO-138 registration)
+
+**Why now.** M-A banks a day only if the day's LAST run holds target, and M-B.1
+requires the SAME market present across two consecutive cycles; both are starved
+by a portfolio that oscillates between 0 and 1 markets. Measured 2026-07-29 from
+live telemetry and a code trace: the book-seeding watchlist is 51 slots
+(portfolio 1 + persistent 25 + seeds 25), and 26 of the 29 watchlist slots that
+overlapped that day's candidate set were on markets that can never be sized —
+for two independent and unrelated reasons.
+
+**Scope (collection/reporting only — no gate, threshold, or eligibility change).**
+Files: `src/polymarket_predictive_engine/maker_fill_replay.py`,
+`src/polymarket_predictive_engine/maker_carry_study.py` (CSV columns only), tests.
+
+139.1 — `_candidate_seed_markets` (`maker_fill_replay.py:511-529`) ranks seeds by
+raw `net_carry_usd_per_day` alone, reading none of the sizer's other predicates,
+so that day's top two seed slots went to markets with `estimated_reward_share`
+0.978 and 1.000 — permanently `thin_book_untrusted` at the sizer
+(`maker_carry_study.py:1696`, `max_trusted_reward_share` 0.05). Replace the flat
+ranking with **three explicit tiers**, each ordered by carry desc:
+
+  * **Tier 1 — sizeable now.** Clears every non-depth sizer predicate exactly as
+    the sizer states them: `net_carry > 0`, `estimate_quality ==
+    "book_and_history"` (the sizer accepts nothing else, `:1696`),
+    `band_eligible is True`, `resolution_risk != "high"`. Seeding keeps these
+    warm so they stay depth-eligible.
+  * **Tier 2 — one window short.** Identical except `estimate_quality ==
+    "single_window_history"`. These are NOT sizeable today, and the tier exists
+    precisely because more history is what promotes them; registering the tier
+    separately keeps them from displacing Tier 1, which the flat "in {both}"
+    formulation would have allowed.
+  * **Tier 3 — fallback.** The existing raw-carry order, filling only slots that
+    Tiers 1 and 2 leave free.
+
+  This REALLOCATES slots: the number of markets polled never falls, and a market
+  that would be polled today when slots are free is still polled.
+
+139.2 — `_recent_book_markets` (`:436-475`) uses file mtime only as a filter and
+then iterates `sorted(books_dir.glob("*.csv.gz"))` — lexicographic hex
+`condition_id` — after which `snapshot_official_books` truncates with
+`persistent[:persistent_cap]` (`:700`). The 25 persistent slots were verifiably
+an unbroken hex prefix (`0x003a…`-`0x2d1492…`), so ~82% of the address space can
+never hold a persistent slot; the docstring at `:449-450` already claims mtime
+ordering. Sort by mtime descending before truncation; a `stat` failure sorts
+last rather than raising.
+
+139.3 — `book_history_hours` and `book_snapshot_count` are computed at
+`maker_carry_study.py:2180-2184` but omitted from `CANDIDATE_FIELDS`
+(`:328-387`), so `maker_carry_candidates.csv` cannot show why a candidate is
+depth-ineligible. Add both columns. Reporting-only: no gate reads that CSV.
+
+**Fail-safe direction (S5).** Seeding and archiving are collection-only. Nothing
+here may mark a market measured, alter `_measurement_eligible`, change any
+`maker_min_book_*` / `max_trusted_reward_share` / M-A / M-B / M-C threshold, or
+change which candidates the sizer accepts. The module's existing contract holds:
+configuration may make the system poll MORE, never blind it
+(`maker_fill_replay.py:88-90`). If a reordering input is missing or malformed,
+fall back to current behaviour rather than dropping a market from the watchlist.
+
+**Explicitly out of scope, recorded so it is not attempted.** Two adjacent
+"fixes" surfaced in the same diagnosis and are refused here: (a) lowering
+`max_trusted_reward_share` or `MB_TIER0_MIN_CONFIRMED_FILLS` to make M-B.1
+reachable — both are registered gates, and the tension between them (we may only
+quote deep books, where we are never filled) is a real finding for the owner,
+not a threshold to move; (b) adding a new objective LOW class to
+`_base_resolution_class` to widen the universe — the WO-51 screen may escalate
+LOW to MEDIUM and never the reverse.
+
+**Tests.** (1) with top raw-carry entries thin-book/high-risk and lower-carry
+entries sizeable, the seed tranche polls the sizeable ones first and the total
+polled count is unchanged; (2) when fewer than the cap qualify, remaining slots
+are still filled from the raw-carry order — no shrinkage; (3) malformed or
+missing eligibility fields fall back to current ordering without dropping
+markets; (4) the persistent tranche returns the most recently written archives,
+proven with a fixture whose mtime order is the REVERSE of its lexicographic
+`condition_id` order — the pre-fix code must fail this test; (4b) the
+wall-clock eligibility window still holds across the refactor: with one archive
+held at a fixed mtime, advancing the evaluation clock beyond `regime_days` drops
+it from the persistent tranche, and inside the window keeps it; (5)
+`maker_carry_candidates.csv` carries both depth columns; (6) an existing
+sizer/eligibility test passes unchanged, proving no gate moved.
+
+**Day-after check:** in `official_book_snapshot.json`, the seeded watchlist's
+LEADING entries are the Tier-1 candidates in carry order, followed by Tier 2,
+with Tier-3 fallback entries only after both are exhausted — i.e. the check is on
+the priority ORDERING and the qualified prefix, never on the whole list being
+qualified, because the registered fallback may legitimately reintroduce
+thin-book or high-risk markets when fewer than the cap qualify. The polled count
+is unchanged from the prior run's cap. `maker_carry_candidates.csv` shows
+`book_history_hours` and `book_snapshot_count` for every row.

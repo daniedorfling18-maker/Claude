@@ -21,6 +21,7 @@ from polymarket_predictive_engine.maker_carry_study import (
     _incumbent_hold,
     _maker_carry_ledger_lock_path,
     _measurement_eligible,
+    _portfolio_composition_diff,
     _size_portfolio,
     run_maker_carry_study,
 )
@@ -1563,3 +1564,95 @@ def test_wo113_stickiness_bonus_drops_after_max_hold():
         settings, [incumbent, challenger], 500.0, incumbents={"0xinc"}, incumbent_hold_days={"0xinc": 30}
     )
     assert [entry["condition_id"] for entry in portfolio] == ["0xchal"]  # held >= max -> bonus dropped
+
+
+def test_wo137_composition_diff_names_departures_and_keeps_sets_disjoint():
+    diff, status = _portfolio_composition_diff(
+        previous=(
+            "2026-07-28T00:24:00Z",
+            {
+                "held": True,
+                "stale": False,
+                "risk": True,
+                "thin": True,
+                "unsized": False,
+                "unscanned": False,
+                "unrewarded": False,
+                "unknown": False,
+            },
+        ),
+        current_run_at="2026-07-28T12:51:00Z",
+        portfolio=[{"condition_id": "held"}, {"condition_id": "entered"}],
+        candidates=[
+            {"condition_id": "risk", "resolution_risk": "high"},
+            {"condition_id": "thin", "estimate_quality": "thin_book_untrusted"},
+            {"condition_id": "unsized", "net_carry_usd_per_day": 1.25},
+        ],
+        rewarded_universe=[
+            {"condition_id": cid}
+            for cid in ("held", "entered", "risk", "thin", "unsized", "unscanned", "unknown")
+        ],
+        measurement_universe=[
+            {"condition_id": cid}
+            for cid in ("held", "entered", "risk", "thin", "unsized", "unknown")
+        ],
+        stale_reasons={"stale": ["venue_close_time_past"]},
+    )
+
+    assert status == "ok"
+    assert diff["entered"] == [{"condition_id": "entered"}]
+    assert diff["held"] == [{"condition_id": "held"}]
+    dispositions = {row["condition_id"]: row["disposition"] for row in diff["departed"]}
+    assert dispositions == {
+        "risk": "excluded_resolution_risk",
+        "stale": "excluded_stale:venue_close_time_past",
+        "thin": "excluded_thin_book",
+        "unknown": "disposition_unknown",
+        "unrewarded": "not_in_rewarded_universe",
+        "unscanned": "not_in_candidate_scan",
+        "unsized": "measured_not_sized",
+    }
+    unsized = next(row for row in diff["departed"] if row["condition_id"] == "unsized")
+    assert unsized["net_carry_usd_per_day"] == 1.25
+    assert diff["paper_trading_invoked"] is False
+    assert diff["live_trading_invoked"] is False
+
+
+def test_wo137_missing_prior_run_is_explicit_and_empty():
+    diff, status = _portfolio_composition_diff(
+        previous=None,
+        current_run_at="2026-07-28T12:51:00Z",
+        portfolio=[{"condition_id": "new"}],
+        candidates=[],
+        rewarded_universe=[],
+        measurement_universe=[],
+        stale_reasons={},
+    )
+    assert status == "no_prior_run"
+    assert diff["previous_run_at"] is None
+    assert diff["entered"] == diff["departed"] == diff["held"] == []
+
+
+def test_wo137_diff_write_failure_does_not_change_subject_ledgers(tmp_path, monkeypatch):
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+    run_maker_carry_study(cfg)
+    out_root = cfg.output_root / "maker_carry"
+    members_before = (out_root / "maker_carry_portfolio_members.csv").read_bytes()
+    history_before = len(read_csv_rows(out_root / "maker_carry_history.csv"))
+    real_write_json = maker_carry_study.write_json
+
+    def fail_only_diff(path, payload):
+        if Path(path).name == "portfolio_composition_diff.json":
+            raise OSError("forced WO-137 snapshot failure")
+        return real_write_json(path, payload)
+
+    monkeypatch.setattr(maker_carry_study, "write_json", fail_only_diff)
+    summary = run_maker_carry_study(cfg)
+
+    assert summary["status"] == "ok"
+    assert summary["ledger_commit"]["status"] == "committed"
+    assert summary["composition_diff_status"] == "write_failed"
+    assert len(read_csv_rows(out_root / "maker_carry_history.csv")) == history_before + 1
+    # WO-111 remains append-only: the existing bytes are an identical prefix.
+    assert (out_root / "maker_carry_portfolio_members.csv").read_bytes().startswith(members_before)

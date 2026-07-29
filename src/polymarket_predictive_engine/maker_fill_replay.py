@@ -17,6 +17,7 @@ import json
 import time
 from bisect import bisect_left, bisect_right
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 from math import isfinite
 from pathlib import Path
 from typing import Any, Iterable
@@ -1120,6 +1121,8 @@ def _replay_against_states(
     study_charge: float,
     study_charge_by_condition: dict[str, float],
     max_state_lag_seconds: float,
+    quote_sheet_generated_stamp: float | None = None,
+    quoting_basis: str = "static_sheet",
     start_stamp: float | None = None,
     end_stamp: float | None = None,
 ) -> dict[str, Any]:
@@ -1132,6 +1135,7 @@ def _replay_against_states(
             "simulated_fill_opportunities": 0,
             "last_in_queue_evaluable_opportunities": 0,
             "queue_depth_unavailable_opportunities": 0,
+            "no_contemporaneous_state_opportunities": 0,
             "confirmed_fills": 0,
             "windows_simulated": 0,
             "windows_covered": 0,
@@ -1154,6 +1158,7 @@ def _replay_against_states(
     fills: list[dict[str, Any]] = []
     simulated_fill_opportunities = 0
     last_in_queue_evaluable_opportunities = 0
+    no_contemporaneous_state_opportunities = 0
     relevant_trades: list[dict[str, Any]] = []
     for trade in trades:
         if start_stamp is not None and trade["stamp"] < start_stamp:
@@ -1168,11 +1173,48 @@ def _replay_against_states(
         state = _state_at_or_before(states, trade["stamp"])
         if state is not None and trade["stamp"] - state["stamp"] > max_state_lag_seconds:
             state = None
-        bid_quote = safe_float(entry.get("quote_bid_price"))
-        ask_quote = safe_float(entry.get("quote_ask_price"))
-        if (bid_quote is None or ask_quote is None) and state is not None:
+        historical = (
+            quoting_basis == "contemporaneous"
+            and (
+                quote_sheet_generated_stamp is None
+                or trade["stamp"] < quote_sheet_generated_stamp
+            )
+        )
+        quote_rounding = "sheet_absolute_prices"
+        if historical:
+            if state is None:
+                no_contemporaneous_state_opportunities += 1
+                coverage_by_token[str(entry["token_id"])][
+                    "no_contemporaneous_state_opportunities"
+                ] += 1
+                continue
             bid_quote = state["midpoint"] - float(entry["quote_distance"])
             ask_quote = state["midpoint"] + float(entry["quote_distance"])
+            tick = safe_float(entry.get("order_price_min_tick_size"))
+            if tick is not None and tick > 0:
+                tick_decimal = Decimal(str(tick))
+                bid_quote = float(
+                    (Decimal(str(bid_quote)) / tick_decimal).to_integral_value(
+                        rounding=ROUND_FLOOR
+                    )
+                    * tick_decimal
+                )
+                ask_quote = float(
+                    (Decimal(str(ask_quote)) / tick_decimal).to_integral_value(
+                        rounding=ROUND_CEILING
+                    )
+                    * tick_decimal
+                )
+                quote_rounding = "order_price_min_tick_size_outward"
+            else:
+                quote_rounding = "raw_midpoint_distance"
+        else:
+            bid_quote = safe_float(entry.get("quote_bid_price"))
+            ask_quote = safe_float(entry.get("quote_ask_price"))
+            if (bid_quote is None or ask_quote is None) and state is not None:
+                bid_quote = state["midpoint"] - float(entry["quote_distance"])
+                ask_quote = state["midpoint"] + float(entry["quote_distance"])
+                quote_rounding = "raw_midpoint_distance_fallback"
         if bid_quote is None or ask_quote is None or ask_quote <= bid_quote:
             continue
         if trade["side"] == "SELL" and trade["price"] <= bid_quote:
@@ -1252,6 +1294,8 @@ def _replay_against_states(
                 "fill_size": round(fill_size, 6),
                 "depth_ahead": round(depth_ahead, 6),
                 "queue_depth_source": queue_depth_source,
+                "quoting_basis": "contemporaneous" if historical else "static_sheet",
+                "quote_rounding": quote_rounding,
                 "trade_size": trade["size"],
                 "markout_per_share": markouts,
                 "adverse_usd": adverse_usd,
@@ -1363,7 +1407,13 @@ def _replay_against_states(
             else None
         )
     haircut_coverage = int(by_horizon["5m"]["windows_covered"])
-    insufficient = simulated_fill_opportunities > 0 and haircut_coverage == 0
+    insufficient = (
+        simulated_fill_opportunities > 0 and haircut_coverage == 0
+    ) or (
+        quoting_basis == "contemporaneous"
+        and no_contemporaneous_state_opportunities > 0
+        and simulated_fill_opportunities == 0
+    )
     if insufficient:
         coverage_status = "insufficient_coverage"
         haircut: float | str | None = "insufficient_coverage"
@@ -1392,6 +1442,8 @@ def _replay_against_states(
         "queue_depth_unavailable_opportunities": (
             simulated_fill_opportunities - last_in_queue_evaluable_opportunities
         ),
+        "no_contemporaneous_state_opportunities": no_contemporaneous_state_opportunities,
+        "quoting_basis": quoting_basis,
         "queue_depth_standard": "full_book_levels_or_quote_aligned_depth_only",
         "confirmed_fills": len(fills),
         "confirmed_fill_ratio": (
@@ -1444,6 +1496,7 @@ def run_maker_fill_replay(cfg: EngineConfig) -> dict[str, Any]:
         "status": "disabled",
         "generated_at_utc": generated_at,
         "work_order": "WO-40/WO-44/WO-83",
+        "quoting_basis": "contemporaneous",
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
         "order_placement_invoked": False,
@@ -1507,6 +1560,7 @@ def run_maker_fill_replay(cfg: EngineConfig) -> dict[str, Any]:
     study_charge_by_condition = _study_charge_by_condition(cfg, portfolio)
     study_charge = sum(study_charge_by_condition.values())
     max_state_lag = float(settings["max_book_state_lag_seconds"])
+    quote_sheet_generated_stamp = _stamp(payload["portfolio_generated_at_utc"])
     source_results = {
         source: _replay_against_states(
             source=source,
@@ -1516,6 +1570,22 @@ def run_maker_fill_replay(cfg: EngineConfig) -> dict[str, Any]:
             study_charge=study_charge,
             study_charge_by_condition=study_charge_by_condition,
             max_state_lag_seconds=max_state_lag,
+            quote_sheet_generated_stamp=quote_sheet_generated_stamp,
+            quoting_basis="contemporaneous",
+        )
+        for source, states in states_by_source.items()
+    }
+    static_sheet_results = {
+        source: _replay_against_states(
+            source=source,
+            states_by_token=states,
+            trades=trades,
+            portfolio=portfolio,
+            study_charge=study_charge,
+            study_charge_by_condition=study_charge_by_condition,
+            max_state_lag_seconds=max_state_lag,
+            quote_sheet_generated_stamp=quote_sheet_generated_stamp,
+            quoting_basis="static_sheet",
         )
         for source, states in states_by_source.items()
     }
@@ -1551,6 +1621,8 @@ def run_maker_fill_replay(cfg: EngineConfig) -> dict[str, Any]:
                 study_charge=study_charge,
                 study_charge_by_condition=study_charge_by_condition,
                 max_state_lag_seconds=max_state_lag,
+                quote_sheet_generated_stamp=quote_sheet_generated_stamp,
+                quoting_basis="contemporaneous",
                 start_stamp=cutoff,
             ),
             "prior_to_last_7_days": _replay_against_states(
@@ -1561,6 +1633,8 @@ def run_maker_fill_replay(cfg: EngineConfig) -> dict[str, Any]:
                 study_charge=study_charge,
                 study_charge_by_condition=study_charge_by_condition,
                 max_state_lag_seconds=max_state_lag,
+                quote_sheet_generated_stamp=quote_sheet_generated_stamp,
+                quoting_basis="contemporaneous",
                 end_stamp=cutoff,
             ),
         }
@@ -1581,7 +1655,11 @@ def run_maker_fill_replay(cfg: EngineConfig) -> dict[str, Any]:
             "official_snapshot": read_json(out_root / "official_book_snapshot.json", default={}) or {},
             "book_states": primary["book_states"],
             "trade_prints_seen": len(trades),
+            "quoting_basis": "contemporaneous",
             "simulated_fill_opportunities": primary["simulated_fill_opportunities"],
+            "no_contemporaneous_state_opportunities": primary[
+                "no_contemporaneous_state_opportunities"
+            ],
             "last_in_queue_evaluable_opportunities": primary[
                 "last_in_queue_evaluable_opportunities"
             ],
@@ -1602,6 +1680,14 @@ def run_maker_fill_replay(cfg: EngineConfig) -> dict[str, Any]:
             "implied_adverse_usd_per_day": primary["implied_adverse_usd_per_day"],
             "study_adverse_usd_per_day": primary["study_adverse_usd_per_day"],
             "realism_ratio": primary["realism_ratio"],
+            # WO-136 one-release audit bridge. These deliberately retain the
+            # pre-WO-136 static replay, but no policy or sizing path reads them.
+            "static_sheet_realism_ratio": static_sheet_results[primary_source][
+                "realism_ratio"
+            ],
+            "static_sheet_fills_per_day": static_sheet_results[primary_source][
+                "simulated_fills_per_day"
+            ],
             "realism_ratio_by_source": {source: result["realism_ratio"] for source, result in source_results.items()},
             "source_results": source_results,
             "source_agreement": source_agreement,

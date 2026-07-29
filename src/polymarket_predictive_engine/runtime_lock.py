@@ -131,6 +131,16 @@ def acquire_runtime_lock(
             stale_reason = f"age_seconds>{stale_after_seconds:g}"
         elif _same_pid_lock_predates_current_process(existing_payload):
             stale_reason = "same_pid_lock_predates_current_process"
+        elif not existing_payload and stale_after_seconds > 0:
+            # Atomic publishing means this process never creates a malformed
+            # lock.  Treat an externally corrupt lock as ambiguous until its
+            # filesystem age crosses the same stale ceiling, then reclaim it.
+            try:
+                mtime_age = max(0.0, time.time() - path.stat().st_mtime)
+            except (FileNotFoundError, OSError):
+                mtime_age = 0.0
+            if mtime_age > stale_after_seconds:
+                stale_reason = f"corrupt_payload_mtime_age_seconds>{stale_after_seconds:g}"
         if stale_reason:
             try:
                 path.unlink()

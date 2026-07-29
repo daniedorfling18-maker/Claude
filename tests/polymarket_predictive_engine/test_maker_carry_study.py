@@ -4,6 +4,7 @@ reward shares, and a calm last-24h window hiding news-gap pick-off risk."""
 from __future__ import annotations
 
 import fcntl
+import gzip
 import json
 import os
 from contextlib import contextmanager
@@ -65,7 +66,18 @@ def _config(tmp_path: Path):
     }
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
-    return load_config(path)
+    cfg = load_config(path)
+    # The suite's long-standing calm-market fixture represents a deep book.
+    # WO-129 no longer permits tests to disable the registered archive-depth
+    # gate through config, so record the corresponding 100-snapshot/48h proof.
+    books = cfg.output_root / "maker_carry" / "official_books"
+    books.mkdir(parents=True, exist_ok=True)
+    rows = ["condition_id,collected_at_utc"] + [
+        f"0xcalm,2026-07-{20 + (index * 2 // 99):02d}T{(index * 48 // 99) % 24:02d}:00:00Z"
+        for index in range(100)
+    ]
+    (books / "0xcalm.csv.gz").write_bytes(gzip.compress(("\n".join(rows) + "\n").encode()))
+    return cfg
 
 
 def _market(
@@ -1506,7 +1518,34 @@ def test_wo113_measurement_eligible_gate():
     assert _measurement_eligible({"book_history_hours": 5.0, "book_snapshot_count": 18}, settings) is False
     assert _measurement_eligible({}, settings) is False  # missing depth fails closed
     disabled = _wo113_settings(maker_min_book_history_hours=0, maker_min_book_snapshots=0)
-    assert _measurement_eligible({}, disabled) is True  # both thresholds zero -> gate off
+    assert _measurement_eligible({}, disabled) is False  # no both-zero bypass remains
+
+
+def test_wo129_config_cannot_lower_registered_evidence_gate_minima(tmp_path):
+    cfg = _config(tmp_path)
+    cfg.raw["maker_carry_study"].update(
+        maker_min_book_history_hours=0,
+        maker_min_book_snapshots=0,
+        gate_min_runs_at_target=0,
+        target_net_usd_per_day=0,
+    )
+    settings = maker_carry_study._settings(cfg)
+    assert settings["maker_min_book_history_hours"] == 48.0
+    assert settings["maker_min_book_snapshots"] == 100
+    assert settings["gate_min_runs_at_target"] == 7
+    assert settings["target_net_usd_per_day"] == 3.33
+
+    cfg.raw["maker_carry_study"].update(
+        maker_min_book_history_hours=72,
+        maker_min_book_snapshots=200,
+        gate_min_runs_at_target=12,
+        target_net_usd_per_day=8,
+    )
+    tightened = maker_carry_study._settings(cfg)
+    assert tightened["maker_min_book_history_hours"] == 72
+    assert tightened["maker_min_book_snapshots"] == 200
+    assert tightened["gate_min_runs_at_target"] == 12
+    assert tightened["target_net_usd_per_day"] == 8
 
 
 def test_wo113_incumbent_hold_reads_membership_sidecar(tmp_path):

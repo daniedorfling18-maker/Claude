@@ -121,6 +121,21 @@ def test_preexisting_empty_lock_is_held_fail_closed_not_reclaimed(tmp_path: Path
     assert lock.stale_lock_replaced is False
 
 
+def test_corrupt_lock_is_reclaimed_after_mtime_stale_ceiling(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    path = runtime_lock.runtime_lock_path(cfg, "prediction_cycle")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("not-json", encoding="utf-8")
+    old = datetime.now(timezone.utc).timestamp() - 120
+    os.utime(path, (old, old))
+
+    lock = runtime_lock.acquire_runtime_lock(cfg, "prediction_cycle", stale_after_seconds=60)
+
+    assert lock.acquired is True
+    assert lock.stale_lock_reason == "corrupt_payload_mtime_age_seconds>60"
+    runtime_lock.release_runtime_lock(lock)
+
+
 def test_short_writes_still_publish_the_complete_payload(tmp_path: Path, monkeypatch) -> None:
     # #347 Codex P2: os.write may return a short count; the loop must persist the whole
     # payload before linking, or a truncated (malformed) lock could be published.

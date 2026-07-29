@@ -56,6 +56,28 @@ file_age_seconds() {
   printf '%s' "$((now - mtime))"
 }
 
+# Registered WO-129 health ceilings. The forward-cycle fallback is allowed only
+# during the first 30 minutes after container start; thereafter the live-loop
+# heartbeat itself must be no older than 15 minutes. Forward evidence is always
+# bounded by its existing 26-hour ceiling. Invalid/negative ages fail closed.
+health_evidence_within_ceiling() {
+  heartbeat_age_value="$1"
+  forward_age_value="$2"
+  uptime_seconds_value="$3"
+  if [ "$heartbeat_age_value" != "missing" ]; then
+    case "$heartbeat_age_value" in ''|*[!0-9]*) return 1 ;; esac
+    if [ "$heartbeat_age_value" -le 900 ]; then
+      return 0
+    fi
+  fi
+  case "$forward_age_value:$uptime_seconds_value" in *[!0-9:]*|*::*) return 1 ;; esac
+  [ "$uptime_seconds_value" -le 1800 ] && [ "$forward_age_value" -le 93600 ]
+}
+
+if [ "${PM_HEALTH_LIBRARY_ONLY:-0}" = "1" ]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 cd "$REPO_DIR"
 
 port="$(env_value POLYMARKET_DASHBOARD_PORT .env)"
@@ -246,13 +268,20 @@ fi
 heartbeat_age="$(file_age_seconds "$heartbeat")"
 forward_age="$(file_age_seconds "$forward_cycle")"
 dashboard_age="$(file_age_seconds "$dashboard_data")"
+container_started_at="$(docker_cmd inspect -f '{{.State.StartedAt}}' polymarket-paper-live 2>/dev/null || true)"
+container_started_epoch="$(date -d "$container_started_at" +%s 2>/dev/null || true)"
+now_epoch="$(date +%s)"
+container_uptime=""
+if [ -n "${container_started_epoch:-}" ] && [ "$container_started_epoch" -le "$now_epoch" ]; then
+  container_uptime="$((now_epoch - container_started_epoch))"
+fi
 
 printf '%s\n' "Live heartbeat age: ${heartbeat_age:-missing}s"
 printf '%s\n' "Forward paper cycle age: ${forward_age:-missing}s"
 printf '%s\n' "Dashboard data age: ${dashboard_age:-missing}s"
 
-if [ -z "${heartbeat_age:-}" ] && [ -z "${forward_age:-}" ]; then
-  printf '%s\n' "No paper heartbeat files exist yet."
+if ! health_evidence_within_ceiling "${heartbeat_age:-missing}" "${forward_age:-missing}" "${container_uptime:-missing}"; then
+  printf '%s\n' "Paper live-loop evidence breaches its registered ceiling (heartbeat 900s; forward fallback 93600s only during first 1800s after start)."
   exit_code=1
 fi
 

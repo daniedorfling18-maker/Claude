@@ -105,8 +105,41 @@ def test_requote_missing_input_trips_on_fourth_distinct_cycle_and_deduplicates(t
     assert len(read_csv_rows(cfg.output_root / INCIDENT_LEDGER)) == 1
 
 
+
+def _write_healthy_slo(cfg: EngineConfig, generated_at: str) -> None:
+    """Multi-day fixtures simulate a RUNNING host, which always has operating
+    state; without it the (correct) post-grace SLO incident drowns the
+    registration actually under test."""
+    write_json(
+        cfg.output_root / "performance" / "operating_state.json",
+        {
+            "generated_at_utc": generated_at,
+            "slo": {
+                "rows": [
+                    {"id": row_id, "breach": False}
+                    for row_id in (
+                        "quote_sheet_age",
+                        "governance_refresh_duration",
+                        "scheduler_overrun_cycles",
+                        "websocket_gap",
+                        "dashboard_staleness",
+                        "reconciliation_age",
+                        "ledger_anchor_age",
+                    )
+                ]
+            },
+        },
+    )
+    for bridge in ("anchor", "telemetry"):
+        write_json(
+            cfg.output_root / "performance" / f"{bridge}_push_status.json",
+            {"generated_at_utc": generated_at, "status": "ok",
+             "paper_trading_invoked": False, "live_trading_invoked": False},
+        )
+
 def test_legitimate_risk_reason_and_transient_missing_input_do_not_incident(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
+    _write_healthy_slo(cfg, "2026-07-13T00:00:00Z")
     path = cfg.output_root / "maker_carry" / "requote_alerts.json"
     for cycle in range(1, 7):
         write_json(path, _requote(cycle, rule="scheduled_event_within_window"))
@@ -116,7 +149,8 @@ def test_legitimate_risk_reason_and_transient_missing_input_do_not_incident(tmp_
 
     for cycle in range(7, 10):
         write_json(path, _requote(cycle, rule="incomplete_order_ticket"))
-        result = build_degraded_state_watchdog(cfg, as_of=f"2026-07-13T00:{cycle}:30Z")
+        _write_healthy_slo(cfg, f"2026-07-13T00:{cycle:02d}:00Z")
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-07-13T00:{cycle:02d}:30Z")
         assert result["status"] == "ok"
     write_json(path, _requote(0, rule="scheduled_event_within_window", state="quotes_ok"))
     recovered = build_degraded_state_watchdog(cfg, as_of="2026-07-13T00:10:30Z")
@@ -268,8 +302,10 @@ def test_live_kill_input_staleness_is_immediate_incident_and_owner_alert(tmp_pat
 
 def test_wallet_partial_counts_distinct_harvests_not_watchdog_polls(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
+    _write_healthy_slo(cfg, "2026-07-11T00:00:00Z")
     wallet_path = cfg.output_root / "performance" / "wallet_reconciliation.json"
     for harvest in range(1, 4):
+        _write_healthy_slo(cfg, f"2026-07-{10 + harvest}T02:00:00Z")
         write_json(
             wallet_path,
             {
@@ -292,8 +328,10 @@ def test_wallet_partial_counts_distinct_harvests_not_watchdog_polls(tmp_path: Pa
 
 def test_wallet_discrepancy_and_unknown_status_are_outside_healthy_allowlist(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path)
+    _write_healthy_slo(cfg, "2026-07-11T00:00:00Z")
     wallet_path = cfg.output_root / "performance" / "wallet_reconciliation.json"
     for harvest in range(1, 4):
+        _write_healthy_slo(cfg, f"2026-07-{10 + harvest}T03:00:00Z")
         write_json(
             wallet_path,
             {
@@ -310,6 +348,7 @@ def test_wallet_discrepancy_and_unknown_status_are_outside_healthy_allowlist(tmp
     assert wallet_eval["healthy_reachable_states"] == sorted(WALLET_HEALTHY_STATES)
     assert result["active_incidents"][0]["reason"] == "synthetic normalized NAV mismatch"
 
+    _write_healthy_slo(cfg, "2026-07-14T03:05:00Z")
     write_json(
         wallet_path,
         {
@@ -486,6 +525,70 @@ def test_wo121_fail_closed_producers_and_slo_are_incidents(tmp_path: Path) -> No
     result = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:00:01Z")
     ids = {row["registration_id"] for row in result["active_incidents"]}
     assert {"ledger_chain_integrity", "disaster_recovery_not_recoverable", "maker_study_run_failed", "operating_state_slo_breach"} <= ids
+
+
+def test_wo121_job_record_missing_exit_code_reads_degraded_not_keyerror(tmp_path: Path) -> None:
+    # A torn status.json write (the OPS-6 case this program was chartered on) can
+    # drop the last_exit_code field entirely. That must read as a FAILED job, not
+    # raise KeyError out of the watchdog - a crashed watchdog is the most
+    # fail-open outcome there is.
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "ops_scheduler" / "status.json",
+        {
+            "generated_at_utc": "2026-07-29T00:00:00Z",
+            "jobs": {"governance_refresh": {"last_run_utc": "2026-07-29T00:00:00Z"}},
+        },
+    )
+    result = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:00:01Z")
+    scheduler_eval = next(
+        row for row in result["evaluations"] if row["registration_id"] == "scheduler_nonzero_exit"
+    )
+    assert scheduler_eval["failing_jobs"], "an absent exit code must count as a failure"
+
+
+def test_wo121_missing_operating_state_is_an_slo_incident_after_grace(tmp_path: Path) -> None:
+    # No operating_state.json at all: every required SLO row is unproven. Before
+    # the fix, an empty rows mapping short-circuited to healthy FOREVER -
+    # silencing the SLO registration and the bridge bootstrap carve-out at the
+    # same time. The corrected behaviour mirrors the publication bridges: a
+    # fixed two-hour bootstrap grace, then every required id reports failing.
+    cfg = _cfg(tmp_path)
+    first = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:00:00Z")
+    first_eval = next(
+        row for row in first["evaluations"] if row["registration_id"] == "operating_state_slo_breach"
+    )
+    assert first_eval["state"] == "healthy", "bootstrap absence is healthy only inside the grace"
+
+    late = build_degraded_state_watchdog(cfg, as_of="2026-07-29T02:00:01Z")
+    slo_eval = next(
+        row for row in late["evaluations"] if row["registration_id"] == "operating_state_slo_breach"
+    )
+    assert slo_eval["state"] == "incident"
+    assert "quote_sheet_age" in slo_eval["failed_rows"]
+    assert any(
+        row["registration_id"] == "operating_state_slo_breach" for row in late["active_incidents"]
+    )
+
+
+def test_wo121_partial_slo_block_is_strict_with_no_grace(tmp_path: Path) -> None:
+    # A PRESENT operating state whose SLO block lacks required rows is torn or
+    # partial evidence, not a bootstrap - it fails immediately, no grace.
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "performance" / "operating_state.json",
+        {
+            "generated_at_utc": "2026-07-29T00:00:00Z",
+            "slo": {"rows": [{"id": "quote_sheet_age", "breach": False}]},
+        },
+    )
+    result = build_degraded_state_watchdog(cfg, as_of="2026-07-29T00:00:01Z")
+    slo_eval = next(
+        row for row in result["evaluations"] if row["registration_id"] == "operating_state_slo_breach"
+    )
+    assert slo_eval["state"] == "incident"
+    assert "quote_sheet_age" not in slo_eval["failed_rows"]
+    assert "websocket_gap" in slo_eval["failed_rows"]
 
 
 def test_wo121_missing_publication_status_trips_after_grace(tmp_path: Path) -> None:

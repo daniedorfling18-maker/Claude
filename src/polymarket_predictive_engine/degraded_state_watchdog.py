@@ -465,7 +465,10 @@ def _evaluate_scheduler(
     for job_name, raw_job in sorted(jobs.items()):
         job = _mapping(raw_job)
         try:
-            exit_code = int(job["last_exit_code"])
+            # .get, not [..]: a job record with the field entirely ABSENT (a torn
+            # status.json write - the exact OPS-6 case) must read as a failure,
+            # not raise KeyError out of the watchdog.
+            exit_code = int(job.get("last_exit_code"))
         except (TypeError, ValueError):
             exit_code = 1
         token = str(job.get("last_run_utc") or job.get("started_at_utc") or _stamp(job))
@@ -964,7 +967,28 @@ def _evaluate_slos_and_pushes(cfg: EngineConfig, state: dict[str, Any], generate
         "reconciliation_age",
         "ledger_anchor_age",
     }
-    bad = sorted(identifier for identifier in required if rows and (identifier not in rows or rows[identifier].get("breach") is not False))
+    # A missing operating-state artifact (or an empty SLO block) means every
+    # required row is unproven. The registered fail-safe direction is "absent,
+    # stale, or unparseable input is an incident, never health" - but a freshly
+    # bootstrapped host has legitimately not produced operating state yet, so
+    # absence gets the SAME fixed two-hour grace the publication bridges use
+    # below (config cannot widen it), and then every required id reports as
+    # failing. Non-empty rows are evaluated strictly with no grace: a torn or
+    # partial block is missing evidence, not a bootstrap.
+    slo_first_unobserved = state.setdefault("slo_first_unobserved", {})
+    if rows:
+        slo_first_unobserved.pop("operating_state", None)
+        bad = sorted(
+            identifier
+            for identifier in required
+            if identifier not in rows or rows[identifier].get("breach") is not False
+        )
+    else:
+        now_for_slo = _parse_stamp(generated_at) or datetime.now(timezone.utc)
+        first = str(slo_first_unobserved.get("operating_state") or generated_at)
+        slo_first_unobserved["operating_state"] = first
+        missing_age = max(0.0, (now_for_slo - (_parse_stamp(first) or now_for_slo)).total_seconds())
+        bad = sorted(required) if missing_age > PUSH_STATUS_MAX_SECONDS else []
     if bad:
         row = _incident(
             generated_at=generated_at,

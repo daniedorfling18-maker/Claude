@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 import yaml
@@ -8,6 +11,7 @@ import yaml
 from polymarket_predictive_engine.cli import COMMANDS
 from polymarket_predictive_engine.config import load_config
 from polymarket_predictive_engine.training_harvest import run_training_harvest
+from polymarket_predictive_engine.upstream_latency import record_upstream_latency
 from polymarket_predictive_engine.utils import read_json
 
 
@@ -35,7 +39,7 @@ def test_failed_middle_step_still_runs_retention_and_anchor(tmp_path: Path) -> N
     calls: list[str] = []
 
     def runner(command: Sequence[str], timeout_seconds: int) -> int:
-        assert timeout_seconds in {300, 1800}
+        assert timeout_seconds in {300, 1200, 1800}
         name = _step_name(command)
         calls.append(name)
         return 1 if name == "maker-fill-replay" else 0
@@ -65,10 +69,119 @@ def test_failed_middle_step_still_runs_retention_and_anchor(tmp_path: Path) -> N
     assert by_step["maker_fill_replay"]["exit_code"] == 1
     assert by_step["corpus_retention"]["status"] == "ok"
     assert by_step["anchor_ledgers"]["status"] == "ok"
+    assert all("duration_seconds" in row for row in payload["steps"])
 
     persisted = read_json(cfg.output_root / "ops_scheduler" / "training_harvest.json")
     assert persisted["paper_trading_invoked"] is False
     assert persisted["live_trading_invoked"] is False
+
+
+def test_collection_timeout_degrades_coverage_and_later_children_run(tmp_path: Path) -> None:
+    cfg, config_path = _config(tmp_path)
+    calls: list[str] = []
+
+    def runner(command: Sequence[str], timeout_seconds: int) -> int:
+        name = _step_name(command)
+        calls.append(name)
+        if name == "collect-price-history":
+            assert timeout_seconds == 1800
+            return 124
+        return 0
+
+    payload = run_training_harvest(
+        cfg,
+        config_path=str(config_path),
+        runner=runner,
+        clock=lambda: 0.0,
+        timestamp=lambda: "2026-07-29T13:37:00Z",
+    )
+
+    row = next(row for row in payload["steps"] if row["step"] == "collect_price_history")
+    assert row["status"] == "timed_out"
+    assert row["timeout_degrades_coverage"] is True
+    assert payload["status"] == "coverage_degraded"
+    assert payload["successful_completion"] is True
+    assert "maker-carry-study" in calls
+    assert calls[-1] == "anchor-ledgers"
+
+
+def test_non_timeout_failure_remains_fail_loud(tmp_path: Path) -> None:
+    cfg, config_path = _config(tmp_path)
+
+    payload = run_training_harvest(
+        cfg,
+        config_path=str(config_path),
+        runner=lambda command, timeout: 7 if _step_name(command) == "collect-price-history" else 0,
+        clock=lambda: 0.0,
+        timestamp=lambda: "2026-07-29T13:37:00Z",
+    )
+
+    assert payload["status"] == "partial_failure"
+    assert payload["successful_completion"] is False
+    assert payload["failed_steps"] == ["collect_price_history"]
+
+
+def test_latency_summary_strips_query_token_and_credentials(tmp_path: Path, monkeypatch) -> None:
+    cfg, config_path = _config(tmp_path)
+    token_id = "1234567890123456789012345678901234567890"
+
+    def runner(command: Sequence[str], timeout_seconds: int) -> int:
+        del command, timeout_seconds
+        record_upstream_latency(
+            f"https://user:secret@clob.polymarket.com/prices-history?market={token_id}",
+            5.125,
+        )
+        return 0
+
+    payload = run_training_harvest(
+        cfg,
+        config_path=str(config_path),
+        runner=runner,
+        clock=lambda: 0.0,
+        timestamp=lambda: "2026-07-29T13:37:00Z",
+    )
+
+    assert payload["upstream_latency"] == [{
+        "host": "clob.polymarket.com",
+        "path_tail": "prices-history",
+        "request_count": len(payload["steps"]),
+        "p50_seconds": 5.125,
+        "max_seconds": 5.125,
+    }]
+    serialized = json.dumps(payload["upstream_latency"])
+    assert token_id not in serialized
+    assert "secret" not in serialized
+    assert "user" not in serialized
+
+
+def test_scheduler_library_mode_stamps_coverage_timeout_as_success(tmp_path: Path) -> None:
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_python = fake_bin / "python"
+    fake_python.write_text(
+        "#!/bin/sh\nif [ \"$1\" != \"-m\" ]; then exec " + sys.executable + " \"$@\"; fi\nprintf '%s\\n' '"
+        '{"steps":[{"step":"collect_price_history","status":"timed_out","exit_code":124,'
+        '"timeout_degrades_coverage":true},{"step":"maker_carry_study","status":"ok","exit_code":0},'
+        '{"step":"anchor_ledgers","status":"ok","exit_code":0}]}'
+        f"' >'{out_dir}/training_harvest.json'\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    probe = f"""
+OPS_SCHEDULER_LIBRARY_ONLY=1 OPS_SCHEDULER_OUT_DIR='{out_dir}' PATH='{fake_bin}':$PATH . scripts/run_vps_ops_scheduler.sh
+wait_with_safety_pulses() {{ wait "$1"; }}
+stamp_status() {{ printf '%s:%s\\n' "$1" "$2" >>'{tmp_path}/stamps'; }}
+touch_success_stamp() {{ printf '%s\\n' "$1" >>'{tmp_path}/success'; }}
+run_training_harvest
+"""
+    subprocess.run(["sh", "-c", probe], check=True, cwd=Path.cwd())
+    assert (tmp_path / "stamps").read_text(encoding="utf-8").splitlines() == [
+        "training_harvest:0",
+        "training_harvest_anchor_tail:0",
+    ]
+    assert (tmp_path / "success").read_text(encoding="utf-8").strip() == "training_harvest"
 
 
 def test_deadline_skips_unstarted_work_but_not_mandatory_tail(

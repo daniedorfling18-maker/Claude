@@ -578,7 +578,10 @@ try:
     anchor_code = int(anchor.get("exit_code"))
     harvest_failed = any(
         row.get("step") != "anchor_ledgers"
-        and row.get("status") in {"failed", "timed_out", "skipped_deadline"}
+        and (
+            row.get("status") in {"failed", "skipped_deadline"}
+            or (row.get("status") == "timed_out" and not row.get("timeout_degrades_coverage"))
+        )
         for row in rows
     )
     print(1 if harvest_failed else 0, anchor_code)

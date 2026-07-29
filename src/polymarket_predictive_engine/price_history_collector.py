@@ -9,6 +9,7 @@ import requests
 from .config import EngineConfig, load_config
 from .crypto_updown_model import is_crypto_updown_contract
 from .utils import normalize_external_timestamp, now_utc, parse_timestamp, read_csv_rows, safe_float, write_csv, write_json
+from .upstream_latency import record_upstream_latency
 
 DEFAULT_CLOB_BASE_URL = "https://clob.polymarket.com"
 SNAPSHOT_FIELDS = [
@@ -226,7 +227,12 @@ def normalize_price_history_payload(payload: Any) -> list[dict[str, Any]]:
 
 
 def _request_history(base_url: str, params: dict[str, Any], timeout: int) -> Any:
-    response = requests.get(f"{base_url.rstrip('/')}/prices-history", params=params, timeout=timeout)
+    url = f"{base_url.rstrip('/')}/prices-history"
+    started = time.monotonic()
+    try:
+        response = requests.get(url, params=params, timeout=timeout)
+    finally:
+        record_upstream_latency(url, time.monotonic() - started)
     response.raise_for_status()
     return response.json()
 

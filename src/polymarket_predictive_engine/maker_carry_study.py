@@ -1282,11 +1282,18 @@ def _supplementary_income(row: dict[str, Any], settings: dict[str, Any], depth: 
 def _price_series(settings: dict[str, Any], token_id: str, *, interval: str, fidelity_minutes: int) -> list[tuple[float, float]] | None:
     """(unix seconds, price) mid series from the public prices-history feed."""
     try:
-        response = requests.get(
-            f"{str(settings['clob_base_url']).rstrip('/')}/prices-history",
-            params={"market": token_id, "interval": interval, "fidelity": fidelity_minutes},
-            timeout=float(settings["request_timeout_seconds"]),
-        )
+        url = f"{str(settings['clob_base_url']).rstrip('/')}/prices-history"
+        request_started = time.monotonic()
+        try:
+            response = requests.get(
+                url,
+                params={"market": token_id, "interval": interval, "fidelity": fidelity_minutes},
+                timeout=float(settings["request_timeout_seconds"]),
+            )
+        finally:
+            from .upstream_latency import record_upstream_latency
+
+            record_upstream_latency(url, time.monotonic() - request_started)
         response.raise_for_status()
         history = response.json().get("history") or []
     except Exception:

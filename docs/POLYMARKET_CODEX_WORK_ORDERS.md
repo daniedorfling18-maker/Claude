@@ -6468,14 +6468,30 @@ child and removes it after the last, children append one bounded record per
 request, and the harvest aggregates the spool into the receipt. When the spool
 is absent or unreadable the receipt says so explicitly rather than omitting the
 block silently. The spool is NEVER published — it must match neither the
-telemetry `*.json` glob nor `credential_guard.ALLOWED_SUFFIXES`. Nothing
+telemetry `*.json` glob nor `credential_guard.ALLOWED_SUFFIXES` — and every
+spool row carries the mandatory `paper_trading_invoked: false` and
+`live_trading_invoked: false` flags. "Transient by intent" does not exempt a
+file that can outlive its process: the spool is removed on the normal completion
+path, so a container or orchestrator crash leaves it on disk, and removal must
+therefore be robust to abnormal exit as well. Nothing
 credential-shaped reaches the receipt: no query strings, no URL userinfo, no
 full token ids; a path tail that is pure hex of length >= 32, or any tail of
 length >= 64, is rejected outright, and non-finite durations are clamped. A
 single unclassified 64-hex value in a published artifact blocks every telemetry
 push — that has happened before and cost >22h of blindness.
 
-138.3 — degraded-retry backoff is measured from the previous attempt's
+138.3 — the receipt carries each collection child's own COVERAGE RESULT, not
+merely its exit code: requested versus collected counts and an error/quality
+tally. `collect_price_history` catches each request exception, writes
+`fetch_error` quality rows and returns normally
+(`price_history_collector.py:373-425`), so a child that collected NOTHING exits
+0 and looks clean. That is the evidence this work order exists to surface, and
+an exit code alone hides it. (Recorded honestly: the first draft keyed its whole
+mechanism to process exit 124, which never fires on this path — the 2026-07-29
+harvest failed with exit **1** after ~49 minutes, so the work order
+mis-attributed its own motivating failure. Codex's review of PR #393 found it.)
+
+138.4 — degraded-retry backoff is measured from the previous attempt's
 COMPLETION, not from `touch_attempt_stamp`, which is written before the child
 runs. Without this, a harvest slower than `HARVEST_RETRY_INTERVAL` re-launches
 immediately on the next scheduler iteration, producing sustained back-to-back
@@ -6511,11 +6527,17 @@ and no `status.json` freshness refresh — i.e. the tolerance mechanism is gone;
 (6) a harvest lasting longer than `HARVEST_RETRY_INTERVAL` does not re-launch
 immediately, and the retry does fire once that interval has elapsed since
 COMPLETION; (7) an operator tightening of the harvest timeout is not overridden
-by any floor.
+by any floor; (8) a collection child that finishes with a zero exit code having
+written only `fetch_error` rows is reported in the receipt as collecting
+nothing, with its requested/collected counts and error tally — a clean exit code
+must not read as clean coverage; (9) every latency-spool row carries both
+trading-invocation flags, and the spool is removed after an abnormal exit as
+well as a normal one.
 
 **Day-after check:** on the next scheduled harvest, `training_harvest.json`
 shows per-child `duration_seconds` and a latency summary carrying real `host` /
 `path_tail` / `request_count` / `p50` / `max` values for the prices-history
-endpoint. If upstream is still slow the harvest reports its failure honestly —
+endpoint, plus each collection child's requested/collected counts. If upstream
+is still slow the harvest reports its failure honestly —
 nonzero, no success stamp, the existing scheduler registrations alarming — and
 the receipt now says WHICH child and HOW slow, which is the entire point.

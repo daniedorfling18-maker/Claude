@@ -56,6 +56,28 @@ file_age_seconds() {
   printf '%s' "$((now - mtime))"
 }
 
+# Registered runtime evidence ceilings. The 26-hour forward-cycle artifact is
+# only a bootstrap fallback for the first 30 minutes after service start; once
+# the live loop is expected, its heartbeat must be no older than 15 minutes.
+health_evidence_within_ceiling() {
+  heartbeat_age="$1"
+  forward_age="$2"
+  post_start_age="$3"
+  case "$heartbeat_age" in ''|*[!0-9]*) [ -z "$heartbeat_age" ] || return 1 ;; esac
+  case "$forward_age" in ''|*[!0-9]*) [ -z "$forward_age" ] || return 1 ;; esac
+  case "$post_start_age" in ''|*[!0-9]*) return 1 ;; esac
+  if [ "$post_start_age" -le 1800 ]; then
+    { [ -n "$heartbeat_age" ] && [ "$heartbeat_age" -le 900 ]; } ||
+      { [ -n "$forward_age" ] && [ "$forward_age" -le 93600 ]; }
+  else
+    [ -n "$heartbeat_age" ] && [ "$heartbeat_age" -le 900 ]
+  fi
+}
+
+if [ "${PM_HEALTH_LIBRARY_ONLY:-0}" = 1 ]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 cd "$REPO_DIR"
 
 port="$(env_value POLYMARKET_DASHBOARD_PORT .env)"
@@ -67,6 +89,7 @@ forward_cycle="outputs/polymarket_model_governance/forward_paper_cycle.json"
 dashboard_data="outputs/polymarket_dashboard/dashboard_data.json"
 repo_head="$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')"
 deployed_sha="$(env_value PM_VPS_DEPLOYED_SHA .env)"
+service_started_age="$(docker_cmd inspect -f '{{.State.StartedAt}}' polymarket-paper-live 2>/dev/null | python3 -c 'import datetime,sys; s=sys.stdin.read().strip(); now=datetime.datetime.now(datetime.timezone.utc); print(max(0,int((now-datetime.datetime.fromisoformat(s.replace("Z","+00:00"))).total_seconds())))' 2>/dev/null || printf '')"
 
 printf '%s\n' "Polymarket VPS paper stack"
 printf '%s\n' "Repo: $REPO_DIR"
@@ -251,8 +274,8 @@ printf '%s\n' "Live heartbeat age: ${heartbeat_age:-missing}s"
 printf '%s\n' "Forward paper cycle age: ${forward_age:-missing}s"
 printf '%s\n' "Dashboard data age: ${dashboard_age:-missing}s"
 
-if [ -z "${heartbeat_age:-}" ] && [ -z "${forward_age:-}" ]; then
-  printf '%s\n' "No paper heartbeat files exist yet."
+if ! health_evidence_within_ceiling "${heartbeat_age:-}" "${forward_age:-}" "${service_started_age:-}"; then
+  printf '%s\n' "Live-loop evidence is missing, unmeasurable, or beyond its registered ceiling (forward fallback: first 1800s only)."
   exit_code=1
 fi
 

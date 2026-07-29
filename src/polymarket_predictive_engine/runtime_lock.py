@@ -127,8 +127,20 @@ def acquire_runtime_lock(
         existing_payload = existing if isinstance(existing, dict) else {}
         age = _lock_age_seconds(existing_payload)
         stale_reason = ""
+        # A malformed payload has no trustworthy acquisition timestamp.  Use
+        # the filesystem timestamp as the conservative recovery clock so one
+        # torn lock cannot wedge the producer forever.
+        if age is None:
+            try:
+                age = max(0.0, time.time() - path.stat().st_mtime)
+            except OSError:
+                age = None
         if age is not None and stale_after_seconds > 0 and age > stale_after_seconds:
-            stale_reason = f"age_seconds>{stale_after_seconds:g}"
+            stale_reason = (
+                f"mtime_age_seconds>{stale_after_seconds:g}"
+                if not existing_payload.get("acquired_at_utc")
+                else f"age_seconds>{stale_after_seconds:g}"
+            )
         elif _same_pid_lock_predates_current_process(existing_payload):
             stale_reason = "same_pid_lock_predates_current_process"
         if stale_reason:

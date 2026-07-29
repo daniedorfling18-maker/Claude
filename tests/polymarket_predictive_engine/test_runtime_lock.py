@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -45,6 +46,22 @@ def test_runtime_lock_blocks_second_acquire_in_same_process(tmp_path: Path) -> N
     third = runtime_lock.acquire_runtime_lock(cfg, "prediction_cycle", stale_after_seconds=999999)
     assert third.acquired is True
     runtime_lock.release_runtime_lock(third)
+
+
+def test_runtime_lock_reclaims_old_corrupt_payload(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    path = runtime_lock.runtime_lock_path(cfg, "prediction_cycle")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("not-json", encoding="utf-8")
+    old = time.time() - 120
+    os.utime(path, (old, old))
+
+    lock = runtime_lock.acquire_runtime_lock(cfg, "prediction_cycle", stale_after_seconds=60)
+
+    assert lock.acquired is True
+    assert lock.stale_lock_replaced is True
+    assert lock.stale_lock_reason == "mtime_age_seconds>60"
+    runtime_lock.release_runtime_lock(lock)
 
 
 def _iso_minutes_ago(minutes: float) -> str:

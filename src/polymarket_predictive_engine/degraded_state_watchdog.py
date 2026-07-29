@@ -10,16 +10,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
 from .config import EngineConfig, load_config
 from .runtime_lock import runtime_lock
-from .utils import append_csv_rows, ensure_dir, now_utc, read_csv_rows, read_json, write_json
+from .utils import append_csv_rows, ensure_dir, now_utc, read_csv_rows, read_json, write_json, write_text_atomic
 
 
-WORK_ORDER = "WO-78+WO-83+WO-84+WO-85+WO-86+WO-121"
+WORK_ORDER = "WO-78+WO-83+WO-84+WO-85+WO-86+WO-121+WO-129"
 OUTPUT_FILE = "ops_scheduler/degraded_state_watchdog.json"
 STATE_FILE = "ops_scheduler/degraded_state_watchdog_state.json"
 INCIDENT_LEDGER = "performance/degraded_state_incidents.csv"
@@ -56,6 +59,8 @@ REGISTERED_JOB_FRESHNESS_MAX_SECONDS: dict[str, int] = {
 }
 
 PUSH_STATUS_MAX_SECONDS = 2 * 60 * 60
+DR_STATUS_MAX_SECONDS = 6 * 60 * 60
+NTFY_ENV_VAR = "OPS_OWNER_NTFY_TOPIC_URL"
 PRODUCER_REGISTRATIONS = (
     ("ledger_chain_integrity", "performance/ledger_anchor_verification.json", {"ok"}),
     ("disaster_recovery_not_recoverable", "performance/disaster_recovery_status.json", {"ok", "recoverable"}),
@@ -142,7 +147,7 @@ def _registrations(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
             "max_consecutive_degraded_observations": 0,
             "incident_on_observation": 1,
             "observation_unit": "DR run",
-            "evaluation_policy": "explicit healthy allowlists and compliant RPO",
+            "evaluation_policy": "explicit healthy allowlists and status artifact age <= 6 hours",
         },
         {
             "id": "maker_study_run_failed",
@@ -887,14 +892,22 @@ def _immediate_producer_evaluations(
         elif registration_id == "disaster_recovery_not_recoverable":
             remote = str(payload.get("remote_push_status") or _mapping(payload.get("remote_push")).get("status") or "unobserved").lower()
             compliant = _mapping(payload.get("rpo")).get("compliant") is True
-            degraded = bool(payload) and (degraded or remote not in {"ok", "pending"} or not compliant)
-            reasons += [f"remote_push_status={remote}", f"rpo_compliant={compliant}"]
+            generated = _parse_stamp(payload.get("generated_at_utc"))
+            now = _parse_stamp(generated_at) or datetime.now(timezone.utc)
+            artifact_age = max(0.0, (now - generated).total_seconds()) if generated else None
+            degraded = bool(payload) and (
+                degraded or remote not in {"ok", "pending"} or not compliant
+                or artifact_age is None or artifact_age > DR_STATUS_MAX_SECONDS
+            )
+            reasons += [f"remote_push_status={remote}", f"rpo_compliant={compliant}", f"status_artifact_age_seconds={artifact_age}"]
         evaluations.append(
             {
                 "registration_id": registration_id,
                 "artifact": relative,
                 "observation_token": None if token == "unobserved" else token,
                 "observed_state": status,
+                **({"status_artifact_age_seconds": artifact_age, "status_artifact_max_age_seconds": DR_STATUS_MAX_SECONDS}
+                   if registration_id == "disaster_recovery_not_recoverable" else {}),
                 "state": "incident" if degraded else "healthy",
             }
         )
@@ -917,7 +930,8 @@ def _immediate_producer_evaluations(
     payload = _mapping(read_json(cfg.output_root / relative, default={}) or {})
     token = _stamp(payload)
     status = str(payload.get("status") or "unobserved").lower()
-    degraded = bool(payload) and status in {"partial", "failed", "unobserved"}
+    healthy_states = {"ok", "disabled", "no_portfolio"}
+    degraded = bool(payload) and status not in healthy_states
     counters = state.setdefault("counters", {})
     counter = _advance_counter(_mapping(counters.get("official_book_snapshot_partial")), token=token or generated_at, degraded=degraded)
     counters["official_book_snapshot_partial"] = counter
@@ -932,7 +946,7 @@ def _immediate_producer_evaluations(
             observation_token=token or "unobserved",
             episode_start=str(counter["episode_start_token"]),
             degraded_state=status,
-            reason="official-book collection remained partial or unobserved",
+            reason=f"official-book status {status!r} is outside the healthy allowlist",
             count=count,
             maximum=maximum,
         )
@@ -945,6 +959,7 @@ def _immediate_producer_evaluations(
             "observed_state": status,
             "consecutive_degraded_observations": count,
             "max_consecutive_degraded_observations": maximum,
+            "healthy_reachable_states": sorted(healthy_states),
             "state": "incident" if degraded and count > maximum else ("degraded_within_tolerance" if degraded else "healthy"),
         }
     )
@@ -1100,7 +1115,7 @@ def _notification(
         "Human review only. Fail-closed and risk states remain unchanged; this watchdog cannot trade or cancel orders.",
     ]
     ensure_dir(body_path.parent)
-    body_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    write_text_atomic(body_path, "\n".join(lines) + "\n")
     notify = bool(enabled and new)
     return {
         "enabled": enabled,
@@ -1111,6 +1126,25 @@ def _notification(
         "body_file": str(body_path),
         "pattern": "superbru_score_change_state_digest",
     }
+
+
+def _deliver_notification(incident_ids: list[str]) -> dict[str, Any]:
+    """Send only bounded, non-sensitive registration identifiers off-host."""
+    url = str(os.environ.get(NTFY_ENV_VAR) or "").strip()
+    outcome: dict[str, Any] = {"attempted": False, "delivered": False, "channel_configured": bool(url), "error": ""}
+    if not url or not incident_ids:
+        return outcome
+    message = "Polymarket incidents: " + ", ".join(incident_ids[:20])
+    request = urllib.request.Request(url, data=message.encode("utf-8"), method="POST")
+    outcome["attempted"] = True
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:  # nosec B310 - operator-configured ntfy endpoint
+            outcome["delivered"] = 200 <= int(response.status) < 300
+            if not outcome["delivered"]:
+                outcome["error"] = f"HTTP {response.status}"
+    except (OSError, urllib.error.URLError, ValueError) as exc:
+        outcome["error"] = type(exc).__name__
+    return outcome
 
 
 def build_degraded_state_watchdog(
@@ -1124,6 +1158,7 @@ def build_degraded_state_watchdog(
     output_path = cfg.output_root / OUTPUT_FILE
     state_path = cfg.output_root / STATE_FILE
     ledger_path = cfg.output_root / INCIDENT_LEDGER
+    previous_output = _mapping(read_json(output_path, default={}) or {})
     base = {
         "work_order": WORK_ORDER,
         "generated_at_utc": generated_at,
@@ -1154,13 +1189,37 @@ def build_degraded_state_watchdog(
         stale_after_seconds=float(settings["lock_stale_seconds"]),
     ) as lock:
         if not lock.acquired:
+            carry_cycles = _nonnegative_int(previous_output.get("carry_forward_cycles"), 0) + 1
+            carried = list(previous_output.get("evaluations") or [])
+            active = list(previous_output.get("active_incidents") or [])
+            if carry_cycles > 3:
+                episode_start = str(previous_output.get("carry_forward_started_at") or generated_at)
+                wedge = _incident(
+                    generated_at=generated_at,
+                    registration_id="degraded_state_watchdog_wedged",
+                    entity="degraded_state_watchdog",
+                    source_artifact=OUTPUT_FILE,
+                    observation_token=generated_at,
+                    episode_start=episode_start,
+                    degraded_state="lock_held",
+                    reason="watchdog evaluation carried forward for more than 3 consecutive cycles",
+                    count=carry_cycles,
+                    maximum=3,
+                )
+                active = [row for row in active if row.get("registration_id") != "degraded_state_watchdog_wedged"] + [wedge]
             payload = {
                 **base,
                 "status": "skipped_lock_held",
                 "registrations": _registrations(settings),
-                "evaluations": [],
-                "active_incidents": [],
+                "evaluations": carried,
+                "active_incidents": active,
                 "new_incidents": [],
+                "active_incident_count": len(active),
+                "new_incident_count": 0,
+                "carried_forward_from_utc": previous_output.get("generated_at_utc"),
+                "carry_forward_reason": "runtime_lock_held",
+                "carry_forward_cycles": carry_cycles,
+                "carry_forward_started_at": previous_output.get("carry_forward_started_at") or generated_at,
                 "lock": lock.as_dict(),
                 "notification": {"enabled": settings["notification_enabled"], "eligible": False, "notify": False},
             }
@@ -1199,10 +1258,30 @@ def build_degraded_state_watchdog(
             active=active,
             new=new,
         )
+        pending = [str(value) for value in state.get("undelivered_incident_ids", []) if value]
+        delivery_ids = list(dict.fromkeys(pending + [str(row["incident_id"]) for row in new]))
+        delivery_registrations = list(dict.fromkeys(
+            str(row.get("registration_id")) for row in active if str(row.get("incident_id")) in delivery_ids
+        ))
+        delivery = _deliver_notification(delivery_registrations) if settings["notification_enabled"] else {
+            "attempted": False, "delivered": False, "channel_configured": bool(os.environ.get(NTFY_ENV_VAR)), "error": ""
+        }
+        # No configured channel creates no retry debt. Only attempted failures
+        # persist; success clears every id included in this bounded batch.
+        if delivery["attempted"] and not delivery["delivered"]:
+            undelivered = delivery_ids
+        elif delivery["delivered"]:
+            undelivered = []
+        else:
+            undelivered = []
+        notification["delivery"] = delivery
         state.update(
             {
                 "generated_at_utc": generated_at,
                 "active_incident_ids": [row["incident_id"] for row in active],
+                "undelivered_incident_ids": undelivered,
+                "carry_forward_cycles": 0,
+                "carry_forward_started_at": None,
                 "paper_trading_invoked": False,
                 "live_trading_invoked": False,
             }
@@ -1219,6 +1298,8 @@ def build_degraded_state_watchdog(
             "new_incidents": new,
             "incident_ledger": str(ledger_path),
             "notification": notification,
+            "carry_forward_cycles": 0,
+            "carry_forward_started_at": None,
             "notify": notification["notify"],
             "body_file": notification["body_file"],
             "state_changed": notification["state_changed"],

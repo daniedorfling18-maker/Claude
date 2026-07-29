@@ -6470,10 +6470,19 @@ runs from the previous attempt's END. Absent completion evidence is an
 interruption, not a fresh start, because both naive readings are wrong: treating
 it as infinitely old re-launches a full harvest on every scheduler restart,
 while treating it as not-ready would block the first-ever harvest forever. The
-registered behaviour is therefore: missing completion WITH a prior attempt stamp
-backs off from that attempt stamp; missing completion with NO prior attempt is a
-genuine first run and proceeds immediately; a malformed or future-dated stamp is
-treated as an interruption, never as licence to run now.
+Backing off from the prior ATTEMPT stamp is not sufficient either: if the
+interrupted harvest had already run longer than the interval, that stamp is old
+enough to trigger the immediate relaunch this clause exists to prevent, while
+refusing indefinitely on malformed or far-future evidence would stop any run
+from ever replacing it.
+
+  The registered behaviour therefore uses a bounded RECOVERY clock. On first
+observing an interruption — an attempt stamp with no completion stamp, or a
+malformed or future-dated stamp — the scheduler records a recovery timestamp
+once, at that moment, and the retry becomes due one `HARVEST_RETRY_INTERVAL`
+after it. That blocks the immediate relaunch and still guarantees the lane
+recovers within a bounded, testable time rather than never. Missing completion
+with NO prior attempt remains a genuine first run and proceeds immediately.
 
 **Explicitly NOT in scope, recorded so it is not rebuilt.** No tolerated-step
 list; no `coverage_degraded` / `coverage_degraded_steps` / `successful_completion`
@@ -6498,10 +6507,14 @@ or unparseable collector output reports unknown coverage, not full coverage;
 (4) every child row still carries `duration_seconds` — a REGRESSION assertion on
 existing behaviour, not evidence of new work; (5) a harvest lasting longer than
 `HARVEST_RETRY_INTERVAL` does not re-launch immediately, and the retry does fire
-once that interval has elapsed since COMPLETION; (6) missing completion with a
-prior attempt stamp backs off from that attempt; (7) missing completion with no
+once that interval has elapsed since COMPLETION; (6) a CLOCK-ADVANCE test on the recovery clock: an
+observed interruption blocks the immediate retry, and the retry becomes due once
+`HARVEST_RETRY_INTERVAL` has elapsed since the recovery timestamp — including
+when the interrupted harvest had already outlived that interval, which is the
+case a plain attempt-stamp backoff gets wrong; (7) missing completion with no
 prior attempt proceeds immediately; (8) a malformed or future-dated stamp is
-treated as an interruption; (9) a timed-out child still produces a nonzero
+treated as an interruption and still recovers on the bounded clock rather than
+refusing forever; (9) a timed-out child still produces a nonzero
 harvest exit, no success stamp, and no `status.json` freshness refresh — proving
 no tolerance mechanism was reintroduced.
 

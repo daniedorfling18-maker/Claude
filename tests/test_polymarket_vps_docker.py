@@ -249,10 +249,15 @@ def test_vps_deploy_runs_real_data_acceptance_after_restart_and_before_success()
     assert "reconcile-wallet" in acceptance_script
     assert "executor-ops-monitor" in acceptance_script
     assert "operating-state" in acceptance_script
-    assert 'COMMAND_TIMEOUT="${DEPLOY_ACCEPTANCE_COMMAND_TIMEOUT_SECONDS:-300}"' in acceptance_script
-    assert 'TOTAL_TIMEOUT="${DEPLOY_ACCEPTANCE_TOTAL_TIMEOUT_SECONDS:-720}"' in acceptance_script
+    assert 'COMMAND_TIMEOUT="${DEPLOY_ACCEPTANCE_COMMAND_TIMEOUT_SECONDS:-900}"' in acceptance_script
+    assert 'TOTAL_TIMEOUT="${DEPLOY_ACCEPTANCE_TOTAL_TIMEOUT_SECONDS:-1200}"' in acceptance_script
     assert "run_bounded" in acceptance_script
-    assert "timeout --signal=TERM --kill-after=30s 900" in text
+    # Every producer must record wall seconds beside its exit code: the
+    # 2026-07-29 prices-history upstream slowdown took a forensic VPS session
+    # to localize precisely because this artifact held exit codes only.
+    assert 'run_producer maker_carry_study' in acceptance_script
+    assert '"duration_seconds": int(os.environ[f"{name}_seconds"])' in acceptance_script
+    assert "timeout --signal=TERM --kill-after=30s 1500" in text
     assert 'acceptance_status" != "PASS"' in text
     assert "automatic rollback is armed for $original_head" in text
     assert 'install -d -m 0775 -o "$(id -u)" -g "$(id -g)"' in text

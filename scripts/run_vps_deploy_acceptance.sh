@@ -11,18 +11,21 @@ set -u
 
 CONFIG_PATH="${POLYMARKET_CONFIG_PATH:-/app/polymarket_predictive_config.example.yaml}"
 OUT_PATH="${DEPLOY_ACCEPTANCE_CYCLE_PATH:-/app/outputs/ops_scheduler/deploy_acceptance_cycle.json}"
-# Budget calibration (2026-07-29): the 120s per-command bound TERM-killed a
-# HEALTHY maker-carry-study during the ca8c3a3 deploy. Measured baselines from
-# VPS telemetry (training_harvest.json, 2026-07-28): study 69.9s and
-# maker-fill-replay 47.6s on a warm, idle host - and acceptance runs cold,
-# immediately after an image build and full container recreation, where CPU
-# contention roughly doubles both (the replay also legitimately doubles for
-# one release after WO-136's static-sheet audit pass). 300s/720s keep every
-# producer bounded at ~4x its warm baseline while the deploy paths' outer
-# wrappers (900s in both the workflow and the manual script) still kill a
-# genuine hang. The PASS predicate is unchanged: every producer must exit 0.
-COMMAND_TIMEOUT="${DEPLOY_ACCEPTANCE_COMMAND_TIMEOUT_SECONDS:-300}"
-TOTAL_TIMEOUT="${DEPLOY_ACCEPTANCE_TOTAL_TIMEOUT_SECONDS:-720}"
+# Budget calibration, round 2 (2026-07-29 after the 08187b6 acceptance
+# failure). The study's wall time is dominated by ~80 uncached calls to
+# clob.polymarket.com/prices-history (two windows x 40 candidates), and that
+# UPSTREAM endpoint degraded from ~0.3s to ~5-10s per origin fetch sometime
+# after 2026-07-28 13:37Z - measured on 2026-07-29 with an instrumented run
+# (p50 5.1s, max 10.3s, all HTTP 200, cf-cache-status EXPIRED, no rate-limit
+# headers; the same requests answered in 0.3s the day before). A full study
+# completed in 627s under that weather, on BOTH the old and new code. The
+# per-command bound therefore holds ~1.4x the observed worst case; a genuine
+# hang is still killed, just later, and the deploy paths' outer wrappers
+# (1500s) bound the whole stage. The PASS predicate is unchanged: every
+# producer must exit 0. If upstream recovers, runs simply finish early -
+# these are ceilings, not sleeps.
+COMMAND_TIMEOUT="${DEPLOY_ACCEPTANCE_COMMAND_TIMEOUT_SECONDS:-900}"
+TOTAL_TIMEOUT="${DEPLOY_ACCEPTANCE_TOTAL_TIMEOUT_SECONDS:-1200}"
 
 case "$COMMAND_TIMEOUT:$TOTAL_TIMEOUT" in
   *[!0-9:]*|:*|*:) printf '%s\n' "deploy acceptance timeouts must be positive integers" >&2; exit 64 ;;
@@ -58,31 +61,42 @@ case "${POLYMARKET_LIVE_TRADING:-0}" in
     ;;
 esac
 
+# Each producer records its wall seconds next to its exit code, so a failed
+# or slow acceptance names where the time went from the artifact alone. The
+# 2026-07-29 diagnosis of the prices-history upstream slowdown required an
+# instrumented forensic session on the VPS precisely because this file only
+# recorded exit codes.
+run_producer() {
+  producer_name="$1"; shift
+  producer_started=$(date -u +%s)
+  run_bounded "$@"
+  producer_code=$?
+  producer_elapsed=$(( $(date -u +%s) - producer_started ))
+  eval "${producer_name}_code=\$producer_code"
+  eval "${producer_name}_seconds=\$producer_elapsed"
+  return 0
+}
+
 set +e
-run_bounded python -m polymarket_predictive_engine.cli maker-carry-study --config "$CONFIG_PATH"
-maker_carry_study_code=$?
-run_bounded python -m polymarket_predictive_engine.cli collect-maker-replay-data --config "$CONFIG_PATH"
-collect_maker_replay_data_code=$?
-run_bounded python -m polymarket_predictive_engine.cli maker-fill-replay --config "$CONFIG_PATH"
-maker_fill_replay_code=$?
-run_bounded python -m polymarket_predictive_engine.cli maker-live-test --config "$CONFIG_PATH"
-maker_live_test_code=$?
-run_bounded python -m polymarket_predictive_engine.cli decision-policy --config "$CONFIG_PATH"
-decision_policy_code=$?
-run_bounded python -m polymarket_predictive_engine.cli requote-alerts --config "$CONFIG_PATH"
-requote_alerts_code=$?
-run_bounded python -m polymarket_predictive_engine.cli reconcile-wallet --config "$CONFIG_PATH"
-reconcile_wallet_code=$?
-run_bounded python -m polymarket_predictive_engine.cli executor-ops-monitor --config "$CONFIG_PATH"
-executor_ops_monitor_code=$?
-run_bounded python -m polymarket_predictive_engine.cli operating-state --config "$CONFIG_PATH"
-operating_state_code=$?
+run_producer maker_carry_study python -m polymarket_predictive_engine.cli maker-carry-study --config "$CONFIG_PATH"
+run_producer collect_maker_replay_data python -m polymarket_predictive_engine.cli collect-maker-replay-data --config "$CONFIG_PATH"
+run_producer maker_fill_replay python -m polymarket_predictive_engine.cli maker-fill-replay --config "$CONFIG_PATH"
+run_producer maker_live_test python -m polymarket_predictive_engine.cli maker-live-test --config "$CONFIG_PATH"
+run_producer decision_policy python -m polymarket_predictive_engine.cli decision-policy --config "$CONFIG_PATH"
+run_producer requote_alerts python -m polymarket_predictive_engine.cli requote-alerts --config "$CONFIG_PATH"
+run_producer reconcile_wallet python -m polymarket_predictive_engine.cli reconcile-wallet --config "$CONFIG_PATH"
+run_producer executor_ops_monitor python -m polymarket_predictive_engine.cli executor-ops-monitor --config "$CONFIG_PATH"
+run_producer operating_state python -m polymarket_predictive_engine.cli operating-state --config "$CONFIG_PATH"
 set -e
 
 export OUT_PATH maker_carry_study_code collect_maker_replay_data_code
 export maker_fill_replay_code maker_live_test_code decision_policy_code
 export requote_alerts_code reconcile_wallet_code executor_ops_monitor_code
 export operating_state_code
+export maker_carry_study_seconds collect_maker_replay_data_seconds
+export maker_fill_replay_seconds maker_live_test_seconds decision_policy_seconds
+export requote_alerts_seconds reconcile_wallet_seconds executor_ops_monitor_seconds
+export operating_state_seconds
 python - <<'PY'
 import json
 import os
@@ -92,7 +106,10 @@ from pathlib import Path
 target = Path(os.environ["OUT_PATH"])
 target.parent.mkdir(parents=True, exist_ok=True)
 commands = {
-    name: {"exit_code": int(os.environ[f"{name}_code"])}
+    name: {
+        "exit_code": int(os.environ[f"{name}_code"]),
+        "duration_seconds": int(os.environ[f"{name}_seconds"]),
+    }
     for name in (
         "maker_carry_study",
         "collect_maker_replay_data",

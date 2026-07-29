@@ -721,7 +721,7 @@ jobs:
           # runs: `run` does not build by default, and the `up -d --build` above
           # has already built the image. The sibling callers that were always
           # correct are scripts/restore_from_archive.sh and scripts/push_vps_archive.sh.
-          timeout --signal=TERM --kill-after=30s 900 \
+          timeout --signal=TERM --kill-after=30s 1500 \
             $DOCKER compose -f "$COMPOSE_FILE" --profile deploy-acceptance run \
               --rm --no-deps vps-deploy-acceptance </dev/null
           $DOCKER compose -f "$COMPOSE_FILE" up -d --no-build vps-ops-scheduler

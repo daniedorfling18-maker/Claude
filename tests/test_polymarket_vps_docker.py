@@ -340,6 +340,29 @@ def test_vps_deploy_acceptance_outer_wrappers_outlast_the_inner_budget():
                 f"script's total budget {total}s with margin"
             )
 
+    # Codex review P1 on #391: the workflow's job-level cap sits ABOVE all of
+    # these clocks, and its own comment history records two mid-rollout
+    # cancellations from exactly this drift. Whatever the numbers become, the
+    # job cap must clear the acceptance ceiling plus the documented rest of a
+    # worst-case rollout (checkout+build ~10m, 20m governance wait,
+    # health/rollback headroom ~5m).
+    workflow = (ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml").read_text(
+        encoding="utf-8"
+    )
+    job_cap_minutes = int(re.search(r"timeout-minutes:\s*(\d+)", workflow).group(1))
+    acceptance_outer = max(
+        int(match)
+        for match in re.findall(
+            r"timeout --signal=TERM --kill-after=30s (\d+)\s*\\\n\s*\$DOCKER compose[^\n]*deploy-acceptance",
+            workflow,
+        )
+    )
+    assert job_cap_minutes * 60 >= acceptance_outer + 35 * 60, (
+        f"workflow timeout-minutes {job_cap_minutes} cannot cover the {acceptance_outer}s "
+        "acceptance ceiling plus a worst-case rollout; the runner would be "
+        "cancelled mid-deploy, before rollback"
+    )
+
 
 def test_vps_deploy_acceptance_never_passes_no_build_to_compose_run():
     """Path A parity with WO-133's fix. Observed on the VPS 2026-07-28.

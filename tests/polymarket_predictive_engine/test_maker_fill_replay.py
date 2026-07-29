@@ -403,7 +403,8 @@ def test_missing_official_coverage_is_not_masked_by_archive(tmp_path):
     assert summary["primary_book_source"] == "official"
     assert summary["available_book_sources"] == ["archive"]
     assert summary["source_results"]["archive"]["confirmed_fills"] == 1
-    assert summary["simulated_fill_opportunities"] == 1
+    assert summary["simulated_fill_opportunities"] == 0
+    assert summary["no_contemporaneous_state_opportunities"] == 1
     assert summary["coverage"]["windows_covered"] == 0
     assert summary["realism_ratio"] == "insufficient_coverage"
     assert summary["simulation_to_reality_haircut"] == "insufficient_coverage"
@@ -503,10 +504,135 @@ def test_nonzero_simulated_fills_without_coverage_use_explicit_sentinel(tmp_path
     summary = run_maker_fill_replay(cfg)
 
     assert summary["status"] == "insufficient_coverage"
-    assert summary["simulated_fill_opportunities"] == 1
+    assert summary["simulated_fill_opportunities"] == 0
+    assert summary["no_contemporaneous_state_opportunities"] == 1
     assert summary["confirmed_fills"] == 0
     assert summary["coverage_status"] == "insufficient_coverage"
     assert summary["realism_ratio"] == "insufficient_coverage"
+
+
+def _wo136_replay(*, trades, states, sheet_stamp=2_000.0, basis="contemporaneous", tick=None):
+    entry = {
+        "condition_id": "0xcond",
+        "token_id": "tok1",
+        "question": "WO-136 recorded shape",
+        "quote_size_shares": 10.0,
+        "quote_distance": 0.01,
+        "quote_bid_price": 0.32,
+        "quote_ask_price": 0.38,
+    }
+    if tick is not None:
+        entry["order_price_min_tick_size"] = tick
+    return maker_fill_replay._replay_against_states(
+        source="official",
+        states_by_token={"tok1": states},
+        trades=trades,
+        portfolio=[entry],
+        study_charge=1.0,
+        study_charge_by_condition={"0xcond": 1.0},
+        max_state_lag_seconds=60,
+        quote_sheet_generated_stamp=sheet_stamp,
+        quoting_basis=basis,
+    )
+
+
+def test_wo136_historical_regime_does_not_replay_current_sheet_quote():
+    states = [
+        {"stamp": 1_000.0, "midpoint": 0.44, "resting_ask_depth_at_quote": 0.0},
+        {"stamp": 1_300.0, "midpoint": 0.44, "resting_ask_depth_at_quote": 0.0},
+        {"stamp": 1_900.0, "midpoint": 0.44, "resting_ask_depth_at_quote": 0.0},
+        {"stamp": 4_600.0, "midpoint": 0.44, "resting_ask_depth_at_quote": 0.0},
+    ]
+    trades = [{"token_id": "tok1", "side": "BUY", "price": 0.38, "size": 20.0, "stamp": 1_000.0}]
+
+    contemporary = _wo136_replay(trades=trades, states=states)
+    static = _wo136_replay(trades=trades, states=states, basis="static_sheet")
+
+    assert contemporary["confirmed_fills"] == 0
+    assert static["confirmed_fills"] == 1
+    assert static["simulated_fills_per_day"] > contemporary["simulated_fills_per_day"]
+
+
+def test_wo136_genuine_contemporaneous_ask_sweep_fills_and_marks_out():
+    states = [
+        {"stamp": 1_000.0, "midpoint": 0.44, "resting_ask_depth_at_quote": 2.0},
+        {"stamp": 1_300.0, "midpoint": 0.47, "resting_ask_depth_at_quote": 0.0},
+        {"stamp": 1_900.0, "midpoint": 0.46, "resting_ask_depth_at_quote": 0.0},
+        {"stamp": 4_600.0, "midpoint": 0.45, "resting_ask_depth_at_quote": 0.0},
+    ]
+    result = _wo136_replay(
+        trades=[{"token_id": "tok1", "side": "BUY", "price": 0.46, "size": 20.0, "stamp": 1_000.0}],
+        states=states,
+    )
+
+    assert result["confirmed_fills"] == 1
+    assert result["fills_preview"][0]["fill_price"] == 0.45
+    assert result["fills_preview"][0]["markout_per_share"]["5m"] == 0.02
+
+
+def test_wo136_post_sheet_window_matches_static_basis():
+    states = [
+        {"stamp": 2_100.0, "midpoint": 0.35, "resting_ask_depth_at_quote": 0.0},
+        {"stamp": 2_400.0, "midpoint": 0.36, "resting_ask_depth_at_quote": 0.0},
+        {"stamp": 3_000.0, "midpoint": 0.36, "resting_ask_depth_at_quote": 0.0},
+        {"stamp": 5_700.0, "midpoint": 0.36, "resting_ask_depth_at_quote": 0.0},
+    ]
+    trades = [{"token_id": "tok1", "side": "BUY", "price": 0.38, "size": 20.0, "stamp": 2_100.0}]
+
+    contemporary = _wo136_replay(trades=trades, states=states)
+    static = _wo136_replay(trades=trades, states=states, basis="static_sheet")
+
+    assert contemporary["simulated_fills_per_day"] == static["simulated_fills_per_day"]
+    assert contemporary["realism_ratio"] == static["realism_ratio"]
+
+
+def test_wo136_missing_contemporaneous_state_is_counted_and_excluded():
+    result = _wo136_replay(
+        trades=[{"token_id": "tok1", "side": "BUY", "price": 0.99, "size": 20.0, "stamp": 1_000.0}],
+        states=[],
+    )
+
+    assert result["no_contemporaneous_state_opportunities"] == 1
+    assert result["simulated_fill_opportunities"] == 0
+    assert result["status"] == "insufficient_coverage"
+
+
+def test_wo136_haircut_policy_strings_survive_verbatim(tmp_path):
+    cfg = _config(tmp_path)
+    _seed_maker_portfolio(cfg)
+    _seed_archive(cfg)
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xcond", "asset_id": "tok1", "side": "SELL", "price": 0.49, "size": 25, "timestamp": 1_000}],
+        fieldnames=["market", "asset_id", "side", "price", "size", "timestamp"],
+    )
+    summary = run_maker_fill_replay(cfg)
+
+    assert summary["haircut_policy"]["reported_only"] is True
+    assert summary["haircut_policy"]["permitted_direction"] == "tighten_only"
+
+
+def test_wo136_tick_rounding_is_outward():
+    states = [
+        {"stamp": 1_000.0, "midpoint": 0.445, "resting_ask_depth_at_quote": 0.0},
+        {"stamp": 1_300.0, "midpoint": 0.45, "resting_ask_depth_at_quote": 0.0},
+        {"stamp": 1_900.0, "midpoint": 0.45, "resting_ask_depth_at_quote": 0.0},
+        {"stamp": 4_600.0, "midpoint": 0.45, "resting_ask_depth_at_quote": 0.0},
+    ]
+    ask = _wo136_replay(
+        trades=[{"token_id": "tok1", "side": "BUY", "price": 0.46, "size": 20.0, "stamp": 1_000.0}],
+        states=states,
+        tick=0.01,
+    )
+    bid = _wo136_replay(
+        trades=[{"token_id": "tok1", "side": "SELL", "price": 0.43, "size": 20.0, "stamp": 1_000.0}],
+        states=[{**row, "resting_bid_depth_at_quote": 0.0} for row in states],
+        tick=0.01,
+    )
+
+    assert ask["fills_preview"][0]["fill_price"] == 0.46
+    assert bid["fills_preview"][0]["fill_price"] == 0.43
+    assert ask["fills_preview"][0]["quote_rounding"] == "order_price_min_tick_size_outward"
 
 
 def test_matched_collection_polls_exact_portfolio_and_records_zero_print_coverage(tmp_path, monkeypatch):
@@ -852,7 +978,7 @@ def test_wo113_coverage_window_alignment_excludes_unobservable_horizon(tmp_path)
     _seed_archive(cfg)
     write_csv(
         cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
-        [{"market": "0xcond", "asset_id": "tok1", "side": "SELL", "price": 0.49, "size": 25, "timestamp": 3_000}],
+        [{"market": "0xcond", "asset_id": "tok1", "side": "SELL", "price": 0.43, "size": 25, "timestamp": 3_000}],
         fieldnames=["market", "asset_id", "side", "price", "size", "timestamp"],
     )
 

@@ -6549,33 +6549,52 @@ deployed configuration (compose file, CLI flags), not just module code paths.
 **Scope — one mechanism.** File:
 `src/polymarket_predictive_engine/price_history_collector.py` and its tests.
 
-141.1 — **preserve prior corpus rows for requested-but-failed tokens.** Before
-the final write, read the existing corpus (when present) and retain its rows
-for every token that this run REQUESTED but recorded as `fetch_error`. The
-merged output is: this run's fetched rows for its successful tokens, plus the
-preserved prior rows for its failed tokens, written through the existing atomic
-`write_csv` path with unchanged `SNAPSHOT_FIELDS`. Price-history points are
-immutable venue facts, so a preserved row is yesterday's prefix of the same
-series — it can be short, never wrong. Boundary rules, all four explicit:
-- A requested token with `fetch_error` and prior rows keeps them, byte-identical.
-- A requested token with `fetch_error` and NO prior rows contributes nothing —
-  preservation never fabricates.
+141.1 — **a token's prior corpus rows survive any fetch outcome that is not a
+clean, recognized venue answer.** Before the final write, read the existing
+corpus (when present) and merge per requested token by the rule below, written
+through the existing atomic `write_csv` path with unchanged `SNAPSHOT_FIELDS`.
+Price-history points are immutable venue facts, so a preserved row is
+yesterday's copy of the same series — it can be short, never wrong.
+
+The whole rule keys on ONE new recorded integer. `_fetch_history`
+(`price_history_collector.py:263-293`) stops at the first non-empty answer and
+swallows earlier attempt failures, and `normalize_price_history_payload`
+(`:205-223`) coerces an UNRECOGNIZED body — an HTTP 200 whose JSON is
+error-shaped, carrying none of the `history`/`prices`/`data` keys and not a
+bare list — to an empty list without raising. Therefore define
+`attempt_errors` (new on every quality row) as the count of attempts that
+either RAISED or returned an unrecognized payload; only a recognized
+history-schema response counts as the venue answering. Per-token merge rule,
+exhaustive:
+
+- **Clean success** (`attempt_errors == 0`, points returned): replace the
+  token's rows with this run's fetch, exactly as today — the healthy path is
+  byte-identical to current behaviour.
+- **Fallback success** (`attempt_errors > 0`, points returned): the answer may
+  cover a shorter window than the errored primary attempt (e.g.
+  `bounded_close_window` raised, `short_close_window` answered with 7 of the
+  prior 30 days), so replacement would shrink coverage. Union this run's
+  points with the token's prior rows, deduplicated on
+  (`token_id`, `timestamp`) with the freshly fetched row winning ties.
+  Self-correcting: the next clean success replaces wholesale and re-trims to
+  the venue's full answer.
+- **Clean empty** (`attempt_errors == 0`, zero points): venue-authoritative —
+  the venue answered every attempted shape with a recognized empty; prior rows
+  drop as today.
+- **Failed or unrecognized with no points** (`attempt_errors > 0`, zero
+  points — covers `fetch_error` and mixed error/empty chains alike): preserve
+  the token's prior rows unchanged. No prior rows means nothing is written for
+  the token — preservation never fabricates.
 - A token absent from today's selection still drops, exactly as today — the
   registered rolling-selection design is unchanged.
-- `empty_history` is authoritative ONLY when the whole fetch chain was clean.
-  `_fetch_history` (`price_history_collector.py:280-293`) resets `last_error`
-  when any attempt returns an empty payload and raises only when the LAST
-  attempt errored — so `all_attempts_empty` can follow earlier failed attempts
-  during a partial outage, and such an empty is not evidence the venue has no
-  points. Therefore: record per-token how many attempts raised
-  (`attempt_errors` on the quality row), and preserve prior rows for an
-  `empty_history` token when `attempt_errors > 0`. A clean empty
-  (`attempt_errors == 0`) keeps venue-authoritative semantics and drops prior
-  rows as today. (Found by Codex review of this registration — the carve-out
-  as first written would have deleted history in exactly the
-  destructive-refresh case this WO exists to prevent.)
-The totally-failed run needs no special case: every requested token is
-`fetch_error`, so the merge preserves the whole prior corpus instead of
+
+(The clean-empty/mixed-chain distinction, the unrecognized-payload
+classification, and the fallback-success union were each added by successive
+Codex review rounds on this registration — the first drafts would have deleted
+history in realistic degraded-upstream cases.)
+
+The totally-failed run needs no special case: every requested token lands in
+the preserve branch, so the merge keeps the whole prior corpus instead of
 writing a header-only file.
 
 **Malformed-input predicates (deterministic, pinned by tests).** A prior
@@ -6585,10 +6604,15 @@ foreign columns) means the whole prior file is untrusted and the run falls
 back to today's write-what-was-fetched behaviour, recording
 `prior_corpus_untrusted: true` in the summary. Within a trusted corpus, an
 individual preserved row is valid only with a non-empty `token_id`, a
-parseable `timestamp`, and a finite numeric `price`; an invalid row is dropped
-alone (counted in `preserved_rows_dropped_invalid`) while the token's
-remaining valid rows are kept. `read_csv_rows` tolerates arbitrary content, so
-these predicates are the whole defence — nothing else validates this file.
+parseable `timestamp`, and finite numeric `price` AND `midpoint` that are
+equal — the writer emits them identical
+(`price_history_collector.py:344-346`), and the corpus's consumers read
+`midpoint` FIRST (`features_v2.py:169-175`, `market_making_pnl.py:57-64`), so
+a row validated on `price` alone could still feed a corrupt or missing
+`midpoint` into training. An invalid row is dropped alone (counted in
+`preserved_rows_dropped_invalid`) while the token's remaining valid rows are
+kept. `read_csv_rows` tolerates arbitrary content, so these predicates are the
+whole defence — nothing else validates this file.
 
 **Honesty requirement.** Preservation must not dress up a failed fetch as a
 successful one. The quality CSV keeps recording `fetch_error` for every failed
@@ -6617,13 +6641,20 @@ run is byte-identical to today's output with both preservation counts at 0
 still carries `fetch_error` rows for preserved tokens (honesty); (7) a prior
 corpus with a non-`SNAPSHOT_FIELDS` header is wholly untrusted — the run falls
 back to write-what-was-fetched, stamps `prior_corpus_untrusted`, and does not
-raise; (8) within a trusted corpus, a row with a missing timestamp or
-non-finite price is dropped alone and counted in
-`preserved_rows_dropped_invalid` while the token's valid rows survive; (9) a
-token whose fetch chain mixed errors with a final empty payload
-(`attempt_errors > 0`, zero points) keeps its prior rows and its quality row
-records the attempt errors; (10) a clean empty (`attempt_errors == 0`) still
-drops prior rows (venue-authoritative regression).
+raise; (8) within a trusted corpus, a row with a missing timestamp, a
+non-finite price, or a missing/non-finite/disagreeing midpoint is dropped
+alone and counted in `preserved_rows_dropped_invalid` while the token's valid
+rows survive; (9) a token whose fetch chain mixed errors with a final empty
+payload (`attempt_errors > 0`, zero points) keeps its prior rows and its
+quality row records the attempt errors; (10) a clean empty
+(`attempt_errors == 0`, recognized schema) still drops prior rows
+(venue-authoritative regression); (11) a chain whose every attempt returns
+HTTP 200 with an error-shaped/unrecognized body counts those attempts in
+`attempt_errors` and preserves prior rows — it must NOT read as a clean empty;
+(12) a fallback success (primary attempt raises, a shorter window answers)
+unions the fetched points with the token's prior rows, deduplicated on
+(`token_id`, `timestamp`) with the fetched row winning ties, so prior
+coverage outside the fallback window survives.
 
 **Day-after check:** on the next scheduled harvest,
 `historical_price_history_summary.json` shows `preserved_token_count: 0` on a

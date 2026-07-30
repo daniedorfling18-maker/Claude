@@ -6562,11 +6562,33 @@ series — it can be short, never wrong. Boundary rules, all four explicit:
   preservation never fabricates.
 - A token absent from today's selection still drops, exactly as today — the
   registered rolling-selection design is unchanged.
-- `empty_history` keeps its current venue-authoritative semantics (the venue
-  answered; it said there are no points) — no preservation on that status.
+- `empty_history` is authoritative ONLY when the whole fetch chain was clean.
+  `_fetch_history` (`price_history_collector.py:280-293`) resets `last_error`
+  when any attempt returns an empty payload and raises only when the LAST
+  attempt errored — so `all_attempts_empty` can follow earlier failed attempts
+  during a partial outage, and such an empty is not evidence the venue has no
+  points. Therefore: record per-token how many attempts raised
+  (`attempt_errors` on the quality row), and preserve prior rows for an
+  `empty_history` token when `attempt_errors > 0`. A clean empty
+  (`attempt_errors == 0`) keeps venue-authoritative semantics and drops prior
+  rows as today. (Found by Codex review of this registration — the carve-out
+  as first written would have deleted history in exactly the
+  destructive-refresh case this WO exists to prevent.)
 The totally-failed run needs no special case: every requested token is
 `fetch_error`, so the merge preserves the whole prior corpus instead of
 writing a header-only file.
+
+**Malformed-input predicates (deterministic, pinned by tests).** A prior
+corpus is trusted for preservation only when its header is exactly
+`SNAPSHOT_FIELDS`; any other header (missing, reordered-with-missing, or
+foreign columns) means the whole prior file is untrusted and the run falls
+back to today's write-what-was-fetched behaviour, recording
+`prior_corpus_untrusted: true` in the summary. Within a trusted corpus, an
+individual preserved row is valid only with a non-empty `token_id`, a
+parseable `timestamp`, and a finite numeric `price`; an invalid row is dropped
+alone (counted in `preserved_rows_dropped_invalid`) while the token's
+remaining valid rows are kept. `read_csv_rows` tolerates arbitrary content, so
+these predicates are the whole defence — nothing else validates this file.
 
 **Honesty requirement.** Preservation must not dress up a failed fetch as a
 successful one. The quality CSV keeps recording `fetch_error` for every failed
@@ -6592,9 +6614,16 @@ selection is dropped even when preservation is active (pins the rolling
 design); (4) a failed token with no prior rows adds nothing; (5) a full-success
 run is byte-identical to today's output with both preservation counts at 0
 (regression — the mechanism is inert on the healthy path); (6) the quality CSV
-still carries `fetch_error` rows for preserved tokens (honesty); (7) an
-unreadable/corrupt existing corpus falls back to today's write-what-was-fetched
-behaviour without raising.
+still carries `fetch_error` rows for preserved tokens (honesty); (7) a prior
+corpus with a non-`SNAPSHOT_FIELDS` header is wholly untrusted — the run falls
+back to write-what-was-fetched, stamps `prior_corpus_untrusted`, and does not
+raise; (8) within a trusted corpus, a row with a missing timestamp or
+non-finite price is dropped alone and counted in
+`preserved_rows_dropped_invalid` while the token's valid rows survive; (9) a
+token whose fetch chain mixed errors with a final empty payload
+(`attempt_errors > 0`, zero points) keeps its prior rows and its quality row
+records the attempt errors; (10) a clean empty (`attempt_errors == 0`) still
+drops prior rows (venue-authoritative regression).
 
 **Day-after check:** on the next scheduled harvest,
 `historical_price_history_summary.json` shows `preserved_token_count: 0` on a

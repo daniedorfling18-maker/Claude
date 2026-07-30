@@ -6285,6 +6285,7 @@ refactors:
 | 7 | **WO-133** | guarded manual deploy path + its `AGENTS.md` amendment | **owner** (one PR carrying a governance amendment cannot be partially merged) |
 | 8 | **WO-136** | contemporaneous-quote fill replay (kills the phantom-fill 42x haircut; issued 2026-07-28 under the owner's direct instruction) | orchestrator, after line-audit |
 | 9 | **WO-137** | portfolio composition diff — name the reason every market leaves (churn is the campaign's binding variable; issued 2026-07-28 under the owner's direct instruction) | orchestrator, after line-audit |
+| 10 | **WO-141** | a failed refresh must not erase collected price history: the collector preserves prior corpus rows for requested-but-failed tokens (rescoped 2026-07-30 — the model-abstention and readiness items were withdrawn after Codex review disproved the inference chain) | owner (training-data integrity) |
 | 11 | **WO-139** | spend the official-book seeding budget on markets that can actually be sized (dispatched 2026-07-29 before registration — see the WO-138 registration's provenance note) | owner (study module) |
 
 **WO-121 — watchdog coverage for unmonitored producers** (registered 2026-07-27 as
@@ -6499,3 +6500,173 @@ qualified, because the registered fallback may legitimately reintroduce
 thin-book or high-risk markets when fewer than the cap qualify. The polled count
 is unchanged from the prior run's cap. `maker_carry_candidates.csv` shows
 `book_history_hours` and `book_snapshot_count` for every row.
+
+
+## WO-141 — A failed refresh must not erase collected price history — `queued` (registered 2026-07-29; RESCOPED 2026-07-30 after Codex review of the registration disproved the original harm chain; collection-only → owner merge after line-audit)
+
+**Provenance and epitaph — read this before the scope.** As first registered,
+this work order claimed a starved `historical_price_snapshots.csv` flows through
+`features_v2` into `predict_optimized_probability`'s zero-fill-then-standardise
+path and out to the paper cycle's `on_pace` status, and prescribed three fixes
+(collector refusal, model abstention, readiness blocker). Codex review of the
+registration PR (#398) disproved the chain on three grounds, each verified
+against the code before this rewrite:
+
+1. **The deployed paper lane never reads the corpus at inference.**
+   `docker-compose.vps-paper.yml:94` passes `--paper-source websocket`, and
+   `_source_files` (`features_v2.py:119-140`) includes
+   `historical_price_snapshots.csv` only for `all`/`historical`. The corpus is a
+   TRAINING input. The registered readiness blocker (old 141.3) would have
+   blocked the paper lane on an unrelated collector outage — withdrawn.
+2. **Zero-imputation is the model's train-time convention, not an
+   inference-side fail-open.** `numeric_model_feature_columns` selects a column
+   when any training row has a numeric value, and `_design_rows` zero-imputes
+   the rest at fit time — so a websocket inference row missing history-derived
+   columns is treated exactly as the equivalent training rows were. Mandatory
+   abstention on any missing column (old 141.2) would have abstained on every
+   production prediction — withdrawn.
+3. **What survives is narrower and better-defined than "the collector destroys
+   an accumulating asset."** The corpus is a rolling rebuild by design:
+   `_collection_rows` (`price_history_collector.py:154-195`) reselects priority
+   finals + general tokens each run, and tokens that rotate out of selection
+   legitimately drop (`general_tokens_truncated` counts them). The defect is
+   that `write_csv` (`price_history_collector.py:391`) replaces the file with
+   only THIS run's successful fetches, so a token that was **requested and
+   failed** loses its previously collected rows: one success out of fifty
+   erases the other forty-nine histories, and a totally failed run leaves a
+   header-only file — both at exit 0. The loss is permanent when a token's
+   selection or venue-serveable window lapses during the outage (priority
+   finals live `lookahead_days_after_close` = 3 days), which is precisely the
+   window a degraded upstream makes likely.
+
+The registration-before-dispatch rule was followed; no build was dispatched
+against the withdrawn scope. Chain-tracing discipline note, standing: this is
+the fifth incorrect model-lane/dependency claim across WO-138/140/141
+registrations, every one caught by Codex review and none by the orchestrator's
+own audit — registrations touching model or inference behaviour must cite the
+deployed configuration (compose file, CLI flags), not just module code paths.
+
+**Scope — one mechanism.** File:
+`src/polymarket_predictive_engine/price_history_collector.py` and its tests.
+
+141.1 — **a token's prior corpus rows survive any fetch outcome that is not a
+clean, recognized venue answer.** Before the final write, read the existing
+corpus (when present) and merge per requested token by the rule below, written
+through the existing atomic `write_csv` path with unchanged `SNAPSHOT_FIELDS`.
+Price-history points are immutable venue facts, so a preserved row is
+yesterday's copy of the same series — it can be short, never wrong.
+
+The whole rule keys on ONE new recorded integer. `_fetch_history`
+(`price_history_collector.py:263-293`) stops at the first non-empty answer and
+swallows earlier attempt failures, and `normalize_price_history_payload`
+(`:205-223`) coerces an UNRECOGNIZED body — an HTTP 200 whose JSON is
+error-shaped, carrying none of the `history`/`prices`/`data` keys and not a
+bare list — to an empty list without raising. Therefore define
+`attempt_errors` (new on every quality row) as the count of attempts that
+either RAISED or returned an unrecognized payload; only a recognized
+history-schema response counts as the venue answering. Per-token merge rule,
+exhaustive:
+
+- **Clean success** (`attempt_errors == 0`, points returned): replace the
+  token's rows with this run's fetch, exactly as today — the healthy path is
+  byte-identical to current behaviour.
+- **Fallback success** (`attempt_errors > 0`, points returned): the answer may
+  cover a shorter window than the errored primary attempt (e.g.
+  `bounded_close_window` raised, `short_close_window` answered with 7 of the
+  prior 30 days), so replacement would shrink coverage. Union this run's
+  points with the token's prior rows, deduplicated on
+  (`token_id`, `timestamp`) with the freshly fetched row winning ties.
+  Self-correcting: the next clean success replaces wholesale and re-trims to
+  the venue's full answer.
+- **Clean empty** (`attempt_errors == 0`, zero points): venue-authoritative —
+  the venue answered every attempted shape with a recognized empty; prior rows
+  drop as today.
+- **Failed or unrecognized with no points** (`attempt_errors > 0`, zero
+  points — covers `fetch_error` and mixed error/empty chains alike): preserve
+  the token's prior rows unchanged. No prior rows means nothing is written for
+  the token — preservation never fabricates.
+- A token absent from today's selection still drops, exactly as today — the
+  registered rolling-selection design is unchanged.
+
+(The clean-empty/mixed-chain distinction, the unrecognized-payload
+classification, and the fallback-success union were each added by successive
+Codex review rounds on this registration — the first drafts would have deleted
+history in realistic degraded-upstream cases.)
+
+The totally-failed run needs no special case: every requested token lands in
+the preserve branch, so the merge keeps the whole prior corpus instead of
+writing a header-only file.
+
+**Malformed-input predicates (deterministic, pinned by tests).** A prior
+corpus is trusted for preservation only when its header is exactly
+`SNAPSHOT_FIELDS`; any other header (missing, reordered-with-missing, or
+foreign columns) means the whole prior file is untrusted and the run falls
+back to today's write-what-was-fetched behaviour, recording
+`prior_corpus_untrusted: true` in the summary. Within a trusted corpus, an
+individual preserved row is valid only with a non-empty `token_id`, a
+parseable `timestamp`, and finite numeric `price` AND `midpoint` that are
+equal — the writer emits them identical
+(`price_history_collector.py:344-346`), and the corpus's consumers read
+`midpoint` FIRST (`features_v2.py:169-175`, `market_making_pnl.py:57-64`), so
+a row validated on `price` alone could still feed a corrupt or missing
+`midpoint` into training. An invalid row is dropped alone (counted in
+`preserved_rows_dropped_invalid`) while the token's remaining valid rows are
+kept. `read_csv_rows` tolerates arbitrary content, so these predicates are the
+whole defence — nothing else validates this file.
+
+**Honesty requirement.** Preservation must not dress up a failed fetch as a
+successful one. The quality CSV keeps recording `fetch_error` for every failed
+token exactly as today, and the summary gains `preserved_token_count` and
+`preserved_row_count` so a reader of
+`historical_price_history_summary.json` can distinguish "collected today" from
+"carried forward". `error_count`, `requested_tokens`, and every existing
+summary field keep their current meanings.
+
+**Fail-safe sentence (S5).** Collection-only: nothing here marks a market
+measured, alters any M-A/M-B/M-C or `maker_min_*` threshold, changes
+`_measurement_eligible`, or widens any eligibility rule. Preserved rows are
+prior immutable observations, never synthesised; when in doubt (unreadable
+prior corpus, malformed prior rows for a token) the fallback is today's
+behaviour — write what was fetched — never a crash and never fabrication.
+
+**Tests (enumerated).** (1) a run whose every request errors leaves every
+requested token's prior series byte-identical in the corpus and the summary
+records the preservation counts alongside `error_count == requested_tokens`;
+(2) a 1-of-N-success partial run writes fresh rows for the success and
+preserves each failed token's prior rows; (3) a token rotated out of the
+selection is dropped even when preservation is active (pins the rolling
+design); (4) a failed token with no prior rows adds nothing; (5) a full-success
+run is byte-identical to today's output with both preservation counts at 0
+(regression — the mechanism is inert on the healthy path); (6) the quality CSV
+still carries `fetch_error` rows for preserved tokens (honesty); (7) a prior
+corpus with a non-`SNAPSHOT_FIELDS` header is wholly untrusted — the run falls
+back to write-what-was-fetched, stamps `prior_corpus_untrusted`, and does not
+raise; (8) within a trusted corpus, a row with a missing timestamp, a
+non-finite price, or a missing/non-finite/disagreeing midpoint is dropped
+alone and counted in `preserved_rows_dropped_invalid` while the token's valid
+rows survive; (9) a token whose fetch chain mixed errors with a final empty
+payload (`attempt_errors > 0`, zero points) keeps its prior rows and its
+quality row records the attempt errors; (10) a clean empty
+(`attempt_errors == 0`, recognized schema) still drops prior rows
+(venue-authoritative regression); (11) a chain whose every attempt returns
+HTTP 200 with an error-shaped/unrecognized body counts those attempts in
+`attempt_errors` and preserves prior rows — it must NOT read as a clean empty;
+(12) a fallback success (primary attempt raises, a shorter window answers)
+unions the fetched points with the token's prior rows, deduplicated on
+(`token_id`, `timestamp`) with the fetched row winning ties, so prior
+coverage outside the fallback window survives.
+
+**Day-after check:** on the next scheduled harvest,
+`historical_price_history_summary.json` shows `preserved_token_count: 0` on a
+healthy run; if upstream degrades again, the corpus row count for
+requested-and-failed tokens holds instead of collapsing, while the quality CSV
+and `error_count` report the failures undiminished.
+
+**Recorded separately, not in this WO:** the verified model-lane finding that
+`volatility_penalty` is structurally dead (`mispricing_alpha.py:488-490` reads
+`rolling_volatility_*` fields that `predict_from_features`
+(`calibrated.py:127-171`) never copies into prediction rows, so the penalty is
+always 0.0 and `volatility_penalty_weight` is dead config, inflating
+`edge_lower_bound` on every row while missing liquidity IS penalised at
+`:499-500`). That is independent of corpus health and will be registered as its
+own work order with the deployed-configuration citation rule applied.

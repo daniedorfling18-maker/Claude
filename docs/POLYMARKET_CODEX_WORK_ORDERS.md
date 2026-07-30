@@ -6285,6 +6285,7 @@ refactors:
 | 7 | **WO-133** | guarded manual deploy path + its `AGENTS.md` amendment | **owner** (one PR carrying a governance amendment cannot be partially merged) |
 | 8 | **WO-136** | contemporaneous-quote fill replay (kills the phantom-fill 42x haircut; issued 2026-07-28 under the owner's direct instruction) | orchestrator, after line-audit |
 | 9 | **WO-137** | portfolio composition diff — name the reason every market leaves (churn is the campaign's binding variable; issued 2026-07-28 under the owner's direct instruction) | orchestrator, after line-audit |
+| 10 | **WO-141** | a starved price corpus must not become a confident prediction: collector refuses to destroy the corpus, the model abstains instead of zero-filling, and data quality blocks on it | owner (model inference + readiness gates) |
 | 11 | **WO-139** | spend the official-book seeding budget on markets that can actually be sized (dispatched 2026-07-29 before registration — see the WO-138 registration's provenance note) | owner (study module) |
 
 **WO-121 — watchdog coverage for unmonitored producers** (registered 2026-07-27 as
@@ -6499,3 +6500,112 @@ qualified, because the registered fallback may legitimately reintroduce
 thin-book or high-risk markets when fewer than the cap qualify. The polled count
 is unchanged from the prior run's cap. `maker_carry_candidates.csv` shows
 `book_history_hours` and `book_snapshot_count` for every row.
+
+
+## WO-141 — A starved price corpus must not become a confident prediction — `queued` (registered 2026-07-29 BEFORE dispatch; model inference + readiness gates → owner merge after line-audit)
+
+**Severity: this is a fail-open into the $100/month verdict machinery, not a
+reporting gap.** It was found by auditing the actual consumers of
+`outputs/polymarket_training/historical_price_snapshots.csv` after a Codex review
+established that an earlier work order had traced the wrong dependency chain.
+The chain below was traced FIRST this time, end to end, before any scope was
+written — which is the lesson from WO-138/WO-140 and the reason this entry leads
+with it.
+
+**The chain, with the step that does the damage in bold.**
+
+1. **Trigger.** The price-history collector catches every per-request exception,
+   writes `fetch_error` quality rows, and returns normally
+   (`price_history_collector.py:367-380`). Because `write_csv` always emits a
+   header and then atomically replaces the target (`utils.py:136-143`), a
+   totally-failed run **destroys a previously good corpus and leaves a
+   header-only file** (`price_history_collector.py:391`), exit 0. Its own
+   summary records `error_count == requested_tokens`
+   (`price_history_collector.py:398-404`) — and nothing reads that field.
+2. **Propagation.** `features_v2` gates on `.exists()` (`features_v2.py:133-135`),
+   so the file is silently dropped or contributes zero rows. Feature rows still
+   emit at FULL count with `midpoint`, `spread`, `logit_midpoint` intact, while
+   every history-derived column comes back blank: `price_change_*` via
+   `_change_at_or_before` returning `""` (`:89-90`), `rolling_volatility_*` via
+   `_std` returning `""` below two points (`:81-82`), `snapshots_so_far` = 0
+   (`:425`). `features_v2_summary.json` hardcodes `"status": "ok"` (`:464`).
+3. **The damage.** `predict_optimized_probability` zero-fills every absent
+   column — `vector.append(0.0 if value is None else value)`
+   (`models/optimized.py:525-526`) — and then standardises it as
+   `(0.0 - standardization_mean) / standardization_std` (`:538-539`). **Zero is
+   not neutral after standardisation.** With `snapshots_so_far` fitted on a dense
+   corpus (mean ≈ 200, std ≈ 100), the standardised input is `-2.0`, not `0`, and
+   the displacement compounds across every history-derived column. The model
+   emits a confidently WRONG probability and raises nothing: the only guard is a
+   vector-length check (`:533-534`), which passes because `feature_columns` is
+   fixed by the artifact.
+4. **Reach.** `calibrated.py:122` turns it into `edge`; `apply_mispricing_alpha`
+   turns that into `edge_lower_bound`, the declared `edge_field_for_trading`
+   (`mispricing_alpha.py:837-838, 1046`); `paper_cycle.py:150-166` sums it into
+   `expected_cycle_profit` and `cycles_needed_for_target_at_current_approved_rate`
+   and stamps **`"status": "on_pace"`** against `target_monthly_profit_usdc =
+   100.0`. Prediction rows carry no `feature_source`
+   (`calibrated.py:127-171`), so provenance is lost before this point.
+
+**Why every existing gate misses it.** The Brier/CI champion gate runs at TRAIN
+time (`models/optimized.py:454-464`); this failure is train-healthy /
+infer-starved, so the gate sits on the wrong side of the event.
+`load_prediction_models` (`calibrated.py:52-56`) returns the still-champion
+artifact without revalidating it against the current corpus. `readiness.py`'s
+`data_quality`, `training_artifact_blockers`, `paper_trade_readiness` and
+`paper_live_promotion_gate` contain **zero** references to this file.
+`promotion_gate.json` reports `optimized_model_champion` green because it reads
+the training-time artifact. No test anywhere covers an empty or absent price
+corpus for any consumer.
+
+**Scope — three fixes, in dependency order.** Files:
+`src/polymarket_predictive_engine/price_history_collector.py`,
+`src/polymarket_predictive_engine/models/optimized.py`,
+`src/polymarket_predictive_engine/readiness.py`, and their tests.
+
+141.1 — **the collector must not destroy the corpus it failed to refresh.**
+When a run's own accounting shows it obtained nothing — `error_count ==
+requested_tokens`, or zero non-empty histories against a non-zero request count —
+it must leave any existing non-empty corpus untouched and record the refusal in
+its summary. Losing today's collection is a coverage gap; overwriting last
+week's with a header is data destruction, and it is what converts a slow upstream
+into a starved model.
+
+141.2 — **the model abstains instead of guessing.** `predict_optimized_probability`
+must not zero-fill a required feature column. A row missing any column the
+artifact declares required produces NO optimized prediction — the caller falls
+back to its existing non-optimized path or emits no row — rather than a
+standardisation-displaced one. Record the abstention count in the prediction
+summary so it is visible. Fail-safe direction: abstaining costs coverage;
+guessing costs correctness, and a wrong probability is indistinguishable from a
+right one downstream.
+
+141.3 — **data quality blocks on the corpus.** Add
+`historical_price_snapshots.csv` row-count and freshness to `readiness.py`'s
+`data_quality`, as a paper blocker on the same fail-closed pattern as its
+siblings. An empty or stale corpus must block the paper lane rather than let it
+report `on_pace` from displaced edges.
+
+**Fail-safe direction (S5).** Every change here removes output rather than adding
+it: the collector declines to write, the model declines to predict, readiness
+declines to pass. Nothing may mark a market measured, alter an M-gate threshold,
+or widen any eligibility rule. Coverage may fall; correctness may not.
+
+**Tests.** (1) a collector run whose every request errors leaves an existing
+non-empty corpus byte-identical and records the refusal; (2) the same run against
+an absent corpus still writes nothing rather than a header-only file; (3) a
+partial run writes normally; (4) `predict_optimized_probability` given a feature
+row missing a required column returns no prediction and increments the
+abstention count — asserted against a fitted artifact whose
+`standardization_mean` is non-zero, so a zero-fill implementation would produce a
+numerically different, non-abstaining result and fail; (5) a complete row still
+predicts identically to today (regression); (6) `data_quality` blocks on an empty
+corpus and on a stale one, and passes on a fresh populated one; (7) an
+end-to-end test proving a starved corpus yields no `on_pace` status rather than
+one computed from displaced edges.
+
+**Day-after check:** with the corpus healthy, `predictions.csv` row count and the
+paper cycle's `expected_cycle_profit` are unchanged from the prior run, and the
+new abstention count is 0. Then, in a temporary scratch output root only, an
+emptied corpus produces zero optimized predictions, a `data_quality` blocker, and
+no `on_pace` status — never a populated forward-cycle artifact.

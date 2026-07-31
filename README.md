@@ -1,9 +1,14 @@
 # Claude Research Engines
 
-This repository contains two related systems:
-
-1. the Polymarket predictive/paper-trading research engine; and
-2. the World Cup/SuperBru score engine and VPS auto-pick watchdog.
+This repository exists to answer one economic question under pre-registered,
+fail-closed rules: can a paper-only Polymarket engine produce verified forward
+evidence of a sustainable edge — concretely, the registered `$100/month`
+(= `$3.33/day`) maker-carry target — before any real capital is considered?
+The Polymarket predictive/paper-trading research engine is the repository's
+principal system. A second, ancillary system — the World Cup/SuperBru score
+engine and its VPS auto-pick watchdog — shares the infrastructure but is not
+part of the economic thesis and should not be read as the repository's main
+line of work.
 
 ## Start with generated state
 
@@ -18,6 +23,43 @@ outputs/performance/operating_state.json
 
 [`docs/OPERATING_STATE.md`](docs/OPERATING_STATE.md) defines the control, and
 [`AGENTS.md`](AGENTS.md) defines how agents operate the repository.
+
+## Primary economic thesis — sharp-anchor maker carry (H1)
+
+Three research hypotheses are registered in
+[`docs/EXPERIMENT_REGISTRY.md`](docs/EXPERIMENT_REGISTRY.md); the registry
+permits exactly these three and no fourth. H1, sharp-anchor maker carry, is
+the current priority: it is the only lane with an active pre-registered
+profit campaign (the frozen M-A/M-B/M-C gates in `maker_carry_study.py`), a
+registered validation ladder, and a registered — and blocked — path toward
+any future funding decision. H2 (persistent dutch-book consistency) and H3
+(structural-bias/smart-flow cohorts with positive executable CLV) remain
+registered but are secondary research lanes: their own registrations cap a
+pass at a shadow research candidate and cannot invoke paper or live trading.
+
+**Mechanism.** Passive maker quotes rest on rewarded Polymarket markets
+around independent sharp external anchors (bookmaker-derived probabilities).
+Resting liquidity earns a published reward-pot share and may capture spread;
+the sharp anchor identifies quotes whose apparent carry is least likely to be
+erased by adverse selection. Edge is realised reward plus spread minus
+markout, fees, gas, and all investor costs — never the reward headline alone.
+
+**What the target means.** The `$100/month` (= `$3.33/day`) figure is a
+pre-registered target under investigation, not demonstrated performance.
+M-A requires trusted net carry at or above that target on the registered
+number of distinct UTC days; the study's computed net carry is, by its own
+registration, a simulation upper bound until the three-tier validation
+ladder (fill replay, reward receipt, real-fill markout) confirms it. Current
+gate progress lives only in the generated operating state and study
+artifacts above — never in this file.
+
+**Unresolved risks and measurements.** Fill quality (confirmed-fill ratio),
+realised markout and adverse selection (the human real-fill stage is the only
+true test of that half), reward eligibility of the quotes actually posted
+(time-integrated epoch share versus snapshot extrapolation), inventory
+exposure, and execution costs (fees, gas, requoting) are all still being
+measured. Until they are measured on forward evidence, every carry number in
+any artifact is a hypothesis, not a result.
 
 ## Runtime model
 
@@ -50,9 +92,12 @@ loosened to force trades or a `$100/month` headline.
 
 ## Safety status
 
-The engine is shadow/dry-run/paper-gated. WO-67 is a blocked architecture
-registration; there is no approved autonomous live-order path. Missing or stale
-evidence fails closed as `UNKNOWN`.
+The engine is shadow/dry-run/paper-gated and funding is closed: the registered
+decision policy's binding capital is exactly zero until its pre-registered
+preconditions pass on forward evidence. WO-67 is a blocked architecture
+registration; there is no approved autonomous live-order path, and live
+trading remains gated four independent ways plus owner authorization. Missing
+or stale evidence fails closed as `UNKNOWN`.
 
 ## Work and verification
 

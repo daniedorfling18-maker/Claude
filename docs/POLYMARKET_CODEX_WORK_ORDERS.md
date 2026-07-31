@@ -6286,7 +6286,7 @@ refactors:
 | 8 | **WO-136** | contemporaneous-quote fill replay (kills the phantom-fill 42x haircut; issued 2026-07-28 under the owner's direct instruction) | orchestrator, after line-audit |
 | 9 | **WO-137** | portfolio composition diff — name the reason every market leaves (churn is the campaign's binding variable; issued 2026-07-28 under the owner's direct instruction) | orchestrator, after line-audit |
 | 10 | **WO-141** | a failed refresh must not erase collected price history: the collector preserves prior corpus rows for requested-but-failed tokens (rescoped 2026-07-30 — the model-abstention and readiness items were withdrawn after Codex review disproved the inference chain) | owner (training-data integrity) |
-| 11 | **WO-139** | spend the official-book seeding budget on markets that can actually be sized (dispatched 2026-07-29 before registration — see the WO-138 registration's provenance note) | owner (study module) |
+| 11 | **WO-139** | spend the official-book seeding budget on markets that can actually be sized — `done` (2026-07-31, PR #397; awaiting the next VPS deploy for its day-after check) | owner (study module) |
 | 12 | **WO-142** | wire the volatility columns into prediction rows so the declared volatility penalty actually applies (tighten-only; edges may only shrink) | owner (edge_field_for_trading producer) |
 
 **WO-121 — watchdog coverage for unmonitored producers** (registered 2026-07-27 as
@@ -6411,7 +6411,7 @@ widen the carve-out into "agents may run production paths".
 gate still runs the full unfiltered suite on that PR and remains what the merge
 decision cites.
 
-## WO-139 — Spend the official-book seeding budget on markets that can actually be sized — `queued` (dispatched to Codex 2026-07-29; study module → owner merge after line-audit; see the provenance note in the WO-138 registration)
+## WO-139 — Spend the official-book seeding budget on markets that can actually be sized — `done` (2026-07-31, PR #397; built by Codex with a six-item fix round after line-audit — three-tier seed ordering per the registered spec, sizer-matching risk predicate, clock-advance window test, mtime tie-break, stat-failure test, strengthened tests; day-after check pending the next VPS deploy, which as of this status line has not yet occurred — the deployed revision predates this merge)
 
 **Why now.** M-A banks a day only if the day's LAST run holds target, and M-B.1
 requires the SAME market present across two consecutive cycles; both are starved

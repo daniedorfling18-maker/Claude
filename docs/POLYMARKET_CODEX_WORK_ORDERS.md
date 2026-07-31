@@ -6863,22 +6863,28 @@ makes the blank population COUNTABLE (`rows_missing_rolling_volatility`);
 after one deployed day of that telemetry the owner decides WO-142b's
 magnitude. It stays prose here — no placeholder registration.
 
-**Deployment caveat (added 2026-07-31, deployed-configuration citation rule).**
-Telemetry shows `mispricing_alpha_live_summary.json` frozen at
-2026-07-19T22:21:45Z while `forward_paper_cycle.json` stamps `status: "ran"`
-fresh every cycle. The only code path consistent with both is
-`apply_mispricing_alpha`'s silent early return on
-`settings.get("enabled") == False` (`mispricing_alpha.py:542-543`) — the
-deployed VPS host config has evidently carried `mispricing_alpha.enabled:
-false` since ~2026-07-19 (the tracked example config defaults `true`; no
-registered decision disables it). Consequences, recorded honestly: this WO's
-copy-through is correct and tighten-only regardless, but it is DORMANT in the
-deployed lane until the overlay is re-enabled — the owner decides whether and
-when. The build and its tests are unaffected (they run the overlay
-explicitly). Separately noted as a candidate hardening item, same fail-open
-class as the WO-129 depth-gate disable: a config-reachable off-switch on a
-scoring lane that leaves no artifact trace — a disabled overlay should stamp
-a visible `disabled` status artifact instead of skipping silently.
+**Deployment caveat (added 2026-07-31; mechanism CORRECTED same day after
+host verification — the first version of this caveat blamed a config
+`enabled: false`, which was wrong: the tracked config has said `enabled:
+true` since 2026-07-01 and the deployed stack reads that tracked file).**
+Host ground truth: `mispricing_alpha_live_summary.json` last written
+2026-07-19T22:22 while `forward_paper_cycle.json` refreshes every cycle.
+Verified mechanism: the deployed live loop runs `_run_prediction_cycle` in
+its default `paper-bridge` mode (`run_polymarket_local_live_loop.py:993-998`;
+compose passes `--prediction-mode $POLYMARKET_PREDICTION_MODE`), and the
+bridge cycle never calls `run_paper_cycle`, so `apply_mispricing_alpha`
+never runs. The only in-production paths that invoke the full cycle are the
+resource-guard degraded fallback (`:1037-1045`) and manual invocation; no
+scheduler job owns it. The 2026-07-19 freeze therefore marks the last time
+any full-cycle path fired (trigger unconfirmed: most plausibly the degraded
+fallback ceasing as host health recovered). Consequences: this WO's
+copy-through is correct and tighten-only but DORMANT in the deployed lane
+until a full-cycle path runs it — the owner decides whether the taker alpha
+lane should have a scheduled owner at all, given the registered maker-lane
+priority. The build and its tests are unaffected. Candidate hardening item,
+recorded: the full prediction/alpha lane can die silently — no freshness
+consumer, watchdog registration, or heartbeat alarms when it stops; its
+artifacts simply freeze while the bridge keeps the cycle report fresh.
 
 **Day-after check (conditional on the overlay being enabled in the deployed
 config; if it is disabled, the check is deferred and this WO's deployment

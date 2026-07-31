@@ -6287,6 +6287,7 @@ refactors:
 | 9 | **WO-137** | portfolio composition diff — name the reason every market leaves (churn is the campaign's binding variable; issued 2026-07-28 under the owner's direct instruction) | orchestrator, after line-audit |
 | 10 | **WO-141** | a failed refresh must not erase collected price history: the collector preserves prior corpus rows for requested-but-failed tokens (rescoped 2026-07-30 — the model-abstention and readiness items were withdrawn after Codex review disproved the inference chain) | owner (training-data integrity) |
 | 11 | **WO-139** | spend the official-book seeding budget on markets that can actually be sized (dispatched 2026-07-29 before registration — see the WO-138 registration's provenance note) | owner (study module) |
+| 12 | **WO-142** | wire the volatility columns into prediction rows so the declared volatility penalty actually applies (tighten-only; edges may only shrink) | owner (edge_field_for_trading producer) |
 
 **WO-121 — watchdog coverage for unmonitored producers** (registered 2026-07-27 as
 WO-129's named blocking prerequisite, per ENGINEERING_STANDARDS S3). WO-129 tightens
@@ -6670,3 +6671,206 @@ always 0.0 and `volatility_penalty_weight` is dead config, inflating
 `edge_lower_bound` on every row while missing liquidity IS penalised at
 `:499-500`). That is independent of corpus health and will be registered as its
 own work order with the deployed-configuration citation rule applied.
+
+
+## WO-142 — Wire the volatility columns into prediction rows so the declared volatility penalty actually applies — `queued` (registered 2026-07-30 BEFORE dispatch; decision-surface change to the `edge_field_for_trading` producer → OWNER MERGE after line-audit; tighten-only, edges may only shrink)
+
+**Provenance.** Drafted by the Opus-tier spec agent from the finding recorded in
+the WO-141 registration's "Recorded separately, not in this WO" paragraph, with
+every line number re-verified against current `main` before drafting. The
+drafting pass CORRECTED the orchestrator's original finding in one material
+way, recorded here per the deployed-configuration citation rule: the
+hypothesis that the deployed websocket lane leaves the volatility columns
+blank is FALSE — `features_v2.py:431-434` computes `rolling_volatility_1h/6h/24h`
+for EVERY source from midpoint history accumulated across the input file
+(`:353-358`), and the deployed `websocket_market_features.csv` is a rolling
+~72h multi-snapshot table (`websocket_market_data.retain_existing_features:
+true`, `feature_retention_hours: 72`, `max_feature_rows: 60000`, rewritten
+every 120s — config lines 1489-1491, 1498), so `rolling_volatility_6h` is
+routinely non-blank in production and the penalty applies the moment the
+columns are copied through. This fix bites in the deployed lane; it is not a
+paper exercise.
+
+**The defect (verified by direct code read, 2026-07-30).** `volatility_penalty`
+is structurally dead. `_microstructure_penalty` reads `rolling_volatility_6h` /
+`rolling_volatility_24h` from prediction rows (`mispricing_alpha.py:488-490`),
+but `predict_from_features` (`models/calibrated.py:127-171`) copies eleven
+microstructure fields into the prediction row and never copies the three
+`rolling_volatility_*` columns, so `safe_float(None)` returns `None`
+(`utils.py:373-379`), `volatility_penalty` is `0.0` on every row (`:515`),
+`volatility_penalty_weight: 0.15` (config line 714) is dead config, `total`
+(`:516`) → `alpha_microstructure_penalty` (`:798`) → `total_penalty`
+(`:830-834`) is structurally understated, and `edge_lower_bound` (`:838`) — the
+declared `edge_field_for_trading` (config line 697, echoed at
+`mispricing_alpha.py:1046`, consumed at `strategy.py:219`) — is inflated on
+every row relative to its documented intent. The asymmetry is real: missing
+LIQUIDITY is penalised (`missing_liquidity_penalty`, `:499-500`); missing
+volatility silently costs nothing. `_enrich_with_latest_websocket_quotes`
+cannot rescue it: `QUOTE_ENRICHMENT_FIELDS` (`mispricing_alpha.py:39-51`) has
+no volatility field and neither does its source schema
+(`websocket_normaliser.py:36-62`). `volatility_penalty` is ALREADY a column in
+`predictions.csv` and `mispricing_alpha_scores.csv` (via `**micro_parts` at
+`:799`), currently `0.0` on every row — which makes the day-after check
+trivially auditable.
+
+**Scope: the copy-through of three existing feature columns plus the
+observability to audit it. Nothing else.** This WO does NOT build: a new
+penalty, a new config key, a missing-volatility penalty, any change to the
+penalty arithmetic at `:492-516`, any change to a gate/threshold/filter, any
+change to `features_v2.py`, any change to the near-miss or shadow bands, any
+consumer of the new telemetry, or anything on any order, signer, credential,
+or live surface.
+
+**Touch ONLY these files** (`git diff --stat` must show exactly these four):
+- `src/polymarket_predictive_engine/models/calibrated.py` (three copy-through keys in `predict_from_features`)
+- `src/polymarket_predictive_engine/mispricing_alpha.py` (`volatility_source` provenance stamp + three summary counters; penalty arithmetic byte-identical)
+- `tests/polymarket_predictive_engine/test_mispricing_alpha.py` (extend)
+- NEW `tests/polymarket_predictive_engine/test_volatility_penalty_wiring.py`
+
+Do NOT touch `features_v2.py`, `websocket_normaliser.py`, `strategy.py`,
+`readiness.py`, `risk.py`, `paper_cycle.py`, `cli.py`, `ledger_anchor.py`, any
+config file, any compose file, any scheduler script, or the governance docs
+(the orchestrator flips register status post-merge; the build PR is exactly
+these four files).
+
+**142.1 — `models/calibrated.py`, `predict_from_features`.** Insert exactly
+three entries into the `prediction` dict, between
+`"book_imbalance": row.get("book_imbalance", ""),` (line 157) and
+`"time_to_close_hours": ...` (line 158) — position matters because
+`utils.write_csv` derives fieldnames from first-seen key insertion order
+(`utils.py:128-134`):
+
+```python
+"rolling_volatility_1h": row.get("rolling_volatility_1h", ""),
+"rolling_volatility_6h": row.get("rolling_volatility_6h", ""),
+"rolling_volatility_24h": row.get("rolling_volatility_24h", ""),
+```
+
+Copy the value VERBATIM — no `safe_float`, no rounding, no default beyond the
+empty string. Nothing else in the function changes; `latest_feature_rows`
+(`calibrated.py:71-88`) already selects the newest row per market/token and
+must not be changed. `rolling_volatility_1h` is carried for audit only; the
+penalty continues to consult 6h-then-24h exactly as today.
+
+**142.2 — `mispricing_alpha.py`, provenance stamp.** Replace lines 488-490 with:
+
+```python
+volatility = safe_float(row.get("rolling_volatility_6h"))
+volatility_source = "rolling_volatility_6h" if volatility is not None else ""
+if volatility is None:
+    volatility = safe_float(row.get("rolling_volatility_24h"))
+    volatility_source = "rolling_volatility_24h" if volatility is not None else "missing"
+```
+
+Add `"volatility_source": volatility_source,` to the returned dict immediately
+after `"volatility_penalty": volatility_penalty,` (`:521`). Lines 492-516 must
+be byte-identical after the change — same weights, same `max(0.0, ...)`
+clamps, same summation order; prove it with the diff in the PR.
+
+**142.3 — `mispricing_alpha.py`, summary counters.** Insert after
+`"microstructure_filter_failures": ...` (`:1036-1038`) and before
+`"fundamental_probability_sources"`, exactly three keys:
+`rows_with_rolling_volatility` (count of final rows whose `volatility_source`
+is one of the two window names), `rows_missing_rolling_volatility` (count with
+`"missing"`), `volatility_penalty_sum` (float sum). Third-state invariant,
+stated because it is real: rows that exit early at `:629-632`
+(`skipped_missing_probability_or_price`) or `:812-815` never reach
+`_microstructure_penalty` and carry no stamp — they are counted in NEITHER
+counter, so the two counters sum to <= predictions. Do not "fix" that by
+defaulting the absent stamp to `missing`. Do not add
+`paper_trading_invoked`/`live_trading_invoked` to this pre-existing artifact.
+
+**Anchor safety.** All three touched artifacts are full-rewrite snapshots via
+the atomic writers; verify for yourself (do not trust this sentence) that
+`outputs/polymarket_predictions/*` appears in neither
+`ledger_anchor.DEFAULT_LEDGER_REGISTRY` nor the config `ledger_globs` before
+widening the header. If your grep disagrees, STOP and report — do not widen.
+
+**Fail-safe (state verbatim and contiguous in the `mispricing_alpha.py` module
+docstring).** "Volatility copy-through only: a missing, blank, or malformed
+`rolling_volatility_6h`/`rolling_volatility_24h` yields `volatility_penalty =
+0.0` and `volatility_source = \"missing\"`, which is unchanged from prior
+behaviour and never raises; nothing here marks a market measured, changes any
+M-A/M-B/M-C or `maker_min_*` threshold, changes `_measurement_eligible`, moves
+any gate, sizing rule, filter, or eligibility surface, and `edge_lower_bound`
+may only shrink or stay equal as a result of this change, never grow."
+
+**Direction disclosure (tighten-only, one exception named).** Every decision
+consumer moves tighter or stays equal as `total_penalty` grows:
+`alpha_trade_candidate` (`:917`, vs `risk.minimum_edge: 0.03`), the shadow
+lane (`:898`), `strategy.py:262-285` stake sizing,
+`probationary_positive_edge_override` (`strategy.py:419-425`),
+`promoted_shadow_override` (`:414-418`). The SINGLE widening: a shrinking
+`edge_lower_bound` can move a row out of
+`edge_lower_bound_above_near_miss_band` (`mispricing_alpha.py:927-930`), so
+the near-miss LEARNING population can grow. That band is observation-only —
+`require_alpha_trade_candidate: true` (config 698, `strategy.py:426-432`)
+keeps near-miss rows out of paper approval — but near-miss rows accumulate
+cohort evidence that `allow_near_miss_learning_cohort_proxy: true` (config
+1275) can later use for OTHER rows (`strategy.py:385-394`). Disclosed, watched
+by the day-after check, and this WO must not touch any `near_miss_learning` or
+`cohort_promotion` setting.
+
+**Cadence wiring: none.** No new artifact, no new entry point;
+`apply_mispricing_alpha` already runs inside `run_paper_cycle`
+(`paper_cycle.py:133`) every 30s on the deployed cadence, and the CLI paths
+flow through the same functions. Do not add a CLI command, scheduler line, or
+ledger enrolment.
+
+**Tests (offline, deterministic, exact hand-computed values; numeric
+assertions use `pytest.approx(expected, abs=1e-12)`; fixtures use distinct
+market_ids so `cross_penalty` is exactly 0.0; test config zeroes every other
+penalty weight and sets `volatility_penalty_weight: 0.15`).** New module
+`test_volatility_penalty_wiring.py`: (1) copy-through — prediction dict
+carries all three keys verbatim ("0.04"/"0.09"/""); MUST fail against unfixed
+source (KeyError); (2) unit 6h branch — `volatility_penalty == approx(0.006)`,
+source stamped `rolling_volatility_6h`; (3) unit 24h fallback — blank 6h,
+"0.10" 24h → `approx(0.015)`, source `rolling_volatility_24h`; (4) both
+blank/absent/malformed ("n/a", "-") → 0.0 and `"missing"`, no exception; a
+negative parseable value clamps to 0.0 via the existing `max(0.0, ...)` with
+source still stamped; (5) headline — two rows identical except
+`rolling_volatility_6h` ("" vs "0.04") through `apply_mispricing_alpha`:
+penalties 0.0 vs approx(0.006), `edge_lower_bound` difference exactly
+approx(0.006), strict inequality; (6) end-to-end from a three-row
+`websocket_market_features.csv` fixture (midpoints 0.50/0.54/0.52 at
+T-5h/T-2h/T) through `build_features_v2(source="websocket")` →
+`rolling_volatility_6h == approx(0.02)` hand-computed → scored row
+`volatility_penalty == approx(0.003)`; MUST fail against unfixed source; (7)
+single-snapshot asset → all three columns blank → 0.0/"missing", no exception
+(the honest blank case, input to WO-142b). Extended
+`test_mispricing_alpha.py`: (8) telemetry counters on a three-row fixture (one
+with volatility, one blank, one skipped-early) — counters 1/1 and the skipped
+row in neither; (9) no gate moved / monotone tightening — same fixture at
+weight 0.0 vs 0.15: trade-candidate set under 0.15 is a SUBSET of that under
+0.0, same for shadow candidates, `trade_candidates` count <=, and the config
+literals (`risk.minimum_edge == 0.03`, `edge_field_for_trading ==
+"edge_lower_bound"`, `require_alpha_trade_candidate is True`) untouched; (10)
+near-miss widening disclosed — a row that is a trade candidate at 0.0 falls
+into the near-miss band at 0.15 and appears in
+`near_miss_learning_candidates.csv`; this test makes the widening
+regression-visible and must not be "fixed" by suppressing the band; (11)
+header order — the three columns contiguous after `book_imbalance`,
+`volatility_source` contiguous after `volatility_penalty`; every pre-existing
+test in `test_mispricing_alpha.py`, `test_optimized_model.py`, and
+`test_predictive_power_expansion.py` passes UNMODIFIED.
+
+**Follow-on named, NOT built here — WO-142b.** A symmetric missing-volatility
+penalty (the residual asymmetry against `missing_liquidity_penalty`) is
+deliberately out of scope: its magnitude has no measured basis
+(`missing_liquidity_penalty: 0.01` at weight 0.15 would imply an assumed 6h
+midpoint std of 0.0667, which nothing in this repository supports). WO-142
+makes the blank population COUNTABLE (`rows_missing_rolling_volatility`);
+after one deployed day of that telemetry the owner decides WO-142b's
+magnitude. It stays prose here — no placeholder registration.
+
+**Day-after check.** Before the deploy that carries this change, the
+orchestrator records the pre-deploy `trade_candidates` and
+`near_miss_learning_candidates` values from the telemetry branch's
+`mispricing_alpha_live_summary.json` into this WO's status line. After one
+deployed paper cycle: `volatility_penalty` is non-zero on at least one row of
+`mispricing_alpha_scores.csv` with `volatility_source =
+"rolling_volatility_6h"`; the summary shows `rows_with_rolling_volatility >=
+1`, `volatility_penalty_sum > 0`, and `rows_missing_rolling_volatility`
+recorded; `trade_candidates` is <= the pre-deploy value. If `trade_candidates`
+rises, the tighten-only claim is falsified and the change is reverted, not
+tuned.

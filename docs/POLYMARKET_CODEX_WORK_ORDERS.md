@@ -6863,14 +6863,34 @@ makes the blank population COUNTABLE (`rows_missing_rolling_volatility`);
 after one deployed day of that telemetry the owner decides WO-142b's
 magnitude. It stays prose here — no placeholder registration.
 
-**Day-after check.** Before the deploy that carries this change, the
-orchestrator records the pre-deploy `trade_candidates` and
-`near_miss_learning_candidates` values from the telemetry branch's
-`mispricing_alpha_live_summary.json` into this WO's status line. After one
-deployed paper cycle: `volatility_penalty` is non-zero on at least one row of
-`mispricing_alpha_scores.csv` with `volatility_source =
-"rolling_volatility_6h"`; the summary shows `rows_with_rolling_volatility >=
-1`, `volatility_penalty_sum > 0`, and `rows_missing_rolling_volatility`
-recorded; `trade_candidates` is <= the pre-deploy value. If `trade_candidates`
-rises, the tighten-only claim is falsified and the change is reverted, not
-tuned.
+**Deployment caveat (added 2026-07-31, deployed-configuration citation rule).**
+Telemetry shows `mispricing_alpha_live_summary.json` frozen at
+2026-07-19T22:21:45Z while `forward_paper_cycle.json` stamps `status: "ran"`
+fresh every cycle. The only code path consistent with both is
+`apply_mispricing_alpha`'s silent early return on
+`settings.get("enabled") == False` (`mispricing_alpha.py:542-543`) — the
+deployed VPS host config has evidently carried `mispricing_alpha.enabled:
+false` since ~2026-07-19 (the tracked example config defaults `true`; no
+registered decision disables it). Consequences, recorded honestly: this WO's
+copy-through is correct and tighten-only regardless, but it is DORMANT in the
+deployed lane until the overlay is re-enabled — the owner decides whether and
+when. The build and its tests are unaffected (they run the overlay
+explicitly). Separately noted as a candidate hardening item, same fail-open
+class as the WO-129 depth-gate disable: a config-reachable off-switch on a
+scoring lane that leaves no artifact trace — a disabled overlay should stamp
+a visible `disabled` status artifact instead of skipping silently.
+
+**Day-after check (conditional on the overlay being enabled in the deployed
+config; if it is disabled, the check is deferred and this WO's deployment
+status recorded as `dormant_pending_overlay_enable`).** Before the deploy
+that carries this change, the orchestrator records the pre-deploy
+`trade_candidates` and `near_miss_learning_candidates` values from the
+telemetry branch's `mispricing_alpha_live_summary.json` into this WO's status
+line — using the most recent cycle in which the overlay actually ran. After
+one deployed paper cycle with the overlay enabled: `volatility_penalty` is
+non-zero on at least one row of `mispricing_alpha_scores.csv` with
+`volatility_source = "rolling_volatility_6h"`; the summary shows
+`rows_with_rolling_volatility >= 1`, `volatility_penalty_sum > 0`, and
+`rows_missing_rolling_volatility` recorded; `trade_candidates` is <= the
+pre-deploy value. If `trade_candidates` rises, the tighten-only claim is
+falsified and the change is reverted, not tuned.

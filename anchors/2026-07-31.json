@@ -1,0 +1,332 @@
+{
+  "anchor_date": "2026-07-31",
+  "anchored_at_utc": "2026-07-31T10:38:51Z",
+  "chain_head": "f5f61772f2e972c35e114531a737fcc82f83f97cea74d67769e4b23b1b2b121a",
+  "external_anchor_branch": "vps-anchor",
+  "ledger_manifest": [
+    {
+      "byte_length": 1182,
+      "mode": "snapshot",
+      "path": "execution/a1_sweep_advisory.json",
+      "prefix_sha256": "82bdb9d6891ed939434957f97c6ea993852610286e4082feacd417efe2931585",
+      "status": "present",
+      "verification_path": "performance/ledger_anchor_snapshots/2026-07-31/execution/a1_sweep_advisory.json"
+    },
+    {
+      "byte_length": 0,
+      "mode": "snapshot",
+      "path": "execution/credential_rotation_drill.json",
+      "prefix_sha256": "",
+      "status": "missing_at_anchor",
+      "verification_path": "execution/credential_rotation_drill.json"
+    },
+    {
+      "byte_length": 0,
+      "mode": "append_only",
+      "path": "execution/execution_ledger.csv",
+      "prefix_sha256": "",
+      "status": "missing_at_anchor",
+      "verification_path": "execution/execution_ledger.csv"
+    },
+    {
+      "byte_length": 4429,
+      "mode": "snapshot",
+      "path": "execution/executor_status.json",
+      "prefix_sha256": "3738bb6ba4213139c243e38b3b04a856081aa381865ee124afbd348bed8d4212",
+      "status": "present",
+      "verification_path": "performance/ledger_anchor_snapshots/2026-07-31/execution/executor_status.json"
+    },
+    {
+      "byte_length": 0,
+      "mode": "snapshot",
+      "path": "execution/replay_certification.json",
+      "prefix_sha256": "",
+      "status": "missing_at_anchor",
+      "verification_path": "execution/replay_certification.json"
+    },
+    {
+      "byte_length": 0,
+      "mode": "append_only",
+      "path": "execution/stage_operator_log.csv",
+      "prefix_sha256": "",
+      "status": "missing_at_anchor",
+      "verification_path": "execution/stage_operator_log.csv"
+    },
+    {
+      "byte_length": 0,
+      "mode": "append_only",
+      "path": "h2_dutch/h2_final_episodes_v1.csv",
+      "prefix_sha256": "",
+      "status": "missing_at_anchor",
+      "verification_path": "h2_dutch/h2_final_episodes_v1.csv"
+    },
+    {
+      "byte_length": 0,
+      "mode": "snapshot",
+      "path": "h2_dutch/h2_final_sample_manifest.json",
+      "prefix_sha256": "",
+      "status": "missing_at_anchor",
+      "verification_path": "h2_dutch/h2_final_sample_manifest.json"
+    },
+    {
+      "byte_length": 257435,
+      "mode": "append_only",
+      "path": "h2_dutch/h2_scan_observations_v1.csv",
+      "prefix_sha256": "c7e641beb0371c849d959c2ca7c18a33954f97132a63dd00ddb096434b9ee829",
+      "status": "present",
+      "verification_path": "h2_dutch/h2_scan_observations_v1.csv"
+    },
+    {
+      "byte_length": 81275,
+      "mode": "append_only",
+      "path": "h3_smart_flow/h3_final_fills.csv",
+      "prefix_sha256": "78101ec1a6a108e5ed8aceb910bcd1a696bce8d14a3bee4f5c7589248338024e",
+      "status": "present",
+      "verification_path": "h3_smart_flow/h3_final_fills.csv"
+    },
+    {
+      "byte_length": 4211,
+      "mode": "snapshot",
+      "path": "maker_carry/decision_policy.json",
+      "prefix_sha256": "68ad14ae24dee28c3725f687c18486a9a4bd1fc0338abb1f8b2e9f1ef392ef1f",
+      "status": "present",
+      "verification_path": "performance/ledger_anchor_snapshots/2026-07-31/maker_carry/decision_policy.json"
+    },
+    {
+      "byte_length": 0,
+      "mode": "snapshot",
+      "path": "maker_carry/h1_funding_qualification.json",
+      "prefix_sha256": "",
+      "status": "missing_at_anchor",
+      "verification_path": "maker_carry/h1_funding_qualification.json"
+    },
+    {
+      "byte_length": 15961,
+      "mode": "snapshot",
+      "path": "maker_carry/maker_carry_history.csv",
+      "prefix_sha256": "ef3f42e9769afae5cf86cbe23cf699d19d2c5f91f18d426ef6491c13e5feddd0",
+      "status": "present",
+      "verification_path": "performance/ledger_anchor_snapshots/2026-07-31/maker_carry/maker_carry_history.csv"
+    },
+    {
+      "byte_length": 3083,
+      "mode": "append_only",
+      "path": "maker_carry/maker_carry_portfolio_members.csv",
+      "prefix_sha256": "e2c0b480076b620fa984bb139fa43eda92d9e08d80a65cc130e960f608cfc5b9",
+      "status": "present",
+      "verification_path": "maker_carry/maker_carry_portfolio_members.csv"
+    },
+    {
+      "byte_length": 140482,
+      "mode": "append_only",
+      "path": "maker_carry/maker_live_test_attribution_history.csv",
+      "prefix_sha256": "26e4b5fb892efb72445a7009d0634ea2ed685ea4a798f21359894120ce78715e",
+      "status": "present",
+      "verification_path": "maker_carry/maker_live_test_attribution_history.csv"
+    },
+    {
+      "byte_length": 109380,
+      "mode": "append_only",
+      "path": "maker_carry/maker_live_test_history.csv",
+      "prefix_sha256": "065b90ec62dc4a9a3b0752455f398a6613e900481a4f82dd2ed1d67062f53cc2",
+      "status": "present",
+      "verification_path": "maker_carry/maker_live_test_history.csv"
+    },
+    {
+      "byte_length": 188615,
+      "mode": "append_only",
+      "path": "maker_carry/maker_live_test_wallet_history.csv",
+      "prefix_sha256": "49214bc7f611f5fdeb8b1e6bd27f9d5aa0b08eefa421e27433f63e95a23d4a1c",
+      "status": "present",
+      "verification_path": "maker_carry/maker_live_test_wallet_history.csv"
+    },
+    {
+      "byte_length": 578,
+      "mode": "snapshot",
+      "path": "maker_carry/requote_alerts.json",
+      "prefix_sha256": "a93b70472031a7874cbb78db0d5f78fa6096d9275ec4ddf13b7483fdfeb00655",
+      "status": "present",
+      "verification_path": "performance/ledger_anchor_snapshots/2026-07-31/maker_carry/requote_alerts.json"
+    },
+    {
+      "byte_length": 347795,
+      "mode": "append_only",
+      "path": "maker_carry/reward_epoch_samples.csv",
+      "prefix_sha256": "ac855cbc0c113dc4e4a8cf852bbe051b11b2f1a96571160db63a9080380ba610",
+      "status": "present",
+      "verification_path": "maker_carry/reward_epoch_samples.csv"
+    },
+    {
+      "byte_length": 4665,
+      "mode": "snapshot",
+      "path": "maker_carry/sharp_linking_qualification.json",
+      "prefix_sha256": "38969e6b0b628cf5cbc1c317b05dc0ef281e40128be0f72d2ce6d2df5cfbb5c4",
+      "status": "present",
+      "verification_path": "performance/ledger_anchor_snapshots/2026-07-31/maker_carry/sharp_linking_qualification.json"
+    },
+    {
+      "byte_length": 511,
+      "mode": "append_only",
+      "path": "performance/background_timeout_incidents.csv",
+      "prefix_sha256": "4b150e90790284d23d3d4744b6bee54c74b96e2bc8e11040a9a836fe2a6fa264",
+      "status": "present",
+      "verification_path": "performance/background_timeout_incidents.csv"
+    },
+    {
+      "byte_length": 0,
+      "mode": "append_only",
+      "path": "performance/cost_ledger.csv",
+      "prefix_sha256": "",
+      "status": "missing_at_anchor",
+      "verification_path": "performance/cost_ledger.csv"
+    },
+    {
+      "byte_length": 1129,
+      "mode": "snapshot",
+      "path": "performance/cost_ledger_summary.json",
+      "prefix_sha256": "4b262b211be7b2e7fc4be9feddb9f68f9c7bf1b48808ca9d00da686b4a85ac68",
+      "status": "present",
+      "verification_path": "performance/ledger_anchor_snapshots/2026-07-31/performance/cost_ledger_summary.json"
+    },
+    {
+      "byte_length": 199463,
+      "mode": "append_only",
+      "path": "performance/degraded_state_incidents.csv",
+      "prefix_sha256": "a80b53d8d59e751bfbcf91fa17c99b997c076fcf14fcd65a2cd9883071c8ae86",
+      "status": "present",
+      "verification_path": "performance/degraded_state_incidents.csv"
+    },
+    {
+      "byte_length": 10309,
+      "mode": "snapshot",
+      "path": "performance/investment_policy_statement.md",
+      "prefix_sha256": "28a99fee336eb9f463ecc32c5ca1e1e293b04f87b26c764be2581046b1b520d6",
+      "status": "present",
+      "verification_path": "performance/ledger_anchor_snapshots/2026-07-31/performance/investment_policy_statement.md"
+    },
+    {
+      "byte_length": 19634,
+      "mode": "snapshot",
+      "path": "performance/investment_policy_statement_summary.json",
+      "prefix_sha256": "e756a73c26b10d6df33b01811673f3842c6269758cebe13fab92c7cb7f41f521",
+      "status": "present",
+      "verification_path": "performance/ledger_anchor_snapshots/2026-07-31/performance/investment_policy_statement_summary.json"
+    },
+    {
+      "byte_length": 433,
+      "mode": "snapshot",
+      "path": "performance/wallet_contract_registry.json",
+      "prefix_sha256": "290baeab5afcbc48a6bd76b714c25e5af3cd8f92d4b069b51adfb7a7d1dd42cc",
+      "status": "present",
+      "verification_path": "performance/ledger_anchor_snapshots/2026-07-31/performance/wallet_contract_registry.json"
+    },
+    {
+      "byte_length": 584,
+      "mode": "append_only",
+      "path": "performance/wallet_gas_observations.csv",
+      "prefix_sha256": "8af38b2e25c5db15516699ef19bb09655e6a5b83e14dedc788f77a32d0249055",
+      "status": "present",
+      "verification_path": "performance/wallet_gas_observations.csv"
+    },
+    {
+      "byte_length": 10132,
+      "mode": "snapshot",
+      "path": "performance/wallet_reconciliation.json",
+      "prefix_sha256": "abe1783d4936d01a3782e0967c707c52c5e69148ba81a06150e0dc4b23ef7641",
+      "status": "present",
+      "verification_path": "performance/ledger_anchor_snapshots/2026-07-31/performance/wallet_reconciliation.json"
+    },
+    {
+      "byte_length": 12204,
+      "mode": "append_only",
+      "path": "performance/wallet_reconciliation_history.csv",
+      "prefix_sha256": "37388c7625274734c5223c09a910d2ead6fbc417f9b11c963260e547346e498c",
+      "status": "present",
+      "verification_path": "performance/wallet_reconciliation_history.csv"
+    },
+    {
+      "byte_length": 12783,
+      "mode": "append_only",
+      "path": "performance/wallet_reconciliation_wallet_history.csv",
+      "prefix_sha256": "347006e388f1ab88dde8c9b8a6a2f1c61fdc406a9185b559125b4d6e37e86983",
+      "status": "present",
+      "verification_path": "performance/wallet_reconciliation_wallet_history.csv"
+    },
+    {
+      "byte_length": 15086,
+      "mode": "append_only",
+      "path": "polymarket_portfolio/cash_ledger.csv",
+      "prefix_sha256": "57ad78adfaf60dad4bb57a037c926cdc07c0709f456ef4739dc7b940dbbd2647",
+      "status": "present",
+      "verification_path": "polymarket_portfolio/cash_ledger.csv"
+    },
+    {
+      "byte_length": 15748,
+      "mode": "append_only",
+      "path": "polymarket_portfolio/paper_fills.csv",
+      "prefix_sha256": "5ae9371c16d6ace18dd1039b457532eac6320d0437583087f805d327d535eeb0",
+      "status": "present",
+      "verification_path": "polymarket_portfolio/paper_fills.csv"
+    },
+    {
+      "byte_length": 16381,
+      "mode": "snapshot",
+      "path": "polymarket_portfolio/paper_fills_v2.csv",
+      "prefix_sha256": "b180310000664a223fc6be74a451d2adcc4d60b6e7c573bc3a89f1438f0cba13",
+      "status": "present",
+      "verification_path": "performance/ledger_anchor_snapshots/2026-07-31/polymarket_portfolio/paper_fills_v2.csv"
+    },
+    {
+      "byte_length": 33553556,
+      "mode": "append_only",
+      "path": "polymarket_portfolio/portfolio_snapshots.csv",
+      "prefix_sha256": "8405e873787bac7d61d329b85fc0a346ff2aaed516d69a88fc4896c6279909fe",
+      "status": "present",
+      "verification_path": "polymarket_portfolio/portfolio_snapshots.csv"
+    },
+    {
+      "byte_length": 3235,
+      "mode": "append_only",
+      "path": "polymarket_portfolio/settlements.csv",
+      "prefix_sha256": "1c3bb988894f4ca79a35c2ffb22c3c518878adeba44a0c892a414288e772f09e",
+      "status": "present",
+      "verification_path": "polymarket_portfolio/settlements.csv"
+    },
+    {
+      "byte_length": 200061,
+      "mode": "append_only",
+      "path": "polymarket_shadow/shadow_fills.csv",
+      "prefix_sha256": "dd3718a889a4a5460be01b606709646e66bff0c055859087945f643db5a4d637",
+      "status": "present",
+      "verification_path": "polymarket_shadow/shadow_fills.csv"
+    },
+    {
+      "byte_length": 1000939,
+      "mode": "snapshot",
+      "path": "polymarket_shadow/shadow_positions.csv",
+      "prefix_sha256": "0239251ec756882b287d015481653b4c5cf863f761ab07264a13f254d1552810",
+      "status": "present",
+      "verification_path": "performance/ledger_anchor_snapshots/2026-07-31/polymarket_shadow/shadow_positions.csv"
+    },
+    {
+      "byte_length": 591243940,
+      "mode": "append_only",
+      "path": "polymarket_training/historical_bid_ask_v1.csv",
+      "prefix_sha256": "8415fe47d6f7a34f428931ef6edd8712f24c523c296e07148b46af11be6f1437",
+      "status": "present",
+      "verification_path": "polymarket_training/historical_bid_ask_v1.csv"
+    },
+    {
+      "byte_length": 22171428,
+      "mode": "append_only",
+      "path": "polymarket_training/resolution_corpus_v1.csv",
+      "prefix_sha256": "7af5568fb11e09643135fcb8125a3f46739053663a5373e166250b5df816ae18",
+      "status": "present",
+      "verification_path": "polymarket_training/resolution_corpus_v1.csv"
+    }
+  ],
+  "live_trading_invoked": false,
+  "manifest_sha256": "558699af3afa2ae54dd42d52e528491475eaa12fa41e84d7d6a2ca465ad75510",
+  "paper_trading_invoked": false,
+  "previous_chain_head": "2bacc8a0d0e929c3869e9084710d292e45d7788583f9c990aac50a2d370db9fc"
+}

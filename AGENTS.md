@@ -182,6 +182,24 @@ work or capital.
   `docs/POLYMARKET_CODEX_WORK_ORDERS.md`.
 - Never use destructive Git commands to deal with runtime data.
 
+### Amendment, 2026-08-01 — unresolved review threads block merge
+
+Binding merge precondition, in addition to every rule above: a pull request
+with an unresolved inline review thread must not be merged. A thread may be
+marked resolved only when the concern it raises is fixed on the current
+`main` or is demonstrably superseded; "no longer reachable in the diff" is
+not, by itself, a valid reason to resolve one. When a thread's resolved or
+unresolved status cannot be established, it counts as UNRESOLVED and blocks merge.
+
+This does not replace the required PR gate above: a green gate proves the
+tests passed, not that review was answered, and this repository's history has
+already produced merged, green PRs carrying unresolved review threads. Both
+must hold before a merge.
+
+Reason for the amendment: registered in WO-132 (`docs/POLYMARKET_CODEX_WORK_ORDERS.md`)
+after review found dozens of unresolved inline threads sitting on already-merged
+PRs, every one of which had passed the required gate.
+
 ## Stable references
 
 | Topic | File |

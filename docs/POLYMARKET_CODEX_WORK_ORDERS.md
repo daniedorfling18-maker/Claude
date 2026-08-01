@@ -6657,6 +6657,31 @@ unions the fetched points with the token's prior rows, deduplicated on
 (`token_id`, `timestamp`) with the fetched row winning ties, so prior
 coverage outside the fallback window survives.
 
+**Amendment (2026-08-01, after the Opus line-audit of the first build).**
+Conformance findings registered into the fix round: (F1) failure
+classification must key on an explicit final-attempt-raised boolean, never on
+exception-message truthiness — `ConnectionError()`, `Timeout()`, and kin
+stringify to empty, and the audit measured them misclassified as
+`empty_history`, moving tokens from `error_count` into `empty_history_count`
+on the exact fields the day-after check reads; pin with a test using an
+exception whose `str()` is empty. (F2) `fetch_source` on `fetch_error` rows
+stays `""` exactly as on main — the delivered `all_attempts_empty` value on
+failed rows is an unregistered honesty-surface change and is reverted.
+(F3) the fallback-union branch's carried-forward rows become visible via two
+NEW summary fields, `fallback_union_token_count` and
+`fallback_union_carried_row_count` (distinct from `preserved_*`, which keep
+their strict preserve-branch meaning so a healthy run still reads
+`preserved_token_count: 0`); the delivered test asserting zero for the union
+case is corrected. (F4) registered tests (1) and (5) assert REAL byte
+identity of the corpus file against the pre-fix output, not a three-field
+projection. (F6) `attempt_errors` is a measurement everywhere — the
+defensive per-token except path must record the actual count, not a
+hardcoded 1, with a test. (F5) add the test pinning
+reordered-but-complete header → untrusted. Findings F7/F8/F9 (whitespace
+header edge, out-of-scope invalid-row counting, unstripped index key) are
+recorded as fail-closed diagnostics-only observations, not required in this
+round.
+
 **Day-after check:** on the next scheduled harvest,
 `historical_price_history_summary.json` shows `preserved_token_count: 0` on a
 healthy run; if upstream degrades again, the corpus row count for

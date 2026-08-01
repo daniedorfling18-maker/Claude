@@ -19,16 +19,35 @@ definition. It did not: PR #417 was acquitted using *merged to `main`*, while
 dispatches against `f64416e` (PR #418, unmerged) relied on *present in my
 branch*.
 
-**Rule: the LATEST registering-or-amending commit for that WO must be an
-ancestor of the build branch, and the tested SHA is recorded.**
+**Rule: the `origin/main` tip at dispatch must be an ancestor of the build
+branch, and BOTH SHAs are recorded.**
 
 ```
-git merge-base --is-ancestor <latest-registering-or-amending-commit> <build-branch>
+git fetch origin main
+git merge-base --is-ancestor <origin/main tip at dispatch> <build-branch-head>
 ```
 
-The WO status line records `registered-ancestry: <sha> PASS`. **Recording the
-SHA is part of the rule, not decoration** — a check whose subject is not written
-down is unauditable, which is what sank the first version.
+The WO status line records
+`registered-ancestry: <origin/main-sha> ancestor-of <build-branch-sha> PASS`.
+
+**Why `origin/main` tip rather than "the registering commit".** A previous
+version said "the LATEST registering-or-amending commit". Nothing determines
+"latest" mechanically — there is no way to enumerate a WO's registering commits
+(`git log -L` on a section range breaks the moment a section moves, and sections
+do move), so "latest" is human judgement. An honest dispatcher who believes the
+wrong amendment is newest produces a green, recorded, audit-shaped token that is
+wrong. The `origin/main` tip needs no judgement, strictly contains every
+amendment to every WO, and is what rebase-before-dispatch produces anyway.
+
+**Why BOTH SHAs.** The rule is evaluated by whoever runs it, whenever they run
+it, so a stale dispatch followed by a rebase launders clean. Verified:
+`git merge-base --is-ancestor 51ffb42 2a7c305` **passes** — `2a7c305` is
+`claude/wo143-scheduled-cycle` after its rebase onto `51ffb42` at 10:14:16Z —
+while the same test against its actual dispatch head `91c35cd` fails. Recording
+only the registering SHA proves the check ran against *something*, not against
+the branch state that was dispatched. **The build-branch SHA at dispatch is the
+half that makes the record honest**, and a later rebase does not retroactively
+make the earlier dispatch compliant.
 
 **"Latest", not "the".** A first attempt at this rule said "the registering
 commit", singular. Every WO gets amended, so that is defeated by citing the
@@ -7887,8 +7906,8 @@ WHOLE-FUNCTION pass**, not a budgeted settlement pass. Implement all three:
 - **a progress-derived heartbeat** (specified below) so a live holder is never
   judged stale — the only mechanism that survives a genuinely unbounded single
   read, and therefore the primary one;
-- an explicit `stale_after_seconds` sized above budget + one-position worst
-  case + the post-settlement remainder.
+- an explicit `shadow_cohort_stale_after_seconds` per the named constants and
+  registered ordering above.
 
 Budget and stale window are registered together so the relationship is
 auditable; neither is derived from the other at runtime.
@@ -7901,12 +7920,42 @@ the unbounded `urlopen` read this item establishes as possible — would be
 heartbeaten by a timer thread forever and the lane would stop silently, which is
 the failure WO-143 exists to prevent. All four are registered:
 
-1. **Progress-derived, never timer-derived.** Beat only when the worker's
-   monotonically increasing progress counter advanced since the previous beat.
-   A hung worker stops being heartbeaten and becomes reclaimable on schedule.
-2. **Absolute heartbeat lifetime cap.** Past `budget + remainder + margin` the
-   heartbeat stops unconditionally and normal stale reclaim resumes, bounding
-   the wedge even if (1) is implemented imperfectly.
+**Named constants (A1 — corrected 2026-08-01; the first version named none and
+would have been REJECTED by the S8 checklist this same change registers).** All
+four are literals with stated bases, all tighten-only:
+
+- `settlement_budget_seconds: 900` (15 min). Basis: measured worst case for 25
+  positions at up to 3 calls x 20s is 1500s, so 900s guarantees the pass
+  abandons well before the stale window.
+- `remainder_budget_seconds: 300` (5 min) for the post-settlement phase.
+  Basis: a 17 MB rewrite plus appends on a loaded 2-core VPS, with headroom.
+- `heartbeat_margin_seconds: 120`.
+- `shadow_cohort_stale_after_seconds: 2400` (40 min). Basis: strictly greater
+  than `900 + 300 + 120 = 1320`, and strictly greater than the heartbeat cap so
+  the cap can never sit below the stale window.
+
+**Registered ordering, validated in full by test (10):**
+`settlement_budget + remainder_budget + margin  <  heartbeat_cap  <  shadow_cohort_stale_after_seconds`.
+
+1. **Progress-derived, never timer-derived, and defined across ALL phases.**
+   Beat only when a monotonically increasing progress counter advanced since the
+   previous beat. **The counter is NOT the settlement position counter**
+   (`shadow_cohort.py:543`) — that stops advancing permanently once
+   `_settle_due_positions` returns at `:890`, which would silence the heartbeat
+   for exactly the remainder phase that performs the ledger writes, and a
+   reclaim there is the lost-update corruption F1 exists to prevent. The counter
+   advances at every phase boundary and every ledger-write step.
+2. **Heartbeat lifetime cap, CONDITIONAL.** Past
+   `settlement_budget + remainder_budget + margin` the heartbeat stops and normal
+   stale reclaim resumes — **except while inside the ledger-write critical
+   section, which it never abandons.** An unconditional cap fires mid-`write_csv`
+   if `remainder_budget` was estimated low, causing the corruption being
+   prevented.
+2b. **The ledger-write section is a declared critical section.** From the first
+   write of `shadow_positions.csv` through the `shadow_fills.csv` append and
+   `_write_shadow_pnl_history`, the heartbeat continues unconditionally. A
+   section that exceeds its budget is RECORDED as an overrun for the owner to
+   see; it is never resolved by letting the lock go.
 3. **Do NOT re-stamp `acquired_at_utc`.** It is read by `_lock_age_seconds`
    (`runtime_lock.py:44-49`) and validated by `_valid_lock_payload` (`:52-63`);
    re-stamping makes the field's name false for every other reader. Add a
@@ -7930,9 +7979,11 @@ does NOT acquire; **(9b) its mirror — a HUNG worker whose progress counter sto
 advancing ceases to be heartbeaten and becomes reclaimable on schedule; this is
 the test that distinguishes the design from a permanent wedge; (9c) the
 heartbeat write never unlinks the lock file (assert no window in which the path
-is absent);** (10) a configuration in which
-`stale_after_seconds` <= budget + remainder allowance is rejected at load
-rather than silently inverted; (11) a settlement pass shorter than the budget
+is absent);** (10) a load-time validator rejects any
+configuration violating the FULL registered ordering — all three relations, not
+only the outer one — rather than silently inverting; **(10b) the heartbeat
+continues through the ledger-write critical section even after the cap would
+otherwise have fired;** (11) a settlement pass shorter than the budget
 is byte-identical to today.
 
 Citation correction: config line 1311 is `settlement_request_timeout_seconds:
@@ -8148,7 +8199,9 @@ Owner merge.**
   deploy-polymarket-vps-paper`, `cancel-in-progress: false`. A separate group
   would let Path A and Path B deploy simultaneously — a duplicate writer.
 - **`permissions:` least privilege**, matching Path A's `actions: read,
-  contents: read` unless the verifier requires more.
+  contents: read`. (The "unless the verifier requires more" clause was struck
+  2026-08-01: option (b) means the verifier never runs on the runner, so it was
+  dead text widening a security control.)
 - **Name the credential correctly.** Not a GitHub "deploy key" (a repo SSH key)
   — this needs a **VPS user's SSH private key**, a much larger surface. Bound it
   with a forced-command / `restrict` entry in the VPS `authorized_keys` so the
@@ -8177,10 +8230,17 @@ becomes never-required and the un-attested Path B becomes the permanent route �
 a change to the binding condition of the strongest deploy gate, in the
 loosening direction.
 
-**Sunset, registered with it.** The amendment LAPSES when a second eligible
-collaborator exists or option (a) below is adopted, whichever is first. The
-Path-B usage counter in the day-after check is the review trigger: a rising
-count with no sunset in sight is the signal to revisit, not to normalise.
+**Sunset, registered with it, and MECHANICALLY triggered.** The amendment
+LAPSES when a second eligible collaborator exists or option (a) below is
+adopted, whichever is first. "Lapses when a collaborator exists" is aspirational
+unless something detects it, and the Path-B usage counter measures the wrong
+thing — usage rises whether or not a reviewer was added. So:
+`merge_independently_reviewed_pr.py:340-347` already computes reviewer
+eligibility; **register that the deploy workflow runs that same query and emits
+a warning whenever an eligible independent reviewer exists**, which is the lapse
+signal. The Path-B usage counter remains a secondary review trigger. Without the
+mechanical trigger the loosening is permanent in practice — exactly what the
+corrected fail-safe sentence warns against.
 
 **Touch ONLY these files** (`git diff --stat` must show exactly these six).
 The register is deliberately EXCLUDED — a build PR does not edit its own WO
@@ -8204,7 +8264,10 @@ honesty field; that phrasing is superseded by `trigger_mechanism`.
 **The `AGENTS.md` amendment text is registered here, not delegated.** `AGENTS.md`
 is exactly the surface that governance protects, and
 `tests/test_vps_only_operating_docs.py:65-77` pins the sentences being changed,
-so a build agent must not draft it. The amendment states, dated: Path A remains
+so a build agent must not draft it. **The existing Path A/Path B sentences are QUALIFIED, never deleted** — a
+builder must not rewrite `AGENTS.md:85-90`, which would break six assertions
+pinned at `tests/test_vps_only_operating_docs.py:65-77`; this amendment is
+additive and dated. It states: Path A remains
 required whenever an eligible independent reviewer exists; where the independent
 review requirement cannot be satisfied because no eligible reviewer exists — a
 POLICY limit, not a capability limit — Path B is permitted, records
@@ -8243,11 +8306,29 @@ surfaced so Path-B reliance is **measured rather than invisible** — making the
 un-attested route the ergonomic one is a de facto loosening of the deploy
 control even though no threshold moves, and it must be visible.
 
+## S8 admission records (2026-08-01)
+
+S8 was registered in the same change as WO-143's §143.7, WO-143b's §143b.1 and
+WO-145, so all three were authored before the checklist existed. Running S8
+against them retroactively, and recording the result rather than assuming it:
+
+| WO | A1 | A2 | A3 | A4 | A5 | A6 | A7 | A8 | A9 | A10 | result |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| WO-143 §143.7 | PASS (1800 with basis, two alternatives rejected) | PASS (non-finite → `blocked_inputs`) | n/a | PASS | PASS (§143.1 exception recorded) | PASS | PASS (ten→eleven) | n/a | n/a | PASS | **ADMITTED** |
+| WO-143b §143b.1 | **FAILED, now FIXED** — F1 named `budget`/`remainder`/`margin`/`stale_after_seconds` with no literals; the four are now named with bases and a registered ordering | PASS | PASS (roots widened to `src/`+`scripts/` off `__file__`) | PASS (Scope reconciled) | PASS | PASS (F4 antecedent) | PASS (fourteen) | PASS (F1 fan-out shown) | n/a | PASS | **ADMITTED after fix** |
+| WO-145 | PASS | n/a | n/a | n/a | PASS | n/a | PASS (six→seven) | n/a | PASS (both deploy paths enumerated) | PASS | **ADMITTED** |
+
+The A1 failure on F1 is the checklist working on its first use, against text
+written by the same agent that registered the checklist. It was found by the
+independent reviewer, not by the author — which is the structural rule in Part 0
+doing its job.
+
 ## Calibration log
 
 One row per WO, appended at close, per `docs/ENGINEERING_STANDARDS.md` S8 and
 `.claude/skills/wo-lifecycle/SKILL.md` Part 4. A WO is not `done` without its
-row. Seeded 2026-08-01 with the cycle that produced the standard.
+row — **applying to work orders closed after 2026-08-01 only.** WOs closed
+before that date predate this log and are not retroactively reopened. Seeded 2026-08-01 with the cycle that produced the standard.
 
 | WO | class | tiers used | subagent tokens | spec-review defects | build-review defects | escaped to deploy | day-after |
 |---|---|---|---|---|---|---|---|

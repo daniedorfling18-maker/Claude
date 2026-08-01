@@ -35,7 +35,7 @@ and this file is the text that must change.
 |---|---|---|
 | Operating procedure | `.claude/skills/wo-lifecycle/SKILL.md` (this file) | how the lifecycle is run |
 | Admission checklist | `docs/ENGINEERING_STANDARDS.md` S8 | **canonical**; binds every WO and every review |
-| Binding clause | `AGENTS.md`, "Work-order and Git discipline" | makes both bind every agent in this repo |
+| Binding clause | `AGENTS.md`, "Work-order and Git discipline" | binds S8 and the GLOBAL RULE. **This file is the non-binding companion** — agent-configuration space is not register-reviewed and carries no frozen-surface protection |
 | Definition of "registered" | `docs/POLYMARKET_CODEX_WORK_ORDERS.md`, GLOBAL RULE | the ancestry test; not restated here |
 
 A1-A10 appear in this file for operating convenience. **S8 is the canonical

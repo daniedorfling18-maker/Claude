@@ -203,9 +203,14 @@ PRs, every one of which had passed the required gate.
 ### Amendment, 2026-08-01 — the work-order lifecycle standard
 
 Binding on every agent that authors, registers, reviews, dispatches, builds, or
-closes a work order: the lifecycle standard in
-`.claude/skills/wo-lifecycle/SKILL.md` and the admission checklist S8 in
-`docs/ENGINEERING_STANDARDS.md`. Three rules bind at all times. A draft work
+closes a work order: the admission checklist **S8** in
+`docs/ENGINEERING_STANDARDS.md` and the **GLOBAL RULE** at the top of
+`docs/POLYMARKET_CODEX_WORK_ORDERS.md`. `.claude/skills/wo-lifecycle/SKILL.md`
+is the non-binding operating companion to those two — deliberately not itself a
+binding surface, because agent-configuration space is not register-reviewed and
+carries no frozen-surface protection, and because it is not mounted into the
+containers. Where the companion and S8 differ, S8 governs. Three rules bind at
+all times. A draft work
 order is not registerable until every S8 rule passes. A build is not
 dispatchable until the latest registering-or-amending commit is an ancestor of
 the build branch — the GLOBAL RULE at the top of

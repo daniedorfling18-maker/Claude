@@ -212,10 +212,13 @@ carries no frozen-surface protection, and because it is not mounted into the
 containers. Where the companion and S8 differ, S8 governs. Three rules bind at
 all times. A draft work
 order is not registerable until every S8 rule passes. A build is not
-dispatchable until the latest registering-or-amending commit is an ancestor of
-the build branch — the GLOBAL RULE at the top of
+dispatchable until the `origin/main` tip at dispatch is an ancestor of the build
+branch — the GLOBAL RULE at the top of
 `docs/POLYMARKET_CODEX_WORK_ORDERS.md`, whose test is run at dispatch and whose
-tested SHA is recorded in the work order's status line. And no agent both
+BOTH SHAs (the `origin/main` tip and the build-branch head) are appended to the
+work order's status line, one token per dispatch. The dispatch prompt cites the
+work order by section and does not restate its content, so the register remains
+the sole source of what was registered. And no agent both
 produces and approves the same artifact: the orchestrator never reviews its own
 adjudication and never merges an owner-routed pull request.
 

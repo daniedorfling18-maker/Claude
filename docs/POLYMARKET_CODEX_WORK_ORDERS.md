@@ -28,7 +28,18 @@ git merge-base --is-ancestor <origin/main tip at dispatch> <build-branch-head>
 ```
 
 The WO status line records
-`registered-ancestry: <origin/main-sha> ancestor-of <build-branch-sha> PASS`.
+`registered-ancestry: <origin/main-sha> ancestor-of <build-branch-sha> PASS`,
+**appended once per dispatch** — a WO sees several fix-round dispatches, so the
+record is a list, not a single value.
+
+**Two residuals this rule cannot close, recorded so they are not mistaken for
+covered.** (i) It verifies the branch contains `main`; it does not verify the
+BUILDER READ the WO. `91c35cd`'s commit message described §143.6 as "amended:
+now unconditional" while its own tree carried the conditional text — the agent
+learned it from the dispatch prompt, not the register. Mitigation, registered:
+**the dispatch prompt cites the WO by section and does not restate its
+content.** (ii) It cannot detect a builder that read stale text it had already
+cached.
 
 **Why `origin/main` tip rather than "the registering commit".** A previous
 version said "the LATEST registering-or-amending commit". Nothing determines
@@ -7231,8 +7242,9 @@ no change to `features_v2.py`, `mispricing_alpha.py`, `strategy.py`,
 `readiness.py`, `risk.py`, `shadow_cohort.py`, `paper_broker.py`,
 `runtime_lock.py`, or `docker-compose.vps-paper.yml`.
 
-**Touch ONLY these files** (`git diff --stat` must show exactly these ten —
-count corrected 2026-08-01; §143.6 added the ninth and tenth):
+**Touch ONLY these files** (`git diff --stat` must show exactly these eleven —
+count corrected 2026-08-01; §143.6 added the ninth and tenth, §143.7(b) the
+eleventh):
 - NEW `src/polymarket_predictive_engine/scheduled_paper_cycle.py`
 - `src/polymarket_predictive_engine/paper_cycle.py` (one keyword-only `scope` parameter; `scope="full"` behaviour byte-identical **except for the two invocation flags — amended by §143.7(a)**)
 - `src/polymarket_predictive_engine/cli.py` (one command, one import, one dispatch branch)
@@ -7243,6 +7255,8 @@ count corrected 2026-08-01; §143.6 added the ninth and tenth):
 - `tests/test_polymarket_vps_docker.py` (extend)
 - `scripts/run_polymarket_local_live_loop.py` (§143.6 lock-clearer tightening)
 - `tests/polymarket_predictive_engine/test_local_live_loop.py` (§143.6 tests)
+- `polymarket_predictive_config.example.yaml` (repository ROOT) — §143.7(b)'s
+  `scheduled_paper_cycle.max_websocket_observation_age_seconds: 1800`
 
 Do NOT touch `docker-compose.vps-paper.yml` (the scheduler service already
 loads `env_file: .env`, so `OPS_PAPER_CYCLE_*` overrides reach the container;
@@ -7930,12 +7944,34 @@ four are literals with stated bases, all tighten-only:
 - `remainder_budget_seconds: 300` (5 min) for the post-settlement phase.
   Basis: a 17 MB rewrite plus appends on a loaded 2-core VPS, with headroom.
 - `heartbeat_margin_seconds: 120`.
+- `heartbeat_cap_seconds: 1800` (30 min). Basis: strictly greater than
+  `900 + 300 + 120 = 1320` (the sum of the phase budgets, so a legitimately slow
+  pass is never cut off) and strictly less than the 2400s stale window (so the
+  beat always stops before the lock could be reclaimed under it).
+  **Added 2026-08-01 after review: the previous text used `heartbeat_cap` in the
+  ordering while requirement 2 separately DEFINED it as `budget + remainder +
+  margin`, i.e. exactly 1320 — which made the registered ordering
+  `1320 < heartbeat_cap` unsatisfiable and would have failed test (10) against
+  the registered values themselves. It was also a fifth constant with no literal
+  and no basis, so F1 still failed A1 after the fix that was supposed to close
+  A1.**
+- `critical_section_max_seconds: 120`. Basis: with the temp-file requirement
+  below, the critical section is `os.replace` calls only — milliseconds — so
+  120s is pure headroom for a stalled filesystem, and a bounded wedge beats an
+  unbounded one.
 - `shadow_cohort_stale_after_seconds: 2400` (40 min). Basis: strictly greater
-  than `900 + 300 + 120 = 1320`, and strictly greater than the heartbeat cap so
-  the cap can never sit below the stale window.
+  than `heartbeat_cap_seconds` so the cap can never sit at or above the stale
+  window.
 
 **Registered ordering, validated in full by test (10):**
-`settlement_budget + remainder_budget + margin  <  heartbeat_cap  <  shadow_cohort_stale_after_seconds`.
+`settlement_budget_seconds + remainder_budget_seconds + heartbeat_margin_seconds  <  heartbeat_cap_seconds  <  shadow_cohort_stale_after_seconds`
+— i.e. `1320 < 1800 < 2400`.
+
+**Naming note:** `settlement_budget_seconds` ABANDONS remaining work when
+exceeded; `remainder_budget_seconds` is advisory and only sizes the constants
+above. Two constants named "budget" with opposite enforcement is a trap, so the
+advisory one is documented as `remainder_budget_seconds (sizing only, never
+enforced at runtime)`.
 
 1. **Progress-derived, never timer-derived, and defined across ALL phases.**
    Beat only when a monotonically increasing progress counter advanced since the
@@ -7945,17 +7981,23 @@ four are literals with stated bases, all tighten-only:
    for exactly the remainder phase that performs the ledger writes, and a
    reclaim there is the lost-update corruption F1 exists to prevent. The counter
    advances at every phase boundary and every ledger-write step.
-2. **Heartbeat lifetime cap, CONDITIONAL.** Past
-   `settlement_budget + remainder_budget + margin` the heartbeat stops and normal
-   stale reclaim resumes — **except while inside the ledger-write critical
-   section, which it never abandons.** An unconditional cap fires mid-`write_csv`
-   if `remainder_budget` was estimated low, causing the corruption being
-   prevented.
-2b. **The ledger-write section is a declared critical section.** From the first
-   write of `shadow_positions.csv` through the `shadow_fills.csv` append and
-   `_write_shadow_pnl_history`, the heartbeat continues unconditionally. A
-   section that exceeds its budget is RECORDED as an overrun for the owner to
-   see; it is never resolved by letting the lock go.
+2. **Heartbeat lifetime cap, CONDITIONAL.** Past `heartbeat_cap_seconds` the
+   heartbeat stops and normal stale reclaim resumes — **except while inside the
+   ledger-write critical section**, subject to 2b. An unconditional cap fires
+   mid-`write_csv` if `remainder_budget_seconds` was estimated low, causing the
+   corruption being prevented.
+2b. **The ledger-write critical section is BOUNDED and SHRUNK** (corrected
+   2026-08-01 after review: an unconditional never-abandon carve-out simply moved
+   the wedge from a hung `urlopen` to a hung `write_csv`, and `./outputs` is a
+   shared bind mount, so a volume stall or full disk would beat forever and wedge
+   the lane permanently with no bound at all):
+   - **Shrink it.** The ledger rewrites build their content in a temp file
+     **outside** the section; the section is the `os.replace` calls only. This is
+     the same temp-plus-`os.replace` discipline already mandated for the
+     heartbeat write, and it makes the section near-instantaneous by
+     construction, dissolving the problem rather than capping it.
+   - **Bound it.** Past `critical_section_max_seconds` the beat stops with a
+     loudly recorded overrun. A bounded wedge beats an unbounded one.
 3. **Do NOT re-stamp `acquired_at_utc`.** It is read by `_lock_age_seconds`
    (`runtime_lock.py:44-49`) and validated by `_valid_lock_payload` (`:52-63`);
    re-stamping makes the field's name false for every other reader. Add a
@@ -7970,6 +8012,20 @@ for updating a held lock's payload. The heartbeat write MUST be temp-file plus
 `os.replace`. **Unlink-then-recreate is explicitly forbidden** — it opens a
 window in which another process can legitimately acquire.
 
+**Settlement starvation — registered 2026-08-01 after review.** A 900s budget
+at ~60s/position reaches roughly the first 15 of 25 due positions. There is no
+rotation: `_settle_due_positions` iterates in file order every pass and
+`_should_check_settlement` (`shadow_cohort.py:402-407`) gates only on close time
+plus grace, storing no last-checked timestamp. On a degraded day the tail is
+therefore **never reached on any pass** — those positions age past
+`maximum_holding_hours` and close as `shadow_time_exit` at a stale mark instead
+of `shadow_clean_settlement` at the true 0/1 outcome. That is a systematic
+distortion of shadow P&L, not deferred work, and "fail-closed" covers only the
+write. **Required: a per-position `last_settlement_check_utc` with oldest-first
+ordering (or an equivalent rotating offset), plus a
+`settlement_positions_abandoned` count emitted into the artifact and named in
+the day-after check.**
+
 **Tests for F1 (enumerated; additive to the six below).** (7) with a stubbed
 provider that blocks past the budget, the pass returns the partial fail-closed
 status, leaves remaining positions unprocessed, and writes NO partial ledger
@@ -7982,8 +8038,13 @@ heartbeat write never unlinks the lock file (assert no window in which the path
 is absent);** (10) a load-time validator rejects any
 configuration violating the FULL registered ordering — all three relations, not
 only the outer one — rather than silently inverting; **(10b) the heartbeat
-continues through the ledger-write critical section even after the cap would
-otherwise have fired;** (11) a settlement pass shorter than the budget
+continues through the ledger-write critical section after `heartbeat_cap_seconds`
+would otherwise have fired, but stops at `critical_section_max_seconds` with a
+recorded overrun; (10c) the ledger content is built in a temp file outside the
+critical section, so the section contains only `os.replace` calls; (10d) with a
+budget that reaches only the first N of M due positions, the NEXT pass starts
+with the previously unreached ones (no starvation), and
+`settlement_positions_abandoned` is emitted;** (11) a settlement pass shorter than the budget
 is byte-identical to today.
 
 Citation correction: config line 1311 is `settlement_request_timeout_seconds:
@@ -8314,8 +8375,8 @@ against them retroactively, and recording the result rather than assuming it:
 
 | WO | A1 | A2 | A3 | A4 | A5 | A6 | A7 | A8 | A9 | A10 | result |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| WO-143 §143.7 | PASS (1800 with basis, two alternatives rejected) | PASS (non-finite → `blocked_inputs`) | n/a | PASS | PASS (§143.1 exception recorded) | PASS | PASS (ten→eleven) | n/a | n/a | PASS | **ADMITTED** |
-| WO-143b §143b.1 | **FAILED, now FIXED** — F1 named `budget`/`remainder`/`margin`/`stale_after_seconds` with no literals; the four are now named with bases and a registered ordering | PASS | PASS (roots widened to `src/`+`scripts/` off `__file__`) | PASS (Scope reconciled) | PASS | PASS (F4 antecedent) | PASS (fourteen) | PASS (F1 fan-out shown) | n/a | PASS | **ADMITTED after fix** |
+| WO-143 §143.7 | PASS (1800 with basis, two alternatives rejected) | PASS (non-finite → `blocked_inputs`) | n/a | PASS | PASS (§143.1 exception recorded) | PASS | **FAILED, now FIXED** — the count said ten and the config file was absent after its prohibition was struck; now eleven with the file listed | n/a | n/a | PASS | **ADMITTED after fix** |
+| WO-143b §143b.1 | **FAILED TWICE, now FIXED** — F1 first named four constants with no literals; the fix then introduced a FIFTH (`heartbeat_cap`) with no literal and an unsatisfiable ordering (`1320 < 1320`). Six constants are now literals with bases and the ordering is `1320 < 1800 < 2400` | PASS | PASS (roots widened to `src/`+`scripts/` off `__file__`) | PASS (Scope reconciled) | PASS | PASS (F4 antecedent) | PASS (fourteen) | PASS (F1 fan-out shown) | n/a | PASS | **ADMITTED after fix** |
 | WO-145 | PASS | n/a | n/a | n/a | PASS | n/a | PASS (six→seven) | n/a | PASS (both deploy paths enumerated) | PASS | **ADMITTED** |
 
 The A1 failure on F1 is the checklist working on its first use, against text

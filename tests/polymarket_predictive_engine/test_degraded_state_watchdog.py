@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+import pytest
 
 from polymarket_predictive_engine.cli import COMMANDS
 from polymarket_predictive_engine.config import EngineConfig
@@ -830,3 +833,623 @@ def test_wo129_lock_held_carries_incidents_then_alarms_and_recovers(tmp_path: Pa
     assert recovered["status"] == "incident"
     assert state["carry_forward_cycles"] == 0
     assert state["carry_forward_started_at"] is None
+
+
+# --- WO-144: stable episode identity + per-entity push cooldown -----------
+#
+# The 2026-08-01 notification storm: three evaluators minted a new incident
+# id from each cycle's per-cycle observation token, so a single persisting
+# breach paged the owner on every 5-minute cycle (39 pushes overnight). The
+# fix anchors incident identity to the episode's first breach observation
+# and adds a per-entity push cooldown as a second, independent backstop.
+
+
+def _write_breaching_slo(cfg: EngineConfig, generated_at: str) -> None:
+    """Breach exactly scheduler_overrun_cycles while the other six registered
+    SLO rows and both publication bridges stay healthy, so only the SLO
+    registration is under test (mirrors _write_healthy_slo's shape)."""
+    write_json(
+        cfg.output_root / "performance" / "operating_state.json",
+        {
+            "generated_at_utc": generated_at,
+            "slo": {
+                "rows": [
+                    {"id": row_id, "breach": row_id == "scheduler_overrun_cycles"}
+                    for row_id in (
+                        "quote_sheet_age",
+                        "governance_refresh_duration",
+                        "scheduler_overrun_cycles",
+                        "websocket_gap",
+                        "dashboard_staleness",
+                        "reconciliation_age",
+                        "ledger_anchor_age",
+                    )
+                ]
+            },
+        },
+    )
+    for bridge in ("anchor", "telemetry"):
+        write_json(
+            cfg.output_root / "performance" / f"{bridge}_push_status.json",
+            {"generated_at_utc": generated_at, "status": "ok",
+             "paper_trading_invoked": False, "live_trading_invoked": False},
+        )
+
+
+def _stub_ok_post(monkeypatch) -> list[str]:
+    """Install a requests.post stub that always succeeds and records calls."""
+    calls: list[str] = []
+
+    class _Response:
+        status_code = 200
+
+    def post(_url, *, data, **kwargs):
+        calls.append(data)
+        return _Response()
+
+    monkeypatch.setattr("polymarket_predictive_engine.degraded_state_watchdog.requests.post", post)
+    return calls
+
+
+def test_wo144_persisting_breach_keeps_one_incident_id_and_pushes_once(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path)
+    monkeypatch.setenv("OPS_OWNER_NTFY_TOPIC_URL", "http://127.0.0.1:9")
+    calls = _stub_ok_post(monkeypatch)
+
+    incident_ids = []
+    counts = []
+    for minute in range(3):
+        _write_breaching_slo(cfg, f"2026-08-01T00:0{minute}:00Z")
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-08-01T00:0{minute}:01Z")
+        incident = next(row for row in result["active_incidents"] if row["registration_id"] == "operating_state_slo_breach")
+        incident_ids.append(incident["incident_id"])
+        counts.append(incident["consecutive_degraded_observations"])
+
+    assert len(set(incident_ids)) == 1
+    ledger_rows = read_csv_rows(cfg.output_root / INCIDENT_LEDGER)
+    assert sum(1 for row in ledger_rows if row["entity"] == "operating_state_slo") == 1
+    assert len(calls) == 1
+    # WO-144 amendment (F2): consecutive_degraded_observations increments on
+    # the active incident across cycles instead of the SLO site's hardcoded
+    # count=1 - the ledger stays at one row while the artifact keeps the
+    # per-cycle observation depth.
+    assert counts == [1, 2, 3]
+
+
+def test_wo144_new_episode_after_healthy_mints_new_id(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path)
+    cfg.raw["degraded_state_watchdog"]["notification_cooldown_seconds"] = 0
+    monkeypatch.setenv("OPS_OWNER_NTFY_TOPIC_URL", "http://127.0.0.1:9")
+    calls = _stub_ok_post(monkeypatch)
+
+    _write_breaching_slo(cfg, "2026-08-01T01:00:00Z")
+    first = build_degraded_state_watchdog(cfg, as_of="2026-08-01T01:00:01Z")
+    first_id = next(row["incident_id"] for row in first["active_incidents"] if row["registration_id"] == "operating_state_slo_breach")
+
+    _write_healthy_slo(cfg, "2026-08-01T01:05:00Z")
+    healthy = build_degraded_state_watchdog(cfg, as_of="2026-08-01T01:05:01Z")
+    assert healthy["status"] == "ok"
+
+    _write_breaching_slo(cfg, "2026-08-01T01:10:00Z")
+    second = build_degraded_state_watchdog(cfg, as_of="2026-08-01T01:10:01Z")
+    second_id = next(row["incident_id"] for row in second["active_incidents"] if row["registration_id"] == "operating_state_slo_breach")
+
+    assert first_id != second_id
+    assert len(calls) == 2
+
+
+def test_wo144_flap_within_cooldown_suppresses_push_but_keeps_ledger(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path)
+    monkeypatch.setenv("OPS_OWNER_NTFY_TOPIC_URL", "http://127.0.0.1:9")
+    calls = _stub_ok_post(monkeypatch)
+
+    _write_breaching_slo(cfg, "2026-08-01T02:00:00Z")
+    build_degraded_state_watchdog(cfg, as_of="2026-08-01T02:00:01Z")
+
+    _write_healthy_slo(cfg, "2026-08-01T02:02:00Z")
+    build_degraded_state_watchdog(cfg, as_of="2026-08-01T02:02:01Z")
+
+    _write_breaching_slo(cfg, "2026-08-01T02:05:00Z")
+    final = build_degraded_state_watchdog(cfg, as_of="2026-08-01T02:05:01Z")
+
+    assert len(calls) == 1
+    notification = final["notification"]
+    assert notification["pushes_suppressed_by_cooldown"] == 1
+    assert notification["next_eligible_push_utc"] != ""
+    ledger_rows = read_csv_rows(cfg.output_root / INCIDENT_LEDGER)
+    assert sum(1 for row in ledger_rows if row["entity"] == "operating_state_slo") == 2
+
+
+def test_wo144_push_resumes_after_cooldown_elapses(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path)
+    monkeypatch.setenv("OPS_OWNER_NTFY_TOPIC_URL", "http://127.0.0.1:9")
+    calls = _stub_ok_post(monkeypatch)
+
+    _write_breaching_slo(cfg, "2026-08-01T03:00:00Z")
+    build_degraded_state_watchdog(cfg, as_of="2026-08-01T03:00:00Z")
+
+    _write_healthy_slo(cfg, "2026-08-01T03:05:00Z")
+    build_degraded_state_watchdog(cfg, as_of="2026-08-01T03:05:00Z")
+
+    _write_breaching_slo(cfg, "2026-08-01T05:00:00Z")
+    build_degraded_state_watchdog(cfg, as_of="2026-08-01T05:00:00Z")
+
+    assert len(calls) == 2
+
+
+def test_wo144_cooldown_is_per_entity_not_global(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path)
+    monkeypatch.setenv("OPS_OWNER_NTFY_TOPIC_URL", "http://127.0.0.1:9")
+    calls = _stub_ok_post(monkeypatch)
+
+    _write_breaching_slo(cfg, "2026-08-01T06:00:00Z")
+    build_degraded_state_watchdog(cfg, as_of="2026-08-01T06:00:00Z")
+
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"status": "failed", "generated_at_utc": "2026-08-01T06:02:00Z"},
+    )
+    build_degraded_state_watchdog(cfg, as_of="2026-08-01T06:02:00Z")
+
+    assert len(calls) == 2
+
+
+def test_wo144_malformed_state_file_falls_back_without_raising(tmp_path: Path, monkeypatch) -> None:
+    # F7 (amended): the malformed-state test must also exercise the push
+    # path - garbage cooldown state must read as never-notified (pushes
+    # immediately), not merely fail to raise.
+    cfg = _cfg(tmp_path)
+    monkeypatch.setenv("OPS_OWNER_NTFY_TOPIC_URL", "http://127.0.0.1:9")
+    calls = _stub_ok_post(monkeypatch)
+    write_json(
+        cfg.output_root / "ops_scheduler" / "degraded_state_watchdog_state.json",
+        {"episode_anchors": "not-a-dict", "notified_entities": 7},
+    )
+    _write_breaching_slo(cfg, "2026-08-01T07:00:00Z")
+
+    result = build_degraded_state_watchdog(cfg, as_of="2026-08-01T07:00:01Z")
+
+    assert any(row["registration_id"] == "operating_state_slo_breach" for row in result["active_incidents"])
+    assert result["notification"]["delivery"]["attempted"] is True
+    assert len(calls) == 1
+
+
+def test_wo144_sweep_producer_and_bridge_ids_are_episode_stable(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    dr_path = cfg.output_root / "performance" / "disaster_recovery_status.json"
+
+    write_json(
+        dr_path,
+        {"status": "ok", "remote_push_status": "failed", "rpo": {"compliant": True}, "generated_at_utc": "2026-08-01T08:00:00Z"},
+    )
+    first_dr = build_degraded_state_watchdog(cfg, as_of="2026-08-01T08:00:00Z")
+    write_json(
+        dr_path,
+        {"status": "ok", "remote_push_status": "failed", "rpo": {"compliant": True}, "generated_at_utc": "2026-08-01T08:01:00Z"},
+    )
+    second_dr = build_degraded_state_watchdog(cfg, as_of="2026-08-01T08:01:00Z")
+
+    dr_id_1 = next(row["incident_id"] for row in first_dr["active_incidents"] if row["registration_id"] == "disaster_recovery_not_recoverable")
+    dr_id_2 = next(row["incident_id"] for row in second_dr["active_incidents"] if row["registration_id"] == "disaster_recovery_not_recoverable")
+    assert dr_id_1 == dr_id_2
+
+    anchor_path = cfg.output_root / "performance" / "anchor_push_status.json"
+    write_json(anchor_path, {"status": "failed", "generated_at_utc": "2026-08-01T08:02:00Z"})
+    first_bridge = build_degraded_state_watchdog(cfg, as_of="2026-08-01T08:02:01Z")
+    write_json(anchor_path, {"status": "failed", "generated_at_utc": "2026-08-01T08:03:00Z"})
+    second_bridge = build_degraded_state_watchdog(cfg, as_of="2026-08-01T08:03:01Z")
+
+    bridge_id_1 = next(
+        row["incident_id"]
+        for row in first_bridge["active_incidents"]
+        if row["registration_id"] == "publication_bridge_unhealthy" and row["entity"] == "anchor"
+    )
+    bridge_id_2 = next(
+        row["incident_id"]
+        for row in second_bridge["active_incidents"]
+        if row["registration_id"] == "publication_bridge_unhealthy" and row["entity"] == "anchor"
+    )
+    assert bridge_id_1 == bridge_id_2
+
+
+def test_wo144_registered_cooldown_floor_cannot_be_lengthened() -> None:
+    widened = EngineConfig(
+        raw={"degraded_state_watchdog": {"notification_cooldown_seconds": 99999}},
+        path=Path("config.yaml"),
+    )
+    assert _settings(widened)["notification_cooldown_seconds"] == 3600
+
+    shortened = EngineConfig(
+        raw={"degraded_state_watchdog": {"notification_cooldown_seconds": 600}},
+        path=Path("config.yaml"),
+    )
+    assert _settings(shortened)["notification_cooldown_seconds"] == 600
+
+
+# --- WO-144 amendment (2026-08-01, Opus line-audit fix round: F1-F8) -------
+
+
+def test_wo144_f1_future_dated_notified_stamp_expires_now_not_forever(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path)
+    monkeypatch.setenv("OPS_OWNER_NTFY_TOPIC_URL", "http://127.0.0.1:9")
+    calls = _stub_ok_post(monkeypatch)
+    key = "operating_state_slo_breach|operating_state_slo"
+    future_stamp = "2026-08-31T00:00:00Z"  # 30 days ahead of the breach below
+    write_json(
+        cfg.output_root / "ops_scheduler" / "degraded_state_watchdog_state.json",
+        {"notified_entities": {key: future_stamp}},
+    )
+    _write_breaching_slo(cfg, "2026-08-01T10:00:00Z")
+
+    result = build_degraded_state_watchdog(cfg, as_of="2026-08-01T10:00:01Z")
+
+    # A future-dated (clock-artifact) stamp must be expired-now for the
+    # cooldown check, not treated as still cooling forever.
+    assert result["notification"]["delivery"]["attempted"] is True
+    assert len(calls) == 1
+    state = read_json(cfg.output_root / "ops_scheduler" / "degraded_state_watchdog_state.json")
+    # The bogus future-dated value must be gone - the delivered push may
+    # legitimately re-stamp the same key with a real, current timestamp.
+    assert state.get("notified_entities", {}).get(key) != future_stamp
+
+
+def test_wo144_f3_cooldown_arms_when_first_push_only_succeeds_on_retry(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path)
+    monkeypatch.setenv("OPS_OWNER_NTFY_TOPIC_URL", "http://127.0.0.1:9")
+
+    def failing_post(_url, *, data, **kwargs):
+        raise ConnectionError("synthetic network failure")
+
+    monkeypatch.setattr("polymarket_predictive_engine.degraded_state_watchdog.requests.post", failing_post)
+    _write_breaching_slo(cfg, "2026-08-01T13:00:00Z")
+    first = build_degraded_state_watchdog(cfg, as_of="2026-08-01T13:00:01Z")
+    assert first["notification"]["delivery"]["delivered"] is False
+    assert first["notification"]["undelivered_incident_ids"]
+    assert first["notification"]["undelivered_incident_entities"]
+
+    calls = _stub_ok_post(monkeypatch)
+    retry = build_degraded_state_watchdog(cfg, as_of="2026-08-01T13:00:31Z")
+    assert retry["notification"]["delivery"]["delivered"] is True
+    assert len(calls) == 1
+    assert retry["notification"]["undelivered_incident_ids"] == []
+
+    _write_healthy_slo(cfg, "2026-08-01T13:05:00Z")
+    build_degraded_state_watchdog(cfg, as_of="2026-08-01T13:05:01Z")
+
+    _write_breaching_slo(cfg, "2026-08-01T13:10:00Z")
+    later = build_degraded_state_watchdog(cfg, as_of="2026-08-01T13:10:01Z")
+
+    # The retry-delivered push must have armed the cooldown for this entity,
+    # so a NEW episode of the same entity within the floor is suppressed.
+    assert len(calls) == 1
+    assert later["notification"]["pushes_suppressed_by_cooldown"] == 1
+
+
+def test_wo144_f5_notify_false_when_only_new_incident_is_suppressed(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path)
+    monkeypatch.setenv("OPS_OWNER_NTFY_TOPIC_URL", "http://127.0.0.1:9")
+    calls = _stub_ok_post(monkeypatch)
+
+    _write_breaching_slo(cfg, "2026-08-01T09:00:00Z")
+    build_degraded_state_watchdog(cfg, as_of="2026-08-01T09:00:01Z")
+
+    _write_healthy_slo(cfg, "2026-08-01T09:02:00Z")
+    build_degraded_state_watchdog(cfg, as_of="2026-08-01T09:02:01Z")
+
+    _write_breaching_slo(cfg, "2026-08-01T09:05:00Z")
+    final = build_degraded_state_watchdog(cfg, as_of="2026-08-01T09:05:01Z")
+
+    # A new episode is a new ledger row (eligible/state_changed are bool(new)
+    # and stay True), but its push is suppressed by the still-active
+    # per-entity cooldown, so notify must read False.
+    assert final["new_incident_count"] == 1
+    assert final["notification"]["eligible"] is True
+    assert final["notification"]["state_changed"] is True
+    assert final["notification"]["notify"] is False
+    assert len(calls) == 1
+
+
+def test_wo144_f6_cooldown_setting_survives_inf_and_overflow(tmp_path: Path) -> None:
+    cfg = EngineConfig(
+        raw={"degraded_state_watchdog": {"notification_cooldown_seconds": float("inf")}},
+        path=tmp_path / "config.yaml",
+    )
+    assert _settings(cfg)["notification_cooldown_seconds"] == 3600
+
+    overflow_cfg = EngineConfig(
+        raw={"degraded_state_watchdog": {"notification_cooldown_seconds": 10**400}},
+        path=tmp_path / "config.yaml",
+    )
+    assert _settings(overflow_cfg)["notification_cooldown_seconds"] == 3600
+
+
+def test_wo144_f8_notified_entities_capped_at_64_newest(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path)
+    monkeypatch.setenv("OPS_OWNER_NTFY_TOPIC_URL", "http://127.0.0.1:9")
+    _stub_ok_post(monkeypatch)
+    base = datetime(2026, 8, 1, 0, 0, 0, tzinfo=timezone.utc)
+    notified = {
+        f"registration_{i}|entity_{i}": (base + timedelta(minutes=i)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        for i in range(70)
+    }
+    write_json(
+        cfg.output_root / "ops_scheduler" / "degraded_state_watchdog_state.json",
+        {"notified_entities": notified},
+    )
+    _write_breaching_slo(cfg, "2026-08-01T12:00:00Z")
+
+    build_degraded_state_watchdog(cfg, as_of="2026-08-01T12:00:01Z")
+
+    state = read_json(cfg.output_root / "ops_scheduler" / "degraded_state_watchdog_state.json")
+    kept = state["notified_entities"]
+    assert len(kept) == 64
+    assert "registration_0|entity_0" not in kept
+    assert "registration_69|entity_69" in kept
+
+
+# --- WO-144 F4: parametrized id-stability sweep across all twelve
+# `_incident(` call sites (thirteen registrations; the wedge registration is
+# pinned separately below because it requires lock-held, not acquired,
+# cycles).
+
+
+def _sweep_requote_missing_inputs(cfg: EngineConfig) -> tuple[str, str]:
+    path = cfg.output_root / "maker_carry" / "requote_alerts.json"
+    ids: list[str] = []
+    for cycle in range(1, 6):
+        write_json(path, _requote(cycle, rule="missing_live_bid_ask"))
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-08-02T00:0{cycle}:30Z")
+        if cycle >= 4:
+            incident = next(row for row in result["active_incidents"] if row["registration_id"] == "requote_missing_inputs")
+            ids.append(incident["incident_id"])
+    return ids[0], ids[1]
+
+
+def _sweep_scheduler_nonzero_exit(cfg: EngineConfig) -> tuple[str, str]:
+    path = cfg.output_root / "ops_scheduler" / "status.json"
+    ids: list[str] = []
+    for cycle in range(1, 3):
+        write_json(
+            path,
+            {
+                "generated_at_utc": f"2026-08-02T03:0{cycle}:00Z",
+                "jobs": {"governance_refresh": {"last_exit_code": 1, "last_run_utc": f"2026-08-02T03:0{cycle}:00Z"}},
+            },
+        )
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-08-02T03:0{cycle}:30Z")
+        incident = next(row for row in result["active_incidents"] if row["registration_id"] == "scheduler_nonzero_exit")
+        ids.append(incident["incident_id"])
+    return ids[0], ids[1]
+
+
+def _sweep_scheduler_completion_freshness(cfg: EngineConfig) -> tuple[str, str]:
+    path = cfg.output_root / "ops_scheduler" / "status.json"
+    ids: list[str] = []
+    for cycle in range(1, 3):
+        write_json(
+            path,
+            {
+                "generated_at_utc": f"2026-08-02T04:0{cycle}:00Z",
+                "jobs": {
+                    "training_harvest": {
+                        "last_exit_code": 1,
+                        "last_run_utc": f"2026-08-02T04:0{cycle}:00Z",
+                        "last_success_utc": "2026-07-30T00:00:00Z",
+                    }
+                },
+            },
+        )
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-08-02T04:0{cycle}:30Z")
+        incident = next(
+            row
+            for row in result["active_incidents"]
+            if row["registration_id"] == "scheduler_completion_freshness" and row["entity"] == "training_harvest"
+        )
+        ids.append(incident["incident_id"])
+    return ids[0], ids[1]
+
+
+def _sweep_kill_input_stale_live_stage(cfg: EngineConfig) -> tuple[str, str]:
+    path = cfg.output_root / "maker_carry" / "decision_policy.json"
+    ids: list[str] = []
+    for cycle in range(1, 3):
+        write_json(
+            path,
+            {
+                "generated_at_utc": f"2026-08-02T05:0{cycle}:00Z",
+                "indicated_action": "stop_quoting_review_before_resume",
+                "kill_data_stale": True,
+                "kill_criteria_status": {
+                    "status": "triggered",
+                    "kill_data_stale": True,
+                    "kill_input_freshness": {
+                        "state": "stale",
+                        "guard_active": True,
+                        "latest_observation_utc": "2026-08-02T04:00:00Z",
+                        "age_seconds": 3600.0 * cycle,
+                        "maximum_age_seconds": 1800.0,
+                    },
+                },
+            },
+        )
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-08-02T05:0{cycle}:30Z")
+        incident = next(row for row in result["active_incidents"] if row["registration_id"] == "kill_input_stale_live_stage")
+        ids.append(incident["incident_id"])
+    return ids[0], ids[1]
+
+
+def _sweep_maker_replay_insufficient_coverage(cfg: EngineConfig) -> tuple[str, str]:
+    path = cfg.output_root / "maker_carry" / "maker_fill_replay.json"
+    ids: list[str] = []
+    for cycle in range(1, 6):
+        write_json(
+            path,
+            {
+                "generated_at_utc": f"2026-08-02T01:0{cycle}:00Z",
+                "status": "insufficient_coverage",
+                "coverage_status": "insufficient_coverage",
+                "simulated_fill_opportunities": 10,
+                "coverage": {"windows_simulated": 30, "windows_covered": 0},
+            },
+        )
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-08-02T01:0{cycle}:30Z")
+        if cycle >= 4:
+            incident = next(row for row in result["active_incidents"] if row["registration_id"] == "maker_replay_insufficient_coverage")
+            ids.append(incident["incident_id"])
+    return ids[0], ids[1]
+
+
+def _sweep_wallet_reconciliation_not_clean(cfg: EngineConfig) -> tuple[str, str]:
+    path = cfg.output_root / "performance" / "wallet_reconciliation.json"
+    ids: list[str] = []
+    for harvest in range(1, 5):
+        write_json(
+            path,
+            {"generated_at_utc": f"2026-08-02T0{harvest}:00:00Z", "reconciliation_status": "partial"},
+        )
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-08-02T0{harvest}:00:01Z")
+        if harvest >= 3:
+            incident = next(row for row in result["active_incidents"] if row["registration_id"] == WALLET_REGISTRATION_ID)
+            ids.append(incident["incident_id"])
+    return ids[0], ids[1]
+
+
+def _sweep_operating_state_unknown_regression(cfg: EngineConfig) -> tuple[str, str]:
+    path = cfg.output_root / "performance" / "operating_state.json"
+    write_json(path, {"generated_at_utc": "2026-08-02T06:00:00Z", "rows": [{"key": "source_vs_deployed_sha", "state": "ALIGNED"}]})
+    build_degraded_state_watchdog(cfg, as_of="2026-08-02T06:00:01Z")
+    ids: list[str] = []
+    for cycle in range(1, 3):
+        write_json(path, {"generated_at_utc": f"2026-08-02T06:0{cycle}:00Z", "rows": [{"key": "source_vs_deployed_sha", "state": "UNKNOWN"}]})
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-08-02T06:0{cycle}:30Z")
+        incident = next(row for row in result["active_incidents"] if row["registration_id"] == "operating_state_unknown_regression")
+        ids.append(incident["incident_id"])
+    return ids[0], ids[1]
+
+
+def _sweep_ledger_chain_integrity(cfg: EngineConfig) -> tuple[str, str]:
+    path = cfg.output_root / "performance" / "ledger_anchor_verification.json"
+    ids: list[str] = []
+    for cycle in range(1, 3):
+        write_json(path, {"status": "broken", "generated_at_utc": f"2026-08-02T07:0{cycle}:00Z"})
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-08-02T07:0{cycle}:30Z")
+        incident = next(row for row in result["active_incidents"] if row["registration_id"] == "ledger_chain_integrity")
+        ids.append(incident["incident_id"])
+    return ids[0], ids[1]
+
+
+def _sweep_disaster_recovery_not_recoverable(cfg: EngineConfig) -> tuple[str, str]:
+    path = cfg.output_root / "performance" / "disaster_recovery_status.json"
+    ids: list[str] = []
+    for cycle in range(1, 3):
+        write_json(
+            path,
+            {"status": "ok", "remote_push_status": "failed", "rpo": {"compliant": True}, "generated_at_utc": f"2026-08-02T08:0{cycle}:00Z"},
+        )
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-08-02T08:0{cycle}:30Z")
+        incident = next(row for row in result["active_incidents"] if row["registration_id"] == "disaster_recovery_not_recoverable")
+        ids.append(incident["incident_id"])
+    return ids[0], ids[1]
+
+
+def _sweep_maker_study_run_failed(cfg: EngineConfig) -> tuple[str, str]:
+    path = cfg.output_root / "maker_carry" / "maker_carry_study.json"
+    ids: list[str] = []
+    for cycle in range(1, 3):
+        write_json(path, {"status": "failed", "generated_at_utc": f"2026-08-02T09:0{cycle}:00Z"})
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-08-02T09:0{cycle}:30Z")
+        incident = next(row for row in result["active_incidents"] if row["registration_id"] == "maker_study_run_failed")
+        ids.append(incident["incident_id"])
+    return ids[0], ids[1]
+
+
+def _sweep_official_book_snapshot_partial(cfg: EngineConfig) -> tuple[str, str]:
+    path = cfg.output_root / "maker_carry" / "official_book_snapshot.json"
+    ids: list[str] = []
+    for cycle in range(1, 6):
+        write_json(path, {"status": "failed", "generated_at_utc": f"2026-08-02T02:0{cycle}:00Z"})
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-08-02T02:0{cycle}:30Z")
+        if cycle >= 4:
+            incident = next(row for row in result["active_incidents"] if row["registration_id"] == "official_book_snapshot_partial")
+            ids.append(incident["incident_id"])
+    return ids[0], ids[1]
+
+
+def _sweep_operating_state_slo_breach(cfg: EngineConfig) -> tuple[str, str]:
+    ids: list[str] = []
+    for cycle in range(1, 3):
+        _write_breaching_slo(cfg, f"2026-08-02T10:0{cycle}:00Z")
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-08-02T10:0{cycle}:30Z")
+        incident = next(row for row in result["active_incidents"] if row["registration_id"] == "operating_state_slo_breach")
+        ids.append(incident["incident_id"])
+    return ids[0], ids[1]
+
+
+def _sweep_publication_bridge_unhealthy(cfg: EngineConfig) -> tuple[str, str]:
+    path = cfg.output_root / "performance" / "anchor_push_status.json"
+    ids: list[str] = []
+    for cycle in range(1, 3):
+        write_json(path, {"status": "failed", "generated_at_utc": f"2026-08-02T11:0{cycle}:00Z"})
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-08-02T11:0{cycle}:30Z")
+        incident = next(
+            row
+            for row in result["active_incidents"]
+            if row["registration_id"] == "publication_bridge_unhealthy" and row["entity"] == "anchor"
+        )
+        ids.append(incident["incident_id"])
+    return ids[0], ids[1]
+
+
+_ID_STABILITY_SWEEP = [
+    ("requote_missing_inputs", _sweep_requote_missing_inputs),
+    ("scheduler_nonzero_exit", _sweep_scheduler_nonzero_exit),
+    ("scheduler_completion_freshness", _sweep_scheduler_completion_freshness),
+    ("kill_input_stale_live_stage", _sweep_kill_input_stale_live_stage),
+    ("maker_replay_insufficient_coverage", _sweep_maker_replay_insufficient_coverage),
+    (WALLET_REGISTRATION_ID, _sweep_wallet_reconciliation_not_clean),
+    ("operating_state_unknown_regression", _sweep_operating_state_unknown_regression),
+    ("ledger_chain_integrity", _sweep_ledger_chain_integrity),
+    ("disaster_recovery_not_recoverable", _sweep_disaster_recovery_not_recoverable),
+    ("maker_study_run_failed", _sweep_maker_study_run_failed),
+    ("official_book_snapshot_partial", _sweep_official_book_snapshot_partial),
+    ("operating_state_slo_breach", _sweep_operating_state_slo_breach),
+    ("publication_bridge_unhealthy", _sweep_publication_bridge_unhealthy),
+]
+
+
+@pytest.mark.parametrize("registration_id, sweep", _ID_STABILITY_SWEEP, ids=[item[0] for item in _ID_STABILITY_SWEEP])
+def test_wo144_f4_id_stability_sweep_pins_every_evaluator(tmp_path: Path, registration_id: str, sweep) -> None:
+    cfg = _cfg(tmp_path)
+    first_id, second_id = sweep(cfg)
+    assert first_id
+    assert first_id == second_id
+
+
+def test_wo144_f4_wedge_incident_id_is_stable_across_wedged_cycles(tmp_path: Path) -> None:
+    # The wedge registration cannot be synthesized via the standard
+    # two-acquired-cycle sweep above - it only fires once the runtime lock
+    # has been held by another process through more than 3 consecutive
+    # skipped (not acquired) cycles - so it is pinned with its own targeted
+    # lock-held test instead of forced into the parametrization.
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"status": "failed", "generated_at_utc": "2026-08-02T12:00:00Z"},
+    )
+    build_degraded_state_watchdog(cfg, as_of="2026-08-02T12:00:01Z")
+    lock = acquire_runtime_lock(cfg, "degraded_state_watchdog", stale_after_seconds=999999)
+    try:
+        carried = [
+            build_degraded_state_watchdog(cfg, as_of=f"2026-08-02T12:0{cycle}:01Z")
+            for cycle in range(1, 6)
+        ]
+    finally:
+        release_runtime_lock(lock)
+
+    wedged_ids = [
+        next(row["incident_id"] for row in cycle["active_incidents"] if row["registration_id"] == "degraded_state_watchdog_wedged")
+        for cycle in carried
+        if any(row["registration_id"] == "degraded_state_watchdog_wedged" for row in cycle["active_incidents"])
+    ]
+    assert len(wedged_ids) >= 2, "need at least two wedged cycles to compare identity"
+    assert len(set(wedged_ids)) == 1

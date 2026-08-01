@@ -92,6 +92,20 @@ CARD_TIMEOUT="${OPS_CARD_TIMEOUT_SECONDS:-2400}"
 # job's success stamp and stays out of the overrun SLO - instead of accruing
 # exit-1 incidents and burning an odds preflight until the next tournament.
 CARD_REFRESH_ENABLED="${OPS_CARD_REFRESH_ENABLED:-1}"
+# WO-143: scheduled scoring-only paper cycle. Deliberately two-sided, NOT
+# collection-style - config may run it more often (floor 1h) or less often
+# (ceiling 4h, the default) and cannot leave that band: a heavier cadence
+# starves the live bridge's 30s lock cycles and raises the 2g cgroup's
+# peak-concurrency risk, mirroring the HARVEST_RETRY_INTERVAL precedent for
+# two-sided bounding of a heavy job.
+PAPER_CYCLE_INTERVAL="${OPS_PAPER_CYCLE_INTERVAL_SECONDS:-14400}"
+case "$PAPER_CYCLE_INTERVAL" in ''|*[!0-9]*) PAPER_CYCLE_INTERVAL=14400 ;; esac
+[ "$PAPER_CYCLE_INTERVAL" -ge 3600 ] 2>/dev/null || PAPER_CYCLE_INTERVAL=3600
+[ "$PAPER_CYCLE_INTERVAL" -le 14400 ] || PAPER_CYCLE_INTERVAL=14400
+PAPER_CYCLE_TIMEOUT="${OPS_PAPER_CYCLE_TIMEOUT_SECONDS:-1800}"
+case "$PAPER_CYCLE_TIMEOUT" in ''|*[!0-9]*) PAPER_CYCLE_TIMEOUT=1800 ;; esac
+[ "$PAPER_CYCLE_TIMEOUT" -le 1800 ] || PAPER_CYCLE_TIMEOUT=1800
+PAPER_CYCLE_ENABLED="${OPS_PAPER_CYCLE_ENABLED:-1}"
 # Ledger-anchor cadence: 12h gives three chances inside deploy-acceptance's
 # 36h ledger_anchor_age SLO. Hashing the largest ledger (~17MB) is seconds;
 # 600s bounds a pathological filesystem stall.
@@ -777,6 +791,29 @@ run_book_pulse() {
   log "book_pulse: exit $CODE"
 }
 
+run_paper_cycle_job() {
+  # WO-143: scheduled scoring-only owner for the canonical forward paper
+  # cycle. Plain `timeout` only, no extra kill flag: the process installs a
+  # SIGTERM handler that unwinds the `prediction_cycle` runtime lock cleanly,
+  # and a follow-up SIGKILL would defeat that.
+  if [ "$PAPER_CYCLE_ENABLED" = "0" ]; then
+    stamp_status paper_cycle 0 "skipped: scheduled paper cycle disabled (OPS_PAPER_CYCLE_ENABLED=0)" "" intentional
+    log "paper_cycle: skipped (disabled)"
+    return
+  fi
+  log "paper_cycle: starting"
+  PAPER_CYCLE_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  (
+    set -e
+    timeout "$PAPER_CYCLE_TIMEOUT" python -m polymarket_predictive_engine.cli scheduled-paper-cycle --config "$CONFIG_PATH" --paper-source websocket
+  ) >> "$LOG_FILE" 2>&1 &
+  JOB_PID=$!
+  wait_with_safety_pulses "$JOB_PID" paper_cycle
+  CODE=$?
+  stamp_status paper_cycle "$CODE" "WO-143 scheduled scoring-only paper cycle (predictions/alpha/signals; no shadow/broker/dashboard writes)" "$PAPER_CYCLE_STARTED_AT"
+  log "paper_cycle: exit $CODE"
+}
+
 run_maker_safety_refresh() {
   # WO-85/WO-86/WO-88: keep the human maker scoreboard, fail-safe kill
   # decision, and pull/STOP advice on their own short cadence. This lane is
@@ -969,6 +1006,12 @@ while :; do
     JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind book_pulse "$BOOK_PULSE_INTERVAL")"
     touch_stamp book_pulse
     run_book_pulse
+    JOB_SCHEDULE_SKIP_KIND=""
+  fi
+  if [ "$(seconds_since_stamp paper_cycle)" -ge "$PAPER_CYCLE_INTERVAL" ]; then
+    JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind paper_cycle "$PAPER_CYCLE_INTERVAL")"
+    touch_stamp paper_cycle
+    run_paper_cycle_job
     JOB_SCHEDULE_SKIP_KIND=""
   fi
   if [ "$(seconds_since_stamp ledger_anchor)" -ge "$LEDGER_ANCHOR_INTERVAL" ]; then

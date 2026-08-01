@@ -6,6 +6,14 @@ reachable solely from ``apply_mispricing_alpha`` (live decision scoring).
 Training (``train_mispricing_alpha_model``), label building, and historical
 backtests must consume stored point-in-time rows only — enriching them with
 later quotes would be lookahead. A regression test pins this invariant.
+
+Volatility copy-through only: a missing, blank, or malformed
+`rolling_volatility_6h`/`rolling_volatility_24h` yields `volatility_penalty =
+0.0` and `volatility_source = "missing"`, which is unchanged from prior
+behaviour and never raises; nothing here marks a market measured, changes any
+M-A/M-B/M-C or `maker_min_*` threshold, changes `_measurement_eligible`, moves
+any gate, sizing rule, filter, or eligibility surface, and `edge_lower_bound`
+may only shrink or stay equal as a result of this change, never grow.
 """
 
 from __future__ import annotations
@@ -486,8 +494,10 @@ def _microstructure_penalty(
     ask_size = safe_float(row.get("ask_size") or row.get("top_ask_size"))
     bid_size = safe_float(row.get("bid_size") or row.get("top_bid_size"))
     volatility = safe_float(row.get("rolling_volatility_6h"))
+    volatility_source = "rolling_volatility_6h" if volatility is not None else ""
     if volatility is None:
         volatility = safe_float(row.get("rolling_volatility_24h"))
+        volatility_source = "rolling_volatility_24h" if volatility is not None else "missing"
 
     spread_penalty = max(0.0, spread or 0.0) * float(settings.get("spread_penalty_weight", 0.50))
     reference_liquidity = float(settings.get("reference_liquidity", 1000.0))
@@ -519,6 +529,7 @@ def _microstructure_penalty(
         "liquidity_penalty": liquidity_penalty,
         "depth_penalty": depth_penalty,
         "volatility_penalty": volatility_penalty,
+        "volatility_source": volatility_source,
         "execution_cost_penalty": execution_cost_penalty,
         "execution_cost_status": execution_estimate.get("status", ""),
         "execution_expected_slippage": execution_estimate.get("expected_slippage", ""),
@@ -1036,6 +1047,15 @@ def apply_mispricing_alpha(
         "microstructure_filter_failures": sum(
             1 for row in final_rows if str(row.get("microstructure_filter_pass")).lower() == "false"
         ),
+        "rows_with_rolling_volatility": sum(
+            1
+            for row in final_rows
+            if row.get("volatility_source") in {"rolling_volatility_6h", "rolling_volatility_24h"}
+        ),
+        "rows_missing_rolling_volatility": sum(
+            1 for row in final_rows if row.get("volatility_source") == "missing"
+        ),
+        "volatility_penalty_sum": sum(safe_float(row.get("volatility_penalty")) or 0.0 for row in final_rows),
         "fundamental_probability_sources": sorted(
             {
                 str(row.get("fundamental_source"))

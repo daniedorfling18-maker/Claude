@@ -1093,6 +1093,142 @@ def test_wo120_stamp_status_leaves_no_temp_file_and_valid_json(tmp_path):
     assert not [p for p in out_dir.iterdir() if p.name.endswith(".tmp")]
 
 
+def test_wo143_paper_cycle_interval_and_timeout_clamp_bands(tmp_path):
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    script = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
+
+    def interval_for(value):
+        env = {
+            **os.environ,
+            "OPS_SCHEDULER_LIBRARY_ONLY": "1",
+            "OPS_SCHEDULER_OUT_DIR": str(out_dir),
+            "OPS_PAPER_CYCLE_INTERVAL_SECONDS": value,
+        }
+        result = subprocess.run(
+            ["sh", "-c", '. "$1"; echo "$PAPER_CYCLE_INTERVAL"', "sh", str(script)],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        return int(result.stdout.strip())
+
+    def timeout_for(value):
+        env = {
+            **os.environ,
+            "OPS_SCHEDULER_LIBRARY_ONLY": "1",
+            "OPS_SCHEDULER_OUT_DIR": str(out_dir),
+            "OPS_PAPER_CYCLE_TIMEOUT_SECONDS": value,
+        }
+        result = subprocess.run(
+            ["sh", "-c", '. "$1"; echo "$PAPER_CYCLE_TIMEOUT"', "sh", str(script)],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        return int(result.stdout.strip())
+
+    # Two-sided: config may run more often (floor 3600) or less often
+    # (ceiling 14400) and cannot leave that band, mirroring the
+    # HARVEST_RETRY_INTERVAL precedent for bounding a heavy job.
+    assert interval_for("999999") == 14400
+    assert interval_for("60") == 3600
+    assert interval_for("abc") == 14400
+    assert timeout_for("99999") == 1800
+
+
+def test_wo143_paper_cycle_job_wiring_and_loop_position():
+    script = (ROOT / "scripts" / "run_vps_ops_scheduler.sh").read_text(encoding="utf-8")
+    assert (
+        'timeout "$PAPER_CYCLE_TIMEOUT" python -m polymarket_predictive_engine.cli scheduled-paper-cycle '
+        '--config "$CONFIG_PATH" --paper-source websocket'
+        in script
+    )
+    assert 'wait_with_safety_pulses "$JOB_PID" paper_cycle' in script
+    assert 'PAPER_CYCLE_STARTED_AT=$(date' in script
+    assert '"$PAPER_CYCLE_STARTED_AT"' in script
+    # The SIGTERM handler installed by scheduled_paper_cycle.py must be
+    # allowed to unwind the prediction_cycle lock cleanly -- `timeout -k`
+    # would defeat that with a follow-up SIGKILL. No job in this script uses it.
+    assert "timeout -k" not in script
+    loop_body = script.split("while :; do", 1)[1]
+    assert loop_body.index("run_trade_prints") < loop_body.index("run_paper_cycle_job") < loop_body.index("run_ledger_anchor")
+
+
+def test_wo143_paper_cycle_failure_accounting_sequence(tmp_path):
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    script = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
+    env = {
+        **os.environ,
+        "OPS_SCHEDULER_LIBRARY_ONLY": "1",
+        "OPS_SCHEDULER_OUT_DIR": str(out_dir),
+    }
+
+    subprocess.run(
+        ["sh", "-c", '. "$1"; stamp_status paper_cycle 75 "lock contention" "2026-07-15T00:00:00Z"', "sh", str(script)],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    job = json.loads((out_dir / "status.json").read_text(encoding="utf-8"))["jobs"]["paper_cycle"]
+    assert job["last_success_utc"] == ""
+    assert isinstance(job["duration_seconds"], (int, float))
+
+    subprocess.run(
+        ["sh", "-c", '. "$1"; stamp_status paper_cycle 0 "ran" "2026-07-15T00:05:00Z"', "sh", str(script)],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    job = json.loads((out_dir / "status.json").read_text(encoding="utf-8"))["jobs"]["paper_cycle"]
+    assert job["last_success_utc"]
+
+    subprocess.run(
+        ["sh", "-c", '. "$1"; stamp_status paper_cycle 124 "overrun" "2026-07-15T00:10:00Z"', "sh", str(script)],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    job = json.loads((out_dir / "status.json").read_text(encoding="utf-8"))["jobs"]["paper_cycle"]
+    assert job["skip_kind"] == "overrun"
+
+
+def test_wo143_paper_cycle_disabled_records_intentional_skip(tmp_path):
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    script = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
+    env = {
+        **os.environ,
+        "OPS_SCHEDULER_LIBRARY_ONLY": "1",
+        "OPS_SCHEDULER_OUT_DIR": str(out_dir),
+        "OPS_PAPER_CYCLE_ENABLED": "0",
+    }
+
+    result = subprocess.run(
+        ["sh", "-c", '. "$1"; run_paper_cycle_job', "sh", str(script)],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    job = json.loads((out_dir / "status.json").read_text(encoding="utf-8"))["jobs"]["paper_cycle"]
+    assert job["last_exit_code"] == 0
+    assert job["skip_kind"] == "intentional"
+    assert job["skipped_intentional"] is True
+    assert "disabled" in job["detail"]
+    # An intentional skip refreshes the success stamp so the quiesced job
+    # never trips the scheduler_completion_freshness SLO.
+    assert job["last_success_utc"]
+
+
 def test_wo118_disabled_superbru_watchdog_cannot_reach_the_submitting_loop():
     # WO-118: this is the only script that takes an external action (submitting
     # picks). The disabled branch must terminate explicitly - if `tail` ever

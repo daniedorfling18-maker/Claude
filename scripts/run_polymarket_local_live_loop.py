@@ -45,6 +45,7 @@ from polymarket_predictive_engine.price_action_scout import build_price_action_s
 from polymarket_predictive_engine.profit_target import write_profit_target_tracker  # noqa: E402
 from polymarket_predictive_engine.refresh_governance import refresh_governance  # noqa: E402
 from polymarket_predictive_engine.resolution_collector import fetch_gamma_market  # noqa: E402
+from polymarket_predictive_engine import runtime_lock as runtime_lock_module  # noqa: E402
 from polymarket_predictive_engine.runtime_lock import runtime_lock, runtime_lock_path  # noqa: E402
 from polymarket_predictive_engine.shadow_cohort import update_shadow_cohort_evidence  # noqa: E402
 from polymarket_predictive_engine.storage import connect_db  # noqa: E402
@@ -796,6 +797,29 @@ def _clear_orphaned_same_process_prediction_lock(cfg, prediction_future: Future[
         return {"status": "foreign_or_malformed_lock", "pid": payload.get("pid", "")}
     if lock_pid != os.getpid():
         return {"status": "owned_by_other_process", "pid": lock_pid}
+    # WO-143.6 (amended 2026-08-01, now unconditional): PID namespaces are
+    # per-container and the lock file lives on the shared ./outputs mount, so
+    # a PID collision between this container and another writer (e.g. the
+    # WO-143 scheduled scoring-only cycle, which acquires the same
+    # `prediction_cycle` lock from a different container) would otherwise let
+    # this clearer delete a lock it does not own. `runtime_lock.acquire`
+    # stamps every payload with `process_started_at_utc`
+    # (runtime_lock.py:133); a genuinely orphaned same-PID lock from a PRIOR
+    # process of THIS container always carries THIS process's own stamp, so
+    # requiring an exact match costs that case nothing while closing the
+    # cross-container collision. A previous-process same-PID orphan is
+    # already reclaimed at acquisition time by
+    # `_same_pid_lock_predates_current_process` (runtime_lock.py:66-86),
+    # which is the mechanism that actually owns that case.
+    lock_process_started_at = payload.get("process_started_at_utc")
+    if not lock_process_started_at:
+        return {"status": "missing_process_started_at", "pid": lock_pid}
+    if lock_process_started_at != runtime_lock_module._PROCESS_STARTED_AT_UTC:
+        return {
+            "status": "foreign_process_started_at",
+            "pid": lock_pid,
+            "lock_process_started_at_utc": lock_process_started_at,
+        }
     try:
         path.unlink()
     except FileNotFoundError:

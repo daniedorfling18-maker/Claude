@@ -6900,3 +6900,91 @@ non-zero on at least one row of `mispricing_alpha_scores.csv` with
 `rows_missing_rolling_volatility` recorded; `trade_candidates` is <= the
 pre-deploy value. If `trade_candidates` rises, the tighten-only claim is
 falsified and the change is reverted, not tuned.
+
+
+## WO-144 — One degraded episode must notify once, not every cycle — `queued` (registered 2026-08-01 BEFORE dispatch; watchdog notification surface → owner merge after line-audit; defect fix on the merged WO-129 build)
+
+**Incident (measured).** Overnight 2026-07-31→08-01 the owner's phone received
+an `operating_state_slo_breach` ntfy push roughly every 5 minutes (the
+watchdog cadence); the incident ledger shows 39 `operating_state_slo`
+incident-open events in 12.5 hours, every one with a distinct `incident_id`,
+`consecutive_degraded_observations: 1`, and `detected_at_utc` equal to the
+current cycle. False-alarm storms are how real alarms get ignored — the
+WO-138 round-3 correction said exactly this, and the same defect class
+shipped anyway.
+
+**Root cause (verified by direct read).** `_incident_id(registration_id,
+entity, episode_start)` (`degraded_state_watchdog.py:309-311`) is stable only
+if `episode_start` is stable, but the operating-state SLO evaluator passes
+`episode_start=token` (`:1029-1030`) where `token` is the CURRENT
+observation token — the operating-state artifact's timestamp, which
+refreshes every cycle. A persisting breach is therefore re-identified as a
+brand-new incident each cycle; the prior id vanishes from the rebuilt
+incident set; `state_changed` reads true; the state-change-gated notifier
+(`:1271, :1338`) pushes every cycle. The underlying breach itself
+(`scheduler_overrun_cycles`, ceiling 0) flaps nightly while the training
+harvest legitimately overruns under the measured-slow upstream — flapping is
+expected; the storm is the defect.
+
+144.1 — **stable episode identity.** For every evaluator that opens
+incidents, the identity anchor must be the FIRST breach observation of the
+contiguous degraded episode, persisted in the watchdog state file keyed by
+`(registration_id, entity)`, reused while the entity stays degraded, and
+cleared only when the entity observes healthy (which ends the episode). The
+`slo_first_unobserved` state pattern (`:1009-1022`) is the in-file precedent
+to follow. Sweep ALL evaluators, not just the SLO one: any call site passing
+a per-cycle-varying value as `episode_start` (audit each of the `_incident(`
+call sites) is the same bug; fix each or record in the PR why its token is
+already episode-stable (e.g. a last-success stamp that cannot change while
+the job is failing).
+
+144.2 — **per-entity push cooldown.** Even with stable identity, a flapping
+condition legitimately starts new episodes (breach → healthy → breach), and
+a nightly flapping window must not page more than once. Add a per
+`(registration_id, entity)` notification cooldown persisted in the state
+file: after a push for an entity, further pushes for that entity are
+suppressed until a fixed floor elapses — 3600 seconds, fixed in code;
+configuration may make the cooldown SHORTER (more pushes), never longer, so
+the config surface cannot silence the channel. Fidelity guarantee: the
+incident artifact, ledger CSV, and notification body file record every event
+exactly as today — only the ntfy push channel is rate-bounded. A suppressed
+push is recorded in the notification block (`pushes_suppressed_by_cooldown`
+count and `next_eligible_push_utc`), so the suppression itself is visible
+evidence, not silence.
+
+**Explicitly out of scope:** the `scheduler_overrun_cycles` SLO ceiling (0)
+and every other threshold — the nightly-harvest-overrun calibration question
+is the owner's, recorded here as observed context only. No registration is
+added or removed; no incident-opening logic changes beyond identity
+anchoring; the WO-129 retry-debt mechanics for failed sends are untouched.
+
+**Fail-safe sentence.** Nothing here suppresses, delays, or drops an
+incident from the artifact or ledger; nothing marks a market measured or
+touches any M-gate, threshold, or eligibility surface; the push cooldown can
+only reduce notification frequency, its floor is fixed in code, and
+suppression is always itself recorded. When the state file is absent or
+malformed, identity anchoring falls back to today's behaviour (noisy, never
+blind) and the cooldown treats the entity as never-notified (pushes
+immediately).
+
+**Tests (enumerated).** (1) a breach persisting across three cycles yields
+ONE incident id, ONE push, and three ledger observations with
+`consecutive_degraded_observations` incrementing; (2) the episode id is
+reused while degraded and a NEW id is minted only after an intervening
+healthy observation; (3) a flapping entity (breach/healthy/breach within the
+cooldown) pushes once and records the suppression fields; (4) after the
+cooldown elapses, the next new episode pushes again; (5) a DIFFERENT entity
+breaching during another entity's cooldown pushes immediately (cooldown is
+per-entity, never global); (6) absent/malformed state file: identity falls
+back per-cycle (today's behaviour) and the cooldown does not raise; (7) the
+sweep test: for every evaluator, a synthetic persisting condition observed
+across two cycles produces identical incident ids (this is the regression
+that pins 144.1 across ALL call sites); (8) ledger/artifact fidelity: with
+the cooldown active, the ledger row count for a flapping entity equals
+today's count exactly.
+
+**Day-after check:** the owner's ntfy history shows at most one
+`operating_state_slo_breach` push per hour-long flapping window overnight,
+while the incident ledger for the same window still records every
+open/observation; the notification block shows nonzero
+`pushes_suppressed_by_cooldown` during the harvest window.

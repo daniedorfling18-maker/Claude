@@ -7140,7 +7140,8 @@ no change to `features_v2.py`, `mispricing_alpha.py`, `strategy.py`,
 `readiness.py`, `risk.py`, `shadow_cohort.py`, `paper_broker.py`,
 `runtime_lock.py`, or `docker-compose.vps-paper.yml`.
 
-**Touch ONLY these files** (`git diff --stat` must show exactly these eight):
+**Touch ONLY these files** (`git diff --stat` must show exactly these ten —
+count corrected 2026-08-01; §143.6 added the ninth and tenth):
 - NEW `src/polymarket_predictive_engine/scheduled_paper_cycle.py`
 - `src/polymarket_predictive_engine/paper_cycle.py` (one keyword-only `scope` parameter; `scope="full"` behaviour byte-identical)
 - `src/polymarket_predictive_engine/cli.py` (one command, one import, one dispatch branch)
@@ -7149,6 +7150,8 @@ no change to `features_v2.py`, `mispricing_alpha.py`, `strategy.py`,
 - NEW `tests/polymarket_predictive_engine/test_scheduled_paper_cycle.py`
 - `tests/polymarket_predictive_engine/test_degraded_state_watchdog.py` (extend)
 - `tests/test_polymarket_vps_docker.py` (extend)
+- `scripts/run_polymarket_local_live_loop.py` (§143.6 lock-clearer tightening)
+- `tests/polymarket_predictive_engine/test_local_live_loop.py` (§143.6 tests)
 
 Do NOT touch `docker-compose.vps-paper.yml` (the scheduler service already
 loads `env_file: .env`, so `OPS_PAPER_CYCLE_*` overrides reach the container;
@@ -7513,15 +7516,27 @@ artifact. Today those two literals are set only inside the
 artifact — the success path, the `trading_mode` block, and the
 feature/model-load block — omits them. Add both to the initial `report` dict
 at construction so every writing path carries them, leaving the lock-skip
-branch's explicit re-statement in place. The 22-key scheduler receipt already
+branch's explicit re-statement in place.
+
+**Registered exception to §143.1 (added 2026-08-01 after review).** That dict is
+shared by BOTH scopes, and `write_json` sorts keys, so this addition also puts
+two new keys into `forward_paper_cycle.json` on every full-scope path — which
+§143.1's "byte-identical on every path" clause otherwise forbids. The two
+requirements cannot both hold literally. **`AGENTS.md` L131-135 wins**, and
+§143.1 is hereby amended to read "byte-identical except for the two invocation
+flags, which every artifact must carry." The build must not resolve this by
+skipping the flags on the full path. The 22-key scheduler receipt already
 carries both; that is a different artifact and does not discharge this
 requirement.
 
 **(b) A zero-prediction cycle must not be classified as success.**
 `scheduled_paper_cycle.py` classifies on `has_predictions = "predictions" in
 report` — a KEY-PRESENCE test. `build_features_v2` reads its inputs through
-`read_csv_rows`, which returns `[]` for a missing, empty, or malformed
-`websocket_market_features.csv` rather than raising, so `predictions` is `0`,
+`read_csv_rows`, which returns `[]` for a missing or empty
+`websocket_market_features.csv` rather than raising (a MALFORMED file is a
+separate case: `csv.DictReader` with `errors="replace"` yields garbage-keyed
+rows rather than an empty list, and must be handled as its own input class),
+so `predictions` is `0`,
 the key is present, and the run is classified `ran`/`blocked_readiness` at
 exit 0. `apply_mispricing_alpha` compounds it: line 554 is its ONLY early
 return between the overlay-enabled check and the live-summary write at :1068,
@@ -7530,9 +7545,27 @@ and `overlay_refreshed` reads true. The job therefore refreshes
 `last_success_utc` while the scoring lane has no current observations — the
 same fail-open class as the odds-preflight "intentional skip" (OPS-5).
 Require a POSITIVE prediction count for the `ran`/`blocked_readiness`
-classifications, and validate the websocket observation age against a
-registered ceiling before classifying completion; otherwise classify
-`blocked_inputs` at exit 1.
+classifications, and validate the websocket observation age before classifying
+completion; otherwise classify `blocked_inputs` at exit 1.
+
+**The ceiling, named (owner decision 2026-08-01).** Register a NEW setting
+`scheduled_paper_cycle.max_websocket_observation_age_seconds`, **default
+1800**, tighten-only via config. Basis: 6x the 300s `websocket_max_gap_seconds`
+reporting target, and well inside the job's 4h default cadence. The build must
+NOT reuse `operating_state_slos.websocket_max_gap_seconds` —
+`REGISTERED_SLO_TARGETS` (`operating_state.py:44-52`) is annotated "never read
+by a gate, broker, sizing rule, or order path", so wiring it in would make a
+reporting-only block gate-bearing. It must NOT reuse
+`mispricing_alpha.max_websocket_quote_enrichment_age_seconds` either — that
+bounds per-row quote/prediction pairing (`mispricing_alpha.py:363`), not feed
+freshness, and is unset in config.
+
+**Fail-closed on bad inputs (added after review).** The age comparison is the
+repo's known fail-open shape: `safe_float("nan")` returns NaN
+(`utils.py:373-379`) and `nan > ceiling` is `False`, so a corrupt timestamp
+would classify as FRESH — the exact hole this item exists to close. A missing,
+empty, unparseable, or **non-finite** observation timestamp classifies
+`blocked_inputs` at exit 1, never fresh. One test per input class.
 
 **(c) Detect the disabled overlay BEFORE signals are published.**
 `_run_paper_cycle_unlocked` runs `generate_signals` unconditionally — it is
@@ -7541,9 +7574,15 @@ not skipped under `scoring_only` — and `generate_signals` writes
 false, `apply_mispricing_alpha` returns at :554 without writing the summary,
 so the wrapper only learns the overlay was disabled AFTER the signal file is
 already on disk, and its exit 1 cannot retract it. With the overlay absent
-`generate_signals` also stops applying several alpha-dependent gates, so the
-published rows can include raw `predictive_directional` candidates that the
-live container's broker subsequently fills. Everything remains paper — no
+`generate_signals` drops THREE named alpha-dependent gates, so the published
+rows can include raw `predictive_directional` candidates that the live
+container's broker subsequently fills: `alpha_edge` is None (no
+`edge_lower_bound` column from `write_predictions`) so the alpha-candidate
+rejection at `strategy.py:426-438` cannot fire; `require_same_category_labels`
+(`:221-224`) and `require_positive_cohort` (`:228-230`) are both
+`alpha_enabled and ...` -> False, disabling the gates at `:456-470` and
+`:471-485`. Only `risk_decision` survives, and rows are stamped
+`"predictive_directional"` at `:303`. Everything remains paper — no
 live path exists or is added — but this is a scheduled job publishing signals
 past gates that would otherwise have rejected them, which the "do not loosen
 ... controls to manufacture activity" rule forbids. Detect the
@@ -7619,7 +7658,16 @@ run.
   `VPS_OPS_MEM_LIMIT`. Stays prose until the number exists.
 
 
-## WO-143b — Serialise the shadow-cohort writer against the live tick path — `queued` (registered 2026-08-01 BEFORE dispatch; pre-existing defect surfaced by the WO-143 draft; shadow ledger is anchor-enrolled → OWNER MERGE after line-audit)
+## WO-143b — Serialise the shadow-cohort writer against the live tick path — `queued` (registered 2026-08-01 09:12 UTC; **the first build branch was cut at 09:06 UTC, BEFORE that registration merged — registration-before-dispatch was NOT satisfied for the initial dispatch**, corrected 2026-08-01 by independent review; shadow ledger is anchor-enrolled → OWNER MERGE after line-audit)
+
+**Provenance correction (2026-08-01).** This header previously read "registered
+2026-08-01 BEFORE dispatch". That claim is **not supported** and is retracted.
+`claude/wo143b-shadow-lock` was created at 09:06:05Z from `ab16ee9`; `51ffb42`,
+the commit registering this WO, merged at 09:12:15Z — 6m10s later. At `ab16ee9`
+the only mention of WO-143b in this document is a single line under *"Named
+follow-ons, NOT built here"*, carrying no scope, no fail-safe sentence and no
+test list. The branch therefore requires a rebase onto a `main` containing its
+own registration, for the same reason PR #417 did.
 
 **The defect exists today, independent of WO-143.**
 `update_shadow_cohort_evidence` states its own contract in its docstring
@@ -7645,7 +7693,14 @@ workaround for this defect, and it is the reason WO-143 cannot restore the
 full cycle's forwarding of longshot candidates into the shadow updater.
 Fixing this unblocks that.
 
-**Scope.** File: `src/polymarket_predictive_engine/shadow_cohort.py` and its
+**Scope.** *(Amended 2026-08-01 — see §143b.1. The original single-file scope
+below is SUPERSEDED: F4's caller-honesty contract requires edits at five call
+sites across four further files, three of them under `scripts/`, and F1's
+reversal adds a settlement wall-clock budget. The authoritative touched-file
+list for a line audit is §143b.1's, not this paragraph's. In particular the
+sentence "Do NOT ... touch either caller" below no longer holds.)*
+
+File: `src/polymarket_predictive_engine/shadow_cohort.py` and its
 tests. Give `update_shadow_cohort_evidence` its OWN internal lock
 (`shadow_cohort`, distinct from `prediction_cycle` so the non-reentrancy
 note stays true and no caller deadlocks), acquired at entry and released at
@@ -7680,21 +7735,81 @@ the live tick path with no `blocked_broken_chain` from `anchor_ledgers`, and
 any `skipped_shadow_lock_held` occurrences appear in the cycle artifacts
 rather than as silent gaps.
 
+## RULING — what "registered" means (2026-08-01, binding on every future WO)
+
+Independent review found that I was applying two different definitions: I
+acquitted PR #417 using *merged to `main`*, while the dispatches made against
+`f64416e` (PR #418, unmerged) relied on *present in my branch*. Both cannot be
+right, and the looser one makes the rule unenforceable.
+
+**Ruling: "registered" means the registering commit is merged to `main`, and the
+build branch was cut after that merge.** Machine-checkable at dispatch time:
+
+```
+git merge-base --is-ancestor <registering-commit> origin/main   # must pass
+<build-branch creation time>  >  <registering-commit merge time> # must hold
+```
+
+Consequences accepted rather than quietly avoided:
+- PR #416's initial dispatch was pre-registration (branch 09:06:05Z,
+  registration merged 09:12:15Z). Recorded in the WO-143b header above.
+- The two fix-round dispatches made on 2026-08-01 against unmerged `f64416e`
+  were ALSO premature under this ruling. Both builds are held until #418
+  merges, and both branches rebase onto the resulting `main` before resuming.
+- Going forward the check is run and its result recorded at every dispatch.
+
 ### 143b.1 — Review-round amendment (registered 2026-08-01, BEFORE the fix dispatch)
 
 Codex's review of PR #416 raised four findings. Each was re-verified against
 the code by the orchestrator before being registered here.
 
-**F1 — settlement reclaiming the lock while a writer is active (P1): NOT
-REACHABLE under shipped defaults; recorded, not scheduled.** The concern is
-real in shape — `runtime_lock`'s stale-reclaim timeout defaults to 1800s, so
-a writer slower than that would have its lock reclaimed underneath it. The
-measured worst case does not reach it: `settlement_max_positions_per_cycle:
-25` and `settlement_request_timeout_seconds: 20` (config lines 1311-1312)
-bound a fully-timing-out settlement pass at ~500s, a 3.6x margin. The finding
-becomes reachable only under a hand-raised config. No change is registered;
-if either value is ever raised, this note is the reason to revisit the
-`shadow_cohort` lock's stale window in the same change.
+**F1 — settlement reclaiming the lock while a writer is active (P1):
+REACHABLE under shipped defaults. REVERSED 2026-08-01 by independent review;
+this item IS scheduled.**
+
+The original dismissal is retracted. It bounded a fully-timing-out settlement
+pass at `settlement_max_positions_per_cycle: 25` x
+`settlement_request_timeout_seconds: 20` = ~500s against the 1800s stale
+window and called that a 3.6x margin. **That assumed one HTTP request per
+position.** `shadow_cohort.py:494-522` issues up to three:
+
+- crypto path — `shadow_cohort.py:504` reaches
+  `crypto_updown_settlement.py:249`, which loops over TWO providers, each in
+  its own `try/except` so both are attempted, each an
+  `urlopen(..., timeout=timeout_seconds)` (`:175`, `:215`). Worst case 2x20 =
+  40s/position -> 25x40 = **1000s**.
+- non-crypto path — `shadow_cohort.py:509` `_fetch_resolution_market` calls
+  `fetch_gamma_market` (`resolution_collector.py:49`, 20s) then
+  `_public_search_market_by_slug` (`shadow_cohort.py:410-433`), which iterates
+  2 unique queries at 20s each -> 3x20 = 60s/position -> 25x60 = **1500s
+  against the 1800s window, a 1.2x margin.**
+
+The bound is also wrong **in kind**: `urllib.request.urlopen(timeout=N)` is a
+per-socket-operation timeout, not a total deadline, so `response.read()`
+against a trickling server never trips it and a single call is unbounded in
+wall-clock terms. The WO-143b lock wraps the WHOLE function, not just
+`_settle_due_positions`, so the read/rewrite of the anchor-enrolled ledgers is
+inside the protected region, and it passes no `stale_after_seconds`, taking
+`runtime_lock.py:203`'s 1800.0 default.
+
+Failure scenario: one degraded Gamma/Binance day, 25 due positions at ~55s
+each, the pass exceeds 1800s, a second writer reclaims the lock.
+`shadow_positions.csv` is a full `write_csv` rewrite from a stale in-memory
+snapshot (lost update) and both writers append `SELL_SHADOW` rows to the
+append-only, anchor-enrolled `shadow_fills.csv` — precisely the re-genesis
+harm WO-143b exists to prevent.
+
+**Scope for this item.** Pass an explicit `stale_after_seconds` to the
+`shadow_cohort` lock, set provably larger than a BUDGETED settlement pass, and
+impose a monotonic wall-clock budget on the `_settle_due_positions` loop so the
+pass abandons remaining positions (returning a partial status, fail-closed)
+rather than running past its own lock's stale window. Budget and stale window
+are registered together so the relationship is auditable; neither is derived
+from the other at runtime.
+
+Citation correction: config line 1311 is `settlement_request_timeout_seconds:
+20`; line 1312 is `settlement_max_positions_per_cycle: 25`. The original text
+transposed them.
 
 **F2 — the obsolete structural test (P2): CONFIRMED.**
 `tests/polymarket_predictive_engine/test_shadow_cohort.py:127`
@@ -7707,6 +7822,19 @@ retired. Retarget it: the invariant worth keeping is that no caller performs
 an UNGUARDED write, and the internal `shadow_cohort` lock is now one of the
 accepted guards. Do not simply delete it — that scan is the only structural
 defence against a future unguarded caller.
+
+**Widen the scan root too (added 2026-08-01 after review).** The scan currently
+roots at `Path("src")` (`test_shadow_cohort.py:162` on `b3ecf0b`) — which is
+exactly WHY it never caught `scripts/run_polymarket_local_live_loop.py:723`,
+the unguarded call that motivated this entire work order. **Three of the five
+call sites in F4's list live under `scripts/` and would stay invisible after a
+retarget alone.** `Path("src")` is also CWD-relative, so it silently covers
+zero files if pytest runs from elsewhere — the same hermeticity family as F3.
+Root the scan at `Path(__file__).resolve().parents[2]` over BOTH `src/` and
+`scripts/`, and assert the scan visited a non-zero file count.
+
+Citation note: `test_shadow_cohort.py:127` resolves to the test definition on
+`b3ecf0b` (PR #416's head); on `main` the same def is at line 118.
 
 **F3 — test hermeticity (P2): CONFIRMED.** The byte-identity regression test
 (WO-143b test 1) resolves its baseline through git object `ab16ee9` and
@@ -7727,10 +7855,20 @@ instance, so the contract is registered once, here, for all callers.
 
 **The caller-honesty contract.** A caller that reports how many candidates
 reached the shadow updater MUST derive that number from the update's outcome,
-not from the size of what it passed in. Concretely: when the returned status
-is any `skipped_*` value, the reported forwarded count is `0`, and the
-caller's artifact additionally carries the returned status verbatim so the
-skip is visible rather than inferred from a zero. Call sites in scope, all
+not from the size of what it passed in. Concretely: **when the update is
+skipped — whether because the callee returned a `skipped_*` status OR because
+the caller elected not to call it at all** — the reported forwarded count is
+`0`, and the caller's artifact additionally carries the skip status verbatim so
+the skip is visible rather than inferred from a zero.
+
+**Wording corrected 2026-08-01 after review.** The original said only "when the
+returned status is any `skipped_*` value". That antecedent is never satisfied on
+the very path §143.7(f) targets: under `scoring_only`,
+`update_shadow_cohort_evidence` is NEVER CALLED and
+`{"status": "skipped_scoring_only"}` is synthesized locally, so there is no
+returned status and a literal implementation would leave
+`shadow_candidates_forwarded` at the full input count — the exact defect (f)
+exists to fix. Call sites in scope, all
 verified present at registration:
 
 - `src/polymarket_predictive_engine/paper_cycle.py:183` (`main`) — the
@@ -7767,3 +7905,67 @@ assert explicitly that it did not skip.
 cycle artifacts is accompanied by `shadow_candidates_forwarded: 0` in the
 same artifact, and `shadow_fills.csv` row growth continues to match the
 uncontended forward counts.
+
+
+## WO-145 — Trigger the VPS deploy from GitHub Actions instead of a laptop — `queued` (owner-requested 2026-08-01; registered BEFORE dispatch; workflow + secrets surface → OWNER MERGE after line-audit; no gate, threshold, or attestation change)
+
+**The requirement.** The owner should not need a laptop shell to deploy. Taking
+this apart, the laptop dependency and the attestation deadlock are **two
+separate problems**, and only one of them is a governance question. This WO
+solves only the first.
+
+**Scope (the mechanical half).** `scripts/deploy_vps_paper_manual.sh` (Path B)
+already performs the full guarded deploy correctly: preflight capacity check,
+private-transport proof BEFORE quiescing, `.env` and marker backup at mode
+0600, `docker image tag` of the running image as `rollback-last-known-good`,
+checkout update preserving runtime state, **markers written before container
+recreation**, `--profile deploy-acceptance` with the scheduler stopped,
+`check_polymarket_vps_paper.sh`, and `rollback_vps_paper_deploy.py` on any
+failure past the arming boundary. It needs only a shell on the VPS.
+
+Add `.github/workflows/deploy_vps_paper_dispatch.yml`: a `workflow_dispatch`
+job that opens an SSH session to the VPS, runs that same script inside `tmux`
+(so a dropped connection cannot leave a half-recreated container — the failure
+mode already observed on a manual run), and streams the log back as run output.
+
+**What must NOT change.** The run records exactly what Path B records today,
+including `attestation_verified: false` naming the unprovable check. A robot
+pressing the button does not upgrade an attestation. No gate, threshold,
+eligibility rule, or funding value moves. No live order path is added.
+
+**Owner-provisioned, never agent-handled:** an Actions secret holding a deploy
+key, and the VPS host key pinned in the workflow. I do not create, read, or
+transport credentials.
+
+**NOT in this WO — the governance half (owner decision).** Path A stays blocked
+for a structural reason: `merge_independently_reviewed_pr.py` requires an
+`APPROVED` review from `COLLABORATOR`/`MEMBER`/`OWNER` excluding both the PR
+author and the repository owner. In a single-owner repository with agent
+authors **no eligible reviewer can exist** — a deadlock, not a missing step.
+Two honest exits, both the owner's: (a) add a second human collaborator, which
+makes Path A work as designed; or (b) register an amendment permitting an
+independent ARM64 machine acceptance run in Actions to bind the SHA in place of
+a human approval. (b) is defensible only if the original intent was "someone
+other than the author attests this SHA passed"; it changes what an attestation
+means, so it is not adopted silently.
+
+**Fail-safe sentence.** Nothing here marks a market measured, changes any
+M-A/M-B/M-C or `maker_min_*` threshold, opens or enables any order path, or
+upgrades any attestation; the only change is WHERE the deploy is triggered
+from, and a failed workflow leaves the VPS on its previous image via the
+existing rollback path.
+
+**Tests (enumerated).** (1) the workflow refuses to run when the target SHA is
+not the freshly fetched `origin/main` tip, matching the script's existing
+refusal; (2) a simulated post-arming failure invokes
+`rollback_vps_paper_deploy.py` and the job exits nonzero; (3) the emitted
+`outputs/performance/vps_manual_deploy.json` still carries
+`attestation_verified: false` and names the unprovable check; (4) no secret
+value appears in the workflow log (assert against the streamed output); (5) the
+guard ordering is unchanged — transport proof before quiesce, markers before
+container recreation.
+
+**Day-after check:** a dispatch-triggered deploy produces a
+`vps_manual_deploy.json` byte-comparable to a laptop-triggered one except for
+the trigger-provenance field, and `source_vs_deployed_sha` reads `ALIGNED`
+afterwards.

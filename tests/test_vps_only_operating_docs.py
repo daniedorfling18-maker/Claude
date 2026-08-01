@@ -125,3 +125,38 @@ def test_maker_module_does_not_write_owner_authorization_claims() -> None:
 
     assert "authorization = owner merge" not in source
     assert "owner merge of this frozen-surface PR" not in source
+
+
+def test_wo132_register_headings_carry_auditable_pr_attribution() -> None:
+    # WO-132. GitHub's squash-merge record names the PR that landed, but never
+    # who clicked merge - so a register heading that claims WHO merged a PR is
+    # an unprovable, agent-written authorization claim. A completed ("done"/
+    # "DONE") heading may cite the PR number; it may never name an actor.
+    work_orders = _text("docs/POLYMARKET_CODEX_WORK_ORDERS.md")
+
+    headings = [line for line in work_orders.splitlines() if line.startswith("## WO-")]
+    assert headings, "expected at least one work-order heading"
+
+    banned_phrases = ("owner merged", "merged by the owner", "orchestrator merged")
+    for heading in headings:
+        lowered = heading.lower()
+        for phrase in banned_phrases:
+            assert phrase not in lowered, heading
+
+    for heading in headings:
+        if "done (" in heading:
+            assert "PR #" in heading, heading
+
+
+def test_wo132_unresolved_review_threads_block_merge() -> None:
+    # WO-132. 49 unresolved inline review threads sat on green, already-merged
+    # PRs - proving the required gate answers "did the tests pass", not "was
+    # review answered". This is now a standing merge precondition, not just a
+    # one-time triage note.
+    agents = _text("AGENTS.md")
+
+    assert "Amendment, 2026-08-01 — unresolved review threads block merge" in agents
+    assert "must not be merged" in agents
+    assert "counts as UNRESOLVED and blocks merge" in agents
+    assert "demonstrably superseded" in agents
+    assert "does not replace the required PR gate" in agents

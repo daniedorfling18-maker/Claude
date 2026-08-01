@@ -4369,7 +4369,7 @@ recorded here. Roster discipline: keep it at five unless a registered need
 demands more — every extra autonomous lane adds noise and surface (the
 external audit's own warning).
 
-## WO-106 — Reward-epoch time-series collector (DONE 2026-07-19; Codex-built, orchestrator-merged PR #265)
+## WO-106 — Reward-epoch time-series collector (DONE 2026-07-19; PR #265)
 
 Landed through issue #264 and this repository's normal review process
 (registered spec -> Codex build with isolated-VPS-checkout validation via signed git bundle, production
@@ -4482,10 +4482,23 @@ Do NOT: touch any gate (`maker_carry_study.py` gate logic, M-A/M-B/M-C),
 any order path. Do NOT build the realism consumer or change the study's reward
 estimate — that is a separate future WO that depends on this data existing.
 
-## WO-111 — Persist per-day portfolio membership + per-market markout in a NEW anchor-safe sidecar ledger (PROPOSAL; rev.2 anchor-safe; forward-only telemetry hardening)
+## WO-111 — Persist per-day portfolio membership + per-market markout in a NEW anchor-safe sidecar ledger — `done` (2026-07-20, PR #341)
+
+**Register-correction note (2026-08-01).** Ground truth from the merge
+history: the sidecar shipped in PR #341 (commit `e34ccb1`, 2026-07-20) and has
+been live in `maker_carry_study.py` ever since, touched again by the
+WO-118/119/120 lineage (PR #358, whose commit message references "the WO-111
+members sidecar" as already existing). `maker_carry_portfolio_members.csv` is
+enrolled `append_only` in `ledger_anchor.py`'s `DEFAULT_LEDGER_REGISTRY` and in
+`polymarket_predictive_config.example.yaml`, and is read by
+`maker_carry_study.py` today. The heading above is corrected from PROPOSAL to
+`done` with PR attribution and no actor claim. The **"PROPOSAL — NOT authorized
+to build"** paragraph immediately below is the original rev.2 registration
+record, kept for history; it no longer describes the current authorization
+state.
 
 Priority: MEDIUM — auditability / anti-regression, not funding-gating.
-Authorization status: **PROPOSAL — NOT authorized to build.** This is a
+Authorization status (historical, as originally registered): **PROPOSAL — NOT authorized to build.** This is a
 registered/control surface (it enrolls a new anchor-enrolled ledger glob and
 sits in the maker-gate module). Per the repository rule, authorization for a
 registered surface exists ONLY through an owner-authored commit or the owner's
@@ -4662,7 +4675,7 @@ Full suite 1361. Day-after check (VPS): after the next export + anchor,
 fallback if float formatting drifted = restore per the 2026-07-13 incident
 pattern from a retained archive.
 
-## WO-108 — NaN fail-open residuals in WO-50 policy/kill surfaces (DONE 2026-07-19; PR #267, FROZEN; tighten-only; owner-merged)
+## WO-108 — NaN fail-open residuals in WO-50 policy/kill surfaces (DONE 2026-07-19; PR #267, FROZEN; tighten-only)
 
 Origin: the owner's LOCAL 5-agent audit (2026-07-19) drafted a NaN fail-closed
 WO grounded against main@9ab58fd (pre-#263). Orchestrator adjudication against
@@ -4689,7 +4702,7 @@ trigger; NaN cumulative reports missing; NaN row drops from observations; NaN
 capital drops from returns). Full suite 1360. Merged as frozen-surface PR #267.
 Companion governance-doc draft (provisional WO-109) remains unregistered.
 
-## WO-107 — M-B.1: require the portfolio market's own Tier-0 coverage (DONE 2026-07-19; PR #262, FROZEN M-B; tighten-only; owner-merged)
+## WO-107 — M-B.1: require the portfolio market's own Tier-0 coverage (DONE 2026-07-19; PR #262, FROZEN M-B; tighten-only)
 
 External-audit item 7: M-B could pass on a data-api-print markout estimate with
 zero Tier-0 last-in-queue coverage (observed adverse ran 2.08x the estimate).
@@ -4708,7 +4721,7 @@ freshness stay enforced downstream by the WO-105 evaluator, so this is
 defence-in-depth, not the sole guard. Constants mirror the evaluator's §2 and
 are mechanically tighten-only.
 
-The owner merge of PR #262 is the repository authorization record; no
+PR #262's merge is the repository authorization record; no
 agent-authored text is treated as authorization. Tests: 11
 direct-helper cases (sufficient passes; no-replay/low-coverage/stale/missing-
 row/non-official/thin-windows/high-haircut fail closed; every portfolio market
@@ -5351,9 +5364,9 @@ income - completes the income picture without touching gates), **WO-49**
 BLOCKED until the maker gates read evidence-supported. WO-33 remains last
 overall pending the leakage review.
 
-## WO-114 — VPS ops hygiene: seasonal-job disable switch, ops-log rotation, dashboard-setup readiness wait — `done` (2026-07-21, PR #354, owner merge)
+## WO-114 — VPS ops hygiene: seasonal-job disable switch, ops-log rotation, dashboard-setup readiness wait — `done` (2026-07-21, PR #354)
 
-Orchestrator-built, owner-merged. Non-frozen ops scripts only; no gate,
+Orchestrator-built. Non-frozen ops scripts only; no gate,
 threshold, policy, registry, verdict, or order path.
 - `run_vps_ops_scheduler.sh`: `OPS_CARD_REFRESH_ENABLED` (default 1; 0 records
   an intentional exit-0 skip BEFORE the odds preflight — used to quiesce the
@@ -5367,7 +5380,7 @@ Deployed 2026-07-21; verified in production: locked_card_refresh flipped to
 `intentional 0`, both degraded incidents cleared; 190 MB log rotated to `.1`;
 configure script has passed first-try on both subsequent deploys.
 
-## WO-115 — Unbreak ledger anchoring: snapshot-enroll the rewritten carry history, fail loud on blocked chains — `done` (2026-07-26, PR #356 commit 6e04263, owner merge; registered WO-61 surface)
+## WO-115 — Unbreak ledger anchoring: snapshot-enroll the rewritten carry history, fail loud on blocked chains — `done` (2026-07-26, PR #356 commit 6e04263; registered WO-61 surface)
 
 Root cause of the chain freeze at 2026-07-16: `maker_carry/maker_carry_history.csv`
 was enrolled `append_only`, but its committer legitimately REWRITES the file
@@ -5384,14 +5397,14 @@ only visible as the slow `ledger_anchor_age` SLO breach, ~10 days).
 - `anchor-ledgers` CLI: zero-exit allowlist {ok, already_anchored, disabled,
   skipped_locked}; blocked/error/unknown statuses now exit 1 so the
   scheduler_nonzero_exit watchdog fires within one cycle.
-- Chain re-genesis executed by the owner on the VPS 2026-07-26 (fresh genesis
-  approved 2026-07-26): broken chain + head archived to
+- Chain re-genesis executed on the VPS 2026-07-26 (fresh genesis,
+  2026-07-26): broken chain + head archived to
   `outputs/performance/ledger_anchor_retired/20260726T100457Z/` (historical
   anchors 2026-07-12..16 preserved there, on the `vps-anchor` branch, and in
   `ledger_anchor_snapshots/`). New chain verified:
   anchor_date 2026-07-26, chain_head 9fc5ff0a..., previous_chain_head all-zeros.
 
-## WO-116 — Seed official-book collection for top-ranked candidates before selection — `done` (2026-07-26, PR #356 commit 31a3e95, owner merge)
+## WO-116 — Seed official-book collection for top-ranked candidates before selection — `done` (2026-07-26, PR #356 commit 31a3e95)
 
 The WO-113 measurement-eligibility gate is correct, but collection was
 portfolio-only plus the WO-104 mtime tranche (re-polls only markets that
@@ -5403,7 +5416,7 @@ $3.33/day target), stalling M-A at 3/7 against the 2026-08-19 terminal date.
   `maker_carry_candidates.csv` not already in the portfolio/persistent
   tranches, sorted by net_carry_usd_per_day (tiebreak yield_rank), capped by
   new `max_candidate_markets` (code default 20; deployed config 25, matching
-  the 2026-07-19 owner-approved breadth posture). Runs even with an empty
+  the 2026-07-19 configured breadth posture). Runs even with an empty
   portfolio. Seeded files stay warm via the existing mtime tranche and season
   toward eligibility.
 - Collection breadth ONLY: no gate, threshold, eligibility rule, sizing, or
@@ -5411,7 +5424,7 @@ $3.33/day target), stalling M-A at 3/7 against the 2026-08-19 terminal date.
   portfolio-only (coverage_ratio semantics unchanged); snapshot summary now
   reports per-tranche counts.
 
-## WO-117 — Window-aware overrun classification for the harvest-gated maker study — `done` (2026-07-26, PR #356 commit 98f4033, owner merge)
+## WO-117 — Window-aware overrun classification for the harvest-gated maker study — `done` (2026-07-26, PR #356 commit 98f4033)
 
 Telemetry 2026-07-25: the scheduler_overrun_cycles SLO breach (10 consecutive)
 came ENTIRELY from `maker_study_intraday` — every other job's consecutive
@@ -6014,6 +6027,40 @@ Files: `docs/POLYMARKET_CODEX_WORK_ORDERS.md`, `AGENTS.md`.
    dismissals with a stated reason. A thread may be resolved only when it is
    fixed on current `main` or demonstrably superseded; "no longer reachable in
    the diff" is not a reason.
+
+**Register-correction status (recorded 2026-08-01).** This pass re-derived
+every claim below from `git log`/the GitHub API rather than porting any text
+from a prior attempt at this WO.
+
+- **Item 1.** The WO-121/122/124/125/126 entries named above no longer exist
+  under those numbers. Ground truth: the combined branch this item describes
+  was opened as PR #363 ("WO-121/122/124/125/126 combined (violates
+  one-WO-per-PR)") and was closed superseded, never merged. WO-121 was later
+  built and merged standalone as PR #385 (fix round PR #387); WO-122 split
+  into WO-122a (PR #360) and WO-122b (PR #361); WO-123 merged alone as PR
+  #362, exactly as this item already states. WO-124/125/126 were never
+  rebuilt as standalone PRs and carry no register entry under those numbers
+  today, so there is no surviving `done`/PR claim about them left to revert.
+  Separately found in this pass, outside the original WO-121-126 scope: the
+  WO-106, WO-107, WO-108, WO-114, WO-115, WO-116, and WO-117 headings (and, in
+  WO-107/WO-114/WO-115/WO-116, matching body text) asserted
+  "owner-merged"/"owner merge"/"orchestrator-merged"/"owner-approved" as a
+  completed act — a claim about WHO merged or approved, which a GitHub
+  squash-merge record never carries. Each PR (#265, #262, #267, #354, #356)
+  is confirmed as a real merge on `main`, so those entries stay `done`/`DONE`;
+  only the actor/approval claim was removed, leaving `(PR #NNN)` form. WO-111
+  separately carried a stale **PROPOSAL** heading for a sidecar that in fact
+  shipped in PR #341 (2026-07-20, commit `e34ccb1`) and has been live since;
+  corrected to `done (2026-07-20, PR #341)`, original proposal text kept as
+  history.
+- **Item 3 — NOT completed in this pass.** Re-queried 2026-08-01 via the
+  GitHub API: merged PRs #356, #357, #358, #359, #360, #361, and #362 carry
+  5, 7, 9, 4, 3, 3, and 4 unresolved review threads respectively (35 total);
+  the closed/superseded #363 carries 20 more (55 total across #356–#363).
+  Every one of them is still marked unresolved on GitHub; none has been
+  dismissed with a stated reason or matched to a WO above. Per the fail-safe
+  direction below, all 55 count as UNRESOLVED. Per-thread triage into
+  dismissals or WOs remains an OPEN follow-up, not resolved by this pass.
 
 **Fail-safe direction (S5).** When a thread's status cannot be established it
 counts as UNRESOLVED and blocks merge. When a register entry's merge state cannot

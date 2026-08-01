@@ -6988,3 +6988,378 @@ today's count exactly.
 while the incident ledger for the same window still records every
 open/observation; the notification block shows nonzero
 `pushes_suppressed_by_cooldown` during the harvest window.
+
+
+## WO-143 — Give the full paper cycle a scheduled owner, as a scoring-only slot the live container cannot race — `queued` (owner-directed 2026-07-31; registered 2026-08-01 BEFORE dispatch; scheduler + registered watchdog surface + canonical-cycle signature → OWNER MERGE after line-audit; no gate, threshold, eligibility, or funding value changes)
+
+**Provenance.** Drafted by the Opus-tier spec agent from the owner's 2026-07-31
+direction, against the hardening item recorded in the WO-142 registration's
+deployment caveat ("the full prediction/alpha lane can die silently"). Every
+line number was re-verified against current `main` before drafting. The
+drafting pass CORRECTED the orchestrator's brief in three material ways,
+recorded per the deployed-configuration citation rule: (1) the live bridge
+does NOT hold the `prediction_cycle` lock continuously — it acquires at
+`run_polymarket_local_live_loop.py:956` and releases at `:986` once per 30s
+cycle, so a scheduled cycle can run, and the starvation risk runs the OTHER
+way (the scheduled cycle holding the lock makes the bridge skip its 30s
+cycles, visibly); (2) there is NO bounded variant of `run_paper_cycle` to
+reuse — `_run_degraded_prediction_cycle` calls it with identical arguments
+(`:1045`) and the asset cap applies to the websocket collector (`:1111-1116`),
+not the cycle; (3) the naive design would add a second cross-container writer
+to `shadow_fills.csv` (append_only-enrolled) and the lock-free paper broker,
+because `update_shadow_cohort_evidence`'s docstring requires the
+`prediction_cycle` lock (`shadow_cohort.py:863-868`) while the live loop's
+tick path calls it without one (`:759`, `:2040`). The scope below is
+SCORING-ONLY for exactly that reason: the live container remains the sole
+writer of every portfolio, shadow, profit-target, and dashboard artifact.
+
+**Purpose.** The canonical forward paper cycle — `build_features_v2` →
+`write_predictions` → `apply_mispricing_alpha` → `_persist_predictions` →
+longshot scan → signals (`paper_cycle.py:110-169`) — has had no in-production
+owner since 2026-07-19T22:22 (the last degraded-fallback firing). Host ground
+truth: `mispricing_alpha_live_summary.json` frozen at that stamp; the trainer
+artifacts frozen at 2026-07-13; `forward_paper_cycle.json` fresh from the
+bridge, which is why nothing alarmed. Worse than dormancy: the live loop's
+per-tick `_lightweight_shadow_maintenance` (`:707-723`) reads the frozen
+`mispricing_alpha_scores.csv` and re-marks 12-day-old candidates at current
+prices into the shadow cohort. This WO gives the lane a scheduled owner and a
+watchdog that cannot be fooled by a fresh sibling artifact. It builds ONLY:
+one scheduler job, one CLI entry point, one keyword-controlled scope on the
+existing cycle, one watchdog freshness registration, and their tests. It does
+NOT build: any change to what the live loop does per cycle; any new gate,
+threshold, screen, filter, or eligibility rule; any change to a penalty, edge
+field, or sizing rule; any config value change; any order, signer,
+credential, or live surface; any new consumer of the revived artifacts; and
+no change to `features_v2.py`, `mispricing_alpha.py`, `strategy.py`,
+`readiness.py`, `risk.py`, `shadow_cohort.py`, `paper_broker.py`,
+`runtime_lock.py`, or `docker-compose.vps-paper.yml`.
+
+**Touch ONLY these files** (`git diff --stat` must show exactly these eight):
+- NEW `src/polymarket_predictive_engine/scheduled_paper_cycle.py`
+- `src/polymarket_predictive_engine/paper_cycle.py` (one keyword-only `scope` parameter; `scope="full"` behaviour byte-identical)
+- `src/polymarket_predictive_engine/cli.py` (one command, one import, one dispatch branch)
+- `src/polymarket_predictive_engine/degraded_state_watchdog.py` (one entry in `REGISTERED_JOB_FRESHNESS_MAX_SECONDS`)
+- `scripts/run_vps_ops_scheduler.sh` (one job function, one loop block, interval/timeout env with clamps)
+- NEW `tests/polymarket_predictive_engine/test_scheduled_paper_cycle.py`
+- `tests/polymarket_predictive_engine/test_degraded_state_watchdog.py` (extend)
+- `tests/test_polymarket_vps_docker.py` (extend)
+
+Do NOT touch `docker-compose.vps-paper.yml` (the scheduler service already
+loads `env_file: .env`, so `OPS_PAPER_CYCLE_*` overrides reach the container;
+`VPS_OPS_MEM_LIMIT` stays 2g), the example config, or the governance docs.
+
+### 143.1 — `paper_cycle.py`: one keyword-only scope, defaults byte-identical
+
+Signature becomes exactly `def run_paper_cycle(cfg, *, source="raw_snapshot",
+scope="full")`, threaded into `_run_paper_cycle_unlocked`. `scope` accepts
+exactly `{"full", "scoring_only"}`; any other value raises `ValueError`
+BEFORE the lock is taken (an unrecognised scope must never silently run the
+full cycle). Naming hazard for the builder: `paper_cycle.py:8` imports
+`render_dashboard` — do not shadow it with a parameter name.
+
+`scope == "full"` is byte-identical to today on every path. `scope ==
+"scoring_only"` changes exactly six things and nothing else:
+1. Every `write_json(cfg.governance_root / "forward_paper_cycle.json", ...)`
+   (`:87`, `:104`, `:121`, `:199`) writes to
+   `scheduled_paper_cycle_report.json` instead; `forward_paper_cycle.json`
+   must not be created, read, or modified on this path (the live loop merges
+   and re-stamps it every tick at `:762-778`, and `readiness.py:118-122`
+   reads it — a scheduled write would be republished as fresh forever).
+2. Skip `update_shadow_cohort_evidence` (`:139`);
+   `report["shadow_cohort"] = {"status": "skipped_scoring_only"}`.
+3. Skip `paper_trade` (`:147`) AND `write_profit_target_tracker` (`:166`);
+   set `broker`, `actual_profit_target`, and `monthly_profit_target` each to
+   `{"status": "skipped_scoring_only"}` (never compute pace from an empty
+   broker dict).
+4. Skip `write_signal_cohort_pnl` (`:140-144`);
+   `report["cohort_pnl"] = {"status": "skipped_scoring_only"}` (the live
+   loop and broker recompute it deterministically every tick).
+5. Skip `render_dashboard` (`:196`);
+   `report["dashboard"] = {"status": "skipped_scoring_only"}`.
+6. Skip `write_agent_runtime_bundle` (`:192` and the three early-exit calls);
+   `report["agent_runtime"] = {"status": "skipped_scoring_only"}`.
+Everything else runs unchanged and in order: features, models, predictions,
+mispricing alpha, `_persist_predictions`, `build_longshot_bias_scan(cfg,
+emit_shadow=False)`, `paper_trade_readiness`, `generate_signals`.
+`report["status"]` keeps its existing meaning; add `report["scope"] = scope`.
+
+### 143.2 — NEW `scheduled_paper_cycle.py`
+
+`def run_scheduled_paper_cycle(cfg, *, source="websocket") -> dict`, with
+fixed module constants `LOCK_WAIT_MAX_SECONDS = 300.0`,
+`LOCK_WAIT_SLEEP_SECONDS = 10.0`, and the contention exit code IMPORTED from
+`refresh_governance` (75) — no second constant. Behaviour, in order: record
+`started_at_utc`/monotonic start; install a SIGTERM handler raising
+`SystemExit` (restored in `finally`) so the scheduler's `timeout` SIGTERM
+unwinds the `runtime_lock` context manager instead of leaking the
+`prediction_cycle` lock for the 1800s stale window — the scheduler must NOT
+use `timeout -k` for this job; read the pre-run `generated_at_utc` of
+`mispricing_alpha_live_summary.json`; bounded acquisition loop calling
+`run_paper_cycle(cfg, source=source, scope="scoring_only")`, retrying on
+`skipped_existing_prediction_cycle` every `LOCK_WAIT_SLEEP_SECONDS` up to
+`LOCK_WAIT_MAX_SECONDS`, counting attempts (no second lock; do not reduce
+`prediction_cycle_lock_stale_seconds`); read the post-run stamp;
+`overlay_refreshed = bool(after and after != before)`. Classify with this
+exact vocabulary and no other value:
+
+| receipt `status` | predicate | exit |
+|---|---|---|
+| `ran` | `"predictions" in report` and `report["status"] == "ran"` and overlay_refreshed | 0 |
+| `blocked_readiness` | `"predictions" in report` and `report["status"] == "blocked"` and overlay_refreshed | 0 |
+| `blocked_overlay_disabled` | `"predictions" in report` and not overlay_refreshed | 1 |
+| `blocked_inputs` | `"predictions" not in report` | 1 |
+| `skipped_prediction_cycle_lock` | lock wait exhausted | 75 |
+
+`"predictions" in report` is the exact predicate separating "the cycle
+scored" from "never got there": the readiness-blocked path always populates
+it (`:167-190`); the trading-mode and feature/model failure paths never do.
+A readiness-blocked cycle is a legitimate observation, NOT a scheduler
+failure. `blocked_overlay_disabled` exists because `apply_mispricing_alpha`
+returns early without writing when the overlay is config-disabled
+(`mispricing_alpha.py:542-543`, its only early return) — a green job that
+did not refresh the summary is false health and must fail loud.
+
+Write the receipt atomically to
+`outputs/polymarket_model_governance/scheduled_paper_cycle.json` with these
+keys in this exact order: `status, generated_at_utc, started_at_utc,
+duration_seconds, source, scope, lock_attempts, lock_wait_seconds,
+cycle_completed, features, predictions, signals_approved, signals_rejected,
+paper_signals_published, mispricing_alpha_live_summary_generated_at_utc,
+mispricing_alpha_overlay_refreshed, longshot_status, longshot_candidates,
+peak_rss_bytes, exit_code, paper_trading_invoked, live_trading_invoked`.
+`paper_signals_published = signals_approved or 0` is the honest disclosure
+that this run published rows the live container's broker will fill.
+`peak_rss_bytes` from `resource.getrusage(RUSAGE_SELF).ru_maxrss * 1024` —
+the memory evidence that exists nowhere else in the repo. Both
+`*_trading_invoked` are REQUIRED literal false (this process runs no
+broker). The receipt is a snapshot artifact (atomic overwrite, no ledger, no
+dedup); `_persist_predictions` stays idempotent via its existing
+`INSERT OR IGNORE` hash key. Do NOT enrol anything in `ledger_anchor.py`.
+
+**Fail-safe (verbatim and contiguous in the module docstring):** "Nothing
+here marks a market measured, changes any M-A/M-B/M-C or maker threshold,
+opens any order path, or changes what the live loop does per cycle; the
+scheduled job is additive evidence accrual, paper-only, and a failed or
+skipped scheduled cycle degrades only the taker alpha lane's evidence
+freshness — loudly: a missing, stale, or malformed input leaves the cycle
+report without a `predictions` key and exits nonzero, a held
+`prediction_cycle` lock exits 75 after a bounded 300-second wait, a disabled
+alpha overlay exits 1 rather than reporting success, and in every failure
+case the scheduler's `last_success_utc` is not refreshed so
+`scheduler_completion_freshness` trips at its registered ceiling."
+
+### 143.3 — CLI
+
+Add `"scheduled-paper-cycle"` to `COMMANDS` after `"paper-cycle"`; dispatch
+branch mirroring the contention-exit precedent at `cli.py:613-614`; reuse the
+existing `--paper-source` argument; the deployed job passes `websocket`.
+The existing `paper-cycle` command stays byte-identical.
+
+### 143.4 — Scheduler wiring
+
+Pattern to match, named: `run_trade_prints`
+(`scripts/run_vps_ops_scheduler.sh:620-645`) — job-local `*_STARTED_AT`,
+`set -e` subshell backgrounded, `wait_with_safety_pulses`, `stamp_status`
+with the started-at argument (do NOT copy `run_maker_study_intraday`, which
+omits it and records no duration). Env with clamps near `:41-47`:
+`OPS_PAPER_CYCLE_INTERVAL_SECONDS` default 14400 clamped into [3600, 14400];
+`OPS_PAPER_CYCLE_TIMEOUT_SECONDS` default 1800 clamped <= 1800;
+`OPS_PAPER_CYCLE_ENABLED` default 1. Job function `run_paper_cycle_job`
+stamping `paper_cycle`, running `timeout "$PAPER_CYCLE_TIMEOUT" python -m
+polymarket_predictive_engine.cli scheduled-paper-cycle --config
+"$CONFIG_PATH" --paper-source websocket` (plain `timeout`, never `-k`: the
+SIGTERM handler must be allowed to unwind the lock). Disabled path stamps an
+intentional skip at exit 0 (WO-114 precedent; visible as
+`skip_kind: "intentional"`). Loop block inserted AFTER the `trade_prints`
+block and BEFORE `ledger_anchor`, so registered maker/collection lanes stay
+ahead and anchoring stays last.
+
+**Cadence justification (4h default).** Six runs/day refreshes the taker
+evidence inside every 6h governance window; overrun headroom is wide (1800s
+timeout vs 14400s+tick overrun boundary); bridge starvation is bounded and
+visible (the bridge loses under ~3% of its 30s cycles while the scheduled
+cycle holds the lock, each skip recorded in `live_paper_bridge_cycle.json`).
+**Direction rule — deliberately two-sided, NOT collection-style:** config may
+run the job more often (floor 3600) or less often (ceiling 14400) and cannot
+leave that band. More-often is NOT always safer here: a heavier cadence
+starves the bridge lane, raises the 2g cgroup's peak-concurrency risk, and
+thrashes the host — the `HARVEST_RETRY_INTERVAL` [900, 3600] clamp is the
+registered precedent for two-sided bounding of a heavy job.
+
+**Memory budget — one choice, made explicitly.** The job runs in the
+`vps-ops-scheduler` container at its existing 2g limit. The alternatives are
+unavailable, not merely less attractive: no bounded cycle variant exists
+(above), and routing through the paper-live container would require
+`POLYMARKET_PREDICTION_MODE=full`, which changes what the live loop does
+every 30s — exactly what the fail-safe forbids. Honest evidence statement:
+NO memory measurement for this path exists anywhere in the repository, which
+is why `peak_rss_bytes` is a required receipt field from run one. Failure
+mode if the budget is exceeded: cgroup OOM SIGKILL → shell exit 137 →
+`stamp_status` records the failure and does NOT refresh `last_success_utc` →
+`scheduler_nonzero_exit` incident next watchdog tick and
+`scheduler_completion_freshness` at the 5h ceiling; SIGKILL cannot be
+trapped, so the `prediction_cycle` lock leaks for up to the registered
+1800s stale window before `acquire_runtime_lock` reclaims it — a bounded,
+self-healing, artifact-visible degradation of the bridge lane, recorded here
+as the accepted worst case. NOT built here: a pre-flight memory guard (no
+measured basis until `peak_rss_bytes` exists — WO-143c).
+
+**Governance-cadence interaction: none.** `_governance_due_blocks_prediction`
+returns False in the deployed `paper-bridge` mode; mutual exclusion with the
+6h `governance_refresh` comes from the scheduler's serial job loop;
+`refresh_governance` takes its own separate lock and recomputes no features,
+predictions, or alpha. The only concurrent runner is the safety pulse, whose
+members write no artifact this job writes.
+
+### 143.5 — Watchdog coverage
+
+Exactly one entry added to `REGISTERED_JOB_FRESHNESS_MAX_SECONDS`:
+`"paper_cycle": 5 * 60 * 60` (interval + 1h, the house ratio: 6h→7h, 8h→9h,
+12h→13h, 24h→25h). One missed run tolerated; two consecutive are an
+incident. **An additional artifact-age registration on
+`mispricing_alpha_live_summary.json` is NOT added — deliberately:** the
+foolability hole (green job, config-disabled overlay, frozen artifact) is
+closed at the source by 143.2's `blocked_overlay_disabled` exit-1 predicate,
+so the job cannot be green while the artifact is frozen; a second surface
+would fire spuriously the moment the owner deliberately quiesced the lane.
+Fail-closed conventions per WO-121/129 preserved throughout (absent →
+unobserved → stale_unobserved incident; malformed exit codes are failures,
+never KeyError; torn status.json is never healthy). Disclosed laundering
+path, accepted with the WO-114 precedent: `OPS_PAPER_CYCLE_ENABLED=0` reads
+green with a visible intentional-skip trail; any OTHER route to a
+green-but-dead lane is a defect.
+
+### Interleaving (S2)
+
+Sole production writer becomes the scheduled job (verify none is enrolled in
+`ledger_anchor.DEFAULT_LEDGER_REGISTRY` yourself; if your grep disagrees,
+STOP and report): the features_v2 websocket artifacts, `predictions.csv`,
+`mispricing_alpha_scores.csv`, `near_miss_learning_candidates.csv`,
+`mispricing_alpha_live_summary.json`, the longshot artifacts,
+`trade_signals.csv`, `rejected_signals.csv`, plus the two new receipts — all
+full-rewrite snapshots through the atomic writers, so the live loop's
+concurrent readers see old or new, never torn. Shared and benign:
+`paper_trade_readiness.json` (deterministic recompute, last-write-wins,
+also written by the broker every 30s) and the SQLite `model_predictions`
+table (`INSERT OR IGNORE` under WAL + busy_timeout; the scheduler container
+already writes the same DB 6-hourly via refresh_governance). Explicitly NOT
+written by the scheduled path: `forward_paper_cycle.json`, the dashboard,
+every shadow and portfolio ledger, the profit-target tracker,
+`cycle_decision_trace.json`, `agent_status.json`, `signal_cohort_pnl.*`.
+
+### Direction disclosure
+
+No threshold, gate, screen, filter, eligibility rule, or config value moves
+in either direction — `risk.minimum_edge`, `edge_field_for_trading`,
+`require_alpha_trade_candidate`, every `maker_min_*`, M-A/M-B/M-C, and the
+near-miss band must be byte-identical in the diff. Two honest consequences:
+(1) the near-miss learning and shadow candidate populations resume growing
+(frozen since 07-19 — the stated purpose); (2) TAKER PAPER FILLS RESUME —
+`generate_signals` writes `trade_signals.csv`, a default input of the
+deployed broker, so approved rows will be filled into the append-only
+`paper_fills.csv` and reach `readiness._forward_paper_evidence`, the
+live-promotion evidence summary. A restoration of the canonical lane, not a
+new path, and every fill stays paper-only — but it is the reason this WO
+routes to OWNER merge.
+
+### Tests (enumerated; offline, deterministic; float assertions
+`pytest.approx(..., abs=1e-12)`)
+
+In `test_scheduled_paper_cycle.py`: (1) default `scope="full"` byte-identical
+behaviour — writes forward_paper_cycle.json, dashboard, broker, shadow, and
+every pre-existing `test_paper_broker_foundation.py` test passes UNMODIFIED;
+(2) receipt isolation — a sentinel `forward_paper_cycle.json` is
+byte-identical after a scoring-only run while both new artifacts exist;
+(3) dashboard sentinel untouched; (4) shadow ledger sentinels untouched;
+(5) portfolio sentinel untouched and all five skipped blocks read
+`skipped_scoring_only`; (6) scoring artifacts written from a websocket
+fixture, `model_predictions` idempotent at exactly 2 rows across a re-run;
+(7) held foreign lock → `skipped_prediction_cycle_lock`, exit 75,
+`lock_attempts >= 2`, sentinel predictions.csv untouched; (8) lock absent
+after a happy run; (9) SIGTERM/SystemExit unwinds and releases the lock, and
+the previous handler is restored; (10) overlay disabled →
+`blocked_overlay_disabled`, exit 1, stale artifact byte-identical;
+(11) readiness-blocked → `blocked_readiness`, exit 0, `cycle_completed`
+true; (12) inputs missing → `blocked_inputs`, exit 1, no predictions.csv;
+(13) `trading.mode: live` → `blocked_inputs`, exit 1, no lock file, no
+scoring artifact; (14) receipt key order equals the registered 22-key list
+with both invocation literals false and `peak_rss_bytes > 0`; (15) invalid
+scope raises ValueError with no lock file; (16) CLI returns 0/75/1 on the
+happy/held-lock/overlay-disabled fixtures. In
+`test_polymarket_vps_docker.py` (library-only sourcing): (17) clamp band
+999999→14400, 60→3600, abc→14400, timeout 99999→1800; (18) static wiring
+(command line, `wait_with_safety_pulses "$JOB_PID" paper_cycle`,
+`stamp_status` with started-at, loop position after trade_prints and before
+ledger_anchor); (19) failure accounting — exit 75 leaves `last_success_utc`
+empty with a numeric duration, a following 0 refreshes it, a following 124
+records `skip_kind: "overrun"`; (20) `OPS_PAPER_CYCLE_ENABLED=0` stamps an
+intentional skip. In `test_degraded_state_watchdog.py`: (21) registration
+surface `== 18000`; (22) stale at 18001s opens the incident with
+`entity: "paper_cycle"`; (23) fresh at 17999s does not; (24) never-observed
+goes unobserved → stale_unobserved incident on the persisted-state second
+evaluation; (25) malformed job records fail closed without raising.
+
+### Merge routing
+
+FROZEN → OWNER MERGE after line-audit: the deployed ops scheduler, a
+registered watchdog surface, and the canonical cycle's signature whose
+`trade_signals.csv` output reaches the live broker and the append-only
+`paper_fills.csv` and thence live-promotion evidence. WO-133's indivisibility
+rule applies to the whole PR. Tighten-only statement: no gate, threshold,
+screen, eligibility rule, or config value changes in either direction; the
+only widening is that two observation-only populations resume growing from
+zero, which is the stated purpose and is watched by the day-after check.
+
+### Pre-dispatch check (named precondition, one command on the VPS)
+
+`docker exec polymarket-paper-live ps -o pid,comm` — if the live loop's
+python is PID 1 (expected), the cross-container orphan-clearer collision is
+impossible and the build proceeds as registered. If it is NOT PID 1, add to
+this registration (before dispatch) the one-line tightening in the live
+loop's `_clear_orphaned_same_process_prediction_lock`: also require
+`payload["process_started_at_utc"]` to equal the loop's own process-start
+stamp — safe either way, since a genuinely orphaned same-PID lock is already
+reclaimed at acquisition by `_same_pid_lock_predates_current_process`.
+
+### Day-after check
+
+Pre-deploy, the orchestrator records in this status line the current
+`generated_at_utc` of `mispricing_alpha_live_summary.json` (expected
+2026-07-19T22:22) and the row count of `mispricing_alpha_scores.csv`. After
+one deployed cadence (<= 4h), from the telemetry branch: (1)
+`jobs.paper_cycle` exists with exit 0, fresh `last_success_utc`, numeric
+duration, `skip_kind: "none"`; (2) `scheduled_paper_cycle.json` status
+`ran`/`blocked_readiness`, `cycle_completed: true`,
+`mispricing_alpha_overlay_refreshed: true`, `predictions >= 1`, both
+invocation literals false, and `peak_rss_bytes` recorded (copied into this
+status line as the WO-143c input); (3) the live summary's stamp has advanced
+past 2026-07-19T22:22; (4) the freshness evaluation lists `paper_cycle`
+fresh at ceiling 18000 with no incident; (5) bridge health: the heartbeat
+and `live_paper_bridge_cycle.json` younger than 2 minutes — if
+`skipped_existing_prediction_cycle` persists longer than the cycle duration,
+the lock leaked and the WO is REVERTED, not tuned; (6) `lock_attempts` stays
+small (1-2) from the second cycle onward — a sustained rise means the
+cadence or wait budget is re-registered from measurement.
+
+### Orchestrator resolutions (2026-08-01, recorded at registration)
+
+Scoring-only scope adopted (shadow forwarding deferred to WO-143b); 4h
+cadence with the two-sided [1h, 4h] clamp adopted; both receipt artifacts
+kept (scheduler receipt + redirected cycle report — distinct consumers);
+`OPS_PAPER_CYCLE_ENABLED=0` keeps the WO-114 intentional-skip precedent;
+owner-merge routing confirmed on the taker-fills-resume consequence; the
+PID-1 pre-dispatch check stands as registered above; the bridge duty cycle
+self-measures via `lock_attempts` plus day-after check (6); WO-142's
+day-after check is re-armed against the artifacts this job refreshes once
+this WO deploys.
+
+### Named follow-ons, NOT built here
+
+- **WO-143b — serialise the shadow-cohort writer.** `update_shadow_cohort_evidence`
+  requires the `prediction_cycle` lock by its own docstring
+  (`shadow_cohort.py:863-868`) but the live loop's tick path calls it without
+  one — a pre-existing same-process race today, and the reason the scheduled
+  slot must not forward candidates into the shadow updater until this lands.
+- **WO-143c — memory decision.** After one deployed day of `peak_rss_bytes`,
+  the owner decides: keep 2g, add a pre-flight guard, or raise
+  `VPS_OPS_MEM_LIMIT`. Stays prose until the number exists.

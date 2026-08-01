@@ -8228,7 +8228,8 @@ downloads the acceptance artifact with `github.token` and runs
 (`.github/workflows/deploy-polymarket-vps-paper.yml:47-55, :65`). Copying the
 string unchanged converts *an unprovable step recorded as unproven* into *an
 unperformed step recorded as unprovable*. **Option (b) is chosen for this WO; (a) is a named follow-on requiring owner
-authorization.** (b): replace the reason string with one naming the ACTUAL
+authorization. Note that "(a)/(b)" here are the two ATTESTATION-STRING options,
+distinct from the two Path-A exits resolved above.** (b): replace the reason string with one naming the ACTUAL
 blocker — no eligible independent reviewer can exist — rather than a capability
 the Actions context possesses. (a) — running the verifier on the runner — could
 make `attestation_verified` legitimately `true`, which is a gate change and is
@@ -8250,6 +8251,17 @@ predicate "Actions can run it" while leaving that text untouched, and
 the dated `AGENTS.md` amendment recording the policy-vs-capability distinction.
 Owner merge.**
 
+**Resolved by owner direction 2026-08-01.** Two exits were put to the owner:
+(a) add a second human collaborator, making Path A work as designed; or
+(b) permit an independent ARM64 machine acceptance run in Actions to bind the
+SHA in place of a human approval. **The owner directed neither — Path B is the
+permanent route** (see the sunset section above, which records the standing
+consequence). Exit (b) remains a named follow-on requiring its own work order
+and merge, because it changes what an attestation MEANS and must not be adopted
+as a side effect of a convenience change. The `AGENTS.md` amendment is therefore
+written as a standing qualification rather than a temporary one, and its text is
+registered verbatim below rather than delegated.
+
 ### Trigger, concurrency and credential controls (all previously missing)
 
 - **`environment:` with required reviewers** on the `workflow_dispatch` job.
@@ -8263,13 +8275,32 @@ Owner merge.**
   contents: read`. (The "unless the verifier requires more" clause was struck
   2026-08-01: option (b) means the verifier never runs on the runner, so it was
   dead text widening a security control.)
-- **Name the credential correctly.** Not a GitHub "deploy key" (a repo SSH key)
-  — this needs a **VPS user's SSH private key**, a much larger surface. Bound it
-  with a forced-command / `restrict` entry in the VPS `authorized_keys` so the
-  key can only invoke the deploy script, never obtain an interactive shell.
-- Forbid `StrictHostKeyChecking=no` (pin the host key); forbid
-  `pull_request_target`, fork, and `schedule` triggers.
-- Owner-provisioned only. I do not create, read, or transport credentials.
+- **Credentials already exist; NO new secret is required** (confirmed
+  2026-08-01). Actions already carries `PM_VPS_HOST`, `PM_VPS_PORT`,
+  `PM_VPS_USER` and `PM_VPS_SSH_PRIVATE_KEY`, consumed today by three workflows:
+  `deploy-polymarket-vps-paper.yml:73-75, :100-102, :129-131`,
+  `polymarket-vps-proof-health.yml`, and
+  `polymarket-vps-governance-refresh.yml`. The new workflow **reuses those exact
+  names and adds none**, so the SSH-to-VPS surface this WO relies on already
+  exists in Actions and is not widened by it. The credential is a VPS user's SSH
+  private key — not a GitHub "deploy key" (a repo SSH key), which an earlier
+  draft of this entry wrongly called it.
+- **Reuse the existing key-handling block verbatim** from
+  `deploy-polymarket-vps-paper.yml:100-127`: the presence check at `:84`, the
+  loadable-private-key validation at `:110-120` (which distinguishes a real
+  private key from a `.pub` or a PuTTY `.ppk`), and the `known_hosts`
+  construction at `:124`. **Named honestly: that block uses `ssh-keyscan`
+  (`:124`), which is trust-on-first-use, NOT host-key pinning.** Matching the
+  existing pattern is the registered requirement; upgrading it to a pinned key
+  touches a shared block used by three workflows and is a named follow-on, not
+  bundled here. Forbid `StrictHostKeyChecking=no` regardless.
+- **Bound the key at the host** with a forced-command / `restrict` entry in the
+  VPS `authorized_keys` so it can only invoke the deploy script and never
+  obtains an interactive shell. This is the control that makes the difference
+  between "Actions can deploy" and "Actions has a shell on production", and it
+  is owner-side.
+- Forbid `pull_request_target`, fork, and `schedule` triggers.
+- No agent creates, reads, or transports a credential value.
 
 ### The `tmux` exit-code fail-open
 
@@ -8291,17 +8322,24 @@ becomes never-required and the un-attested Path B becomes the permanent route �
 a change to the binding condition of the strongest deploy gate, in the
 loosening direction.
 
-**Sunset, registered with it, and MECHANICALLY triggered.** The amendment
-LAPSES when a second eligible collaborator exists or option (a) below is
-adopted, whichever is first. "Lapses when a collaborator exists" is aspirational
-unless something detects it, and the Path-B usage counter measures the wrong
-thing — usage rises whether or not a reviewer was added. So:
-`merge_independently_reviewed_pr.py:340-347` already computes reviewer
-eligibility; **register that the deploy workflow runs that same query and emits
-a warning whenever an eligible independent reviewer exists**, which is the lapse
-signal. The Path-B usage counter remains a secondary review trigger. Without the
-mechanical trigger the loosening is permanent in practice — exactly what the
-corrected fail-safe sentence warns against.
+**No sunset — Path B is PERMANENT by owner direction (2026-08-01), and this
+entry states the consequence plainly.** A sunset lapsing on "a second eligible
+collaborator exists" was drafted; the owner directed instead that Path B be the
+standing route. The loosening is therefore **permanent, not temporary**:
+`attestation_verified: false` becomes the steady state of every deploy this
+repository makes, and the independent-review predicate at
+`merge_independently_reviewed_pr.py:340-347` will never be satisfiable. That is a
+durable reduction in the strength of the deploy gate; it is recorded here rather
+than buried in a lapsed footnote, and authorization is the owner's merge.
+
+**Two controls replace the sunset, because "permanent" must not mean
+"unobserved".** (i) The workflow still runs the existing eligibility query and
+emits a **warning** whenever an eligible independent reviewer does exist — not as
+a lapse trigger, but so a change in the collaborator set is never silently
+ignored. (ii) The Path-B usage counter in the day-after check is retained and
+reported, so reliance on the un-attested route stays measured. Under a permanent
+Path B the honesty field is the only standing record of what is not proven,
+which makes it MORE load-bearing than it was under a sunset, not less.
 
 **Touch ONLY these files** (`git diff --stat` must show exactly these six).
 The register is deliberately EXCLUDED — a build PR does not edit its own WO

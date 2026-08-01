@@ -79,6 +79,82 @@ review. They are tighten-only: a WO may demand more than this, never less.
    executed / production telemetry) and never claims absence of defects —
    only the absence of findings under the methods used.
 
+## S8 — WO admission checklist (gates REGISTRATION, not delivery)
+
+- A draft work order is not registerable until every rule below passes. S7 is
+  run by the auditor against a delivered change; S8 is run against the *text*,
+  before it becomes registered specification and drives a build. Registered
+  text is the most expensive artifact to get wrong: it is permanent, it drives
+  builds, and it fails silently.
+- The agent that runs this checklist is never the agent that drafted the work
+  order. No agent both produces and approves the same artifact.
+- **Each rule is derived from a specific defect found in review; the derivation
+  is part of the rule.** Do not edit the attributions out — they are what makes
+  the rules auditable rather than stylistic.
+
+1. **A1 — literal thresholds.** Every threshold is a literal number with a
+   stated basis. "A registered ceiling", "an appropriate bound", "a reasonable
+   window" are rejected. *Derived from:* a clause requiring validation "against
+   a registered ceiling" that existed nowhere in config or code, leaving the
+   builder to invent a registered value.
+2. **A2 — non-finite and missing inputs.** Every threshold comparison states
+   what missing, empty, unparseable, and non-finite inputs do, and the stated
+   answer is the fail-closed branch (S5). *Derived from:*
+   `utils.safe_float("nan")` returns NaN — there is no non-finite guard at
+   `src/polymarket_predictive_engine/utils.py:373-379` — and `nan > ceiling` is
+   `False`, so a corrupt timestamp would have classified as *fresh*, the exact
+   fail-open the clause existed to close.
+3. **A3 — exhaustive scan roots.** Every "scan all callers/files" rule names its
+   roots exhaustively, anchors them off `__file__` rather than the process CWD,
+   and asserts a non-zero visit count. *Derived from:*
+   `tests/polymarket_predictive_engine/test_shadow_cohort.py` roots its scan at
+   `Path("src")`, which is why it never reached the `scripts/` caller that
+   motivated the work order — and which is also CWD-relative.
+4. **A4 — amendments reconcile the parent.** An amendment updates the parent
+   work order's Scope paragraph and touched-file list, or it is incomplete.
+   *Derived from:* a Scope paragraph reading "do NOT touch either caller" while
+   the same work order's own item required editing five call sites.
+5. **A5 — internal contradiction check.** A new clause is checked for
+   contradiction against every existing clause of the same work order. *Derived
+   from:* an added-flags clause that would have changed a shared artifact on
+   every path, colliding with the same work order's byte-identity guarantee for
+   the unchanged scope.
+6. **A6 — triggers observable at the acting site.** A trigger condition is
+   stated in terms of what is observable at the site that must act, never a
+   callee's return value the callee may never produce. *Derived from:* an
+   antecedent keyed on a returned status on a path where the updater is never
+   called, so a literal implementation leaves the defect in place.
+7. **A7 — preamble counts stay true.** File counts and file lists in a preamble
+   are updated by every amendment that changes them. *Derived from:* a preamble
+   reading "exactly these eight files" after a later item had made it ten.
+8. **A8 — numeric dismissals show their work.** A dismissal on numeric grounds
+   shows the worst-case derivation including per-item fan-out, and states for
+   every timeout whether it is wall-clock or per-operation. *Derived from:* a
+   settlement pass dismissed at 25 x 20s = 500s when the real fan-out is up to
+   three HTTP calls per position (1500s against an 1800s window), and
+   `urlopen(timeout=N)` is a per-socket timeout rather than a deadline, so a
+   trickling server is unbounded.
+9. **A9 — dormancy claims enumerate callers.** A "dormant" or "changes nothing
+   in production" claim enumerates every caller of the changed function, not
+   only the hot path. *Derived from:* a dormancy claim that missed
+   `_run_degraded_prediction_cycle`, which calls `run_paper_cycle` at
+   `scripts/run_polymarket_local_live_loop.py:1045` and is armed in production.
+10. **A10 — the house shape.** Every work order carries what S1-S7 already
+    require: the exact touched-file list, the fail-safe direction sentence (S5),
+    enumerated offline tests with hand-computed expectations (S4), and a
+    `Day-after check:` line (S6). *Derived from:* S1-S7 themselves; A10 exists
+    so admission is one gate rather than two lists.
+
+- A draft that fails any rule returns to its drafter. Registering it with the
+  failure noted is the outcome this section exists to prevent.
+- The lifecycle around this checklist — gate order, resourcing by work-order
+  class, and the calibration row every closed work order appends — is
+  `.claude/skills/wo-lifecycle/SKILL.md`. What "registered" means is defined
+  once, in the GLOBAL RULE at the top of
+  `docs/POLYMARKET_CODEX_WORK_ORDERS.md`, and is not restated here.
+- This section is process discipline. It grants no authorization and changes no
+  gate, threshold, eligibility rule, or merge routing.
+
 ## Honest scope note
 
 These standards raise the defect bar; they do not reach "commercial grade"

@@ -19,13 +19,39 @@ definition. It did not: PR #417 was acquitted using *merged to `main`*, while
 dispatches against `f64416e` (PR #418, unmerged) relied on *present in my
 branch*.
 
-**Rule: the registering commit must be an ancestor of the build branch.**
+**Rule: the LATEST registering-or-amending commit for that WO must be an
+ancestor of the build branch, and the tested SHA is recorded.**
 
 ```
-git merge-base --is-ancestor <registering-commit> <build-branch>    # must pass
+git merge-base --is-ancestor <latest-registering-or-amending-commit> <build-branch>
 ```
 
-Run it at dispatch and record the result in the WO's status line.
+The WO status line records `registered-ancestry: <sha> PASS`. **Recording the
+SHA is part of the rule, not decoration** — a check whose subject is not written
+down is unauditable, which is what sank the first version.
+
+**"Latest", not "the".** A first attempt at this rule said "the registering
+commit", singular. Every WO gets amended, so that is defeated by citing the
+ORIGINAL registration: for WO-143,
+`git merge-base --is-ancestor 357519e 91c35cd` **passes** while
+`git merge-base --is-ancestor 51ffb42 91c35cd` **fails** — a dispatcher citing
+`357519e` gets a green check on the exact branch whose tree lacks §143.6 and
+which produced Codex's P1. The rule must bind to the newest text the builder is
+expected to have read.
+
+**Which SHA — this repository squash-merges.** The registering commit is the
+**squash-merge commit on `main`**, identified after merge, never the branch-side
+SHA. `926fec9` (branch) and `51ffb42` (main) are the same registration; only
+`51ffb42` is an ancestor of anything. Citing a branch-side SHA makes the test
+return NO forever on every correctly-registered dispatch, and the natural
+operator workaround — cherry-picking the register commit onto the build branch —
+reintroduces the unmerged-registration hole this rule exists to close.
+
+**Cherry-picked registrations correctly FAIL.** Both current build branches
+carry `f64416e` by cherry-pick and both fail the test, because `f64416e` is not
+merged. This is intended: the rule asserts BOTH that the builder read the right
+text AND that the registration is merged. An operator watching a cherry-picked
+branch fail must merge the registration, not re-cherry-pick.
 
 **Why this test and not a timestamp comparison.** A first version of this rule
 used two conditions — registering commit merged to `main`, and build branch cut
@@ -52,6 +78,11 @@ Consequences accepted rather than quietly avoided:
   onto the resulting `main` before resuming.
 
 Timestamps are retained in the WO-143b provenance note as history, not as rule.
+
+**Enforcement.** A test asserts that every WO whose status names a dispatched
+build carries a `registered-ancestry: <sha> PASS` token, so this rule is
+mechanically pinned like the register's other invariants rather than left to
+honour. Until that test exists the rule is prose and should be treated as such.
 
 Prior: 2026-07-16 (owner-authorized corrective batch opened with WO-93; WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
 PR #203; WO-84 implemented in PR #205; WO-89 through WO-92 implemented. WO-87 now relabels the unchanged legacy verdict metric honestly and
@@ -7196,7 +7227,14 @@ count corrected 2026-08-01; §143.6 added the ninth and tenth):
 
 Do NOT touch `docker-compose.vps-paper.yml` (the scheduler service already
 loads `env_file: .env`, so `OPS_PAPER_CYCLE_*` overrides reach the container;
-`VPS_OPS_MEM_LIMIT` stays 2g), the example config, or the governance docs.
+`VPS_OPS_MEM_LIMIT` stays 2g) or the governance docs. **"the example config"
+was struck from this sentence 2026-08-01: §143.7(b) registers
+`scheduled_paper_cycle.max_websocket_observation_age_seconds` (default 1800,
+tighten-only), which must be documented in
+`polymarket_predictive_config.example.yaml` at the repository ROOT — an
+eleventh touched file.** For the avoidance of doubt against the "any config
+value change" exclusion above: adding this NEW setting with its registered
+default is in scope; changing any EXISTING config value is not.
 
 ### 143.1 — `paper_cycle.py`: one keyword-only scope, defaults byte-identical
 
@@ -7207,7 +7245,9 @@ BEFORE the lock is taken (an unrecognised scope must never silently run the
 full cycle). Naming hazard for the builder: `paper_cycle.py:8` imports
 `render_dashboard` — do not shadow it with a parameter name.
 
-`scope == "full"` is byte-identical to today on every path. `scope ==
+`scope == "full"` is byte-identical to today on every path **except for the
+two invocation flags, which every artifact must carry — amended by §143.7(a)**.
+`scope ==
 "scoring_only"` changes exactly six things and nothing else:
 1. Every `write_json(cfg.governance_root / "forward_paper_cycle.json", ...)`
    (`:87`, `:104`, `:121`, `:199`) writes to
@@ -7593,7 +7633,11 @@ completion; otherwise classify `blocked_inputs` at exit 1.
 below).** Authorization for this value is the owner's merge of the pull request
 carrying this registration — not any statement attributed to the owner here. Register a NEW setting
 `scheduled_paper_cycle.max_websocket_observation_age_seconds`, **default
-1800**, tighten-only via config. Basis: 6x the 300s `websocket_max_gap_seconds`
+1800**, tighten-only via config. **This adds an eleventh file to WO-143's
+touched list — `polymarket_predictive_config.example.yaml` (repository ROOT, not
+`config/`) — and strikes "the example config" from the preamble's do-not-touch
+sentence.** A setting absent from the example config is not configurable in any
+documented way, so "tighten-only via config" would otherwise be false. Basis: 6x the 300s `websocket_max_gap_seconds`
 reporting target, and well inside the job's 4h default cadence. The build must
 NOT reuse `operating_state_slos.websocket_max_gap_seconds` —
 `REGISTERED_SLO_TARGETS` (`operating_state.py:44-52`) is annotated "never read
@@ -7840,22 +7884,53 @@ WHOLE-FUNCTION pass**, not a budgeted settlement pass. Implement all three:
 
 - a monotonic wall-clock budget on `_settle_due_positions` that abandons
   remaining positions with a partial, fail-closed status and NO partial write;
-- **a heartbeat that re-stamps `acquired_at_utc` on the held lock** while the
-  function is alive, so a live holder is never judged stale — this is the only
-  one of the three that survives a genuinely unbounded single read, and it is
-  the primary mechanism;
+- **a progress-derived heartbeat** (specified below) so a live holder is never
+  judged stale — the only mechanism that survives a genuinely unbounded single
+  read, and therefore the primary one;
 - an explicit `stale_after_seconds` sized above budget + one-position worst
   case + the post-settlement remainder.
 
 Budget and stale window are registered together so the relationship is
 auditable; neither is derived from the other at runtime.
 
+**Heartbeat specification (added 2026-08-01 after second review — the first
+wording traded reclaim-too-early for wedge-forever).** "Re-stamp while the
+function is alive" is not sufficient: a *crashed* holder is safe (the thread
+dies, the stamp ages, reclaim works), but a *hung* holder — blocked in exactly
+the unbounded `urlopen` read this item establishes as possible — would be
+heartbeaten by a timer thread forever and the lane would stop silently, which is
+the failure WO-143 exists to prevent. All four are registered:
+
+1. **Progress-derived, never timer-derived.** Beat only when the worker's
+   monotonically increasing progress counter advanced since the previous beat.
+   A hung worker stops being heartbeaten and becomes reclaimable on schedule.
+2. **Absolute heartbeat lifetime cap.** Past `budget + remainder + margin` the
+   heartbeat stops unconditionally and normal stale reclaim resumes, bounding
+   the wedge even if (1) is implemented imperfectly.
+3. **Do NOT re-stamp `acquired_at_utc`.** It is read by `_lock_age_seconds`
+   (`runtime_lock.py:44-49`) and validated by `_valid_lock_payload` (`:52-63`);
+   re-stamping makes the field's name false for every other reader. Add a
+   separate `heartbeat_at_utc`, and have the stale check use
+   `max(acquired_at_utc, heartbeat_at_utc)`.
+4. **Record `heartbeat_count` and `last_progress_at_utc`** in the payload so a
+   wedge is diagnosable rather than looking like a normal long hold.
+
+**Mechanical constraint.** `_try_acquire` (`runtime_lock.py:89-101`) publishes
+via `os.link`, which cannot overwrite an existing lock, so there is no API today
+for updating a held lock's payload. The heartbeat write MUST be temp-file plus
+`os.replace`. **Unlink-then-recreate is explicitly forbidden** — it opens a
+window in which another process can legitimately acquire.
+
 **Tests for F1 (enumerated; additive to the six below).** (7) with a stubbed
 provider that blocks past the budget, the pass returns the partial fail-closed
 status, leaves remaining positions unprocessed, and writes NO partial ledger
-row; (8) the lock is released after a budget-expired pass; (9) the heartbeat
-re-stamps `acquired_at_utc` such that a concurrent reclaim attempt during a
-long-running pass does NOT acquire; (10) a configuration in which
+row; (8) the lock is released after a budget-expired pass; (9) a progressing worker is
+heartbeaten such that a concurrent reclaim attempt during a long-running pass
+does NOT acquire; **(9b) its mirror — a HUNG worker whose progress counter stops
+advancing ceases to be heartbeaten and becomes reclaimable on schedule; this is
+the test that distinguishes the design from a permanent wedge; (9c) the
+heartbeat write never unlinks the lock file (assert no window in which the path
+is absent);** (10) a configuration in which
 `stale_after_seconds` <= budget + remainder allowance is rejected at load
 rather than silently inverted; (11) a settlement pass shorter than the budget
 is byte-identical to today.
@@ -7954,7 +8029,8 @@ the internal `shadow_cohort` lock; (6) the byte-identity regression runs from
 a committed fixture and does not skip when git history is unavailable —
 assert explicitly that it did not skip.
 
-**Touch ONLY these files** (`git diff --stat` must show exactly these twelve).
+**Touch ONLY these files** (`git diff --stat` must show exactly these fourteen —
+thirteen if the runtime-lock tests fold into `test_shadow_cohort.py`).
 This list is authoritative for a line audit and SUPERSEDES the single-file
 Scope paragraph in the parent WO:
 
@@ -7967,8 +8043,18 @@ Scope paragraph in the parent WO:
 - `scripts/run_promoted_rule_shadow_scan.py` (F4 — status surfacing only; its
   `candidates` count is rule-scan output, not a forwarded-count claim, and does
   not change)
-- `config/polymarket_predictive_config.example.yaml` (F1 budget and
-  `stale_after_seconds` settings)
+- `polymarket_predictive_config.example.yaml` (**repository ROOT — there is no
+  `config/polymarket_predictive_config.example.yaml`; `config/` holds only the
+  live-approval files**) — F1 budget and `stale_after_seconds` settings
+- `src/polymarket_predictive_engine/runtime_lock.py` (heartbeat support).
+  **Shared surface:** `runtime_lock` backs `prediction_cycle`, `shadow_cohort`
+  and every other lane, so a heartbeat defect wedges all of them. The heartbeat
+  is therefore **opt-in per lock** — only `shadow_cohort` enables it — and is
+  NOT a default behaviour change. *Fail-safe for this file: a lock that does not
+  opt in behaves byte-identically to today, and an opted-in lock whose heartbeat
+  fails degrades to today's plain stale-timeout behaviour rather than to an
+  unreclaimable one.* (WO-143's preamble forbids touching `runtime_lock.py`;
+  that constraint binds WO-143, not WO-143b.)
 - `tests/polymarket_predictive_engine/test_shadow_cohort.py` (F2 retarget +
   widen, F3 fixture, F1 tests)
 - NEW `tests/polymarket_predictive_engine/fixtures/` byte-identity fixture (F3)
@@ -8007,9 +8093,19 @@ unconditionally. A workflow-triggered run would therefore stamp an owner
 authorization claim that no owner made — an agent-writable owner-authorization
 claim landing in a runtime artifact on every deploy, which `AGENTS.md` forbids
 outright, and worse than a prose slip because it is machine-generated.
-**Register: the deploy record carries the ACTUAL actor** — `github.actor` for
-the workflow path, preserved behaviour for a genuine owner-run shell — and the
-trigger provenance (`workflow_dispatch` vs `shell`) as its own field.
+**Register: the deploy record records the MECHANISM, not a claimed identity, on
+BOTH paths.** "Preserve the literal for a genuine owner shell" was wrong —
+nothing can establish "a genuine owner shell"; anyone with SSH to the VPS
+produces one, and that unprovability is the very reason `attestation_verified`
+is `false`. So: `authorised_by` is replaced by `trigger_mechanism`
+(`workflow_dispatch` | `vps_shell`) plus, on the workflow path, `github.actor`
+and **the `environment:` approval actor**.
+
+**Register the inversion this creates, because it is the honest reading.** With
+an `environment:` gate carrying required reviewers — which in a single-owner
+repository means the owner — the WORKFLOW path carries *stronger* owner evidence
+than the shell path ever did. Capturing the environment-approval actor is what
+makes that true rather than merely arguable.
 
 **2. `attestation_unverifiable_reason` becomes materially misleading.** It
 currently reads that verification "requires GitHub API credentials and the
@@ -8019,10 +8115,14 @@ downloads the acceptance artifact with `github.token` and runs
 `verify_independent_main_acceptance.py`
 (`.github/workflows/deploy-polymarket-vps-paper.yml:47-55, :65`). Copying the
 string unchanged converts *an unprovable step recorded as unproven* into *an
-unperformed step recorded as unprovable*. **Register one of two, not silence:**
-(a) the workflow runs the verifier on the runner and records its real result; or
-(b) a new, true reason string naming the actual blocker (no eligible independent
-reviewer exists — see below), not a capability that is present.
+unperformed step recorded as unprovable*. **Option (b) is chosen for this WO; (a) is a named follow-on requiring owner
+authorization.** (b): replace the reason string with one naming the ACTUAL
+blocker — no eligible independent reviewer can exist — rather than a capability
+the Actions context possesses. (a) — running the verifier on the runner — could
+make `attestation_verified` legitimately `true`, which is a gate change and is
+therefore out of scope here; it also contradicts test 7 below, which pins
+`attestation_verified: false` on this route. Choosing (b) keeps the two
+consistent.
 
 ### `AGENTS.md` conflict — must be registered, not left implicit
 
@@ -8065,20 +8165,51 @@ returns 0 immediately, so **a failed deploy would report a green workflow run**.
 Register the mechanism by which the script's exit status reaches the job — a
 sentinel file plus poll, or `tmux wait-for` — and test it.
 
-**Fail-safe sentence.** Nothing here marks a market measured, changes any
-M-A/M-B/M-C or `maker_min_*` threshold, opens or enables any order path, or
-upgrades any attestation; the only change is where the deploy is triggered from
-and who is recorded as having triggered it, and a failed workflow leaves the VPS
-on its previous image via the existing rollback path.
+**Fail-safe sentence — corrected 2026-08-01; the first version was false.**
+Nothing here marks a market measured, changes any M-A/M-B/M-C or `maker_min_*`
+threshold, opens or enables any order path, or upgrades any attestation, and a
+failed workflow leaves the VPS on its previous image via the existing rollback
+path. **But this WO is NOT free of gate change and must not claim to be:** the
+registered `AGENTS.md` amendment converts Path A's "REQUIRED whenever GitHub
+Actions can run it" from a CAPABILITY test into a POLICY test, and by this WO's
+own analysis the policy blocker is structural and permanent. Path A therefore
+becomes never-required and the un-attested Path B becomes the permanent route —
+a change to the binding condition of the strongest deploy gate, in the
+loosening direction.
 
-**Touch ONLY these files** (`git diff --stat` must show exactly these six):
+**Sunset, registered with it.** The amendment LAPSES when a second eligible
+collaborator exists or option (a) below is adopted, whichever is first. The
+Path-B usage counter in the day-after check is the review trigger: a rising
+count with no sunset in sight is the signal to revisit, not to normalise.
+
+**Touch ONLY these files** (`git diff --stat` must show exactly these six).
+The register is deliberately EXCLUDED — a build PR does not edit its own WO
+status, matching WO-143's list:
 - NEW `.github/workflows/deploy_vps_paper_dispatch.yml`
-- `scripts/deploy_vps_paper_manual.sh` (actor and trigger-provenance fields;
-  attestation reason string)
-- `AGENTS.md` (dated policy-vs-capability amendment)
+- `scripts/deploy_vps_paper_manual.sh` (`trigger_mechanism` and actor fields
+  replacing the hardcoded `"authorised_by": "owner"` at `:391`; attestation
+  reason string)
+- `AGENTS.md` (dated policy-vs-capability amendment, text registered below)
 - NEW `tests/test_deploy_vps_paper_dispatch_workflow.py`
 - `tests/test_vps_only_operating_docs.py` (extend for the amended text)
-- `docs/POLYMARKET_CODEX_WORK_ORDERS.md` (status)
+- `tests/polymarket_predictive_engine/test_manual_vps_deploy_script.py` —
+  **`:337` asserts `record["authorised_by"] == "owner"` and this WO changes that
+  field**; omitting it would force the build to either fail the suite or edit
+  outside its own contract
+
+**Register cross-reference to update in a later docs pass (not this build):**
+WO-133's acceptance list names *"authoriser recorded"* as a deploy-record
+honesty field; that phrasing is superseded by `trigger_mechanism`.
+
+**The `AGENTS.md` amendment text is registered here, not delegated.** `AGENTS.md`
+is exactly the surface that governance protects, and
+`tests/test_vps_only_operating_docs.py:65-77` pins the sentences being changed,
+so a build agent must not draft it. The amendment states, dated: Path A remains
+required whenever an eligible independent reviewer exists; where the independent
+review requirement cannot be satisfied because no eligible reviewer exists — a
+POLICY limit, not a capability limit — Path B is permitted, records
+`attestation_verified: false`, and this permission lapses under the sunset
+above.
 
 **Tests (enumerated; rewritten — the first draft's set mostly asserted
 pre-existing script behaviour, and its "no secret appears in the log" test had
@@ -8096,9 +8227,11 @@ new fields:
 4. `StrictHostKeyChecking` is not disabled anywhere in the workflow.
 5. a nonzero script exit inside `tmux` yields a nonzero job (exercise the
    sentinel/poll contract directly, not through a real deploy).
-6. the deploy record written on the workflow path carries the real actor and
-   `trigger: workflow_dispatch`, and **never** the literal
-   `authorised_by: "owner"` unless a real owner shell produced it.
+6. the deploy record carries `trigger_mechanism` on BOTH paths, the workflow
+   path additionally carries `github.actor` and the environment-approval actor,
+   and the literal `authorised_by: "owner"` appears in **no** path — there is no
+   "unless a real owner shell produced it" escape, because nothing can establish
+   that.
 7. `attestation_verified` remains `false` on the Path B route and the reason
    string does not claim a capability the Actions context possesses.
 
@@ -8109,3 +8242,20 @@ the actor and trigger-provenance fields; `source_vs_deployed_sha` reads
 surfaced so Path-B reliance is **measured rather than invisible** — making the
 un-attested route the ergonomic one is a de facto loosening of the deploy
 control even though no threshold moves, and it must be visible.
+
+## Calibration log
+
+One row per WO, appended at close, per `docs/ENGINEERING_STANDARDS.md` S8 and
+`.claude/skills/wo-lifecycle/SKILL.md` Part 4. A WO is not `done` without its
+row. Seeded 2026-08-01 with the cycle that produced the standard.
+
+| WO | class | tiers used | subagent tokens | spec-review defects | build-review defects | escaped to deploy | day-after |
+|---|---|---|---|---|---|---|---|
+| WO-143.7 / 143b.1 amendment round | D | Opus draft, Opus review x3 | ~570k reviewer + ~390k engineers (parked) | 7 (round 1), 4 blockers (round 2), 5 blockers (round 3) | not yet built | — | pending |
+
+Reading of the seed row: spec-review defect count did not fall between rounds,
+which by Part 4's rule means the admission checklist gains the rule that would
+have caught the recurring one. Rounds 2 and 3 were both dominated by
+**contradiction-with-existing-clause** and **incomplete-file-list** findings —
+already A4, A5 and A7. Those rules were written after this cycle, so the next
+cycle is the first real test of whether they bite.

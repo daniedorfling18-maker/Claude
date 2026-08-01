@@ -7488,6 +7488,125 @@ self-measures via `lock_attempts` plus day-after check (6); WO-142's
 day-after check is re-armed against the artifacts this job refreshes once
 this WO deploys.
 
+### 143.7 — Review-round amendment (registered 2026-08-01, BEFORE the fix dispatch)
+
+Codex's review of PR #417 (head `91c35cd`) raised seven findings. Each was
+re-verified against the code by the orchestrator before being registered
+here; findings are adopted on the evidence, not on the reviewer's say-so.
+
+**Not adopted — "unregistered live-loop amendment" (P1).** The finding is
+correct about the tree it reviewed and wrong about the repository. §143.6 was
+amended to UNCONDITIONAL and the PID-1 pre-dispatch check withdrawn in
+`51ffb42` (PR #414, merged). PR #417's head is based on `ab16ee9`, which
+predates that merge, so the registered text Codex read out of the PR tree
+still carried the conditional wording. **The required action is a rebase onto
+`main`, not a code change**: the branch must carry the registration that
+authorises its own diff. No file is removed from the commit.
+
+The remaining six are CONFIRMED and in scope for the fix round.
+
+**(a) The new artifact must carry the invocation flags.** `AGENTS.md` L131-135
+requires every new artifact to state `paper_trading_invoked=false` and
+`live_trading_invoked=false`. `scheduled_paper_cycle_report.json` is a new
+artifact. Today those two literals are set only inside the
+`skipped_existing_prediction_cycle` branch; every other path that writes the
+artifact — the success path, the `trading_mode` block, and the
+feature/model-load block — omits them. Add both to the initial `report` dict
+at construction so every writing path carries them, leaving the lock-skip
+branch's explicit re-statement in place. The 22-key scheduler receipt already
+carries both; that is a different artifact and does not discharge this
+requirement.
+
+**(b) A zero-prediction cycle must not be classified as success.**
+`scheduled_paper_cycle.py` classifies on `has_predictions = "predictions" in
+report` — a KEY-PRESENCE test. `build_features_v2` reads its inputs through
+`read_csv_rows`, which returns `[]` for a missing, empty, or malformed
+`websocket_market_features.csv` rather than raising, so `predictions` is `0`,
+the key is present, and the run is classified `ran`/`blocked_readiness` at
+exit 0. `apply_mispricing_alpha` compounds it: line 554 is its ONLY early
+return between the overlay-enabled check and the live-summary write at :1068,
+so a zero-row run still stamps a FRESH `mispricing_alpha_live_summary.json`
+and `overlay_refreshed` reads true. The job therefore refreshes
+`last_success_utc` while the scoring lane has no current observations — the
+same fail-open class as the odds-preflight "intentional skip" (OPS-5).
+Require a POSITIVE prediction count for the `ran`/`blocked_readiness`
+classifications, and validate the websocket observation age against a
+registered ceiling before classifying completion; otherwise classify
+`blocked_inputs` at exit 1.
+
+**(c) Detect the disabled overlay BEFORE signals are published.**
+`_run_paper_cycle_unlocked` runs `generate_signals` unconditionally — it is
+not skipped under `scoring_only` — and `generate_signals` writes
+`trade_signals.csv` (`strategy.py:513`). When `mispricing_alpha.enabled` is
+false, `apply_mispricing_alpha` returns at :554 without writing the summary,
+so the wrapper only learns the overlay was disabled AFTER the signal file is
+already on disk, and its exit 1 cannot retract it. With the overlay absent
+`generate_signals` also stops applying several alpha-dependent gates, so the
+published rows can include raw `predictive_directional` candidates that the
+live container's broker subsequently fills. Everything remains paper — no
+live path exists or is added — but this is a scheduled job publishing signals
+past gates that would otherwise have rejected them, which the "do not loosen
+... controls to manufacture activity" rule forbids. Detect the
+disabled-or-unrefreshed overlay BEFORE `generate_signals` is called, and
+publish no approved-signal file on that path.
+
+**(d) Clamp the paper-cycle timeout above zero.** `run_vps_ops_scheduler.sh`
+validates `OPS_PAPER_CYCLE_TIMEOUT_SECONDS` with a digits check and an upper
+bound (`-le 1800`) only. `0` passes both and reaches `timeout`, where GNU
+coreutils documents "A duration of 0 disables the associated timeout" — an
+unbounded scoring cycle holding the `prediction_cycle` lock and stalling the
+serial scheduler behind it. This is inconsistent within the same commit:
+`PAPER_CYCLE_INTERVAL` is clamped two-sided (`-ge 3600`, `-le 14400`). Add a
+positive lower clamp on the timeout, matching the interval's shape.
+
+**(e) `lock_wait_seconds` must measure lock waiting only.** It is computed as
+`time.monotonic() - started_monotonic` AFTER the retry loop exits, so on
+every first-attempt acquisition it contains the whole feature/model/scoring
+runtime and lands within rounding of `duration_seconds`. The field exists to
+evidence bridge contention; as written it reports a lock wait on runs where
+none occurred. Accumulate only time spent on attempts that returned
+`skipped_existing_prediction_cycle` — a first-attempt acquisition reports
+approximately zero.
+
+**(f) `shadow_candidates_forwarded` must not claim a forward that did not
+happen.** Under `scoring_only` the shadow update is deliberately skipped
+(`shadow_cohort = {"status": "skipped_scoring_only"}`) while the shared
+`report.update` still reports `len(longshot_candidates)`. This is the SAME
+defect Codex raised independently as F4 on PR #416, and it is registered
+once, for all callers, in §143b.1. WO-143's fix round implements the
+`scoring_only` case of that contract; it does not define it.
+
+**Fail-safe sentence.** Nothing in this amendment marks a market measured,
+changes any M-A/M-B/M-C or `maker_min_*` threshold, opens or enables any
+order path, or loosens any gate; every item is strictly tightening — fewer
+runs classified successful, fewer signals published, a bounded timeout where
+one could be disabled, and telemetry that claims less than it does today
+rather than more.
+
+**Tests (enumerated, additive to §143.2's set).** (1) the artifact written on
+the success path contains literal `paper_trading_invoked=false` and
+`live_trading_invoked=false`, and so does the artifact written on each
+blocked path; (2) an absent `websocket_market_features.csv` yields
+`blocked_inputs` at exit 1 and does NOT refresh `last_success_utc`; (3) an
+empty-but-present websocket file yields the same; (4) a websocket file older
+than the registered ceiling yields the same even when it parses and scores;
+(5) with `mispricing_alpha.enabled: false`, `trade_signals.csv` is NOT
+written and its pre-existing on-disk content is unchanged, and the status is
+`blocked_overlay_disabled` at exit 1; (6) `OPS_PAPER_CYCLE_TIMEOUT_SECONDS=0`
+resolves to the positive default, asserted by sourcing the scheduler under
+`OPS_SCHEDULER_LIBRARY_ONLY`; (7) a first-attempt acquisition reports
+`lock_wait_seconds` under one second while `duration_seconds` reflects the
+real runtime; (8) a contended run that succeeds on its second attempt reports
+`lock_wait_seconds` at approximately one sleep interval, not the full
+duration.
+
+**Day-after check:** on the first deployed day `scheduled_paper_cycle.json`
+shows `lock_wait_seconds` near zero on uncontended runs while
+`duration_seconds` carries the real cycle cost; no run is recorded `ran` with
+`predictions: 0`; and `trade_signals.csv`'s modification time advances only
+from the live container, never from a `blocked_overlay_disabled` scheduled
+run.
+
 ### Named follow-ons, NOT built here
 
 - **WO-143b — serialise the shadow-cohort writer.** `update_shadow_cohort_evidence`
@@ -7560,3 +7679,91 @@ rather than wedging the lane permanently.
 the live tick path with no `blocked_broken_chain` from `anchor_ledgers`, and
 any `skipped_shadow_lock_held` occurrences appear in the cycle artifacts
 rather than as silent gaps.
+
+### 143b.1 — Review-round amendment (registered 2026-08-01, BEFORE the fix dispatch)
+
+Codex's review of PR #416 raised four findings. Each was re-verified against
+the code by the orchestrator before being registered here.
+
+**F1 — settlement reclaiming the lock while a writer is active (P1): NOT
+REACHABLE under shipped defaults; recorded, not scheduled.** The concern is
+real in shape — `runtime_lock`'s stale-reclaim timeout defaults to 1800s, so
+a writer slower than that would have its lock reclaimed underneath it. The
+measured worst case does not reach it: `settlement_max_positions_per_cycle:
+25` and `settlement_request_timeout_seconds: 20` (config lines 1311-1312)
+bound a fully-timing-out settlement pass at ~500s, a 3.6x margin. The finding
+becomes reachable only under a hand-raised config. No change is registered;
+if either value is ever raised, this note is the reason to revisit the
+`shadow_cohort` lock's stale window in the same change.
+
+**F2 — the obsolete structural test (P2): CONFIRMED.**
+`tests/polymarket_predictive_engine/test_shadow_cohort.py:127`
+(`test_all_source_shadow_update_callers_hold_prediction_cycle_lock`)
+structurally enforces the caller-holds-`prediction_cycle` contract that
+WO-143b deliberately replaces with an internal lock. It passes today only
+because no caller yet exercises the new contract; a valid new caller relying
+on the internal lock would be rejected by a test asserting a rule the WO
+retired. Retarget it: the invariant worth keeping is that no caller performs
+an UNGUARDED write, and the internal `shadow_cohort` lock is now one of the
+accepted guards. Do not simply delete it — that scan is the only structural
+defence against a future unguarded caller.
+
+**F3 — test hermeticity (P2): CONFIRMED.** The byte-identity regression test
+(WO-143b test 1) resolves its baseline through git object `ab16ee9` and
+silently SKIPS when that object is absent, which is the normal state of a
+shallow CI checkout or a worktree. A regression test that skips itself on the
+machines that run it is not a regression test. Replace the git-object
+dependency with a committed fixture so the assertion is hermetic and offline,
+per `docs/ENGINEERING_STANDARDS.md`'s recorded-reality fixture rule.
+
+**F4 — a skipped shadow update must not be reported as a forward (P1):
+CONFIRMED, and broader than the PR.** WO-143b adds a
+`skipped_shadow_lock_held` return in which the function writes nothing. Every
+caller that reports a forwarded-candidate COUNT computes it from its own
+input list and never consults the returned status, so a contended call is
+recorded as a successful forward. Codex raised the same defect independently
+against WO-143's `scoring_only` skip (§143.7(f)); that is the second
+instance, so the contract is registered once, here, for all callers.
+
+**The caller-honesty contract.** A caller that reports how many candidates
+reached the shadow updater MUST derive that number from the update's outcome,
+not from the size of what it passed in. Concretely: when the returned status
+is any `skipped_*` value, the reported forwarded count is `0`, and the
+caller's artifact additionally carries the returned status verbatim so the
+skip is visible rather than inferred from a zero. Call sites in scope, all
+verified present at registration:
+
+- `src/polymarket_predictive_engine/paper_cycle.py:183` (`main`) — the
+  `longshot_bias.shadow_candidates_forwarded` field, covering both the
+  lock-held skip and WO-143's `scoring_only` skip;
+- `src/polymarket_predictive_engine/longshot_bias.py:426`;
+- `scripts/run_polymarket_local_live_loop.py:723`;
+- `scripts/run_alpha_candidate_shadow_evidence.py:120`;
+- `scripts/run_promoted_rule_shadow_scan.py:769`.
+
+A call site that reports no count needs no change beyond surfacing the
+returned status.
+
+**Fail-safe sentence.** Nothing in this amendment marks a market measured,
+changes any M-A/M-B/M-C or `maker_min_*` threshold, opens any order path, or
+changes what `update_shadow_cohort_evidence` computes; the only behavioural
+change is that a skipped update is reported as a skip instead of as a
+forward, which strictly reduces what the artifacts claim.
+
+**Tests (enumerated, additive to WO-143b's set).** (1) with the
+`shadow_cohort` lock held, `run_paper_cycle` reports
+`shadow_candidates_forwarded: 0` and surfaces `skipped_shadow_lock_held`,
+asserted with a NON-EMPTY candidate list so the count is not incidentally
+zero; (2) the same assertion for each remaining call site listed above;
+(3) the uncontended path still reports the full count, so the honesty fix
+does not zero a real forward; (4) the retargeted structural scan still
+REJECTS a caller that writes with neither the `prediction_cycle` guard nor
+the internal lock; (5) the retargeted scan ACCEPTS a caller relying solely on
+the internal `shadow_cohort` lock; (6) the byte-identity regression runs from
+a committed fixture and does not skip when git history is unavailable —
+assert explicitly that it did not skip.
+
+**Day-after check:** after deploy, any `skipped_shadow_lock_held` in the
+cycle artifacts is accompanied by `shadow_candidates_forwarded: 0` in the
+same artifact, and `shadow_fills.csv` row growth continues to match the
+uncontended forward counts.

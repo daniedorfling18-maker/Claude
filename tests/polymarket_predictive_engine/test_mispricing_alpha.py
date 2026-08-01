@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 import pytest
@@ -12,7 +13,7 @@ from polymarket_predictive_engine.mispricing_alpha import (
     train_mispricing_alpha_model,
 )
 from polymarket_predictive_engine.strategy import _same_category_label_counts, generate_signals
-from polymarket_predictive_engine.utils import read_csv_rows, write_csv, write_json
+from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_csv, write_json
 
 
 def _config(tmp_path: Path):
@@ -1556,3 +1557,332 @@ def test_training_path_never_reaches_quote_enrichment(tmp_path, monkeypatch):
     # Scoring, by contrast, does route through enrichment.
     with pytest.raises(AssertionError, match="never be reached"):
         alpha_module.apply_mispricing_alpha(cfg, predictions=[{"token_id": "t1", "market_midpoint": 0.4}])
+
+
+# --- WO-142: volatility copy-through wiring (mispricing_alpha.py extension) ---
+#
+# Shared test-config convention for this WO (registered): zero every
+# microstructure penalty weight EXCEPT volatility, and set
+# volatility_penalty_weight explicitly per call. `_config` above already
+# zeroes spread/liquidity/depth/uncertainty/model-overround weights; this
+# helper additionally zeroes execution_cost_penalty_weight (default 1.0) and
+# market_overround_penalty_weight (the base helper leaves it at 0.5) so the
+# only nonzero microstructure/cross-market term is the volatility penalty
+# under test. Fixtures below use distinct market_id/token_id per row so the
+# cross-market group size is always 1 and cross_penalty is exactly 0.0.
+
+
+def _volatility_test_config(base_path: Path, *, volatility_penalty_weight: float):
+    base_path.mkdir(parents=True, exist_ok=True)
+    cfg = _config(base_path)
+    cfg.raw["mispricing_alpha"].update(
+        {
+            "execution_cost_penalty_weight": 0.0,
+            "market_overround_penalty_weight": 0.0,
+            "volatility_penalty_weight": volatility_penalty_weight,
+        }
+    )
+    return cfg
+
+
+def _volatility_monotone_fixture() -> list[dict]:
+    return [
+        {
+            # Control row: comfortably above the trade-edge threshold before
+            # AND after the volatility penalty applies (raw edge 0.20, a
+            # penalty of 0.15 * 0.02 = 0.003 never closes that gap).
+            "market_id": "vol-control-market",
+            "token_id": "vol-control-token",
+            "prediction_timestamp": "2026-02-01T00:00:00Z",
+            "category": "synthetic",
+            "market_midpoint": "0.70",
+            "calibrated_probability": "0.70",
+            "executable_price": "0.50",
+            "spread": "0.01",
+            "liquidity": "1000",
+            "time_to_close_hours": "24",
+            "confidence": "1",
+            "fees_enabled": False,
+            "rolling_volatility_6h": "0.02",
+        },
+        {
+            # Widening row: raw edge 0.06 clears the 0.03 trade threshold at
+            # weight 0.0 (edge_lower_bound == 0.06), but a volatility penalty
+            # of 0.15 * 0.30 == 0.045 at weight 0.15 drops edge_lower_bound to
+            # 0.015 -- inside the near-miss band [0.0, 0.03), not a trade
+            # candidate anymore. This is the WO-142 disclosed widening.
+            "market_id": "vol-widening-market",
+            "token_id": "vol-widening-token",
+            "prediction_timestamp": "2026-02-01T00:00:00Z",
+            "category": "synthetic",
+            "market_midpoint": "0.56",
+            "calibrated_probability": "0.56",
+            "executable_price": "0.50",
+            "spread": "0.01",
+            "liquidity": "1000",
+            "time_to_close_hours": "24",
+            "confidence": "1",
+            "fees_enabled": False,
+            "rolling_volatility_6h": "0.30",
+        },
+        {
+            # Shadow row: mirrors test_sharp_anchor_non_worldcup_market_can_
+            # feed_shadow_evidence's fixture shape. raw edge 0.021 stays
+            # below both the trade (0.03) and near-miss-raw-edge (0.05)
+            # thresholds at every weight, so this row exercises ONLY the
+            # shadow-candidate boundary: edge_lower_bound == 0.021 at weight
+            # 0.0 (>= shadow minimum -0.01, a shadow candidate) falls to
+            # 0.021 - 0.15 * 0.30 == -0.024 at weight 0.15 (< -0.01, not a
+            # shadow candidate).
+            "market_id": "vol-shadow-market",
+            "market_slug": "will-shadow-team-win",
+            "question": "Will Shadow Team win?",
+            "category": "sports",
+            "outcome": "Yes",
+            "token_id": "vol-shadow-token",
+            "prediction_timestamp": "2026-02-01T00:00:00Z",
+            "market_midpoint": "0.40",
+            "calibrated_probability": "0.40",
+            "executable_price": "0.40",
+            "spread": "0.01",
+            "liquidity": "1000",
+            "time_to_close_hours": "12",
+            "confidence": "1",
+            "fees_enabled": False,
+            "rolling_volatility_6h": "0.30",
+        },
+    ]
+
+
+def _write_shadow_fundamental_probability(cfg) -> None:
+    write_csv(
+        cfg.output_root / "polymarket_training" / "sharp_fundamental_probabilities.csv",
+        [{"token_id": "vol-shadow-token", "probability": "0.46"}],
+    )
+
+
+def test_volatility_summary_counters_third_state_invariant(tmp_path):
+    """142.3: rows_with_rolling_volatility / rows_missing_rolling_volatility.
+
+    Three rows: one scored with a volatility source, one scored but blank
+    (stamped "missing"), one that exits early before scoring. The early-exit
+    row carries no volatility_source stamp at all, so it lands in NEITHER
+    counter -- the two counters must sum to <= predictions, not ==.
+    """
+    cfg = _volatility_test_config(tmp_path, volatility_penalty_weight=0.15)
+
+    scored = apply_mispricing_alpha(
+        cfg,
+        [
+            {
+                "market_id": "vol-tele-a",
+                "token_id": "vol-tele-a-token",
+                "prediction_timestamp": "2026-02-01T00:00:00Z",
+                "category": "synthetic",
+                "market_midpoint": "0.50",
+                "calibrated_probability": "0.50",
+                "executable_price": "0.50",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "time_to_close_hours": "24",
+                "confidence": "1",
+                "fees_enabled": False,
+                "rolling_volatility_6h": "0.05",
+            },
+            {
+                "market_id": "vol-tele-b",
+                "token_id": "vol-tele-b-token",
+                "prediction_timestamp": "2026-02-01T00:00:00Z",
+                "category": "synthetic",
+                "market_midpoint": "0.50",
+                "calibrated_probability": "0.50",
+                "executable_price": "0.50",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "time_to_close_hours": "24",
+                "confidence": "1",
+                "fees_enabled": False,
+                "rolling_volatility_6h": "",
+                "rolling_volatility_24h": "",
+            },
+            {
+                # No market/model probability field at all -> skipped early,
+                # never reaches _microstructure_penalty.
+                "market_id": "vol-tele-c",
+                "token_id": "vol-tele-c-token",
+                "prediction_timestamp": "2026-02-01T00:00:00Z",
+                "category": "synthetic",
+            },
+        ],
+    )
+
+    assert len(scored) == 3
+    row_a = next(row for row in scored if row["market_id"] == "vol-tele-a")
+    row_b = next(row for row in scored if row["market_id"] == "vol-tele-b")
+    row_c = next(row for row in scored if row["market_id"] == "vol-tele-c")
+
+    assert row_a["volatility_source"] == "rolling_volatility_6h"
+    assert row_a["volatility_penalty"] == pytest.approx(0.0075, abs=1e-12)
+    assert row_b["volatility_source"] == "missing"
+    assert row_b["volatility_penalty"] == pytest.approx(0.0, abs=1e-12)
+    assert row_c["alpha_status"] == "skipped_missing_probability_or_price"
+    assert "volatility_source" not in row_c
+
+    summary = read_json(cfg.governance_root / "mispricing_alpha_live_summary.json")
+    assert summary["predictions"] == 3
+    assert summary["rows_with_rolling_volatility"] == 1
+    assert summary["rows_missing_rolling_volatility"] == 1
+    assert (
+        summary["rows_with_rolling_volatility"] + summary["rows_missing_rolling_volatility"]
+        <= summary["predictions"]
+    )
+    assert summary["volatility_penalty_sum"] == pytest.approx(0.0075, abs=1e-12)
+
+
+def test_volatility_penalty_moves_no_gate_monotone_tightening(tmp_path):
+    """142.2/142.3 direction disclosure: no gate, threshold, or config moves.
+
+    Same three-row fixture scored at volatility_penalty_weight 0.0 and 0.15.
+    The trade-candidate set and the shadow-candidate set at 0.15 must each be
+    a SUBSET of their weight-0.0 counterpart (tighten-only), trade_candidates
+    count must be <=, and the untouched config literals must read exactly as
+    registered.
+    """
+    fixture = _volatility_monotone_fixture()
+
+    cfg_zero = _volatility_test_config(tmp_path / "w0", volatility_penalty_weight=0.0)
+    _write_shadow_fundamental_probability(cfg_zero)
+    scored_zero = apply_mispricing_alpha(cfg_zero, [dict(row) for row in fixture])
+
+    cfg_full = _volatility_test_config(tmp_path / "w15", volatility_penalty_weight=0.15)
+    _write_shadow_fundamental_probability(cfg_full)
+    scored_full = apply_mispricing_alpha(cfg_full, [dict(row) for row in fixture])
+
+    trade_zero = {row["market_id"] for row in scored_zero if row["alpha_trade_candidate"] is True}
+    trade_full = {row["market_id"] for row in scored_full if row["alpha_trade_candidate"] is True}
+    shadow_zero = {row["market_id"] for row in scored_zero if row["shadow_trade_candidate"] is True}
+    shadow_full = {row["market_id"] for row in scored_full if row["shadow_trade_candidate"] is True}
+
+    assert trade_zero == {"vol-control-market", "vol-widening-market"}
+    assert trade_full == {"vol-control-market"}
+    assert trade_full <= trade_zero
+
+    assert shadow_zero == {"vol-shadow-market"}
+    assert shadow_full == set()
+    assert shadow_full <= shadow_zero
+
+    assert len(scored_full) == len(scored_zero) == 3
+    assert sum(1 for row in scored_full if row["alpha_trade_candidate"] is True) <= sum(
+        1 for row in scored_zero if row["alpha_trade_candidate"] is True
+    )
+
+    for cfg in (cfg_zero, cfg_full):
+        assert cfg.raw["risk"]["minimum_edge"] == 0.03
+        assert cfg.raw["mispricing_alpha"]["edge_field_for_trading"] == "edge_lower_bound"
+        assert cfg.raw["mispricing_alpha"]["require_alpha_trade_candidate"] is True
+
+
+def test_volatility_penalty_near_miss_widening_disclosed(tmp_path):
+    """142.3 direction disclosure, single disclosed exception: a row that is
+    a trade candidate at weight 0.0 can fall into the near-miss learning band
+    at weight 0.15 (never suppressed -- this test must stay red if the band
+    is ever suppressed to hide the widening).
+    """
+    fixture = _volatility_monotone_fixture()
+
+    cfg_zero = _volatility_test_config(tmp_path / "w0", volatility_penalty_weight=0.0)
+    scored_zero = apply_mispricing_alpha(cfg_zero, [dict(row) for row in fixture])
+    widening_zero = next(row for row in scored_zero if row["market_id"] == "vol-widening-market")
+    assert widening_zero["alpha_trade_candidate"] is True
+    assert widening_zero["near_miss_learning_candidate"] is False
+    assert "already_trade_candidate" in widening_zero["near_miss_learning_reason"]
+
+    cfg_full = _volatility_test_config(tmp_path / "w15", volatility_penalty_weight=0.15)
+    scored_full = apply_mispricing_alpha(cfg_full, [dict(row) for row in fixture])
+    widening_full = next(row for row in scored_full if row["market_id"] == "vol-widening-market")
+    assert widening_full["alpha_trade_candidate"] is False
+    assert widening_full["near_miss_learning_candidate"] is True
+    assert widening_full["near_miss_learning_reason"] == "near_miss_eligible"
+    assert widening_full["edge_lower_bound"] == pytest.approx(0.015, abs=1e-12)
+
+    near_miss_rows = read_csv_rows(
+        cfg_full.output_root / "polymarket_predictions" / "near_miss_learning_candidates.csv"
+    )
+    assert any(row.get("market_id") == "vol-widening-market" for row in near_miss_rows)
+
+
+def test_volatility_columns_are_contiguous_in_header_order(tmp_path):
+    """142.1/142.2 position invariant: utils.write_csv derives fieldnames
+    from first-seen key insertion order, so the three rolling_volatility_*
+    copy-through keys must sit contiguously right after book_imbalance (and
+    before time_to_close_hours), and volatility_source must sit immediately
+    after volatility_penalty -- in both the in-memory dict and the CSV header
+    actually written to disk.
+    """
+    from polymarket_predictive_engine.models.calibrated import predict_from_features
+
+    features = [
+        {
+            "market_id": "vol-header-market",
+            "token_id": "vol-header-token",
+            "prediction_timestamp": "2026-02-01T00:00:00Z",
+            "midpoint": "0.50",
+            "executable_buy_price": "0.50",
+            "category": "synthetic",
+            "book_imbalance": "0.10",
+            "rolling_volatility_1h": "0.01",
+            "rolling_volatility_6h": "0.02",
+            "rolling_volatility_24h": "0.03",
+        }
+    ]
+    predictions = predict_from_features(features)
+    keys = list(predictions[0].keys())
+    book_imbalance_idx = keys.index("book_imbalance")
+    assert keys[book_imbalance_idx + 1 : book_imbalance_idx + 4] == [
+        "rolling_volatility_1h",
+        "rolling_volatility_6h",
+        "rolling_volatility_24h",
+    ]
+    assert keys[book_imbalance_idx + 4] == "time_to_close_hours"
+
+    predictions_csv = tmp_path / "predictions_header.csv"
+    write_csv(predictions_csv, predictions)
+    with predictions_csv.open(newline="", encoding="utf-8") as handle:
+        header = next(csv.reader(handle))
+    book_imbalance_col = header.index("book_imbalance")
+    assert header[book_imbalance_col + 1 : book_imbalance_col + 4] == [
+        "rolling_volatility_1h",
+        "rolling_volatility_6h",
+        "rolling_volatility_24h",
+    ]
+
+    cfg = _volatility_test_config(tmp_path / "header-scoring", volatility_penalty_weight=0.15)
+    scored = apply_mispricing_alpha(
+        cfg,
+        [
+            {
+                "market_id": "vol-header-score-market",
+                "token_id": "vol-header-score-token",
+                "prediction_timestamp": "2026-02-01T00:00:00Z",
+                "category": "synthetic",
+                "market_midpoint": "0.50",
+                "calibrated_probability": "0.50",
+                "executable_price": "0.50",
+                "spread": "0.01",
+                "liquidity": "1000",
+                "time_to_close_hours": "24",
+                "confidence": "1",
+                "fees_enabled": False,
+                "rolling_volatility_6h": "0.04",
+            }
+        ],
+    )
+    scored_keys = list(scored[0].keys())
+    penalty_idx = scored_keys.index("volatility_penalty")
+    assert scored_keys[penalty_idx + 1] == "volatility_source"
+
+    scores_csv = cfg.output_root / "polymarket_predictions" / "mispricing_alpha_scores.csv"
+    with scores_csv.open(newline="", encoding="utf-8") as handle:
+        scores_header = next(csv.reader(handle))
+    penalty_col = scores_header.index("volatility_penalty")
+    assert scores_header[penalty_col + 1] == "volatility_source"

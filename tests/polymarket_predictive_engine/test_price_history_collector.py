@@ -5,11 +5,14 @@ Tests pin the per-token merge rule in
 rows survive any fetch outcome that is not a clean, recognized venue answer.
 See the "## WO-141" section of ``docs/POLYMARKET_CODEX_WORK_ORDERS.md`` for
 the registered spec; the twelve tests below are numbered to match its
-enumerated test list.
+enumerated test list. Tests prefixed ``test_amend_`` pin the findings (F1-F6)
+registered in the "Amendment (2026-08-01, after the Opus line-audit of the
+first build)" block of the same section.
 """
 
 from __future__ import annotations
 
+import socket
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -164,12 +167,18 @@ def test_01_total_outage_preserves_every_prior_series_byte_identical(tmp_path, m
     ]
     _write_prior_corpus(cfg, prior_rows)
     before = read_csv_rows(_snapshot_path(cfg))
+    # F4 (2026-08-01 amendment): pin REAL byte identity of the corpus file,
+    # not just a 3-field (token_id, timestamp, price) projection -- a
+    # regression blanking e.g. midpoint on preserved rows must fail this.
+    before_bytes = _snapshot_path(cfg).read_bytes()
 
     monkeypatch.setattr(price_history_collector, "_request_history", _always_raises)
 
     snapshots, quality, summary = collect_price_history(cfg)
 
     after = read_csv_rows(_snapshot_path(cfg))
+    after_bytes = _snapshot_path(cfg).read_bytes()
+    assert after_bytes == before_bytes
     assert _by_key(after) == _by_key(before)
     assert _by_key(snapshots) == _by_key(before)
     assert summary["error_count"] == summary["requested_tokens"] == 2
@@ -305,8 +314,53 @@ def test_05_full_success_is_byte_identical_and_preservation_inert(tmp_path, monk
     assert summary["preserved_row_count"] == 0
     assert summary["preserved_rows_dropped_invalid"] == 0
     assert summary["prior_corpus_untrusted"] is False
+    # F3 (2026-08-01 amendment): the new union counters are inert too.
+    assert summary["fallback_union_token_count"] == 0
+    assert summary["fallback_union_carried_row_count"] == 0
     assert quality[0]["attempt_errors"] == 0
     assert quality[0]["status"] == "ok"
+
+    # F4 (2026-08-01 amendment): pin REAL byte identity against the exact
+    # 12-field rows pre-WO-141 main would have written for this fetch --
+    # not the reduced (token_id, timestamp, str(price)) projection, which
+    # would miss a regression blanking e.g. midpoint on a "healthy" run.
+    ts1 = (CLOSE_DT - timedelta(hours=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ts2 = (CLOSE_DT - timedelta(hours=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    expected_rows = [
+        {
+            "market_id": "condition-token-a",
+            "market_slug": "world-cup-a",
+            "condition_id": "condition-token-a",
+            "gamma_market_id": "gamma-token-a",
+            "token_id": "token-a",
+            "outcome": "Yes",
+            "category": "sports",
+            "timestamp": ts1,
+            "midpoint": 0.55,
+            "price": 0.55,
+            "close_time": CLOSE_TIME,
+            "source": "polymarket_clob_prices_history:bounded_close_window",
+        },
+        {
+            "market_id": "condition-token-a",
+            "market_slug": "world-cup-a",
+            "condition_id": "condition-token-a",
+            "gamma_market_id": "gamma-token-a",
+            "token_id": "token-a",
+            "outcome": "Yes",
+            "category": "sports",
+            "timestamp": ts2,
+            "midpoint": 0.60,
+            "price": 0.60,
+            "close_time": CLOSE_TIME,
+            "source": "polymarket_clob_prices_history:bounded_close_window",
+        },
+    ]
+    expected_path = tmp_path / "expected_snapshot.csv"
+    write_csv(expected_path, expected_rows, fieldnames=SNAPSHOT_FIELDS)
+    assert _snapshot_path(cfg).read_bytes() == expected_path.read_bytes()
+    # And the full 12-field rows returned in memory match exactly too.
+    assert [dict(row) for row in snapshots] == expected_rows
 
 
 # ---------------------------------------------------------------------------
@@ -525,6 +579,12 @@ def test_12_fallback_success_unions_with_prior_rows_fresh_wins_ties(tmp_path, mo
     # Not classified as pure preservation -- this run did fetch a point.
     assert summary["preserved_token_count"] == 0
     assert summary["preserved_row_count"] == 0
+    # F3 (2026-08-01 amendment): the union branch's carried-forward row
+    # (outside_ts, which survives only because it was unioned in, not
+    # fetched) must be visible via the two new counters instead of vanishing
+    # between preserved_* (correctly 0 here) and the corpus itself.
+    assert summary["fallback_union_token_count"] == 1
+    assert summary["fallback_union_carried_row_count"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -547,5 +607,136 @@ def test_summary_json_persists_wo141_fields(tmp_path, monkeypatch) -> None:
         "preserved_row_count",
         "preserved_rows_dropped_invalid",
         "prior_corpus_untrusted",
+        "fallback_union_token_count",
+        "fallback_union_carried_row_count",
     ):
         assert key in persisted_summary
+
+
+# ---------------------------------------------------------------------------
+# WO-141 amendment (2026-08-01, after the Opus line-audit of the first
+# build): F1, F2, F5, F6.
+# ---------------------------------------------------------------------------
+
+
+def test_amend_f1_empty_str_exception_on_final_attempt_is_fetch_error(tmp_path, monkeypatch) -> None:
+    """F1: classification must key on an explicit boolean, never on
+    ``str(exc)`` truthiness. ``ConnectionError()`` and ``socket.timeout()``
+    both stringify to "" -- a chain whose final attempt raises either must
+    still record ``status == "fetch_error"``, count in ``error_count``, and
+    NOT count in ``empty_history_count``.
+    """
+
+    for exc_factory in (ConnectionError, socket.timeout):
+        cfg = _cfg(tmp_path / exc_factory.__name__)
+        _write_resolutions(cfg, [_resolution("token-a", "world-cup-a")])
+        # No prior corpus: isolates the status/error_count/empty_history_count
+        # classification from the preserve/union/drop merge decision.
+        monkeypatch.setattr(
+            price_history_collector,
+            "_request_history",
+            lambda *_a, **_k: (_ for _ in ()).throw(exc_factory()),
+        )
+
+        snapshots, quality, summary = collect_price_history(cfg)
+
+        assert str(exc_factory()) == ""  # sanity: this exception type is the bug trigger
+        assert quality[0]["status"] == "fetch_error"
+        assert summary["error_count"] == 1
+        assert summary["empty_history_count"] == 0
+
+
+def test_amend_f2_fetch_error_rows_keep_empty_fetch_source(tmp_path, monkeypatch) -> None:
+    """F2: ``fetch_source`` on a ``fetch_error`` row stays "" exactly as on
+    pre-fix main -- writing ``all_attempts_empty`` there is an unregistered
+    honesty-surface change and must not survive. A genuinely all-empty
+    (recognized) chain keeps whatever main wrote (``all_attempts_empty``).
+    """
+
+    cfg = _cfg(tmp_path)
+    _write_resolutions(
+        cfg,
+        [_resolution("token-total-failure", "world-cup-fail"), _resolution("token-clean-empty", "world-cup-empty")],
+    )
+    sequence = {
+        "token-total-failure": [RuntimeError("outage")],
+        "token-clean-empty": [{"history": []}],
+    }
+    monkeypatch.setattr(price_history_collector, "_request_history", _sequenced_response(sequence))
+
+    snapshots, quality, summary = collect_price_history(cfg)
+
+    by_token = {row["token_id"]: row for row in quality}
+    assert by_token["token-total-failure"]["status"] == "fetch_error"
+    assert by_token["token-total-failure"]["fetch_source"] == ""
+    assert by_token["token-clean-empty"]["status"] == "empty_history"
+    assert by_token["token-clean-empty"]["fetch_source"] == "all_attempts_empty"
+
+
+def test_amend_f5_reordered_complete_header_is_untrusted(tmp_path, monkeypatch) -> None:
+    """F5: a reordered-but-COMPLETE header (all SNAPSHOT_FIELDS present, just
+    a different order) is UNTRUSTED -- ``prior_corpus_untrusted: True``,
+    nothing preserved, and the run does not raise. Pins the current
+    ``csv_columns(path) != SNAPSHOT_FIELDS`` behaviour against a future
+    loosening to a set comparison.
+    """
+
+    cfg = _cfg(tmp_path)
+    _write_resolutions(cfg, [_resolution("token-a", "world-cup-a")])
+
+    reordered_fields = list(reversed(SNAPSHOT_FIELDS))
+    assert set(reordered_fields) == set(SNAPSHOT_FIELDS)  # complete: no field missing
+    assert reordered_fields != SNAPSHOT_FIELDS  # but not the canonical order
+
+    _write_prior_corpus(
+        cfg,
+        [_snapshot_row("token-a", "2026-07-09T12:00:00Z", 0.5)],
+        fieldnames=reordered_fields,
+    )
+    monkeypatch.setattr(price_history_collector, "_request_history", _always_raises)
+
+    snapshots, quality, summary = collect_price_history(cfg)
+
+    assert summary["prior_corpus_untrusted"] is True
+    assert snapshots == []
+    assert summary["preserved_token_count"] == 0
+    assert summary["preserved_row_count"] == 0
+
+
+def test_amend_f6_defensive_except_path_records_real_attempt_errors(tmp_path, monkeypatch) -> None:
+    """F6: the defensive per-token ``except`` path must record the actual
+    ``attempt_errors`` count observed, not a hardcoded 1. Forcing an
+    exception after a successful fetch (via a broken
+    ``normalize_price_history_payload``) must still preserve prior rows,
+    record ``attempt_errors == 0`` (the fetch itself never errored), and
+    never crash the run.
+    """
+
+    cfg = _cfg(tmp_path)
+    _write_resolutions(cfg, [_resolution("token-a", "world-cup-a")])
+    prior_rows = [_snapshot_row("token-a", "2026-07-09T12:00:00Z", 0.5)]
+    _write_prior_corpus(cfg, prior_rows)
+
+    # The venue answers cleanly on the very first attempt -- the fetch itself
+    # never errors -- but the unexpected bug fires while turning that
+    # response into rows.
+    monkeypatch.setattr(
+        price_history_collector,
+        "_request_history",
+        lambda *_a, **_k: {"history": [{"t": 0, "p": 0.9}]},
+    )
+
+    def _broken_normalize(_payload):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(price_history_collector, "normalize_price_history_payload", _broken_normalize)
+
+    snapshots, quality, summary = collect_price_history(cfg)  # must not raise
+
+    assert _by_key(snapshots) == _by_key(prior_rows)
+    assert quality[0]["status"] == "fetch_error"
+    assert quality[0]["attempt_errors"] == 0
+    assert quality[0]["fetch_source"] == ""
+    assert summary["error_count"] == 1
+    assert summary["preserved_token_count"] == 1
+    assert summary["preserved_row_count"] == 1

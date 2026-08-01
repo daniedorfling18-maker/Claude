@@ -291,10 +291,10 @@ def _fetch_history(
     timeout: int,
     lookback_days: int,
     lookahead_days: int,
-) -> tuple[Any, str, int, str]:
+) -> tuple[Any, str, int, str, bool]:
     """Try each fetch shape in turn until a recognized, non-empty answer.
 
-    Returns ``(payload, source, attempt_errors, error_message)``.
+    Returns ``(payload, source, attempt_errors, error_message, raised_on_final_attempt)``.
 
     ``attempt_errors`` (WO-141) counts every attempt in the chain -- not just
     the last one -- that either raised or returned an HTTP-success payload
@@ -302,14 +302,27 @@ def _fetch_history(
     recognized-but-empty answer is not an attempt error, it is the venue
     legitimately reporting no data for that window/shape.
 
+    ``raised_on_final_attempt`` (WO-141 amendment F1) is an explicit boolean:
+    True iff the LAST attempt actually tried in this call raised an
+    exception. This is exactly the condition under which pre-WO-141 main
+    would have re-raised (``last_error`` survives the loop only when the
+    final attempt raised -- any later non-raising attempt resets it).
+    Callers must classify ``fetch_error`` from this boolean, never from
+    ``error_message`` truthiness: several common exception types
+    (``ConnectionError()``, ``Timeout()``, ``socket.timeout()``,
+    ``TimeoutError()``, ...) stringify to ``""``, which would otherwise be
+    misread as "no error".
+
     ``error_message`` mirrors today's raise-on-total-failure behaviour: it is
     the final attempt's exception message when the chain never produced any
     response at all, and "" otherwise -- including when earlier attempts in
-    the same chain raised or were unrecognized. Callers use ``error_message``
-    only to reproduce the existing ``fetch_error`` status classification;
-    the WO-141 merge decision is keyed on ``attempt_errors`` and the returned
-    point count instead, so it also catches chains that end without raising
-    (mixed error/empty chains, or an all-unrecognized chain).
+    the same chain raised or were unrecognized. It may legitimately be ""
+    even when ``raised_on_final_attempt`` is True (an exception whose
+    ``str()`` is empty); it is retained only for the quality CSV's ``error``
+    column, never for classification. The WO-141 merge decision is keyed on
+    ``attempt_errors`` and the returned point count, so it also catches
+    chains that end without raising (mixed error/empty chains, or an
+    all-unrecognized chain).
     """
 
     attempts: list[tuple[str, dict[str, Any]]] = []
@@ -331,24 +344,31 @@ def _fetch_history(
 
     attempt_errors = 0
     error_message = ""
+    raised_on_final_attempt = False
     for source, params in attempts:
         try:
             payload = _request_history(base_url, params, timeout)
         except Exception as exc:
             attempt_errors += 1
             error_message = str(exc)
+            raised_on_final_attempt = True
             continue
 
         error_message = ""
+        raised_on_final_attempt = False
         if not _payload_is_recognized(payload):
             attempt_errors += 1
             continue
 
         points = normalize_price_history_payload(payload)
         if points:
-            return payload, source, attempt_errors, ""
+            return payload, source, attempt_errors, "", False
 
-    return {"history": []}, "all_attempts_empty", attempt_errors, error_message
+    # F2 (2026-08-01 amendment): fetch_source on a fetch_error row must stay
+    # "" exactly as pre-WO-141 main -- only the genuinely all-recognized-empty
+    # chain (never raised) keeps "all_attempts_empty".
+    source = "" if raised_on_final_attempt else "all_attempts_empty"
+    return {"history": []}, source, attempt_errors, error_message, raised_on_final_attempt
 
 
 def _is_valid_preserved_row(row: dict[str, Any]) -> bool:
@@ -466,6 +486,13 @@ def collect_price_history(
     empty = 0
     preserved_token_count = 0
     preserved_row_count = 0
+    # WO-141 amendment (F3): the fallback-union branch carries prior rows
+    # forward too, but that is a distinct mechanism from strict preservation
+    # (it fires on a fallback SUCCESS, not a failure) and must not be folded
+    # into preserved_token_count/preserved_row_count -- those keep their
+    # strict preserve-branch meaning so a healthy run still reads 0.
+    fallback_union_token_count = 0
+    fallback_union_carried_row_count = 0
 
     out_root = cfg.output_root / "polymarket_training"
     gov_root = cfg.governance_root
@@ -479,8 +506,14 @@ def collect_price_history(
         token_id = resolution.get("token_id", "")
         close_dt = _dt(resolution.get("close_time") or resolution.get("resolution_time"))
         prior_rows = prior_by_token.get(token_id, [])
+        # F6 (2026-08-01 amendment): attempt_errors is a measurement -- seed it
+        # at 0 before the fetch so the except path below records the actual
+        # count observed for this token (0 if the failure struck after a
+        # clean fetch) instead of a hardcoded value, even if the exception
+        # happens before _fetch_history returns.
+        attempt_errors = 0
         try:
-            payload, source, attempt_errors, error_message = _fetch_history(
+            payload, source, attempt_errors, error_message, raised_on_final_attempt = _fetch_history(
                 base_url, token_id, close_dt, interval, fidelity, timeout, lookback_days, lookahead_days
             )
             points = normalize_price_history_payload(payload)
@@ -509,6 +542,13 @@ def collect_price_history(
             elif attempt_errors > 0 and points:
                 # Fallback success: a shorter-window answer must not shrink coverage.
                 final_rows = _union_preserve_and_fresh_rows(prior_rows, fresh_rows)
+                # F3 (2026-08-01 amendment): make the union branch's carried-
+                # forward rows visible without folding them into the strict
+                # preserved_* counters.
+                fallback_union_token_count += 1
+                fresh_keys = {(str(r.get("token_id") or ""), str(r.get("timestamp") or "")) for r in fresh_rows}
+                prior_keys = {(str(r.get("token_id") or ""), str(r.get("timestamp") or "")) for r in prior_rows}
+                fallback_union_carried_row_count += len(prior_keys - fresh_keys)
             elif attempt_errors == 0 and not points:
                 # Clean empty: venue-authoritative, prior rows drop as today.
                 final_rows = []
@@ -520,7 +560,11 @@ def collect_price_history(
                     preserved_row_count += len(prior_rows)
             snapshots.extend(final_rows)
 
-            status = "fetch_error" if error_message else ("ok" if points else "empty_history")
+            # F1 (2026-08-01 amendment): classify fetch_error from the
+            # explicit final-attempt-raised boolean, never from
+            # error_message truthiness -- several common exception types
+            # stringify to "" and would otherwise be misread as no error.
+            status = "fetch_error" if raised_on_final_attempt else ("ok" if points else "empty_history")
             if status == "fetch_error":
                 errors += 1
             elif status == "empty_history":
@@ -557,7 +601,13 @@ def collect_price_history(
                     "status": "fetch_error",
                     "history_points": 0,
                     "fetch_source": "",
-                    "attempt_errors": 1,
+                    # F6 (2026-08-01 amendment): record the actual count
+                    # observed for this token, not a hardcoded 1 -- it is 0
+                    # when the failure struck after a clean fetch (e.g. a bug
+                    # in payload normalization), and the count accumulated by
+                    # _fetch_history when it raised after some attempts had
+                    # already errored.
+                    "attempt_errors": attempt_errors,
                     "error": str(exc),
                 }
             )
@@ -596,6 +646,12 @@ def collect_price_history(
         "preserved_row_count": preserved_row_count,
         "preserved_rows_dropped_invalid": preserved_rows_dropped_invalid,
         "prior_corpus_untrusted": prior_corpus_untrusted,
+        # WO-141 amendment (F3): the fallback-union branch's carried-forward
+        # rows, counted separately from preserved_* (which stay strictly
+        # preserve-branch) so they are no longer invisible to a summary
+        # reader.
+        "fallback_union_token_count": fallback_union_token_count,
+        "fallback_union_carried_row_count": fallback_union_carried_row_count,
         "collected_at_utc": now_utc(),
         "output_file": str(out_root / "historical_price_snapshots.csv"),
         "quality_file": str(gov_root / "historical_price_history_quality.csv"),

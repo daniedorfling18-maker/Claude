@@ -34,6 +34,10 @@ OFFICIAL_BOOK_HEALTHY_STATES = frozenset({"ok", "disabled", "no_portfolio"})
 DR_STATUS_MAX_AGE_SECONDS = 6 * 60 * 60
 NTFY_ENV_VAR = "OPS_OWNER_NTFY_TOPIC_URL"
 MAX_NOTIFICATION_IDS = 20
+# WO-144 (F8): the per-entity cooldown stamp map is bounded independently of
+# the notification debt lists above - it grows by one entry per distinct
+# (registration_id, entity) that has ever been pushed, not per incident.
+MAX_NOTIFIED_ENTITIES = 64
 
 # A maximum is the number of consecutive degraded observations tolerated.
 # Therefore max=3 trips on observation four, exactly matching "> 3 cycles".
@@ -112,7 +116,12 @@ def _boolish(value: Any, default: bool) -> bool:
 def _nonnegative_int(value: Any, default: int) -> int:
     try:
         candidate = int(value)
-    except (TypeError, ValueError):
+    # WO-144 (F6): `.inf`/overflow YAML values (e.g. a hand-edited
+    # `notification_cooldown_seconds: .inf`) raise OverflowError, not
+    # ValueError, when coerced with int(). The watchdog dying in _settings is
+    # the most fail-open outcome there is, so this falls back to the
+    # registered default exactly like a non-numeric value does.
+    except (TypeError, ValueError, OverflowError):
         return default
     return candidate if candidate >= 0 else default
 
@@ -317,7 +326,7 @@ def _incident_id(registration_id: str, entity: str, episode_start: str) -> str:
 
 def _episode_anchor(
     state: dict[str, Any], registration_id: str, entity: str, token: str, degraded: bool
-) -> str:
+) -> tuple[str, int]:
     """WO-144: stable episode-start anchor for (registration, entity).
 
     The anchor is the token of the FIRST degraded observation of the current
@@ -327,21 +336,37 @@ def _episode_anchor(
     storm). A healthy observation ends the episode and clears the anchor.
     Absent or malformed state falls back to the per-cycle token: noisy,
     never blind.
+
+    WO-144 amendment (F2): also returns the episode's observation depth, a
+    count persisted alongside the anchor and keyed the same way, so callers
+    that anchor identity here (unlike the `_advance_counter` evaluators)
+    report a real `consecutive_degraded_observations` instead of a hardcoded
+    1. It increments exactly once per call because each anchoring call site
+    runs at most once per acquired watchdog cycle - the lock-held carry
+    path replays the prior cycle's `active_incidents` wholesale rather than
+    re-invoking the evaluators, so a wedged cycle can never double-count.
     """
     try:
         episodes = state.get("episode_anchors")
         if not isinstance(episodes, dict):
             episodes = {}
             state["episode_anchors"] = episodes
+        counts = state.get("episode_observation_counts")
+        if not isinstance(counts, dict):
+            counts = {}
+            state["episode_observation_counts"] = counts
         key = f"{registration_id}|{entity}"
         if not degraded:
             episodes.pop(key, None)
-            return str(token)
+            counts.pop(key, None)
+            return str(token), 0
         anchor = str(episodes.get(key) or "") or str(token)
         episodes[key] = anchor
-        return anchor
+        count = _nonnegative_int(counts.get(key), 0) + 1
+        counts[key] = count
+        return anchor, count
     except Exception:
-        return str(token)
+        return str(token), 1
 
 
 def _incident(
@@ -962,7 +987,7 @@ def _immediate_producer_evaluations(
                 ),
             }
         )
-        anchor = _episode_anchor(state, registration_id, registration_id, token, degraded)
+        anchor, count = _episode_anchor(state, registration_id, registration_id, token, degraded)
         if degraded:
             row = _incident(
                 generated_at=generated_at,
@@ -973,7 +998,7 @@ def _immediate_producer_evaluations(
                 episode_start=anchor,
                 degraded_state=status,
                 reason="; ".join(reasons),
-                count=1,
+                count=count,
                 maximum=0,
             )
             incidents[row["incident_id"]] = row
@@ -1054,7 +1079,7 @@ def _evaluate_slos_and_pushes(cfg: EngineConfig, state: dict[str, Any], generate
         slo_first_unobserved["operating_state"] = first
         missing_age = max(0.0, (now_for_slo - (_parse_stamp(first) or now_for_slo)).total_seconds())
         bad = sorted(required) if missing_age > PUSH_STATUS_MAX_SECONDS else []
-    anchor = _episode_anchor(state, "operating_state_slo_breach", "operating_state_slo", token, bool(bad))
+    anchor, count = _episode_anchor(state, "operating_state_slo_breach", "operating_state_slo", token, bool(bad))
     if bad:
         row = _incident(
             generated_at=generated_at,
@@ -1065,7 +1090,7 @@ def _evaluate_slos_and_pushes(cfg: EngineConfig, state: dict[str, Any], generate
             episode_start=anchor,
             degraded_state="breach_or_missing",
             reason="SLO rows breached, unknown, or missing: " + ", ".join(bad),
-            count=1,
+            count=count,
             maximum=0,
         )
         incidents[row["incident_id"]] = row
@@ -1101,7 +1126,7 @@ def _evaluate_slos_and_pushes(cfg: EngineConfig, state: dict[str, Any], generate
         else:
             first_unobserved.pop(name, None)
             bad_bridge = age > PUSH_STATUS_MAX_SECONDS or status != "ok"
-        anchor = _episode_anchor(state, "publication_bridge_unhealthy", name, stamp or "unobserved", bad_bridge)
+        anchor, count = _episode_anchor(state, "publication_bridge_unhealthy", name, stamp or "unobserved", bad_bridge)
         bridge_rows.append(
             {"bridge": name, "status": status, "observation_token": stamp or None, "age_seconds": age, "state": "incident" if bad_bridge else "healthy"}
         )
@@ -1116,7 +1141,7 @@ def _evaluate_slos_and_pushes(cfg: EngineConfig, state: dict[str, Any], generate
                 episode_start=anchor,
                 degraded_state=status,
                 reason=f"{name} publication status is missing, failed, or older than {PUSH_STATUS_MAX_SECONDS} seconds",
-                count=1,
+                count=count,
                 maximum=0,
             )
             incidents[row["incident_id"]] = row
@@ -1129,6 +1154,35 @@ def _evaluate_slos_and_pushes(cfg: EngineConfig, state: dict[str, Any], generate
         }
     )
     return evaluations, incidents
+
+
+def _prune_notified_entities(
+    notified: Mapping[str, Any], now_dt: datetime, horizon_seconds: float
+) -> dict[str, str]:
+    """WO-144 (F1/F8): drop expired and future-dated cooldown stamps, then
+    keep only the newest MAX_NOTIFIED_ENTITIES entries.
+
+    F1: a stamp with NEGATIVE elapsed time (the recorded push is dated in the
+    future - a clock artifact) is dropped here rather than kept "cooling
+    forever"; combined with the cooldown check reading a since-pruned key as
+    never-notified, a future-dated stamp can never extend suppression beyond
+    the registered floor.
+
+    F8: this runs on every `_notification` call, not only when a push is
+    actually delivered, so a channel that is down (or a burst of distinct
+    entities) cannot grow this map unboundedly between deliveries.
+    """
+    parsed: list[tuple[str, str, datetime]] = []
+    for key, stamp in notified.items():
+        when = _parse_stamp(str(stamp))
+        if when is None:
+            continue
+        elapsed = (now_dt - when).total_seconds()
+        if elapsed < 0 or elapsed > horizon_seconds:
+            continue
+        parsed.append((key, str(stamp), when))
+    parsed.sort(key=lambda item: item[2], reverse=True)
+    return {key: stamp for key, stamp, _ in parsed[:MAX_NOTIFIED_ENTITIES]}
 
 
 def _append_incidents(path: Path, incidents: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1152,6 +1206,7 @@ def _notification(
     new: list[dict[str, Any]],
     undelivered_ids: list[str],
     undelivered_registrations: list[str],
+    undelivered_entities: list[str],
     state_path: Path,
     state: dict[str, Any],
 ) -> dict[str, Any]:
@@ -1181,14 +1236,23 @@ def _notification(
     notified = state.get("notified_entities")
     if not isinstance(notified, dict):
         notified = {}
-        state["notified_entities"] = notified
     now_dt = _parse_stamp(generated_at) or datetime.now(timezone.utc)
+    horizon = max(float(cooldown_seconds), 86400.0)
+    # F1/F8: prune on every call (not only a delivered push) so an unreachable
+    # channel cannot let the map grow unboundedly, and so a future-dated
+    # (clock-artifact) stamp is dropped before it can be read as "still
+    # cooling" by the check below.
+    notified = _prune_notified_entities(notified, now_dt, horizon)
+    state["notified_entities"] = notified
     pushable_new: list[dict[str, Any]] = []
     suppressed_entities: list[str] = []
     next_eligible: list[str] = []
     for row in new:
         key = f"{row.get('registration_id')}|{row.get('entity')}"
         last = _parse_stamp(str(notified.get(key) or ""))
+        # F1: a stamp already pruned above (including a dropped future-dated
+        # one) reads as `last is None`, i.e. never-notified/expired-now -
+        # never as "still cooling forever".
         if last is not None and (now_dt - last).total_seconds() < float(cooldown_seconds):
             suppressed_entities.append(key)
             next_eligible.append((last + timedelta(seconds=float(cooldown_seconds))).strftime("%Y-%m-%dT%H:%M:%SZ"))
@@ -1217,11 +1281,29 @@ def _notification(
             ],
         }
     )[:MAX_NOTIFICATION_IDS]
+    # F3: an episode whose first push succeeds only on retry must still arm
+    # the cooldown. By the retry cycle the originating incident is no longer
+    # in ``new`` (it is already in the ledger), so its entity key would
+    # otherwise be unrecoverable once dropped from ``active`` - persist it
+    # here, parallel to (and bounded the same as) the ids/registrations debt
+    # above, written in the same pre-send durable write.
+    entities = sorted(
+        {
+            *[str(item) for item in undelivered_entities if str(item)],
+            *[
+                f"{active_by_id[item].get('registration_id')}|{active_by_id[item].get('entity')}"
+                for item in pending
+                if item not in undelivered_ids and item in active_by_id
+            ],
+        }
+    )[:MAX_NOTIFICATION_IDS]
     if attempted:
-        # Crash safety: the bounded debt and the registration metadata needed
-        # to retry it are durable before the network side effect begins.
+        # Crash safety: the bounded debt and the registration/entity metadata
+        # needed to retry it are durable before the network side effect
+        # begins.
         state["undelivered_incident_ids"] = pending
         state["undelivered_incident_registrations"] = registrations
+        state["undelivered_incident_entities"] = entities
         write_json(state_path, state)
         message = "Polymarket watchdog incidents: " + ", ".join(registrations)
         try:
@@ -1234,28 +1316,35 @@ def _notification(
     if attempted:
         remaining = pending if not delivery["delivered"] else []
         remaining_registrations = registrations if remaining else []
+        remaining_entities = entities if remaining else []
     else:
         # A temporarily missing/disabled channel must not erase durable debt
         # from an earlier failed attempt. Conversely, new incidents do not
         # become debt until a configured channel actually attempts delivery.
         remaining = list(dict.fromkeys(undelivered_ids))[-MAX_NOTIFICATION_IDS:]
         remaining_registrations = list(dict.fromkeys(str(item) for item in undelivered_registrations))[-MAX_NOTIFICATION_IDS:]
+        remaining_entities = list(dict.fromkeys(str(item) for item in undelivered_entities))[-MAX_NOTIFICATION_IDS:]
     if attempted and delivery["delivered"]:
+        # Stamp this cycle's freshly pushed entities AND any entity whose
+        # debt this delivery just cleared (F3) - the latter may no longer be
+        # in ``pushable_new`` (or even ``active``) by the time delivery
+        # finally succeeds.
         for row in pushable_new:
             notified[f"{row.get('registration_id')}|{row.get('entity')}"] = generated_at
-        horizon = max(float(cooldown_seconds), 86400.0)
-        state["notified_entities"] = {
-            key: stamp
-            for key, stamp in notified.items()
-            if _parse_stamp(str(stamp)) is not None
-            and (now_dt - _parse_stamp(str(stamp))).total_seconds() <= horizon
-        }
+        for key in entities:
+            notified[key] = generated_at
+        notified = _prune_notified_entities(notified, now_dt, horizon)
+        state["notified_entities"] = notified
         state["undelivered_incident_ids"] = []
         state["undelivered_incident_registrations"] = []
+        state["undelivered_incident_entities"] = []
         write_json(state_path, state)
-    # ``notify`` remains the state-change/retry signal consumed by existing
-    # artifact readers; ``delivery.attempted`` records whether a real channel
-    # was configured and a transport call actually occurred.
+    # WO-144 (F5, amended): ``notify`` means "a push will be attempted this
+    # cycle" - an incident suppressed by the per-entity cooldown does not
+    # count, so a cycle whose only new incident is suppressed reports
+    # ``notify=False`` even though ``eligible``/``state_changed`` (both
+    # bool(new)) stay True. See docs/POLYMARKET_CODEX_WORK_ORDERS.md WO-144
+    # amendment (2026-08-01).
     notify = bool(enabled and pending)
     return {
         "enabled": enabled,
@@ -1272,6 +1361,8 @@ def _notification(
         "delivery": delivery,
         "undelivered_incident_ids": remaining,
         "undelivered_incident_registrations": remaining_registrations,
+        "undelivered_incident_entities": remaining_entities,
+        "notified_entities": notified,
     }
 
 
@@ -1348,6 +1439,7 @@ def build_degraded_state_watchdog(
                 new=new,
                 undelivered_ids=list(state.get("undelivered_incident_ids") or []),
                 undelivered_registrations=list(state.get("undelivered_incident_registrations") or []),
+                undelivered_entities=list(state.get("undelivered_incident_entities") or []),
                 state_path=state_path,
                 state=state,
             )
@@ -1361,6 +1453,8 @@ def build_degraded_state_watchdog(
                 "carry_forward_started_at": carry_started,
                 "undelivered_incident_ids": notification["undelivered_incident_ids"],
                 "undelivered_incident_registrations": notification["undelivered_incident_registrations"],
+                "undelivered_incident_entities": notification["undelivered_incident_entities"],
+                "notified_entities": notification["notified_entities"],
             })
             write_json(state_path, state)
             payload = {
@@ -1416,6 +1510,7 @@ def build_degraded_state_watchdog(
             new=new,
             undelivered_ids=list(state.get("undelivered_incident_ids") or []),
             undelivered_registrations=list(state.get("undelivered_incident_registrations") or []),
+            undelivered_entities=list(state.get("undelivered_incident_entities") or []),
             state_path=state_path,
             state=state,
         )
@@ -1425,6 +1520,8 @@ def build_degraded_state_watchdog(
                 "active_incident_ids": [row["incident_id"] for row in active],
                 "undelivered_incident_ids": notification["undelivered_incident_ids"],
                 "undelivered_incident_registrations": notification["undelivered_incident_registrations"],
+                "undelivered_incident_entities": notification["undelivered_incident_entities"],
+                "notified_entities": notification["notified_entities"],
                 "carry_forward_cycles": 0,
                 "carry_forward_started_at": None,
                 "paper_trading_invoked": False,

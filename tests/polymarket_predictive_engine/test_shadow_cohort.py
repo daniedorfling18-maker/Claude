@@ -2,10 +2,19 @@ from __future__ import annotations
 
 import ast
 import json
+import os
+import subprocess
+import sys
+import time
+import types
 from pathlib import Path
 
+import pytest
+
+from polymarket_predictive_engine import runtime_lock
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.shadow_cohort import _write_shadow_pnl_history, update_shadow_cohort_evidence
+import polymarket_predictive_engine.shadow_cohort as shadow_cohort_module
 
 
 def _unlocked_shadow_update_calls(source: str) -> list[int]:
@@ -531,3 +540,182 @@ def test_shadow_cohort_refuses_new_positions_outside_entry_band(tmp_path):
     }
     assert positions == []
     assert fills == []
+
+
+# --- WO-143b: update_shadow_cohort_evidence's own `shadow_cohort` lock -----
+#
+# `update_shadow_cohort_evidence` used to document (and rely on) the caller
+# holding the `prediction_cycle` runtime lock without enforcing it. The
+# deployed live loop's per-tick shadow maintenance calls this function
+# without holding that lock, racing the full paper cycle's in-lock call
+# against the append-only `shadow_fills.csv`. These tests cover the
+# function's own internal, independent `shadow_cohort` lock.
+
+# The commit immediately before WO-143b, i.e. the tip of `origin/main` this
+# WO branched from -- a permanent, immutable git object used as ground truth
+# for the "byte-identical to the pre-fix build" regression (test 1) so that
+# comparison does not merely re-test this file's own refactor of the
+# unchanged computation into a private helper.
+_WO143B_PRE_FIX_COMMIT = "ab16ee9d0e3fc2b483cf4036331b00fc805b633e"
+
+
+def _load_pre_fix_shadow_cohort_module() -> types.ModuleType:
+    """Load shadow_cohort.py exactly as it stood immediately before WO-143b.
+
+    Bound into the real ``polymarket_predictive_engine`` package (via
+    ``__package__``) so its ``from .xxx import yyy`` relative imports resolve
+    against the actual installed sibling modules, none of which this WO
+    touches.
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [
+            "git",
+            "show",
+            f"{_WO143B_PRE_FIX_COMMIT}:src/polymarket_predictive_engine/shadow_cohort.py",
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        pytest.skip(f"pre-fix commit {_WO143B_PRE_FIX_COMMIT} unavailable: {result.stderr.strip()}")
+    module_name = "polymarket_predictive_engine._wo143b_pre_fix_shadow_cohort"
+    module = types.ModuleType(module_name)
+    module.__package__ = "polymarket_predictive_engine"
+    module.__file__ = f"<{_WO143B_PRE_FIX_COMMIT}:shadow_cohort.py>"
+    sys.modules[module_name] = module
+    try:
+        exec(compile(result.stdout, module.__file__, "exec"), module.__dict__)
+    except Exception:
+        sys.modules.pop(module_name, None)
+        raise
+    return module
+
+
+def _shadow_lock_path(cfg: EngineConfig) -> Path:
+    return runtime_lock.runtime_lock_path(cfg, "shadow_cohort")
+
+
+def _write_foreign_shadow_lock(cfg: EngineConfig, *, acquired_at_utc: str, pid: int) -> Path:
+    path = _shadow_lock_path(cfg)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "name": "shadow_cohort",
+                "pid": pid,
+                "process_started_at_utc": "2026-01-01T00:00:00Z",
+                "acquired_at_utc": acquired_at_utc,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_wo143b_uncontended_call_is_byte_identical_to_the_pre_fix_build(tmp_path, monkeypatch):
+    pre_fix = _load_pre_fix_shadow_cohort_module()
+    frozen_now = "2026-08-01T00:00:00Z"
+    monkeypatch.setattr(pre_fix, "now_utc", lambda: frozen_now)
+    monkeypatch.setattr(shadow_cohort_module, "now_utc", lambda: frozen_now)
+
+    old_cfg = _cfg(tmp_path / "old")
+    new_cfg = _cfg(tmp_path / "new")
+    candidate = _wo119_candidate("m-wo143b", "t-wo143b")
+
+    old_summary = pre_fix.update_shadow_cohort_evidence(old_cfg, [candidate])
+    new_summary = shadow_cohort_module.update_shadow_cohort_evidence(new_cfg, [candidate])
+
+    assert old_summary.get("status") == "computed"
+    assert new_summary.get("status") == "computed"
+
+    old_fills = (old_cfg.output_root / "polymarket_shadow" / "shadow_fills.csv").read_bytes()
+    new_fills = (new_cfg.output_root / "polymarket_shadow" / "shadow_fills.csv").read_bytes()
+    assert new_fills == old_fills
+
+    old_positions = (old_cfg.output_root / "polymarket_shadow" / "shadow_positions.csv").read_bytes()
+    new_positions = (new_cfg.output_root / "polymarket_shadow" / "shadow_positions.csv").read_bytes()
+    assert new_positions == old_positions
+
+    # Sanity: the fixture actually exercised a write (an empty-vs-empty diff
+    # would trivially be "byte-identical" without proving anything).
+    assert old_fills and old_positions
+
+
+def test_wo143b_contended_shadow_lock_skips_with_no_writes(tmp_path):
+    cfg = _cfg(tmp_path)
+    _write_foreign_shadow_lock(
+        cfg,
+        acquired_at_utc=runtime_lock._PROCESS_STARTED_AT_UTC,
+        pid=os.getpid() + 1,
+    )
+
+    summary = update_shadow_cohort_evidence(cfg, [_wo119_candidate("m-contend", "t-contend")])
+
+    assert summary.get("status") == "skipped_shadow_lock_held"
+    assert not (cfg.output_root / "polymarket_shadow" / "shadow_fills.csv").exists()
+    assert not (cfg.output_root / "polymarket_shadow" / "shadow_positions.csv").exists()
+    assert not (cfg.governance_root / "shadow_signal_cohort_pnl.json").exists()
+    assert not (cfg.governance_root / "shadow_cohort_update_summary.json").exists()
+
+
+def test_wo143b_lock_released_on_happy_path(tmp_path):
+    cfg = _cfg(tmp_path)
+
+    summary = update_shadow_cohort_evidence(cfg, [_wo119_candidate("m-happy", "t-happy")])
+
+    assert summary.get("status") == "computed"
+    assert not _shadow_lock_path(cfg).exists()
+
+    # And the lock is genuinely usable again afterwards, not merely absent by
+    # coincidence: a fresh acquire succeeds.
+    lock = runtime_lock.acquire_runtime_lock(cfg, "shadow_cohort")
+    assert lock.acquired is True
+    runtime_lock.release_runtime_lock(lock)
+
+
+def test_wo143b_lock_released_when_body_raises(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("simulated shadow-cohort computation failure")
+
+    monkeypatch.setattr(shadow_cohort_module, "_summarise_shadow", _boom)
+
+    with pytest.raises(RuntimeError, match="simulated shadow-cohort computation failure"):
+        update_shadow_cohort_evidence(cfg, [_wo119_candidate("m-raise", "t-raise")])
+
+    assert not _shadow_lock_path(cfg).exists()
+
+
+def test_wo143b_holding_prediction_cycle_lock_does_not_block_shadow_lock(tmp_path):
+    cfg = _cfg(tmp_path)
+
+    prediction_cycle_lock = runtime_lock.acquire_runtime_lock(cfg, "prediction_cycle")
+    assert prediction_cycle_lock.acquired is True
+    try:
+        summary = update_shadow_cohort_evidence(cfg, [_wo119_candidate("m-nodeadlock", "t-nodeadlock")])
+    finally:
+        runtime_lock.release_runtime_lock(prediction_cycle_lock)
+
+    assert summary.get("status") == "computed"
+    rows = read_csv_rows(cfg.output_root / "polymarket_shadow" / "shadow_positions.csv")
+    assert len(rows) == 1
+
+
+def test_wo143b_malformed_stale_shadow_lock_is_reclaimed_not_wedged(tmp_path):
+    cfg = _cfg(tmp_path)
+    path = _shadow_lock_path(cfg)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"pid": "not-a-pid"}', encoding="utf-8")
+    old = time.time() - 3600.0
+    os.utime(path, (old, old))
+
+    summary = update_shadow_cohort_evidence(cfg, [_wo119_candidate("m-reclaim", "t-reclaim")])
+
+    assert summary.get("status") == "computed"
+    rows = read_csv_rows(cfg.output_root / "polymarket_shadow" / "shadow_positions.csv")
+    assert len(rows) == 1
+    # The lock is released after reclaim, not left wedged for the next caller.
+    assert not path.exists()

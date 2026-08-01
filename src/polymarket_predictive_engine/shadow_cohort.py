@@ -19,6 +19,7 @@ from .crypto_updown_settlement import (
 )
 from .execution_costs import estimate_execution_cost
 from .resolution_collector import fetch_gamma_market, infer_market_resolution_rows
+from .runtime_lock import runtime_lock
 from .utils import (
     append_csv_rows_matching_existing_header,
     boolish,
@@ -861,11 +862,38 @@ def read_shadow_signal_cohort_pnl(cfg: EngineConfig) -> dict[str, Any]:
 
 
 def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str, Any]]) -> dict[str, Any]:
-    """Update shadow ledgers while relying on the caller's serialization.
+    """Update shadow ledgers, serialized by this function's own runtime lock.
 
-    Callers MUST hold the ``prediction_cycle`` runtime lock; this function does
-    not acquire it because that lock is intentionally non-reentrant.
+    This function acquires an internal ``shadow_cohort`` runtime lock at
+    entry and releases it at exit -- including when the body raises -- so
+    any two concurrent callers (for example the full paper cycle, which
+    calls this while holding ``prediction_cycle``, and the live loop's
+    per-tick shadow maintenance, which does not) are serialized against each
+    other instead of racing the append-only ``shadow_fills.csv``.
+
+    ``shadow_cohort`` is a distinct, independent lock from
+    ``prediction_cycle``: holding ``prediction_cycle`` neither satisfies nor
+    blocks it, so a caller already holding ``prediction_cycle`` can still
+    call this function without deadlocking, and callers no longer need to
+    hold ``prediction_cycle`` for this function's own serialization.
+
+    When a foreign writer already holds ``shadow_cohort``, this call
+    performs NO writes and returns
+    ``{"status": "skipped_shadow_lock_held", ...}`` instead of racing it.
     """
+
+    with runtime_lock(cfg, "shadow_cohort") as lock:
+        if not lock.acquired:
+            return {
+                "status": "skipped_shadow_lock_held",
+                "generated_at_utc": now_utc(),
+                "runtime_lock": lock.as_dict(),
+            }
+        return _update_shadow_cohort_evidence_locked(cfg, predictions)
+
+
+def _update_shadow_cohort_evidence_locked(cfg: EngineConfig, predictions: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compute and write shadow ledgers. Caller must hold the ``shadow_cohort`` lock."""
 
     settings = _settings(cfg)
     if not boolish(settings.get("enabled", True)):

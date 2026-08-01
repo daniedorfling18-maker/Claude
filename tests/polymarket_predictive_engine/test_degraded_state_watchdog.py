@@ -830,3 +830,220 @@ def test_wo129_lock_held_carries_incidents_then_alarms_and_recovers(tmp_path: Pa
     assert recovered["status"] == "incident"
     assert state["carry_forward_cycles"] == 0
     assert state["carry_forward_started_at"] is None
+
+
+# --- WO-144: stable episode identity + per-entity push cooldown -----------
+#
+# The 2026-08-01 notification storm: three evaluators minted a new incident
+# id from each cycle's per-cycle observation token, so a single persisting
+# breach paged the owner on every 5-minute cycle (39 pushes overnight). The
+# fix anchors incident identity to the episode's first breach observation
+# and adds a per-entity push cooldown as a second, independent backstop.
+
+
+def _write_breaching_slo(cfg: EngineConfig, generated_at: str) -> None:
+    """Breach exactly scheduler_overrun_cycles while the other six registered
+    SLO rows and both publication bridges stay healthy, so only the SLO
+    registration is under test (mirrors _write_healthy_slo's shape)."""
+    write_json(
+        cfg.output_root / "performance" / "operating_state.json",
+        {
+            "generated_at_utc": generated_at,
+            "slo": {
+                "rows": [
+                    {"id": row_id, "breach": row_id == "scheduler_overrun_cycles"}
+                    for row_id in (
+                        "quote_sheet_age",
+                        "governance_refresh_duration",
+                        "scheduler_overrun_cycles",
+                        "websocket_gap",
+                        "dashboard_staleness",
+                        "reconciliation_age",
+                        "ledger_anchor_age",
+                    )
+                ]
+            },
+        },
+    )
+    for bridge in ("anchor", "telemetry"):
+        write_json(
+            cfg.output_root / "performance" / f"{bridge}_push_status.json",
+            {"generated_at_utc": generated_at, "status": "ok",
+             "paper_trading_invoked": False, "live_trading_invoked": False},
+        )
+
+
+def _stub_ok_post(monkeypatch) -> list[str]:
+    """Install a requests.post stub that always succeeds and records calls."""
+    calls: list[str] = []
+
+    class _Response:
+        status_code = 200
+
+    def post(_url, *, data, **kwargs):
+        calls.append(data)
+        return _Response()
+
+    monkeypatch.setattr("polymarket_predictive_engine.degraded_state_watchdog.requests.post", post)
+    return calls
+
+
+def test_wo144_persisting_breach_keeps_one_incident_id_and_pushes_once(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path)
+    monkeypatch.setenv("OPS_OWNER_NTFY_TOPIC_URL", "http://127.0.0.1:9")
+    calls = _stub_ok_post(monkeypatch)
+
+    incident_ids = []
+    for minute in range(3):
+        _write_breaching_slo(cfg, f"2026-08-01T00:0{minute}:00Z")
+        result = build_degraded_state_watchdog(cfg, as_of=f"2026-08-01T00:0{minute}:01Z")
+        incident = next(row for row in result["active_incidents"] if row["registration_id"] == "operating_state_slo_breach")
+        incident_ids.append(incident["incident_id"])
+
+    assert len(set(incident_ids)) == 1
+    ledger_rows = read_csv_rows(cfg.output_root / INCIDENT_LEDGER)
+    assert sum(1 for row in ledger_rows if row["entity"] == "operating_state_slo") == 1
+    assert len(calls) == 1
+
+
+def test_wo144_new_episode_after_healthy_mints_new_id(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path)
+    cfg.raw["degraded_state_watchdog"]["notification_cooldown_seconds"] = 0
+    monkeypatch.setenv("OPS_OWNER_NTFY_TOPIC_URL", "http://127.0.0.1:9")
+    calls = _stub_ok_post(monkeypatch)
+
+    _write_breaching_slo(cfg, "2026-08-01T01:00:00Z")
+    first = build_degraded_state_watchdog(cfg, as_of="2026-08-01T01:00:01Z")
+    first_id = next(row["incident_id"] for row in first["active_incidents"] if row["registration_id"] == "operating_state_slo_breach")
+
+    _write_healthy_slo(cfg, "2026-08-01T01:05:00Z")
+    healthy = build_degraded_state_watchdog(cfg, as_of="2026-08-01T01:05:01Z")
+    assert healthy["status"] == "ok"
+
+    _write_breaching_slo(cfg, "2026-08-01T01:10:00Z")
+    second = build_degraded_state_watchdog(cfg, as_of="2026-08-01T01:10:01Z")
+    second_id = next(row["incident_id"] for row in second["active_incidents"] if row["registration_id"] == "operating_state_slo_breach")
+
+    assert first_id != second_id
+    assert len(calls) == 2
+
+
+def test_wo144_flap_within_cooldown_suppresses_push_but_keeps_ledger(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path)
+    monkeypatch.setenv("OPS_OWNER_NTFY_TOPIC_URL", "http://127.0.0.1:9")
+    calls = _stub_ok_post(monkeypatch)
+
+    _write_breaching_slo(cfg, "2026-08-01T02:00:00Z")
+    build_degraded_state_watchdog(cfg, as_of="2026-08-01T02:00:01Z")
+
+    _write_healthy_slo(cfg, "2026-08-01T02:02:00Z")
+    build_degraded_state_watchdog(cfg, as_of="2026-08-01T02:02:01Z")
+
+    _write_breaching_slo(cfg, "2026-08-01T02:05:00Z")
+    final = build_degraded_state_watchdog(cfg, as_of="2026-08-01T02:05:01Z")
+
+    assert len(calls) == 1
+    notification = final["notification"]
+    assert notification["pushes_suppressed_by_cooldown"] == 1
+    assert notification["next_eligible_push_utc"] != ""
+    ledger_rows = read_csv_rows(cfg.output_root / INCIDENT_LEDGER)
+    assert sum(1 for row in ledger_rows if row["entity"] == "operating_state_slo") == 2
+
+
+def test_wo144_push_resumes_after_cooldown_elapses(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path)
+    monkeypatch.setenv("OPS_OWNER_NTFY_TOPIC_URL", "http://127.0.0.1:9")
+    calls = _stub_ok_post(monkeypatch)
+
+    _write_breaching_slo(cfg, "2026-08-01T03:00:00Z")
+    build_degraded_state_watchdog(cfg, as_of="2026-08-01T03:00:00Z")
+
+    _write_healthy_slo(cfg, "2026-08-01T03:05:00Z")
+    build_degraded_state_watchdog(cfg, as_of="2026-08-01T03:05:00Z")
+
+    _write_breaching_slo(cfg, "2026-08-01T05:00:00Z")
+    build_degraded_state_watchdog(cfg, as_of="2026-08-01T05:00:00Z")
+
+    assert len(calls) == 2
+
+
+def test_wo144_cooldown_is_per_entity_not_global(tmp_path: Path, monkeypatch) -> None:
+    cfg = _cfg(tmp_path)
+    monkeypatch.setenv("OPS_OWNER_NTFY_TOPIC_URL", "http://127.0.0.1:9")
+    calls = _stub_ok_post(monkeypatch)
+
+    _write_breaching_slo(cfg, "2026-08-01T06:00:00Z")
+    build_degraded_state_watchdog(cfg, as_of="2026-08-01T06:00:00Z")
+
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"status": "failed", "generated_at_utc": "2026-08-01T06:02:00Z"},
+    )
+    build_degraded_state_watchdog(cfg, as_of="2026-08-01T06:02:00Z")
+
+    assert len(calls) == 2
+
+
+def test_wo144_malformed_state_file_falls_back_without_raising(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "ops_scheduler" / "degraded_state_watchdog_state.json",
+        {"episode_anchors": "not-a-dict", "notified_entities": 7},
+    )
+    _write_breaching_slo(cfg, "2026-08-01T07:00:00Z")
+
+    result = build_degraded_state_watchdog(cfg, as_of="2026-08-01T07:00:01Z")
+
+    assert any(row["registration_id"] == "operating_state_slo_breach" for row in result["active_incidents"])
+
+
+def test_wo144_sweep_producer_and_bridge_ids_are_episode_stable(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    dr_path = cfg.output_root / "performance" / "disaster_recovery_status.json"
+
+    write_json(
+        dr_path,
+        {"status": "ok", "remote_push_status": "failed", "rpo": {"compliant": True}, "generated_at_utc": "2026-08-01T08:00:00Z"},
+    )
+    first_dr = build_degraded_state_watchdog(cfg, as_of="2026-08-01T08:00:00Z")
+    write_json(
+        dr_path,
+        {"status": "ok", "remote_push_status": "failed", "rpo": {"compliant": True}, "generated_at_utc": "2026-08-01T08:01:00Z"},
+    )
+    second_dr = build_degraded_state_watchdog(cfg, as_of="2026-08-01T08:01:00Z")
+
+    dr_id_1 = next(row["incident_id"] for row in first_dr["active_incidents"] if row["registration_id"] == "disaster_recovery_not_recoverable")
+    dr_id_2 = next(row["incident_id"] for row in second_dr["active_incidents"] if row["registration_id"] == "disaster_recovery_not_recoverable")
+    assert dr_id_1 == dr_id_2
+
+    anchor_path = cfg.output_root / "performance" / "anchor_push_status.json"
+    write_json(anchor_path, {"status": "failed", "generated_at_utc": "2026-08-01T08:02:00Z"})
+    first_bridge = build_degraded_state_watchdog(cfg, as_of="2026-08-01T08:02:01Z")
+    write_json(anchor_path, {"status": "failed", "generated_at_utc": "2026-08-01T08:03:00Z"})
+    second_bridge = build_degraded_state_watchdog(cfg, as_of="2026-08-01T08:03:01Z")
+
+    bridge_id_1 = next(
+        row["incident_id"]
+        for row in first_bridge["active_incidents"]
+        if row["registration_id"] == "publication_bridge_unhealthy" and row["entity"] == "anchor"
+    )
+    bridge_id_2 = next(
+        row["incident_id"]
+        for row in second_bridge["active_incidents"]
+        if row["registration_id"] == "publication_bridge_unhealthy" and row["entity"] == "anchor"
+    )
+    assert bridge_id_1 == bridge_id_2
+
+
+def test_wo144_registered_cooldown_floor_cannot_be_lengthened() -> None:
+    widened = EngineConfig(
+        raw={"degraded_state_watchdog": {"notification_cooldown_seconds": 99999}},
+        path=Path("config.yaml"),
+    )
+    assert _settings(widened)["notification_cooldown_seconds"] == 3600
+
+    shortened = EngineConfig(
+        raw={"degraded_state_watchdog": {"notification_cooldown_seconds": 600}},
+        path=Path("config.yaml"),
+    )
+    assert _settings(shortened)["notification_cooldown_seconds"] == 600

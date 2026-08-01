@@ -6927,7 +6927,7 @@ pre-deploy value. If `trade_candidates` rises, the tighten-only claim is
 falsified and the change is reverted, not tuned.
 
 
-## WO-144 — One degraded episode must notify once, not every cycle — `queued` (registered 2026-08-01 BEFORE dispatch; watchdog notification surface → owner merge after line-audit; defect fix on the merged WO-129 build)
+## WO-144 — One degraded episode must notify once, not every cycle — `done` (2026-08-01, PR #409; built under the Codex-outage hierarchy, line-audited, one fix round applied for the two blockers below; DEPLOY PENDING — the storm continues on the VPS until the next Path B deploy carries this revision)
 
 **Incident (measured).** Overnight 2026-07-31→08-01 the owner's phone received
 an `operating_state_slo_breach` ntfy push roughly every 5 minutes (the

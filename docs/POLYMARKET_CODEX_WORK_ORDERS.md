@@ -6983,6 +6983,40 @@ that pins 144.1 across ALL call sites); (8) ledger/artifact fidelity: with
 the cooldown active, the ledger row count for a flapping entity equals
 today's count exactly.
 
+**Amendment (2026-08-01, after the Opus line-audit of the first build; evidence
+contract reconciled).** The original tests (1) and (8) demanded per-cycle
+ledger rows AND stable episode identity — contradictory, because the incident
+ledger dedups on `incident_id`, so stable identity necessarily collapses a
+persisting episode to ONE ledger row. Reconciled contract: the LEDGER records
+episodes (one row per episode open); per-cycle observation depth is recorded
+on the ACTIVE INCIDENT as an incrementing `consecutive_degraded_observations`
+(persisted in the episode state — the SLO site must stop hardcoding
+`count=1`), so no observation is hidden, it just lives in the artifact
+instead of duplicate ledger rows. Tests (1) and (8) are re-registered
+accordingly: (1) a breach persisting across three cycles yields ONE incident
+id, ONE push, ONE ledger row, and an active incident whose
+`consecutive_degraded_observations` reads 3 on the third cycle; (8) with the
+cooldown active, ledger and notification-body outputs are byte-identical to
+a cooldown-disabled run (the audit verified this already holds). Additional
+items registered into the fix round from the audit: (F1) the cooldown
+comparison and the prune must both treat a FUTURE-DATED stamp as expired-now
+(floor the elapsed term at zero and drop future stamps in the prune) — a
+clock artifact must never extend suppression beyond the floor; (F3) a
+cooldown must also arm when an episode's first push succeeds only on RETRY:
+persist `undelivered_incident_entities` alongside the existing bounded
+ids/registrations debt, and stamp those entities on the delivery that clears
+them; (F4) registered test (7) means EVERY evaluator — add a parametrized
+id-stability sweep pinning all twelve call sites, including the nine whose
+stability is pre-existing; (F5) the top-level `notify` now means "a push
+will be attempted this cycle" (suppressed incidents make it False) — this
+field meaning is hereby registered; `eligible` and `state_changed` keep
+`bool(new)`; (F6) the settings parse for the cooldown key must survive
+`.inf`/overflow inputs without raising (extend the guarded parse — the
+watchdog dying in `_settings` is the most fail-open outcome there is);
+(F7) the malformed-state test must also exercise the push path and pin
+"malformed cooldown state pushes immediately"; (F8) `notified_entities` is
+capped (newest 64 entries) and pruned on every cycle, not only on delivered.
+
 **Day-after check:** the owner's ntfy history shows at most one
 `operating_state_slo_breach` push per hour-long flapping window overnight,
 while the incident ledger for the same window still records every

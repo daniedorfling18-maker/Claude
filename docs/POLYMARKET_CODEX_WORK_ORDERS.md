@@ -6006,7 +6006,7 @@ dead tokens. Within 48 hours of that, `maker_carry_study.json`
 `portfolio_markets` must exceed 0 — if it does not, the seeding fix was not the
 binding constraint and the finding is re-opened.
 
-## WO-132 — Correct the work-order register and make unresolved review threads block merge — `done` (2026-08-01, PR #410; rebuilt from scratch on current main after the first attempt went stale, every claim re-derived from the merge history; the `AGENTS.md` unresolved-thread merge precondition is live, and the 35+20 legacy threads on #356-#363 remain an OPEN follow-up, recorded rather than claimed as triaged)
+## WO-132 — Correct the work-order register and make unresolved review threads block merge — `done` (2026-08-01, PR #410; routed owner-merge, orchestrator self-merge prohibited; rebuilt from scratch on current main after the first attempt went stale, every claim re-derived from the merge history; the `AGENTS.md` unresolved-thread merge precondition is live, and the 35+20 legacy threads on #356-#363 remain an OPEN follow-up, recorded rather than claimed as triaged)
 
 Files: `docs/POLYMARKET_CODEX_WORK_ORDERS.md`, `AGENTS.md`.
 
@@ -6550,7 +6550,7 @@ is unchanged from the prior run's cap. `maker_carry_candidates.csv` shows
 `book_history_hours` and `book_snapshot_count` for every row.
 
 
-## WO-141 — A failed refresh must not erase collected price history — `done` (2026-08-01, PR #411; registration rescoped 2026-07-30 after review disproved the original harm chain, then one audit fix round for the empty-string-exception misclassification; DEPLOY PENDING — the deployed revision predates this, so the collector on the VPS still erases prior rows for requested-but-failed tokens)
+## WO-141 — A failed refresh must not erase collected price history — `done` (2026-08-01, PR #411; routed owner-merge after line-audit; registration rescoped 2026-07-30 after review disproved the original harm chain, then one audit fix round for the empty-string-exception misclassification; DEPLOY PENDING — the deployed revision predates this, so the collector on the VPS still erases prior rows for requested-but-failed tokens)
 
 **Provenance and epitaph — read this before the scope.** As first registered,
 this work order claimed a starved `historical_price_snapshots.csv` flows through
@@ -6745,7 +6745,7 @@ always 0.0 and `volatility_penalty_weight` is dead config, inflating
 own work order with the deployed-configuration citation rule applied.
 
 
-## WO-142 — Wire the volatility columns into prediction rows so the declared volatility penalty actually applies — `done` (2026-08-01, PR #412; audited with zero deletions in the production diff, so the penalty arithmetic is provably untouched; DEPLOY PENDING and then DORMANT — the deployed lane runs `--prediction-mode paper-bridge`, which never calls the full paper cycle, so this changes nothing in production until WO-143 gives that cycle a scheduled owner)
+## WO-142 — Wire the volatility columns into prediction rows so the declared volatility penalty actually applies — `done` (2026-08-01, PR #412; routed owner-merge after line-audit; audited with zero deletions in the production diff, so the penalty arithmetic is provably untouched; DEPLOY PENDING, then dormant on the hot lane only — the deployed lane runs `--prediction-mode paper-bridge`, so the normal tick path never calls the full paper cycle, but the resource-guard degraded fallback (`scripts/run_polymarket_local_live_loop.py:1045`) still does, with no `prediction_mode` gate, and last fired 2026-07-19T22:22 — so this is live on that fallback today, not inert)
 
 **Provenance.** Drafted by the Opus-tier spec agent from the finding recorded in
 the WO-141 registration's "Recorded separately, not in this WO" paragraph, with

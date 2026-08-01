@@ -7416,16 +7416,45 @@ screen, eligibility rule, or config value changes in either direction; the
 only widening is that two observation-only populations resume growing from
 zero, which is the stated purpose and is watched by the day-after check.
 
-### Pre-dispatch check (named precondition, one command on the VPS)
+### 143.6 — Lock-clearer tightening (amended 2026-08-01: now UNCONDITIONAL, and the pre-dispatch host check is withdrawn)
 
-`docker exec polymarket-paper-live ps -o pid,comm` — if the live loop's
-python is PID 1 (expected), the cross-container orphan-clearer collision is
-impossible and the build proceeds as registered. If it is NOT PID 1, add to
-this registration (before dispatch) the one-line tightening in the live
-loop's `_clear_orphaned_same_process_prediction_lock`: also require
-`payload["process_started_at_utc"]` to equal the loop's own process-start
-stamp — safe either way, since a genuinely orphaned same-PID lock is already
-reclaimed at acquisition by `_same_pid_lock_predates_current_process`.
+The original registration gated dispatch on a host command
+(`docker exec polymarket-paper-live ps -o pid,comm`) to learn whether the
+live loop's python is PID 1, because
+`_clear_orphaned_same_process_prediction_lock`
+(`run_polymarket_local_live_loop.py:784-806`) unlinks any `prediction_cycle`
+lock whose payload `pid` equals `os.getpid()`, PID namespaces are
+per-container, and the lock file lives on the shared `./outputs` mount — so a
+PID collision would let the live container delete a lock the scheduler
+container genuinely holds. Verified 2026-08-01: that function checks the lock
+NAME and the PID and nothing else, while `runtime_lock.acquire` already
+writes `process_started_at_utc` into every payload
+(`runtime_lock.py:133`).
+
+The tightening is therefore made UNCONDITIONAL and part of this build, and
+the host check is withdrawn as a dispatch gate: before unlinking, the
+clearer must ALSO require `payload.get("process_started_at_utc")` to equal
+`runtime_lock._PROCESS_STARTED_AT_UTC` (import the module and read the
+constant; do not re-derive it). Rationale for making it unconditional rather
+than conditional: it is strictly tighter on every host, it removes a
+dispatch dependency on a one-off manual observation that nothing re-checks
+afterwards (a container restart can change the answer), and it costs
+nothing — a genuinely orphaned same-PID lock from a PREVIOUS process is
+still reclaimed at acquisition time by
+`_same_pid_lock_predates_current_process` (`runtime_lock.py:66-86`), which
+is the mechanism that actually owns that case. Same-process orphans, the
+only case this clearer legitimately serves, always carry the current
+process's stamp and so still clear.
+`scripts/run_polymarket_local_live_loop.py` is therefore ADDED to this WO's
+touched-file list (one predicate plus its test).
+
+Tests: (a) a lock payload with the current PID and the current
+`process_started_at_utc` is still cleared (the legitimate same-process
+orphan); (b) a payload with the current PID but a DIFFERENT
+`process_started_at_utc` — the cross-container collision — is NOT cleared
+and reports a distinct status; (c) a payload missing the field entirely is
+NOT cleared (fail-closed); (d) the existing foreign-name, malformed-pid, and
+other-pid paths are unchanged.
 
 ### Day-after check
 
@@ -7469,3 +7498,65 @@ this WO deploys.
 - **WO-143c — memory decision.** After one deployed day of `peak_rss_bytes`,
   the owner decides: keep 2g, add a pre-flight guard, or raise
   `VPS_OPS_MEM_LIMIT`. Stays prose until the number exists.
+
+
+## WO-143b — Serialise the shadow-cohort writer against the live tick path — `queued` (registered 2026-08-01 BEFORE dispatch; pre-existing defect surfaced by the WO-143 draft; shadow ledger is anchor-enrolled → OWNER MERGE after line-audit)
+
+**The defect exists today, independent of WO-143.**
+`update_shadow_cohort_evidence` states its own contract in its docstring
+(`shadow_cohort.py:863-868`): *"Callers MUST hold the `prediction_cycle`
+runtime lock; this function does not acquire it because that lock is
+intentionally non-reentrant."* The full paper cycle honours that
+(`paper_cycle.py:139`, inside the lock). The deployed live loop does NOT:
+its per-tick path reaches the same function through
+`mark_portfolio_and_render_dashboard` → `_lightweight_shadow_maintenance`
+(`run_polymarket_local_live_loop.py:759`, `:707-723`, invoked `:2040-2045`)
+without holding that lock, every ~30 seconds. Today the two writers collide
+only during a resource-guard degraded fallback (same process, different
+thread), which is why it has not yet corrupted anything. It is nonetheless a
+documented-contract violation on a writer of `shadow_fills.csv`, which is
+enrolled **append_only** in `ledger_anchor.DEFAULT_LEDGER_REGISTRY`
+(`ledger_anchor.py:54-55`) — a lost update there breaks the tamper chain and
+costs a re-genesis, the exact failure WO-115 spent days undoing.
+
+**Why it is registered now.** WO-143 gives the full paper cycle a scheduled
+owner in a DIFFERENT container. Its registered scope is scoring-only
+precisely so it never calls this function — but that restriction is a
+workaround for this defect, and it is the reason WO-143 cannot restore the
+full cycle's forwarding of longshot candidates into the shadow updater.
+Fixing this unblocks that.
+
+**Scope.** File: `src/polymarket_predictive_engine/shadow_cohort.py` and its
+tests. Give `update_shadow_cohort_evidence` its OWN internal lock
+(`shadow_cohort`, distinct from `prediction_cycle` so the non-reentrancy
+note stays true and no caller deadlocks), acquired at entry and released at
+exit. When the lock is held by another writer the function performs NO
+writes and returns `{"status": "skipped_shadow_lock_held", ...}` — the
+existing runtime-lock skip pattern, fail-closed: a skipped update loses one
+tick of evidence, never a ledger row. Update the docstring so the contract
+it states is the contract it enforces. Do NOT change what the function
+computes, do NOT touch either caller, and do NOT change the ledger
+enrolment.
+
+**Fail-safe sentence.** Nothing here marks a market measured, changes any
+M-A/M-B/M-C or `maker_min_*` threshold, opens any order path, or alters what
+either caller does per cycle; the only behavioural change is that a
+concurrent second writer now declines to write instead of racing, and a
+declined write is recorded in the returned status rather than being silent.
+
+**Tests (enumerated).** (1) an uncontended call writes exactly as today
+(regression: byte-identical `shadow_fills.csv` and `shadow_positions.csv`
+against the pre-fix build on the same fixture); (2) with the `shadow_cohort`
+lock held by a foreign payload, the call writes NOTHING and returns
+`skipped_shadow_lock_held`; (3) the lock is released on the happy path;
+(4) the lock is released when the body raises (the exception still
+propagates); (5) holding the `prediction_cycle` lock does NOT block this
+function — the two locks are independent, so the full paper cycle's existing
+in-lock call still succeeds; (6) a malformed/stale `shadow_cohort` lock
+payload is reclaimed per the existing `runtime_lock` stale-timeout rules
+rather than wedging the lane permanently.
+
+**Day-after check:** after deploy, `shadow_fills.csv` continues to grow on
+the live tick path with no `blocked_broken_chain` from `anchor_ledgers`, and
+any `skipped_shadow_lock_held` occurrences appear in the cycle artifacts
+rather than as silent gaps.

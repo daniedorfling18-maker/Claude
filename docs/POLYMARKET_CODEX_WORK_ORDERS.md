@@ -12,6 +12,47 @@ in merged PR #263 was removed by PR #270 (merged 2026-07-19) without reverting
 were removed 2026-07-20, leaving the bridge operating only under the owner's
 direct instruction with its disclosure and merge-routing guardrails intact.
 
+## GLOBAL RULE — what "registered" means (2026-08-01, binding on every WO)
+
+Registration-before-dispatch is only enforceable if "registered" has one
+definition. It did not: PR #417 was acquitted using *merged to `main`*, while
+dispatches against `f64416e` (PR #418, unmerged) relied on *present in my
+branch*.
+
+**Rule: the registering commit must be an ancestor of the build branch.**
+
+```
+git merge-base --is-ancestor <registering-commit> <build-branch>    # must pass
+```
+
+Run it at dispatch and record the result in the WO's status line.
+
+**Why this test and not a timestamp comparison.** A first version of this rule
+used two conditions — registering commit merged to `main`, and build branch cut
+after that merge. **Both pass on the exact incident that produced Codex's P1,
+and the incident is still real.** `claude/wo143-scheduled-cycle` was created at
+09:16:32Z, after `51ffb42` merged at 09:12:15Z, but it was cut from a *stale
+local `origin/main` ref* (`main` was not fast-forwarded until 10:09:35Z, 53
+minutes later), so `git merge-base --is-ancestor 51ffb42 91c35cd` returns **NO**
+— the registration is absent from the tree the builder reads. The timestamp rule
+encoded the symptom; the ancestry test encodes the property.
+
+The timestamp rule was also unverifiable: branch-creation time lives in a local
+reflog that is never pushed, so no reviewer, CI job, or later auditor could check
+it from the repository. The ancestry test is checkable by anyone from the pushed
+refs.
+
+Consequences accepted rather than quietly avoided:
+- PR #416's initial dispatch was pre-registration (`51ffb42` is not an ancestor
+  of its first head). Recorded in the WO-143b header.
+- PR #417's dispatch fails the ancestry test for the same reason, which is what
+  Codex's P1 correctly identified.
+- The two fix-round dispatches made on 2026-08-01 against unmerged `f64416e`
+  also fail it. Both builds are held until #418 merges, and both branches rebase
+  onto the resulting `main` before resuming.
+
+Timestamps are retained in the WO-143b provenance note as history, not as rule.
+
 Prior: 2026-07-16 (owner-authorized corrective batch opened with WO-93; WO-85, WO-87, WO-86, and WO-88 implemented; WO-80, WO-82, WO-81 landed; WO-83 implemented in
 PR #203; WO-84 implemented in PR #205; WO-89 through WO-92 implemented. WO-87 now relabels the unchanged legacy verdict metric honestly and
 reports non-binding true pre-event CLV on the same units. WO-93 was implemented
@@ -7143,7 +7184,7 @@ no change to `features_v2.py`, `mispricing_alpha.py`, `strategy.py`,
 **Touch ONLY these files** (`git diff --stat` must show exactly these ten —
 count corrected 2026-08-01; §143.6 added the ninth and tenth):
 - NEW `src/polymarket_predictive_engine/scheduled_paper_cycle.py`
-- `src/polymarket_predictive_engine/paper_cycle.py` (one keyword-only `scope` parameter; `scope="full"` behaviour byte-identical)
+- `src/polymarket_predictive_engine/paper_cycle.py` (one keyword-only `scope` parameter; `scope="full"` behaviour byte-identical **except for the two invocation flags — amended by §143.7(a)**)
 - `src/polymarket_predictive_engine/cli.py` (one command, one import, one dispatch branch)
 - `src/polymarket_predictive_engine/degraded_state_watchdog.py` (one entry in `REGISTERED_JOB_FRESHNESS_MAX_SECONDS`)
 - `scripts/run_vps_ops_scheduler.sh` (one job function, one loop block, interval/timeout env with clamps)
@@ -7491,7 +7532,7 @@ self-measures via `lock_attempts` plus day-after check (6); WO-142's
 day-after check is re-armed against the artifacts this job refreshes once
 this WO deploys.
 
-### 143.7 — Review-round amendment (registered 2026-08-01, BEFORE the fix dispatch)
+### 143.7 — Review-round amendment (registered 2026-08-01; **the fix-round dispatch made against this text preceded its merge and therefore fails the ancestry test in the GLOBAL RULE above — retracted claim, corrected 2026-08-01**)
 
 Codex's review of PR #417 (head `91c35cd`) raised seven findings. Each was
 re-verified against the code by the orchestrator before being registered
@@ -7548,7 +7589,9 @@ Require a POSITIVE prediction count for the `ran`/`blocked_readiness`
 classifications, and validate the websocket observation age before classifying
 completion; otherwise classify `blocked_inputs` at exit 1.
 
-**The ceiling, named (owner decision 2026-08-01).** Register a NEW setting
+**The ceiling, named (threshold derived and registered 2026-08-01; basis
+below).** Authorization for this value is the owner's merge of the pull request
+carrying this registration — not any statement attributed to the owner here. Register a NEW setting
 `scheduled_paper_cycle.max_websocket_observation_age_seconds`, **default
 1800**, tighten-only via config. Basis: 6x the 300s `websocket_max_gap_seconds`
 reporting target, and well inside the job's 4h default cadence. The build must
@@ -7735,30 +7778,7 @@ the live tick path with no `blocked_broken_chain` from `anchor_ledgers`, and
 any `skipped_shadow_lock_held` occurrences appear in the cycle artifacts
 rather than as silent gaps.
 
-## RULING — what "registered" means (2026-08-01, binding on every future WO)
-
-Independent review found that I was applying two different definitions: I
-acquitted PR #417 using *merged to `main`*, while the dispatches made against
-`f64416e` (PR #418, unmerged) relied on *present in my branch*. Both cannot be
-right, and the looser one makes the rule unenforceable.
-
-**Ruling: "registered" means the registering commit is merged to `main`, and the
-build branch was cut after that merge.** Machine-checkable at dispatch time:
-
-```
-git merge-base --is-ancestor <registering-commit> origin/main   # must pass
-<build-branch creation time>  >  <registering-commit merge time> # must hold
-```
-
-Consequences accepted rather than quietly avoided:
-- PR #416's initial dispatch was pre-registration (branch 09:06:05Z,
-  registration merged 09:12:15Z). Recorded in the WO-143b header above.
-- The two fix-round dispatches made on 2026-08-01 against unmerged `f64416e`
-  were ALSO premature under this ruling. Both builds are held until #418
-  merges, and both branches rebase onto the resulting `main` before resuming.
-- Going forward the check is run and its result recorded at every dispatch.
-
-### 143b.1 — Review-round amendment (registered 2026-08-01, BEFORE the fix dispatch)
+### 143b.1 — Review-round amendment (registered 2026-08-01; **the fix-round dispatch made against this text preceded its merge and therefore fails the ancestry test in the GLOBAL RULE above — retracted claim, corrected 2026-08-01**)
 
 Codex's review of PR #416 raised four findings. Each was re-verified against
 the code by the orchestrator before being registered here.
@@ -7799,13 +7819,46 @@ snapshot (lost update) and both writers append `SELL_SHADOW` rows to the
 append-only, anchor-enrolled `shadow_fills.csv` — precisely the re-genesis
 harm WO-143b exists to prevent.
 
-**Scope for this item.** Pass an explicit `stale_after_seconds` to the
-`shadow_cohort` lock, set provably larger than a BUDGETED settlement pass, and
-impose a monotonic wall-clock budget on the `_settle_due_positions` loop so the
-pass abandons remaining positions (returning a partial status, fail-closed)
-rather than running past its own lock's stale window. Budget and stale window
-are registered together so the relationship is auditable; neither is derived
-from the other at runtime.
+**Scope for this item (corrected 2026-08-01 after second review — the first
+version of this scope did not close the race it describes).**
+
+Two gaps in the naive fix, both real:
+
+1. **A between-iterations budget cannot bound an unbounded single call.** A
+   monotonic budget on `_settle_due_positions` is only checked between loop
+   iterations (`shadow_cohort.py:546-548`), but this same item establishes that
+   `urlopen(timeout=N)` is per-socket, so ONE position can stall past the whole
+   budget and the loop never regains control to notice.
+2. **The lock covers the whole function, not just settlement.** After
+   `_settle_due_positions` returns (`shadow_cohort.py:890`) the mark-to-market
+   loop, `_candidate_rows`, the full `write_csv` rewrite of
+   `shadow_positions.csv`, the `shadow_fills.csv` append and
+   `_write_shadow_pnl_history` all still run inside the lock, unbudgeted.
+
+Therefore the registered invariant is **`stale_after_seconds` > a budgeted
+WHOLE-FUNCTION pass**, not a budgeted settlement pass. Implement all three:
+
+- a monotonic wall-clock budget on `_settle_due_positions` that abandons
+  remaining positions with a partial, fail-closed status and NO partial write;
+- **a heartbeat that re-stamps `acquired_at_utc` on the held lock** while the
+  function is alive, so a live holder is never judged stale — this is the only
+  one of the three that survives a genuinely unbounded single read, and it is
+  the primary mechanism;
+- an explicit `stale_after_seconds` sized above budget + one-position worst
+  case + the post-settlement remainder.
+
+Budget and stale window are registered together so the relationship is
+auditable; neither is derived from the other at runtime.
+
+**Tests for F1 (enumerated; additive to the six below).** (7) with a stubbed
+provider that blocks past the budget, the pass returns the partial fail-closed
+status, leaves remaining positions unprocessed, and writes NO partial ledger
+row; (8) the lock is released after a budget-expired pass; (9) the heartbeat
+re-stamps `acquired_at_utc` such that a concurrent reclaim attempt during a
+long-running pass does NOT acquire; (10) a configuration in which
+`stale_after_seconds` <= budget + remainder allowance is rejected at load
+rather than silently inverted; (11) a settlement pass shorter than the budget
+is byte-identical to today.
 
 Citation correction: config line 1311 is `settlement_request_timeout_seconds:
 20`; line 1312 is `settlement_max_positions_per_cycle: 25`. The original text
@@ -7901,71 +7954,158 @@ the internal `shadow_cohort` lock; (6) the byte-identity regression runs from
 a committed fixture and does not skip when git history is unavailable —
 assert explicitly that it did not skip.
 
+**Touch ONLY these files** (`git diff --stat` must show exactly these twelve).
+This list is authoritative for a line audit and SUPERSEDES the single-file
+Scope paragraph in the parent WO:
+
+- `src/polymarket_predictive_engine/shadow_cohort.py` (internal lock, F1 budget
+  + heartbeat + explicit `stale_after_seconds`, F4 status surfacing)
+- `src/polymarket_predictive_engine/paper_cycle.py` (F4 count only)
+- `src/polymarket_predictive_engine/longshot_bias.py` (F4)
+- `scripts/run_polymarket_local_live_loop.py` (F4)
+- `scripts/run_alpha_candidate_shadow_evidence.py` (F4)
+- `scripts/run_promoted_rule_shadow_scan.py` (F4 — status surfacing only; its
+  `candidates` count is rule-scan output, not a forwarded-count claim, and does
+  not change)
+- `config/polymarket_predictive_config.example.yaml` (F1 budget and
+  `stale_after_seconds` settings)
+- `tests/polymarket_predictive_engine/test_shadow_cohort.py` (F2 retarget +
+  widen, F3 fixture, F1 tests)
+- NEW `tests/polymarket_predictive_engine/fixtures/` byte-identity fixture (F3)
+- `tests/polymarket_predictive_engine/test_paper_broker_foundation.py` (F4)
+- `tests/polymarket_predictive_engine/test_longshot_bias.py` (F4)
+- NEW test file(s) covering the two `scripts/` call sites that have none
+
 **Day-after check:** after deploy, any `skipped_shadow_lock_held` in the
 cycle artifacts is accompanied by `shadow_candidates_forwarded: 0` in the
-same artifact, and `shadow_fills.csv` row growth continues to match the
-uncontended forward counts.
+same artifact, `shadow_fills.csv` row growth continues to match the
+uncontended forward counts, and no settlement pass records a budget expiry
+without a corresponding partial status.
 
 
-## WO-145 — Trigger the VPS deploy from GitHub Actions instead of a laptop — `queued` (owner-requested 2026-08-01; registered BEFORE dispatch; workflow + secrets surface → OWNER MERGE after line-audit; no gate, threshold, or attestation change)
+## WO-145 — Trigger the VPS deploy from GitHub Actions instead of a laptop — `queued` (owner-requested 2026-08-01; REWRITTEN 2026-08-01 after independent review found two honesty fields silently invalidated; workflow + secrets + `AGENTS.md` surface → OWNER MERGE after line-audit; no gate or threshold change)
 
-**The requirement.** The owner should not need a laptop shell to deploy. Taking
-this apart, the laptop dependency and the attestation deadlock are **two
-separate problems**, and only one of them is a governance question. This WO
-solves only the first.
+**The requirement.** The owner should not need a laptop shell to deploy. The
+laptop dependency and the attestation deadlock are **two separate problems**;
+this WO solves the first and explicitly refuses to launder the second.
 
-**Scope (the mechanical half).** `scripts/deploy_vps_paper_manual.sh` (Path B)
-already performs the full guarded deploy correctly: preflight capacity check,
-private-transport proof BEFORE quiescing, `.env` and marker backup at mode
-0600, `docker image tag` of the running image as `rollback-last-known-good`,
-checkout update preserving runtime state, **markers written before container
-recreation**, `--profile deploy-acceptance` with the scheduler stopped,
+**Scope.** `scripts/deploy_vps_paper_manual.sh` (Path B) already performs the
+full guarded deploy: preflight capacity check, private-transport proof BEFORE
+quiescing, `.env` and marker backup at mode 0600, `rollback-last-known-good`
+image tag, checkout update preserving runtime state, markers written before
+container recreation, `--profile deploy-acceptance` with the scheduler stopped,
 `check_polymarket_vps_paper.sh`, and `rollback_vps_paper_deploy.py` on any
-failure past the arming boundary. It needs only a shell on the VPS.
+failure past the arming boundary. Add
+`.github/workflows/deploy_vps_paper_dispatch.yml`: a `workflow_dispatch` job
+that runs that script on the VPS over SSH.
 
-Add `.github/workflows/deploy_vps_paper_dispatch.yml`: a `workflow_dispatch`
-job that opens an SSH session to the VPS, runs that same script inside `tmux`
-(so a dropped connection cannot leave a half-recreated container — the failure
-mode already observed on a manual run), and streams the log back as run output.
+### The two honesty fields this WO must NOT silently invalidate
 
-**What must NOT change.** The run records exactly what Path B records today,
-including `attestation_verified: false` naming the unprovable check. A robot
-pressing the button does not upgrade an attestation. No gate, threshold,
-eligibility rule, or funding value moves. No live order path is added.
+**1. `authorised_by` must stop being a hardcoded literal.**
+`scripts/deploy_vps_paper_manual.sh:391` writes `"authorised_by": "owner"`
+unconditionally. A workflow-triggered run would therefore stamp an owner
+authorization claim that no owner made — an agent-writable owner-authorization
+claim landing in a runtime artifact on every deploy, which `AGENTS.md` forbids
+outright, and worse than a prose slip because it is machine-generated.
+**Register: the deploy record carries the ACTUAL actor** — `github.actor` for
+the workflow path, preserved behaviour for a genuine owner-run shell — and the
+trigger provenance (`workflow_dispatch` vs `shell`) as its own field.
 
-**Owner-provisioned, never agent-handled:** an Actions secret holding a deploy
-key, and the VPS host key pinned in the workflow. I do not create, read, or
-transport credentials.
+**2. `attestation_unverifiable_reason` becomes materially misleading.** It
+currently reads that verification "requires GitHub API credentials and the
+acceptance run artifact; neither is available from the VPS shell". True of a
+shell — but the Actions context demonstrably has both: Path A's own workflow
+downloads the acceptance artifact with `github.token` and runs
+`verify_independent_main_acceptance.py`
+(`.github/workflows/deploy-polymarket-vps-paper.yml:47-55, :65`). Copying the
+string unchanged converts *an unprovable step recorded as unproven* into *an
+unperformed step recorded as unprovable*. **Register one of two, not silence:**
+(a) the workflow runs the verifier on the runner and records its real result; or
+(b) a new, true reason string naming the actual blocker (no eligible independent
+reviewer exists — see below), not a capability that is present.
 
-**NOT in this WO — the governance half (owner decision).** Path A stays blocked
-for a structural reason: `merge_independently_reviewed_pr.py` requires an
-`APPROVED` review from `COLLABORATOR`/`MEMBER`/`OWNER` excluding both the PR
-author and the repository owner. In a single-owner repository with agent
-authors **no eligible reviewer can exist** — a deadlock, not a missing step.
-Two honest exits, both the owner's: (a) add a second human collaborator, which
-makes Path A work as designed; or (b) register an amendment permitting an
-independent ARM64 machine acceptance run in Actions to bind the SHA in place of
-a human approval. (b) is defensible only if the original intent was "someone
-other than the author attests this SHA passed"; it changes what an attestation
-means, so it is not adopted silently.
+### `AGENTS.md` conflict — must be registered, not left implicit
+
+`AGENTS.md` states two paths are permitted and that Path A is **REQUIRED
+whenever GitHub Actions can run it**. WO-145's premise is that Path A is
+unavailable — but the blocker is a **policy** deadlock, not a capability one:
+`merge_independently_reviewed_pr.py:340-347` requires an `APPROVED` review on the
+exact head from `{COLLABORATOR, MEMBER, OWNER}` excluding both the PR author and
+the repository owner, so in a single-owner repo with agent authors **no eligible
+reviewer can exist**. Giving Actions an SSH route strengthens the factual
+predicate "Actions can run it" while leaving that text untouched, and
+`tests/test_vps_only_operating_docs.py:65-77` pins the text. **This WO includes
+the dated `AGENTS.md` amendment recording the policy-vs-capability distinction.
+Owner merge.**
+
+### Trigger, concurrency and credential controls (all previously missing)
+
+- **`environment:` with required reviewers** on the `workflow_dispatch` job.
+  Without it, anyone with write access — including the orchestrator, which posts
+  from the owner's account — can deploy production unreviewed. This is the most
+  dangerous omission in the first draft.
+- **Share Path A's concurrency group exactly**: `group:
+  deploy-polymarket-vps-paper`, `cancel-in-progress: false`. A separate group
+  would let Path A and Path B deploy simultaneously — a duplicate writer.
+- **`permissions:` least privilege**, matching Path A's `actions: read,
+  contents: read` unless the verifier requires more.
+- **Name the credential correctly.** Not a GitHub "deploy key" (a repo SSH key)
+  — this needs a **VPS user's SSH private key**, a much larger surface. Bound it
+  with a forced-command / `restrict` entry in the VPS `authorized_keys` so the
+  key can only invoke the deploy script, never obtain an interactive shell.
+- Forbid `StrictHostKeyChecking=no` (pin the host key); forbid
+  `pull_request_target`, fork, and `schedule` triggers.
+- Owner-provisioned only. I do not create, read, or transport credentials.
+
+### The `tmux` exit-code fail-open
+
+Running inside `tmux` correctly prevents a dropped connection from leaving a
+half-recreated container — an observed failure. But `tmux new-session -d`
+returns 0 immediately, so **a failed deploy would report a green workflow run**.
+Register the mechanism by which the script's exit status reaches the job — a
+sentinel file plus poll, or `tmux wait-for` — and test it.
 
 **Fail-safe sentence.** Nothing here marks a market measured, changes any
 M-A/M-B/M-C or `maker_min_*` threshold, opens or enables any order path, or
-upgrades any attestation; the only change is WHERE the deploy is triggered
-from, and a failed workflow leaves the VPS on its previous image via the
-existing rollback path.
+upgrades any attestation; the only change is where the deploy is triggered from
+and who is recorded as having triggered it, and a failed workflow leaves the VPS
+on its previous image via the existing rollback path.
 
-**Tests (enumerated).** (1) the workflow refuses to run when the target SHA is
-not the freshly fetched `origin/main` tip, matching the script's existing
-refusal; (2) a simulated post-arming failure invokes
-`rollback_vps_paper_deploy.py` and the job exits nonzero; (3) the emitted
-`outputs/performance/vps_manual_deploy.json` still carries
-`attestation_verified: false` and names the unprovable check; (4) no secret
-value appears in the workflow log (assert against the streamed output); (5) the
-guard ordering is unchanged — transport proof before quiesce, markers before
-container recreation.
+**Touch ONLY these files** (`git diff --stat` must show exactly these six):
+- NEW `.github/workflows/deploy_vps_paper_dispatch.yml`
+- `scripts/deploy_vps_paper_manual.sh` (actor and trigger-provenance fields;
+  attestation reason string)
+- `AGENTS.md` (dated policy-vs-capability amendment)
+- NEW `tests/test_deploy_vps_paper_dispatch_workflow.py`
+- `tests/test_vps_only_operating_docs.py` (extend for the amended text)
+- `docs/POLYMARKET_CODEX_WORK_ORDERS.md` (status)
+
+**Tests (enumerated; rewritten — the first draft's set mostly asserted
+pre-existing script behaviour, and its "no secret appears in the log" test had
+no offline implementation and would have required holding the secret).**
+Structural assertions against the workflow YAML plus behavioural tests of the
+new fields:
+1. every secret is consumed via `env:` from `secrets.*` and **never
+   interpolated into a `run:` string** (the actual injection/leak vector);
+   no `set -x`; `persist-credentials: false`.
+2. the workflow declares `environment:`, the shared concurrency group
+   `deploy-polymarket-vps-paper` with `cancel-in-progress: false`, and a
+   `permissions:` block no broader than Path A's.
+3. only `workflow_dispatch` is declared — no `pull_request_target`, no fork
+   trigger, no `schedule`.
+4. `StrictHostKeyChecking` is not disabled anywhere in the workflow.
+5. a nonzero script exit inside `tmux` yields a nonzero job (exercise the
+   sentinel/poll contract directly, not through a real deploy).
+6. the deploy record written on the workflow path carries the real actor and
+   `trigger: workflow_dispatch`, and **never** the literal
+   `authorised_by: "owner"` unless a real owner shell produced it.
+7. `attestation_verified` remains `false` on the Path B route and the reason
+   string does not claim a capability the Actions context possesses.
 
 **Day-after check:** a dispatch-triggered deploy produces a
 `vps_manual_deploy.json` byte-comparable to a laptop-triggered one except for
-the trigger-provenance field, and `source_vs_deployed_sha` reads `ALIGNED`
-afterwards.
+the actor and trigger-provenance fields; `source_vs_deployed_sha` reads
+`ALIGNED`; and the count of `deploy_path: B_manual_guarded_script` records is
+surfaced so Path-B reliance is **measured rather than invisible** — making the
+un-attested route the ergonomic one is a de facto loosening of the deploy
+control even though no threshold moves, and it must be visible.

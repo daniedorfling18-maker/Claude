@@ -1341,3 +1341,32 @@ def test_wo150_ceiling_literals_are_byte_identical_in_defaults_and_example_confi
     assert raw["disaster_recovery"]["active_rpo_hours"] == 24
     assert raw["disaster_recovery"]["paper_stage_max_rpo_hours"] == 168
     assert raw["disaster_recovery"]["pre_live_max_rpo_hours"] == 24
+
+
+@pytest.mark.parametrize(
+    "corrupt_block",
+    ["a string", 7, 1.5, True, ["wallet_address"]],
+)
+def test_wo150_corrupt_maker_live_test_block_selects_the_conservative_ceiling(corrupt_block: object) -> None:
+    """A structurally corrupt `maker_live_test` is "doubt about its meaning",
+    and WO-150's fail-safe sentence says doubt selects the CONSERVATIVE ceiling.
+
+    Found by independent line audit of the first build: that version normalised
+    a non-dict block to `{}`, which makes `wallet` empty, reads as inert, and
+    selects the PERMISSIVE 168h branch — the one direction a corrupt config must
+    never buy. A well-formed-but-absent block (`None`, missing) is a different
+    case and deliberately keeps its permissive-for-paper behaviour.
+    """
+    from polymarket_predictive_engine.disaster_recovery import _live_capital_context
+
+    class _Cfg:
+        trading_mode = "paper"
+
+        def __init__(self, block: object) -> None:
+            self.raw = {"maker_live_test": block}
+
+    assert _live_capital_context(_Cfg(corrupt_block)) is True, corrupt_block
+
+    # The well-formed empty cases are unchanged: no wallet means no binding capital.
+    for benign in (None, {}, {"wallet_address": ""}):
+        assert _live_capital_context(_Cfg(benign)) is False, benign

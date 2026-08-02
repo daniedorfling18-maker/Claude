@@ -205,8 +205,19 @@ def _live_capital_context(cfg: EngineConfig) -> bool:
     unconditionally, and can never be downgraded by any config value.
     """
     maker_live_test = cfg.raw.get("maker_live_test", {})
-    if not isinstance(maker_live_test, dict):
+    if maker_live_test is None:
+        # Well-formed "nothing configured": a `maker_live_test:` key with an
+        # empty value parses to None, and an absent key defaults to {}. Both
+        # genuinely carry no wallet, so both fall through to the paper-stage
+        # branch below - today's behaviour, unchanged.
         maker_live_test = {}
+    if not isinstance(maker_live_test, dict):
+        # A2: a block that is a scalar or a list is STRUCTURALLY CORRUPT, which
+        # is "doubt about its meaning", and this WO's fail-safe sentence says
+        # doubt selects the CONSERVATIVE ceiling. Normalising it to {} instead
+        # would make `wallet` empty and so read as inert - the permissive 168h
+        # branch - which is the one direction a corrupt config must never buy.
+        return True
     wallet = str(maker_live_test.get("wallet_address") or "").strip()
     # A2: only an exact boolean True downgrades a configured wallet to inert.
     # A missing flag, or any non-bool value (string "true", int 1, None, ...),

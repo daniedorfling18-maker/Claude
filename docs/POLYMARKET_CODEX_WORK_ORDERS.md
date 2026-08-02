@@ -8282,8 +8282,12 @@ registered verbatim below rather than delegated.
 
 ### Trigger, concurrency and credential controls (all previously missing)
 
-- **`environment:` with required reviewers** on the `workflow_dispatch` job.
-  Without it, anyone with write access — including the orchestrator, which posts
+- **`environment:` with required reviewers** on the **`deploy` job**
+  (*amended by §145.1 2026-08-02: this read "the `workflow_dispatch` job", which
+  named a job that no longer exists — §145.1 registers a `guard` job and a
+  `deploy` job, both fed by both triggers. The gate belongs on `deploy` and must
+  NOT be placed on `guard`, or check 1 could never suppress an approval
+  request*). Without it, anyone with write access — including the orchestrator, which posts
   from the owner's account — can deploy production unreviewed. This is the most
   dangerous omission in the first draft.
 - **Share Path A's concurrency group exactly**: `group:
@@ -8368,7 +8372,9 @@ not edit its own WO status, matching WO-143's list:
 - NEW `.github/workflows/deploy_vps_paper_dispatch.yml`
 - `scripts/deploy_vps_paper_manual.sh` (`trigger_mechanism` and actor fields
   replacing the hardcoded `"authorised_by": "owner"` at `:391`; attestation
-  reason string)
+  reason string; **and, added by §145.1(a1b) 2026-08-02, removal of the
+  `:-$remote_sha` tip-defaulting fallback at `:99` so an unset
+  `PM_DEPLOY_TARGET_SHA` is rejected instead of silently retargeting**)
 - `AGENTS.md` (dated policy-vs-capability amendment, text registered below)
 - NEW `tests/test_deploy_vps_paper_dispatch_workflow.py`
 - `tests/test_vps_only_operating_docs.py` (extend for the amended text)
@@ -8461,8 +8467,10 @@ WO-145 already registers.
 **No `paths:` filter — stated so a builder does not add one as an
 "optimisation".** A docs-only merge still moves the `main` SHA, and the VPS
 refuses to deploy unless its checkout equals `origin/main`
-(`deploy-polymarket-vps-paper.yml:263-269`, and the same guard in
-`scripts/deploy_vps_paper_manual.sh`). Skipping deploys for docs-only merges
+(`deploy-polymarket-vps-paper.yml:263-269`; `scripts/deploy_vps_paper_manual.sh`
+enforces the same *property* by a different and weaker mechanism — see (a1),
+which corrects an earlier version of this sentence that called them "the same
+guard"). Skipping deploys for docs-only merges
 would therefore leave `source_vs_deployed_sha` reading `DIVERGED` until some
 later code merge, which is exactly the invisible-drift condition WO-145 exists
 to end. Every merge deploys.
@@ -8475,13 +8483,48 @@ so they run in order — and by the time the **first** runs, `origin/main` has
 moved past its `github.sha`. The VPS-side check then errors, producing a red run
 for a condition that is not a fault.
 
-**Required — TWO JOBS, and the structure is load-bearing (corrected 2026-08-02
-after the registration gate).** An un-gated `guard` job resolves the current
+**Required — TWO CHECKS at two different times, because supersession happens in
+two different places (corrected 2026-08-02 after the second registration gate,
+which showed the first two-job design could not produce its own registered
+outcome).**
+
+**Check 1 — before pickup, un-gated.** A `guard` job resolves the current
 `origin/main` tip and sets an output. The `deploy` job carries the
 `environment:` gate and runs only on `needs: [guard]` with an `if:` on that
-output. When `github.sha` is not the tip the deploy job is **`skipped`** — it
-never starts, so no SSH runs, no `vps_manual_deploy.json` is written, and **no
-approval request is emitted**.
+output. When `github.sha` is already not the tip, the deploy job is
+**`skipped`** — it never starts, so no SSH runs, no `vps_manual_deploy.json` is
+written, and **no approval request is emitted**. This catches back-to-back
+merges landing within seconds of each other.
+
+**Check 2 — after approval, inside the gated job.** The deploy job re-resolves
+`origin/main` as its first step and, when `github.sha` is no longer the tip,
+**fails** with the literal message `superseded: approved <github.sha>, main is
+now <tip>; approve the newer run`. It does **not** deploy and does **not**
+write a deploy record.
+
+**Why check 1 alone is insufficient — this is the flaw the second gate found.**
+A job's outputs are **frozen when that job completes**. The guard is un-gated,
+so it finishes seconds after the merge and the entire approval wait happens
+*downstream* of it. In §145.1(a1)'s own scenario — merge A, park at the gate,
+merge B lands, the owner approves the run labelled A — the guard had already
+passed, because A **was** the tip when it ran. The deploy job is therefore not
+skipped. The first version of this clause registered `skipped` as the outcome
+for exactly the case it cannot produce.
+
+**The unavoidable trade-off, stated rather than engineered around.** Check 2
+runs *after* the approval, so a run superseded **during** the wait **does** page
+the owner. That cannot be fixed: the approval wait is precisely the window in
+which supersession occurs, and no check placed before the wait can observe an
+event that happens during it. What is bounded is the harm — check 2 plus the
+(a1) pinning make a wrong deploy impossible; the cost is one approval request
+that resolves to a red run.
+
+**Check 2's outcome is `failure`, and that is deliberate.** It cannot be
+`skipped` — the job has already started. It must not be `success`: a green run
+that deployed nothing is indistinguishable in the run list from a real deploy,
+which is the defect this section already rejected once. A red run reading
+`superseded: approved A, main is now B; approve the newer run` is accurate and
+actionable.
 
 **Why not a guard step inside the gated job:** `environment:` is a *job-level*
 property and its protection rules gate the job's **start**. The reviewer
@@ -8489,15 +8532,14 @@ notification fires before any step of that job executes, so a guard step could
 not suppress it — every superseded run would page the owner, which is the exact
 noise this amendment exists to remove.
 
-**The registered outcome literal is `skipped`, not "neutral".** An earlier
-version of this clause required the run "terminate NEUTRAL". **GitHub Actions
-has no producible neutral outcome** — the `exit 78` neutral exit was removed at
-GA in 2019, and a job ends `success`, `failure`, `cancelled`, or `skipped` and
-nothing else. A builder implementing "neutral" would substitute `success`,
-producing a **green run that deployed nothing** — indistinguishable in the run
-list from a real deploy, and strictly worse than the red run this guard exists
-to eliminate. `skipped` is achievable, honest, and visibly distinct, and it is
-what the two-job structure produces.
+**No registered outcome is ever "neutral".** An earlier version of this clause
+required the run "terminate NEUTRAL". **GitHub Actions has no producible neutral
+outcome** — the `exit 78` neutral exit was removed at GA in 2019, and a job ends
+`success`, `failure`, `cancelled`, `skipped` or `timed_out`. A builder
+implementing "neutral" would substitute `success`, producing a **green run that
+deployed nothing** — indistinguishable in the run list from a real deploy. The
+two registered outcomes are `skipped` (check 1) and `failure` (check 2), both
+producible and both visibly distinct from a deploy.
 
 **(a1) The deploy target is PINNED to `github.sha`. This is the most important
 requirement in §145.1 and the first version omitted it entirely.**
@@ -8530,6 +8572,28 @@ the tip cannot be resolved — network failure, ref read error, empty result —
 guard job **fails** rather than skipping the deploy, because an unresolvable tip means the
 precondition is unknown and an unknown precondition must not deploy. Missing,
 empty, and unparseable all take the fail branch.
+
+**(a1b) Deleting the fallback changes the `vps_shell` route, and that must be
+registered rather than fall out (added 2026-08-02, second gate).** Test (5c) is
+satisfiable only by removing the `:-$remote_sha` default at
+`scripts/deploy_vps_paper_manual.sh:99`. Three consequences the first version
+did not account for:
+
+- `AGENTS.md:92` documents Path B as a bare
+  `scripts/deploy_vps_paper_manual.sh` invocation. After (5c) that refuses.
+  **The registered `AGENTS.md` amendment must show the explicit form**, e.g.
+  `PM_DEPLOY_TARGET_SHA=$(git rev-parse origin/main) scripts/deploy_vps_paper_manual.sh`.
+  `AGENTS.md` is already file 3 of the seven, so this is in scope.
+- WO-145's enumerated test 6 requires `trigger_mechanism` "on BOTH paths" and
+  §145.1(b) keeps `vps_shell` in the closed set. A `vps_shell` deploy therefore
+  still works, but the operator now supplies the target explicitly. **Stated
+  plainly: this reintroduces tip-defaulting as a manual step.** That is
+  acceptable because an operator typing the command is present and deciding,
+  which is exactly the property the workflow path lost and (a1) restores.
+- The touched-file bullet for `scripts/deploy_vps_paper_manual.sh` scopes the
+  edit to the `trigger_mechanism`/actor fields at `:391` and the attestation
+  reason string. **It is widened here to name the `:99` fallback removal.**
+  Without that, the build could not satisfy (5c) inside its own contract.
 
 **(a2) `timeout-minutes` literal and basis (A1).** The new workflow registers
 **`timeout-minutes: 70`**, the same literal Path A carries. Basis: it is not a
@@ -8583,7 +8647,11 @@ it, so a superseded run emits no approval request;
 asserted against the workflow text; (5c) an invocation with
 `PM_DEPLOY_TARGET_SHA` unset or empty is **rejected** — the registered pinning
 must not be satisfiable by the script's tip-defaulting fallback at
-`scripts/deploy_vps_paper_manual.sh:99`;
+`scripts/deploy_vps_paper_manual.sh:99`; (5d) the remote process actually
+receives the value — `PM_DEPLOY_TARGET_SHA: ${{ github.sha }}` as workflow
+`env:` does **not** cross the `ssh` boundary on its own, so the test asserts the
+variable is present in the command string sent to the host, not merely declared
+in the workflow;
 (6) with the tip unresolvable (stubbed to fail, and separately to return empty),
 the run **fails** and does not deploy — the fail-closed branch;
 (7) `concurrency` is byte-identical to Path A's group with
@@ -8592,11 +8660,25 @@ the run **fails** and does not deploy — the fail-closed branch;
 
 **Fail-safe sentence for §145.1.** Nothing here marks a market measured, changes
 any M-A/M-B/M-C or `maker_min_*` threshold, opens or enables any order path, or
-upgrades any attestation; the `environment:` approval gate is unchanged, so the
-set of deploys a human must approve is **identical** — only the step of
-remembering to start one is removed. The one new branch, the neutral exit, can
-only ever skip a deploy and never cause one, and its unknown-state case fails
-rather than skips.
+upgrades any attestation, and the `environment:` approval gate itself is
+unchanged — every deploy still requires a human approval and none can proceed
+without one.
+
+**But the set of deploys a human must approve is NOT identical, and an earlier
+version of this sentence claimed it was (corrected 2026-08-02, second gate).**
+The population goes from *{deploys the owner chose to start}* to *{every merge
+to `main`}*, with no `paths:` filter, docs-only merges included. That is a
+strict increase in approval events and it is the approval-fatigue direction —
+the same de-facto pressure WO-145's parent insists be made visible rather than
+asserted away. **It is recorded here as an operational loosening: the gate is
+unchanged, the frequency at which it is exercised increases.** The mitigation is
+that check 1 suppresses the request entirely for runs superseded before pickup,
+so the increase is bounded by the merge rate, not by the merge rate plus
+retries.
+
+Neither new check can cause a deploy that would not otherwise happen: check 1
+can only skip, check 2 can only fail, and an unresolvable tip fails rather than
+proceeding.
 
 **Day-after check for §145.1.** After the first auto-triggered deploy:
 `vps_manual_deploy.json` records `trigger_mechanism: push` with a non-empty
@@ -8609,8 +8691,12 @@ and asserted the key was ABSENT — `build_manifest` emits it unconditionally at
 `write_vps_telemetry_manifest.py:122`, empty when aligned, so the original check
 would have failed on the success case*); **the deployed SHA equals the SHA the
 approval was issued against**; and after two merges landed inside one deploy
-window, exactly one run reached the VPS while the superseded run shows
-**`skipped`**, not failure.
+window, exactly one run reached the VPS while the superseded run shows either
+**`skipped`** (superseded before pickup, check 1) or **`failure` carrying the
+registered `superseded:` message** (superseded during the approval wait, check
+2). *(Corrected 2026-08-02: the first version asserted `skipped` for both, which
+the design cannot produce for the during-approval case — see check 2.)* **A
+superseded run must never read `success`.**
 
 ## S8 admission records (2026-08-01)
 

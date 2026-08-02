@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
-import math
-import os
 import re
-import shutil
-import time
 import urllib.parse
 import urllib.request
 from collections import defaultdict
@@ -24,7 +19,6 @@ from .crypto_updown_settlement import (
 )
 from .execution_costs import estimate_execution_cost
 from .resolution_collector import fetch_gamma_market, infer_market_resolution_rows
-from .runtime_lock import runtime_lock_with_heartbeat
 from .utils import (
     append_csv_rows_matching_existing_header,
     boolish,
@@ -528,57 +522,12 @@ def _settlement_price_for_position(
     return None, "token_not_in_settlement"
 
 
-def _settlement_checkpoints_path(cfg: EngineConfig) -> Path:
-    return cfg.governance_root / "shadow_settlement_checkpoints.json"
-
-
-def _read_settlement_checkpoints(cfg: EngineConfig) -> dict[str, str]:
-    """Per-position last-settlement-check times (WO-143b.1 F1 anti-starvation).
-
-    Held in a governance SIDECAR rather than as a `last_settlement_check_utc`
-    column on ``shadow_positions.csv``. The register permits "a per-position
-    ``last_settlement_check_utc`` with oldest-first ordering (or an equivalent
-    rotating offset)"; this is that equivalent. A new ledger column would
-    change ``shadow_positions.csv``'s bytes on every settling pass and so
-    break the byte-identity regression this same amendment requires (tests 1
-    and 11), and it would widen an enrolled ledger's schema for pure
-    scheduling bookkeeping. The sidecar carries no evidence, only ordering
-    state, and can be deleted without loss -- a missing file just means
-    "nothing checked yet", which fails safe to today's file order.
-    """
-    payload = read_json(_settlement_checkpoints_path(cfg), default={}) or {}
-    if not isinstance(payload, dict):
-        return {}
-    checkpoints = payload.get("last_settlement_check_utc")
-    if not isinstance(checkpoints, dict):
-        return {}
-    return {str(key): str(value) for key, value in checkpoints.items() if value}
-
-
-def _settlement_check_sort_key(position: dict[str, Any], checkpoints: dict[str, str]) -> tuple[int, str, str]:
-    """Oldest-checked-first ordering for settlement (WO-143b.1 F1).
-
-    Never-checked positions sort first, then by ascending last-checked time.
-    Without this, `_settle_due_positions` iterated in file order every pass, so
-    on a degraded day a budget that reaches only the first N due positions
-    would never reach the tail at all -- those positions age past
-    ``maximum_holding_hours`` and close as ``shadow_time_exit`` at a stale mark
-    instead of ``shadow_clean_settlement`` at the true 0/1 outcome. That is a
-    systematic distortion of shadow P&L, not merely deferred work.
-    """
-    position_id = str(position.get("shadow_position_id") or "")
-    checked_at = checkpoints.get(position_id, "")
-    return (1, checked_at, position_id) if checked_at else (0, "", position_id)
-
-
 def _settle_due_positions(
     cfg: EngineConfig,
     positions: list[dict[str, Any]],
     fills: list[dict[str, Any]],
     *,
     timestamp: str,
-    budget_seconds: float | None = None,
-    heartbeat: Any = None,
 ) -> dict[str, Any]:
     settings = _settings(cfg)
     if not boolish(settings.get("settle_resolved_markets", True)):
@@ -587,53 +536,23 @@ def _settle_due_positions(
             "settlement_checks": 0,
             "settled_positions": 0,
             "settlement_errors": 0,
-            "settlement_positions_abandoned": 0,
-            "settlement_budget_expired": False,
         }
     max_checks = int(settings.get("settlement_max_positions_per_cycle", 25))
     grace_minutes = float(settings.get("settlement_grace_minutes", 1.0))
     timeout_seconds = int(settings.get("settlement_request_timeout_seconds", 20))
-    if budget_seconds is None:
-        budget_seconds = float(
-            settings.get("settlement_budget_seconds", _DEFAULT_SETTLEMENT_BUDGET_SECONDS)
-        )
-    started_monotonic = time.monotonic()
     checks = 0
     settled = 0
     unresolved = 0
     errors = 0
-    abandoned = 0
-    budget_expired = False
     reasons: dict[str, int] = defaultdict(int)
-    # WO-143b.1 F1: oldest-checked-first, so a budget that cannot reach every
-    # due position rotates through them across passes instead of starving the
-    # tail forever.
-    checkpoints = _read_settlement_checkpoints(cfg)
-    due = [
-        position
-        for position in sorted(positions, key=lambda row: _settlement_check_sort_key(row, checkpoints))
-        if str(position.get("status") or "").lower() == "open"
-        and _should_check_settlement(position, grace_minutes=grace_minutes)
-    ]
-    for index, position in enumerate(due):
+    for position in positions:
         if checks >= max_checks:
-            abandoned = len(due) - index
-            break
-        # The budget is checked between iterations. It cannot bound a single
-        # unbounded urlopen read -- that is precisely why the progress-derived
-        # heartbeat, not this budget, is the primary defence -- but it does
-        # stop a pass of individually-completing-but-slow lookups from running
-        # past the stale window.
-        if budget_seconds > 0 and (time.monotonic() - started_monotonic) >= budget_seconds:
-            budget_expired = True
-            abandoned = len(due) - index
             break
         if str(position.get("status") or "").lower() != "open":
             continue
+        if not _should_check_settlement(position, grace_minutes=grace_minutes):
+            continue
         checks += 1
-        checkpoints[str(position.get("shadow_position_id") or "")] = timestamp
-        if heartbeat is not None:
-            heartbeat.note_progress("settlement_position")
         try:
             settlement_price, reason = _settlement_price_for_position(
                 cfg,
@@ -673,14 +592,6 @@ def _settle_due_positions(
             reason="shadow_clean_settlement",
         )
         settled += 1
-    # Persist the rotation state even when the budget expired -- especially
-    # then, since that is exactly the pass whose unreached tail must be first
-    # in line next time.
-    if checks:
-        write_json(
-            _settlement_checkpoints_path(cfg),
-            {"generated_at_utc": timestamp, "last_settlement_check_utc": checkpoints},
-        )
     return {
         "settlement_enabled": True,
         "settlement_checks": checks,
@@ -688,12 +599,6 @@ def _settle_due_positions(
         "unresolved_positions_checked": unresolved,
         "settlement_errors": errors,
         "settlement_reason_counts": dict(reasons),
-        # WO-143b.1 F1: a budget-expired pass is a PARTIAL pass. It is recorded
-        # as such rather than looking like a complete one that simply found
-        # less to do, and the abandoned count is named in the day-after check.
-        "settlement_positions_abandoned": abandoned,
-        "settlement_budget_expired": budget_expired,
-        "settlement_status": "partial_budget_expired" if budget_expired else "complete",
     }
 
 
@@ -955,139 +860,12 @@ def read_shadow_signal_cohort_pnl(cfg: EngineConfig) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-# --- WO-143b.1 F1: wall-clock budgets, heartbeat and stale window ----------
-#
-# Registered literals with stated bases (see the config file and §143b.1).
-# `remainder_budget_seconds` is ADVISORY: it only sizes `heartbeat_cap_seconds`
-# and is never enforced at runtime, unlike `settlement_budget_seconds` which
-# abandons remaining work.
-_DEFAULT_SETTLEMENT_BUDGET_SECONDS = 900.0
-_DEFAULT_REMAINDER_BUDGET_SECONDS = 300.0  # sizing only, never enforced
-_DEFAULT_HEARTBEAT_MARGIN_SECONDS = 120.0
-_DEFAULT_HEARTBEAT_CAP_SECONDS = 1800.0
-_DEFAULT_CRITICAL_SECTION_MAX_SECONDS = 120.0
-_DEFAULT_SHADOW_COHORT_STALE_AFTER_SECONDS = 2400.0
-
-
-class ShadowCohortTimingConfigError(ValueError):
-    """Raised when the registered timing ordering is violated."""
-
-
-def shadow_cohort_timings(cfg: EngineConfig) -> dict[str, float]:
-    """Resolve and VALIDATE the F1 timing constants at load time.
-
-    The four registered relations are checked together and a violation raises
-    rather than silently inverting. Relation 3 in particular is the one a later
-    edit would break unnoticed: the effective maximum hold is
-    ``heartbeat_cap + critical_section_max`` because the cap does not fire
-    inside the critical section, so a raised ``critical_section_max_seconds``
-    re-opens the reclaim-mid-critical-section hole that the section exists to
-    close -- while a three-relation check would still pass.
-    """
-    settings = _settings(cfg)
-
-    def _read(key: str, default: float) -> float:
-        raw = settings.get(key, default)
-        try:
-            value = float(raw)
-        except (TypeError, ValueError) as exc:
-            raise ShadowCohortTimingConfigError(f"{key} is not a number: {raw!r}") from exc
-        return value
-
-    timings = {
-        "settlement_budget_seconds": _read("settlement_budget_seconds", _DEFAULT_SETTLEMENT_BUDGET_SECONDS),
-        "remainder_budget_seconds": _read("remainder_budget_seconds", _DEFAULT_REMAINDER_BUDGET_SECONDS),
-        "heartbeat_margin_seconds": _read("heartbeat_margin_seconds", _DEFAULT_HEARTBEAT_MARGIN_SECONDS),
-        "heartbeat_cap_seconds": _read("heartbeat_cap_seconds", _DEFAULT_HEARTBEAT_CAP_SECONDS),
-        "critical_section_max_seconds": _read(
-            "critical_section_max_seconds", _DEFAULT_CRITICAL_SECTION_MAX_SECONDS
-        ),
-        "shadow_cohort_stale_after_seconds": _read(
-            "shadow_cohort_stale_after_seconds", _DEFAULT_SHADOW_COHORT_STALE_AFTER_SECONDS
-        ),
-    }
-
-    # Relation 4: every constant positive and finite.
-    for key, value in timings.items():
-        if not math.isfinite(value) or value <= 0:
-            raise ShadowCohortTimingConfigError(f"{key} must be positive and finite, got {value!r}")
-
-    phases = (
-        timings["settlement_budget_seconds"]
-        + timings["remainder_budget_seconds"]
-        + timings["heartbeat_margin_seconds"]
-    )
-    # Relation 1: a legitimately slow pass is never cut off by the cap.
-    if not phases < timings["heartbeat_cap_seconds"]:
-        raise ShadowCohortTimingConfigError(
-            "settlement_budget_seconds + remainder_budget_seconds + heartbeat_margin_seconds "
-            f"({phases:g}) must be < heartbeat_cap_seconds ({timings['heartbeat_cap_seconds']:g})"
-        )
-    # Relation 2: the beat always stops before the lock could be reclaimed.
-    if not timings["heartbeat_cap_seconds"] < timings["shadow_cohort_stale_after_seconds"]:
-        raise ShadowCohortTimingConfigError(
-            f"heartbeat_cap_seconds ({timings['heartbeat_cap_seconds']:g}) must be < "
-            f"shadow_cohort_stale_after_seconds ({timings['shadow_cohort_stale_after_seconds']:g})"
-        )
-    # Relation 3: the effective maximum hold still fits inside the window.
-    effective_max_hold = timings["heartbeat_cap_seconds"] + timings["critical_section_max_seconds"]
-    if not effective_max_hold < timings["shadow_cohort_stale_after_seconds"]:
-        raise ShadowCohortTimingConfigError(
-            "heartbeat_cap_seconds + critical_section_max_seconds "
-            f"({effective_max_hold:g}) must be < shadow_cohort_stale_after_seconds "
-            f"({timings['shadow_cohort_stale_after_seconds']:g})"
-        )
-    return timings
-
-
 def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str, Any]]) -> dict[str, Any]:
-    """Update shadow ledgers, serialized by this function's own runtime lock.
+    """Update shadow ledgers while relying on the caller's serialization.
 
-    This function acquires an internal ``shadow_cohort`` runtime lock at
-    entry and releases it at exit -- including when the body raises -- so
-    any two concurrent callers (for example the full paper cycle, which
-    calls this while holding ``prediction_cycle``, and the live loop's
-    per-tick shadow maintenance, which does not) are serialized against each
-    other instead of racing the append-only ``shadow_fills.csv``.
-
-    ``shadow_cohort`` is a distinct, independent lock from
-    ``prediction_cycle``: holding ``prediction_cycle`` neither satisfies nor
-    blocks it, so a caller already holding ``prediction_cycle`` can still
-    call this function without deadlocking, and callers no longer need to
-    hold ``prediction_cycle`` for this function's own serialization.
-
-    When a foreign writer already holds ``shadow_cohort``, this call
-    performs NO writes and returns
-    ``{"status": "skipped_shadow_lock_held", ...}`` instead of racing it.
+    Callers MUST hold the ``prediction_cycle`` runtime lock; this function does
+    not acquire it because that lock is intentionally non-reentrant.
     """
-
-    timings = shadow_cohort_timings(cfg)
-    with runtime_lock_with_heartbeat(
-        cfg,
-        "shadow_cohort",
-        stale_after_seconds=timings["shadow_cohort_stale_after_seconds"],
-        heartbeat_cap_seconds=timings["heartbeat_cap_seconds"],
-        critical_section_max_seconds=timings["critical_section_max_seconds"],
-    ) as (lock, heartbeat):
-        if not lock.acquired:
-            return {
-                "status": "skipped_shadow_lock_held",
-                "generated_at_utc": now_utc(),
-                "runtime_lock": lock.as_dict(),
-            }
-        return _update_shadow_cohort_evidence_locked(
-            cfg, predictions, heartbeat=heartbeat, timings=timings
-        )
-
-
-def _update_shadow_cohort_evidence_locked(
-    cfg: EngineConfig,
-    predictions: list[dict[str, Any]],
-    *,
-    heartbeat: Any = None,
-    timings: dict[str, float] | None = None,
-) -> dict[str, Any]:
-    """Compute and write shadow ledgers. Caller must hold the ``shadow_cohort`` lock."""
 
     settings = _settings(cfg)
     if not boolish(settings.get("enabled", True)):
@@ -1095,26 +873,10 @@ def _update_shadow_cohort_evidence_locked(
         write_json(cfg.governance_root / str(settings.get("summary_file", "shadow_signal_cohort_pnl.json")), payload)
         return payload
 
-    if timings is None:
-        timings = shadow_cohort_timings(cfg)
-
-    def _progress(label: str) -> None:
-        # WO-143b.1 F1 requirement 1: the progress counter must advance at
-        # every PHASE BOUNDARY and every ledger-write step, not only inside
-        # settlement. The settlement position counter stops advancing once
-        # `_settle_due_positions` returns, which would silence the heartbeat
-        # for exactly the remainder phase that performs the ledger writes --
-        # and a reclaim there is the lost-update corruption F1 exists to
-        # prevent.
-        if heartbeat is not None:
-            heartbeat.note_progress(label)
-
-    _progress("read_positions")
     positions = read_csv_rows(_positions_path(cfg))
     for position in positions:
         _normalise_position_row(position)
     fills = read_csv_rows(_fills_path(cfg))
-    _progress("read_fills")
     # WO-119: everything before this index is already on disk; only rows
     # appended in this cycle may be written, and only by appending.
     preexisting_fill_count = len(fills)
@@ -1125,16 +887,8 @@ def _update_shadow_cohort_evidence_locked(
     max_holding_hours = float(settings.get("maximum_holding_hours", 72.0))
 
     closed_this_cycle = 0
-    settlement = _settle_due_positions(
-        cfg,
-        positions,
-        fills,
-        timestamp=now,
-        budget_seconds=timings["settlement_budget_seconds"],
-        heartbeat=heartbeat,
-    )
+    settlement = _settle_due_positions(cfg, positions, fills, timestamp=now)
     closed_this_cycle += int(settlement.get("settled_positions") or 0)
-    _progress("settlement_complete")
     for position in positions:
         if str(position.get("status") or "").lower() != "open":
             continue
@@ -1347,72 +1101,21 @@ def _update_shadow_cohort_evidence_locked(
             ),
         }
     )
-    # --- WO-143b.1 F1: bounded, SHRUNK ledger-write critical section --------
-    #
-    # The content of both ledgers is rendered into sibling temp files OUTSIDE
-    # the critical section, reusing the same tested writers (so the resulting
-    # bytes are identical to a direct write). The section itself then contains
-    # only the atomic `os.replace` publishes, which makes it
-    # near-instantaneous by construction -- dissolving the "hung write_csv
-    # wedges the lane forever" problem rather than capping it. `./outputs` is
-    # a shared bind mount, so an unconditional never-abandon carve-out would
-    # have moved the wedge from a hung urlopen to a hung write.
-    _progress("render_ledgers")
-    positions_path = _positions_path(cfg)
-    fills_path = _fills_path(cfg)
-    staged_positions = positions_path.with_name(
-        f".{positions_path.name}.{os.getpid()}.{time.time_ns()}.staged"
+    write_csv(_positions_path(cfg), positions)
+    # WO-119: shadow_positions.csv is snapshot-enrolled (rewrite is fine);
+    # shadow_fills.csv is append_only-enrolled, and the old full rewrite here
+    # re-serialised history whenever the fill schema widened - the exact
+    # WO-115 chain-break class.
+    fill_append = append_csv_rows_matching_existing_header(
+        _fills_path(cfg),
+        fills[preexisting_fill_count:],
+        fieldnames=SHADOW_FILL_FIELDS,
     )
-    staged_fills = fills_path.with_name(f".{fills_path.name}.{os.getpid()}.{time.time_ns()}.staged")
-    new_fill_rows = fills[preexisting_fill_count:]
-    try:
-        write_csv(staged_positions, positions)
-        # WO-119: shadow_positions.csv is snapshot-enrolled (rewrite is fine);
-        # shadow_fills.csv is append_only-enrolled, and a full rewrite here
-        # re-serialises history whenever the fill schema widens - the exact
-        # WO-115 chain-break class. Copy the existing bytes VERBATIM and append
-        # under the header already on disk, so every previously anchored byte
-        # survives the staged rewrite unchanged. With nothing to append the
-        # ledger is not staged or republished at all: the file keeps its exact
-        # existing bytes and inode, which is strictly safer for an append_only
-        # ledger than a no-op rewrite.
-        if new_fill_rows:
-            if fills_path.exists():
-                shutil.copyfile(fills_path, staged_fills)
-            fill_append = append_csv_rows_matching_existing_header(
-                staged_fills,
-                new_fill_rows,
-                fieldnames=SHADOW_FILL_FIELDS,
-            )
-        else:
-            fill_append = None
-        _progress("ledgers_staged")
-        critical_section = (
-            heartbeat.critical_section() if heartbeat is not None else contextlib.nullcontext()
-        )
-        with critical_section:
-            os.replace(staged_positions, positions_path)
-            _progress("positions_published")
-            if new_fill_rows:
-                os.replace(staged_fills, fills_path)
-                _progress("fills_published")
-    finally:
-        for staged in (staged_positions, staged_fills):
-            try:
-                os.unlink(staged)
-            except FileNotFoundError:
-                pass
-    if heartbeat is not None and heartbeat.critical_section_overran:
-        # A bounded wedge, recorded loudly rather than looking like a normal
-        # long hold.
-        summary["shadow_ledger_critical_section_overran"] = True
-    if fill_append is not None and fill_append.dropped_fields:
+    if fill_append.dropped_fields:
         # WO-128.3: the legacy-header tolerance (WO-119) is kept, but a field
         # it could not persist is recorded in the reported result rather than
         # vanishing - the visible trace that a versioned ledger path is due.
         summary["shadow_fill_fields_dropped_by_legacy_header"] = list(fill_append.dropped_fields)
-    if heartbeat is not None:
-        summary["shadow_lock_heartbeat"] = heartbeat.as_dict()
     summary_file = str(settings.get("summary_file", "shadow_signal_cohort_pnl.json"))
     write_json(cfg.governance_root / summary_file, summary)
     _write_shadow_pnl_history(cfg, summary)

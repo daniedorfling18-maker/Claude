@@ -721,6 +721,13 @@ def _lightweight_shadow_maintenance(cfg, features: list[dict[str, Any]]) -> dict
             seen.add(key)
     marked_rows = _merge_websocket_marks_into_predictions(rows, features)
     shadow = update_shadow_cohort_evidence(cfg, marked_rows)
+    # WO-143b.1 F4 (caller-honesty contract): a `skipped_*` status -- including
+    # the internal `shadow_cohort` lock skip added by WO-143b -- means nothing
+    # reached the shadow ledger this tick, so `prediction_rows` (the count of
+    # rows this pass forwarded to the updater) must be 0 rather than
+    # `len(rows)`. The status is surfaced verbatim under `shadow` below.
+    shadow_status = shadow.get("status") if isinstance(shadow, dict) else None
+    shadow_skipped = isinstance(shadow_status, str) and shadow_status.startswith("skipped_")
     cohort: dict[str, Any] = {}
     try:
         con = connect_db(cfg.database_path)
@@ -733,7 +740,7 @@ def _lightweight_shadow_maintenance(cfg, features: list[dict[str, Any]]) -> dict
     return {
         "status": "ok",
         "generated_at_utc": now_utc(),
-        "prediction_rows": len(rows),
+        "prediction_rows": 0 if shadow_skipped else len(rows),
         "websocket_feature_rows": len(features),
         "shadow": {
             "status": shadow.get("status"),

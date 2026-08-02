@@ -8409,6 +8409,36 @@ POLICY limit, not a capability limit — Path B is permitted, records
 `attestation_verified: false`, and this permission lapses under the sunset
 above.
 
+**Added by §145.1(a1b) 2026-08-02 — the Path B invocation form, registered here
+because (5c) makes the bare form refuse.** The amendment additionally states
+that a `vps_shell` deploy is invoked as:
+
+```
+PM_DEPLOY_TARGET_SHA=<40-hex commit sha> scripts/deploy_vps_paper_manual.sh
+```
+
+**A LITERAL forty-hex SHA, read from the merged pull request on GitHub. NOT a
+shell substitution.** `PM_DEPLOY_TARGET_SHA=$(git rev-parse origin/main)` was
+offered in an earlier draft of (a1b) and is **withdrawn as defective** — proven
+by execution against the real `assert_target_is_origin_main`
+(`scripts/deploy_vps_paper_manual.sh:96-105`):
+
+- The script's own `git fetch` (`:97`) runs **after** the operator's
+  substitution has already been evaluated, so on a VPS whose local `origin/main`
+  ref is stale — the normal state, and the state Path B exists to serve when
+  Actions is down — the substitution yields the *old* SHA and the deploy
+  **refuses**.
+- On a freshly fetched ref it yields the tip, which is **byte-for-byte the
+  `:-$remote_sha` behaviour (5c) exists to delete**: the guard compares the tip
+  to itself and can never fail.
+
+**The justification is corrected too.** An earlier draft said "an operator
+typing the command is present and deciding". That is true only of a literal
+SHA. Typing a command substitution decides nothing — it delegates the choice
+back to whatever the ref happens to be. The registered property is that the
+operator **names the commit being deployed**, which is the same property (a1)
+restores on the workflow path.
+
 **Tests (enumerated; rewritten — the first draft's set mostly asserted
 pre-existing script behaviour, and its "no secret appears in the log" test had
 no offline implementation and would have required holding the secret).**
@@ -8526,7 +8556,10 @@ which is the defect this section already rejected once. A red run reading
 `superseded: approved A, main is now B; approve the newer run` is accurate and
 actionable.
 
-**Why not a guard step inside the gated job:** `environment:` is a *job-level*
+**Why check 1 cannot be a step inside the gated job** (this concerns CHECK 1
+only — check 2 *is* a step inside the gated job, deliberately, and the reasoning
+below is why the two cannot be the same step; heading corrected 2026-08-02 after
+a gate found the previous wording read as an instruction against check 2):** `environment:` is a *job-level*
 property and its protection rules gate the job's **start**. The reviewer
 notification fires before any step of that job executes, so a guard step could
 not suppress it — every superseded run would page the owner, which is the exact
@@ -8566,12 +8599,16 @@ compares a *caller-supplied* SHA to the tip and fails closed on drift; the
 manual script *defaults the target to the tip* and therefore cannot detect
 drift. One fails closed, the other silently retargets.
 
-**Fail-closed direction, stated because "skipped" is the permissive-sounding
-branch.** The guard may only ever *skip* a deploy; it can never cause one. If
-the tip cannot be resolved — network failure, ref read error, empty result — the
-guard job **fails** rather than skipping the deploy, because an unresolvable tip means the
-precondition is unknown and an unknown precondition must not deploy. Missing,
-empty, and unparseable all take the fail branch.
+**Fail-closed direction, stated for BOTH checks because "skipped" is the
+permissive-sounding branch (reconciled to the two-check design 2026-08-02; the
+previous wording spoke only of "the guard" and predated check 2).** Neither
+check can ever *cause* a deploy: check 1 may only skip, check 2 may only fail.
+**Both resolve the tip, so both carry the same A2 branches** — if the tip cannot
+be resolved for network failure, ref read error, empty result, or an unparseable
+value, the job **fails** rather than proceeding, because an unresolvable tip
+means the precondition is unknown and an unknown precondition must not deploy.
+Missing, empty and unparseable take the fail branch in check 1 and in check 2
+alike.
 
 **(a1b) Deleting the fallback changes the `vps_shell` route, and that must be
 registered rather than fall out (added 2026-08-02, second gate).** Test (5c) is
@@ -8579,17 +8616,21 @@ satisfiable only by removing the `:-$remote_sha` default at
 `scripts/deploy_vps_paper_manual.sh:99`. Three consequences the first version
 did not account for:
 
-- `AGENTS.md:92` documents Path B as a bare
-  `scripts/deploy_vps_paper_manual.sh` invocation. After (5c) that refuses.
-  **The registered `AGENTS.md` amendment must show the explicit form**, e.g.
-  `PM_DEPLOY_TARGET_SHA=$(git rev-parse origin/main) scripts/deploy_vps_paper_manual.sh`.
+- `AGENTS.md:92` names Path B as `scripts/deploy_vps_paper_manual.sh` in a
+  **prose heading** — *"Path B — `scripts/deploy_vps_paper_manual.sh`, for when
+  Path A is not available"* — not as a command-line invocation, and `AGENTS.md`
+  carries no invocation of the script anywhere. *(Citation corrected 2026-08-02:
+  an earlier draft of this bullet called it "a bare invocation".)* The gap is
+  therefore that **no registered text shows how to invoke Path B at all**, and
+  after (5c) the obvious bare form refuses. **The explicit form is now
+  registered in the `AGENTS.md` amendment block above, with a literal SHA.**
   `AGENTS.md` is already file 3 of the seven, so this is in scope.
 - WO-145's enumerated test 6 requires `trigger_mechanism` "on BOTH paths" and
   §145.1(b) keeps `vps_shell` in the closed set. A `vps_shell` deploy therefore
-  still works, but the operator now supplies the target explicitly. **Stated
-  plainly: this reintroduces tip-defaulting as a manual step.** That is
-  acceptable because an operator typing the command is present and deciding,
-  which is exactly the property the workflow path lost and (a1) restores.
+  still works, but the operator supplies a **literal** target SHA. **It must not
+  be a shell substitution** — see the amendment block above, where
+  `$(git rev-parse origin/main)` is withdrawn as defective in both directions.
+  The registered property is that the operator names the commit being deployed.
 - The touched-file bullet for `scripts/deploy_vps_paper_manual.sh` scopes the
   edit to the `trigger_mechanism`/actor fields at `:391` and the attestation
   reason string. **It is widened here to name the `:99` fallback removal.**
@@ -8644,7 +8685,20 @@ and no SSH step runs, asserted by a sentinel the SSH step would have written;
 it, so a superseded run emits no approval request;
 (5) with `github.sha` equal to the tip, the run proceeds to the gate;
 (5b) **the SSH invocation passes `PM_DEPLOY_TARGET_SHA` set to `github.sha`**,
-asserted against the workflow text; (5c) an invocation with
+asserted against the workflow text; (4c) **CHECK 2 EXISTS** — the deploy job's **first** step re-resolves
+`origin/main`, asserted against the workflow text by position, not merely by
+presence: no step may precede it in that job. **This test was absent from the
+first version of the check-2 design, and a gate demonstrated that a workflow
+omitting check 2 entirely passed every other registered test with a green
+suite** — reproducing the exact structural defect check 2 was added to fix,
+undetectably; (4d) that step emits the registered literal
+`superseded: approved <github.sha>, main is now <tip>; approve the newer run`,
+pinned as a string so the day-after check cannot fail on a correct build;
+(4e) that step's failure branch is `exit 1` — **not** `exit 0`, and not a
+`continue-on-error` step, so a superseded run reads `failure` and never
+`success`; (4f) check 2's own tip resolution has the same A2 branches as check
+1's: a missing, empty, or unparseable tip **fails** the job rather than
+proceeding to deploy; (5c) an invocation with
 `PM_DEPLOY_TARGET_SHA` unset or empty is **rejected** — the registered pinning
 must not be satisfiable by the script's tip-defaulting fallback at
 `scripts/deploy_vps_paper_manual.sh:99`; (5d) the remote process actually

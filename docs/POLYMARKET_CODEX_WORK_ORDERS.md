@@ -8451,3 +8451,1323 @@ have caught the recurring one. Rounds 2 and 3 were both dominated by
 **contradiction-with-existing-clause** and **incomplete-file-list** findings —
 already A4, A5 and A7. Those rules were written after this cycle, so the next
 cycle is the first real test of whether they bite.
+
+## WO-146 — The DR archive build trigger IS its own RPO ceiling — `queued` (registered 2026-08-01; `disaster_recovery` tighten-only settings block + a registered watchdog-read artifact → OWNER MERGE after line-audit; build cadence 24.0h → 20.0h, no ceiling changes)
+
+**Provenance.** 2026-08-01 telemetry: `disaster_recovery_status.json` reads
+`status: ok`, archive built 13:00:11Z, `remote_push_status: ok` — yet
+`rpo.observed_archive_age_hours: 24.4986` against `rpo.active_rpo_hours: 24.0`,
+so `rpo.compliant: false` and the `disaster_recovery_not_recoverable` incident
+opened. The mechanism is narrower and more damning than "the archive is late":
+
+1. `create_ledger_archive` decides the build is due at `disaster_recovery.py:402`
+   via `_snapshot_due(previous, rpo_hours=float(rpo["active_rpo_hours"]))`, and
+   `_snapshot_due` (`:248-255`) returns `age_hours >= rpo_hours`. **The build
+   trigger and the compliance ceiling are the same number**, so the archive
+   cannot be rebuilt until its age has ALREADY reached the ceiling.
+2. Compliance is then recomputed from that same pre-build age at `:404`, where
+   `observed_within = observed_age_hours <= active` (`:217`). On every
+   successful build day the recorded age is `>= 24.0` by construction.
+3. `scripts/push_vps_archive.sh:76-85` restamps the file on success and sets
+   `last_remote_archive_age_hours = 0.0` (`:79`) without recomputing the `rpo`
+   sub-object, so one artifact asserts the archive is 0 hours and 24.5 hours old
+   simultaneously.
+4. `degraded_state_watchdog.py:958` reads `rpo.compliant is True`; the
+   registration carries `incident_on_observation: 1`, so one observation fires.
+5. The excess is one poll period: host cron `*/30` (`push_vps_telemetry.sh:19`),
+   and `24.4986 - 24.0 = 0.4986 h = 29.92 min` is 99.7% of 1800s. **Measured, not
+   estimated.**
+
+**Purpose.** Make the archive BUILD more often than the RPO ceiling so
+scheduling latency no longer guarantees a daily breach. Preserves WO-122's
+intent (`:211-216`) that `compliant` reflect observed age. Does **NOT** build:
+any change to `active_rpo_hours`, `pre_live_max_rpo_hours`,
+`paper_stage_max_rpo_hours`, `size_cap_mb`, `source_cap_mb`,
+`lock_stale_seconds`, `ARCHIVE_EXCLUDED_PREFIXES`, the watchdog registration,
+`DR_STATUS_MAX_AGE_SECONDS`, `_live_capital_context`, or any restore,
+credential, order, signer, or live surface. No new artifact.
+
+**Touch ONLY these files** (`git diff --stat` must show exactly these four; any
+amendment adding a file updates this count and list, per S8/A7):
+- `src/polymarket_predictive_engine/disaster_recovery.py`
+- `scripts/push_vps_archive.sh`
+- `polymarket_predictive_config.example.yaml`
+- `tests/polymarket_predictive_engine/test_disaster_recovery.py`
+
+### 146.1 — One new registered setting, tighten-only
+
+In `_settings` (`:55-92`) add `"archive_build_interval_hours": 20.0` after
+`"lock_stale_seconds": 3600,`, clamped `max(6.0, min(20.0, value))`.
+
+| Literal | Basis |
+|---|---|
+| `20.0` default | `24.0` ceiling minus `0.5` measured latency leaves **3.5h** margin = seven consecutive missed 30-min cycles. Today the same arithmetic is `24.0 - 24.0 - 0.5 = -0.5h`: breach by construction. |
+| `0.5` latency | Host cron `*/30` (`push_vps_telemetry.sh:19`); corroborated by the observed 0.4986h excess. |
+| `6.0` floor | Six times `lock_stale_seconds: 3600` (`:75`) — the repo's own registered bound on one build — so a build can never still run when the next is due. Also bounds push volume at `4 x 240 MB = 960 MB/day` against `size_cap_mb: 240`. |
+| `20.0` ceiling | Equals the default, so config may only make the archive MORE frequent — the same tighten-only direction as `min(240.0, ...)` at `:88`. |
+
+**A2 — every input branch, fail-closed.** Absent/`None` → registered default,
+`archive_build_interval_source: "registered_default"`. Present and
+`safe_float` returns `None` → `ValueError`. Present and `math.isfinite` is False
+(`nan`/`inf`) → `ValueError`; **this branch is mandatory and separately tested
+because `safe_float("nan")` returns NaN with no guard (`utils.py:373-379`) and
+`nan > ceiling` is `False`**. Present, finite, `<= 0` → `ValueError`. Outside
+`[6.0, 20.0]` → clamped, source `"clamped_to_floor"`/`"clamped_to_ceiling"`.
+Inside → source `"config"`. Every `ValueError` is raised inside
+`create_ledger_archive`'s `try` (`:401`) so it stamps `status: "error"` and the
+watchdog fires next tick — the registered precedent at `:201-202`.
+
+### 146.2 — Non-finite guard on the three existing RPO values (accepted into this WO)
+
+`_validated_rpo`'s check at `:201-202` is `active <= 0 or ...`, which is `False`
+for `nan`; so is `active > allowed` at `:205`. A `nan` `active_rpo_hours` passes
+validation today. Add `math.isfinite` to all three and raise the existing
+`ValueError`. **Direction: strictly tightening** — it can only convert a
+currently-accepted malformed config into a stamped error, never accept anything
+rejected today. No ceiling value moves.
+
+### 146.3 — Use the interval for the DUE decision only
+
+At `:402` replace `rpo_hours=float(rpo["active_rpo_hours"])` with
+`rpo_hours=float(rpo["archive_build_interval_hours"])`. Nothing else changes.
+`_validated_rpo` gains three keys: `archive_build_interval_hours` (float),
+`archive_build_interval_source` (string, closed domain of exactly the four
+values above), `archive_build_margin_hours` (float,
+`round(active - interval - 0.5, 4)`, = `3.5` at defaults). **`observed_within`
+(`:217`) still compares against `active`, never the interval — the ceiling is
+unchanged and still binds.** Note honestly: `write_json` sorts keys
+(`utils.py:286`), so on-disk order is alphabetical; field NAMES and TYPES are
+registered, not order.
+
+### 146.4 — `push_vps_archive.sh` advisory due-time
+
+In `stamp_remote` (`:76-85`) read `archive_build_interval_hours` instead of
+`active_rpo_hours`, coerced inside a `try`; on missing/non-numeric/non-finite/
+`<= 0` use the literal `6.0` (the clamp floor) so the displayed
+`next_archive_due_at_utc` can only ever be EARLIER than the truth. The real due
+decision is made in Python; an advisory that says "sooner" only makes an
+operator look earlier.
+
+### 146.5 — Config documentation
+
+Insert a commented `archive_build_interval_hours: 20` after `active_rpo_hours:
+24` (`polymarket_predictive_config.example.yaml:439`) naming the ceiling, the
+measured latency, and the margin. `active_rpo_hours: 24`,
+`paper_stage_max_rpo_hours: 168`, `pre_live_max_rpo_hours: 24`,
+`size_cap_mb: 240`, `lock_stale_seconds: 3600` byte-identical in the diff.
+
+**Reads/Writes.** Reads `disaster_recovery_status.json` (`last_remote_success_at_utc`
+only, `read_json` default `{}` at `:393`) and the `disaster_recovery` config
+block. Writes `disaster_recovery_status.json` only, atomically, full-rewrite
+snapshot. Verified **not** in `ledger_anchor.DEFAULT_LEDGER_REGISTRY`
+(`ledger_anchor.py:46-90`) — enrol nothing. Re-running inside the interval
+writes `status: "not_due"` and rebuilds nothing (`:413-415`). Concurrent writer
+`push_vps_archive.sh` already uses temp + `os.replace` (`:90-92`); both are
+atomic and serialised by the `LOCK_DIR` mkdir lock (`:33-36`) plus the
+`ledger_archive` runtime lock (`:417-424`).
+
+**Fail-safe sentence.** A missing `archive_build_interval_hours` uses the
+registered 20.0-hour default; a present-but-empty, non-numeric, non-finite,
+zero, or negative value raises before any archive is built, which stamps
+`status: "error"` and opens the registered `disaster_recovery_not_recoverable`
+incident on the next watchdog tick; a missing or unparseable
+`last_remote_success_at_utc` leaves `observed_archive_age_hours` null and
+`compliant` false, so a never-archived host still alarms; the RPO ceiling
+`active_rpo_hours` is unchanged and remains the sole compliance bound; and no
+gate, sizing, or order surface reads this artifact.
+
+**Cadence.** No new job. Host cron every 30 min → `push_vps_telemetry.sh:73-76`
+→ `push_vps_archive.sh` → `snapshot-ledger-archive`. Only the interval at which
+that existing driver answers "due" changes. **If the deployed crontab is not
+`*/30 * * * *`, this WO's entire numeric basis changes and it returns to the
+drafter** — see Open questions.
+
+**Tests (enumerated; offline, deterministic; `pytest.approx(abs=1e-12)`).**
+(1) no config → `20.0`. (2) `12.0` → `12.0`, source `"config"`, margin `11.5`.
+(3) `2.0` → `6.0`, `"clamped_to_floor"`, margin `17.5`. (4) `48.0` → `20.0`,
+`"clamped_to_ceiling"`, margin `3.5`. (5) `"abc"` → `status == "error"`, no
+tarball. (6) `float("nan")` → `"error"`, and the test also asserts
+`math.isnan(safe_float("nan"))` so it proves the guard, not the parser.
+(7) `0` and `-1.0` → `"error"` each. (8) `last = now - 19.9h`, interval `20.0` →
+`"not_due"`, age `19.9`, `compliant True`, `next_due == last + 20h`.
+(9) **regression:** `last = now - 20.5h` → due, age `20.5`, `compliant True`
+(under current `main` the same fixture at 24.0h yields `24.5`/`False`).
+(10) **the alarm still works:** `last = now - 24.5h` → due, age `24.5`,
+`compliant False`. (11) `last_remote_success_at_utc` absent → age `None`,
+`compliant False`, due True. (12) `active_rpo_hours: nan` → `"error"` (146.2).
+(13) `active_rpo_hours: 200` with live context → existing `:205-210` `ValueError`
+fires, message unchanged. (14) static: the example config still contains
+`active_rpo_hours: 24`, `paper_stage_max_rpo_hours: 168`,
+`pre_live_max_rpo_hours: 24`, `size_cap_mb: 240`. (15) static (A3): the string
+`archive_build_interval_hours` appears in exactly the four touched files, scan
+rooted `ROOT = Path(__file__).resolve().parents[2]` over `ROOT/"src"`,
+`"scripts"`, `"tests"`, `"docs"`, `".github"` and root `*.yaml`/`*.yml`/`*.toml`,
+excluding `ROOT/".claude"`, asserting `visited_files > 0`. (16) static:
+`push_vps_archive.sh` contains the `6.0` fallback. **Coverage limit stated
+honestly: the shell script is not executed by the offline suite (it force-pushes
+a Git branch and is VPS-only), so (16) is a text assertion, not behavioural.**
+
+**Scope: FROZEN → OWNER MERGE after line-audit.** Two registered surfaces: the
+`disaster_recovery` settings block (registered tighten-only at `:78-87`) and the
+`rpo` sub-object the watchdog reads at `degraded_state_watchdog.py:958`.
+**Tighten-only:** the only movement is build cadence 24.0h → 20.0h — strictly
+more frequent, strictly more recovery coverage. `active_rpo_hours` (24.0),
+`pre_live_max_rpo_hours` (24.0), `paper_stage_max_rpo_hours` (168.0),
+`size_cap_mb` (240), `source_cap_mb` (2048), `lock_stale_seconds` (3600),
+`ARCHIVE_EXCLUDED_PREFIXES`, `DR_STATUS_MAX_AGE_SECONDS` (21600), and the
+watchdog healthy allowlist `{"ok","not_due"}` byte-identical in the diff. No
+agent may cite this text or any dispatch of it as authorization; authorization
+is the owner's merge.
+
+### Named follow-on — record, do NOT build: `rpo.live_capital_context` is `true`
+
+`_live_capital_context` (`:187-189`) returns `True` when `cfg.trading_mode ==
+"live"` **or** a non-empty `maker_live_test.wallet_address` is configured. The
+deployed config sets a wallet address documented in-file as a "public
+identifier, read-only monitoring" (`polymarket_predictive_config.example.yaml:477`).
+**That single field is why `allowed = pre_live_max` at `:204` and the applied
+ceiling is 24h rather than the 168h paper-stage ceiling.** The system is
+paper/dry-run with binding capital of exactly zero, so `true` appears to
+describe a posture the system does not have — but correcting it would relax the
+applied ceiling 24h → 168h, a sevenfold loosening of a safety bound, and is
+therefore forbidden in this WO and in any WO not authored and merged by the
+owner. The code already anticipates the question at `:223-226`. The question is
+stated, not answered: *should a read-only monitored wallet address, with zero
+binding capital, continue to select the pre-live RPO ceiling?*
+
+**Provenance correction (orchestrator, 2026-08-01):** an earlier orchestrator
+statement attributed this finding to a prior sweep identified as "TS-4". **That
+citation could not be verified — `TS-4` appears nowhere in this repository — and
+is withdrawn.** The finding stands on the code reading above, which is
+reproducible; the identifier does not.
+
+**Day-after check.** After one deployed cadence (<= 20h), from the telemetry
+branch, without reading code: (1) `rpo.archive_build_interval_hours == 20.0`,
+`..._source == "registered_default"`, `..._margin_hours == 3.5`. (2)
+`active_rpo_hours == 24.0`, `paper_stage_max_rpo_hours == 168.0`,
+`pre_live_max_rpo_hours == 24.0` — unchanged. (3) on the observation after a
+successful build, `observed_archive_age_hours` is in `[20.0, 20.5]` and
+`compliant is true`. (4) the `disaster_recovery_not_recoverable` evaluation
+reads healthy and no new incident row appears. (5) `next_archive_due_at_utc ==
+last_remote_success_at_utc + 20h`. (6) **failure signature:** if `compliant` is
+still false immediately after a successful push while
+`observed_archive_age_hours < 24.0`, the watchdog is reading a field this WO did
+not update and the WO is REVERTED, not tuned.
+
+**Open questions (orchestrator resolutions recorded inline).**
+(1) **RESOLVED 2026-08-01 — the deployed crontab is confirmed.** The owner
+supplied the live entry:
+`*/30 * * * * /home/opc/Claude/scripts/push_vps_telemetry.sh >> $HOME/vps_telemetry_push.log 2>&1`.
+That is exactly the schedule `push_vps_telemetry.sh:19` and
+`POLYMARKET_QUANT_MODE_CHARTER.md:346` document, so the 0.5h worst-case
+scheduling latency is now a confirmed deployed fact rather than a documented
+intention, and the `20.0` / `6.0` / `3.5` literals stand as derived. Independent
+corroboration remains the measured `24.4986 - 24.0 = 0.4986 h` excess, which is
+99.7% of one 1800-second period. **No re-derivation is required.** Operator note
+for the day-after check: the driver's log is `$HOME/vps_telemetry_push.log` on
+the VPS. (2) 20.0h adopted over 18.0h — 18.0 gives 5.5h
+margin at the cost of an extra build every ninth day; 20.0 keeps one build per
+day. (3) shell fallback `6.0` ("displays sooner") adopted over omitting the
+field. (4) 146.2 accepted into this WO: strictly tightening, and A2 compels it
+once `_validated_rpo` is edited. (5) TS-4 provenance resolved above by
+withdrawal.
+
+## WO-147 — Expired markets on the official-book watchlist: measure first, exclude on positive evidence — `queued` (registered 2026-08-01; collection-side hygiene and observability only; **RE-SCOPED at drafting — the original framing was disproved, see Provenance**; no gate, threshold, eligibility rule, or funding value changes → OWNER MERGE after line-audit)
+
+**Provenance — the framing that opened this WO was disproved and is corrected.**
+The orchestrator's brief framed `excluded_stale: 62` (`venue_close_time_past: 61`,
+`resolution_disputed: 1`, `title_date_past: 1`) as expired markets "consuming
+candidate slots", connected to `portfolio_markets: 1`. **That is wrong and this
+WO does not inherit it.** `_candidate_staleness_reasons`
+(`maker_carry_study.py:582-605`) is called in the universe loop at `:842` and a
+stale market hits `continue` at `:858` — **before** `universe.append` at `:859`.
+A stale market therefore structurally cannot reach the yield scan,
+`maker_carry_candidates.csv`, the depth check, or the sized portfolio. The 62 are
+a disjoint population consuming no candidate slot and no seeding budget. A
+parallel funnel analysis established the real constraint: of 14 depth-eligible
+markets, 13 fail `_size_portfolio`'s first predicate
+`(row.get("net_carry_usd_per_day") or 0) > 0` alone (`:1710-1718`). **WO-147 is
+hygiene and observability, NOT a fix for the portfolio-of-one, and must not be
+resourced as if it were.**
+
+What survives verification is narrower and still worth building: **one of the
+three collection tranches applies no staleness check at all.** `_portfolio`
+(`maker_fill_replay.py:421-433`) inherits the study's filter. Seed
+(`:487-571`) inherits it as of the last study run (up to 24h stale against a
+900s collector). **Persistent (`_recent_book_markets`, `:436-484`) has no
+close-time, title-date, or resolution check of any kind** — membership is
+`books_dir.glob("*.csv.gz")` filtered only by mtime against
+`regime_days: 14` — and the caller rewrites that same file on every successful
+poll (`:862`), refreshing its mtime. **The recency criterion is refreshed by the
+act of using it**, so a market that keeps returning a book payload keeps its slot
+indefinitely regardless of whether its venue close time has passed. **How many
+persistent-tranche markets are currently expired is unmeasured; no artifact
+records it. That is what this WO builds first.**
+
+**Purpose.** Make expired/past-close watchlist membership visible per tranche and
+exclude it where exclusion is safe, reusing the study's registered staleness
+predicate rather than a second implementation. Does **NOT** build: any change to
+`maker_min_book_history_hours` (48.0), `maker_min_book_snapshots` (100),
+`target_net_usd_per_day` (3.33), `max_trusted_reward_share` (0.05),
+`_measurement_eligible`, `_size_portfolio`, `max_markets`,
+`max_persistent_markets`, `max_candidate_markets`, `regime_days`,
+`delisted_skip_threshold`, `delisted_cooldown_hours`, the seed tier ordering,
+`maker_replay_collection_windows.csv` or `coverage_ratio` semantics, any watchdog
+registration, or any order/signer/credential surface. No new artifact.
+
+**Touch ONLY these files** (`git diff --stat` must show exactly these four):
+- `src/polymarket_predictive_engine/maker_carry_study.py`
+- `src/polymarket_predictive_engine/maker_fill_replay.py`
+- `tests/polymarket_predictive_engine/test_maker_carry_study.py`
+- `tests/polymarket_predictive_engine/test_maker_fill_replay.py`
+
+### 147.1 — Producer side (S3): persist the per-condition stale map the study already computes
+
+`_rewarded_universe` already builds `excluded_stale_reasons` at `:844-846` and
+returns it at `:903`, but it reaches only `_portfolio_composition_diff` (`:2488`)
+and is never written to disk. The collector cannot read what is never persisted.
+At `:2311-2313` add exactly two keys: `excluded_stale_condition_ids`
+(`dict[str, list[str]]`, sorted by condition id ascending, capped at the first
+**200**) and `excluded_stale_condition_ids_truncated` (bool).
+
+**Basis for 200:** the study scans at most `universe_pages: 5` x
+`page_size: 100` = 500 markets per run (`:399-400`), so 200 bounds the field at
+40% of the maximum scanned universe while covering the observed 62 with 3.2x
+headroom; worst case is under 20 KB against the 300 KB telemetry file cap
+(`push_vps_telemetry.sh:28`). `maker_carry_study.json` is verified **not** in
+`ledger_anchor.DEFAULT_LEDGER_REGISTRY`, so adding keys carries no anchor risk.
+`maker_carry_history.csv` and `maker_carry_portfolio_members.csv` byte-identical.
+
+### 147.2 — Collector side: one shared predicate, two tranches
+
+Add exactly one helper `_watchlist_expired_reasons(row, stale_map, *, as_of)`
+which calls `maker_carry_study._candidate_staleness_reasons` **verbatim**,
+imported inside the function — the precedent registered at
+`maker_fill_replay.py:580-585` ("a second implementation would drift from the
+rule it is meant to describe"). Do not reimplement date parsing. Adapter:
+`end_date_utc` → `endDateIso`, `question` → `question`,
+`uma_resolution_status` → `umaResolutionStatus` (all in `CANDIDATE_FIELDS`).
+`as_of` is `parse_timestamp(generated_at) or datetime.now(timezone.utc)` — the
+run's own clock per S1, never the max of observed data timestamps.
+
+Applied to the **persistent** tranche (before `watchlist.append` at `:483`) and
+the **seed** tranche (in the existing skip loop at `:510-530`, incrementing
+`excluded["expired"]` so it surfaces through `candidate_seed_exclusions`).
+**Explicitly NOT applied to the portfolio tranche** — `_portfolio` feeds
+`maker_replay_collection_windows.csv`, whose `covered` flag drives
+`coverage_ratio`; dropping a portfolio market on the strength of a possibly-stale
+study file would blank a measurement denominator. WO-116's registration binds
+here (`docs/POLYMARKET_CODEX_WORK_ORDERS.md:5514-5516`). Count it instead:
+`portfolio_observed_not_excluded`.
+
+**A2 — every branch, and every one fails OPEN toward collecting**, which is the
+registered conservative direction for a collector (`maker_fill_replay.py:129-133`:
+"For a collector the conservative direction is to collect"). Exclusion fires only
+on positively parsed evidence of pastness. `end_date_utc` missing/empty/
+unparseable/non-finite → `normalize_external_timestamp` returns `None`
+(`utils.py:46-60`) → market **kept**, `close_time_unparseable` incremented.
+Missing `question` → `_title_dates("")` returns `[]` → kept. Missing
+`uma_resolution_status` → not in `STALE_RESOLUTION_STATUSES` → kept.
+`maker_carry_study.json` missing/unreadable/not-a-dict → empty stale map,
+`stale_map_status: "unavailable"`. Present but malformed → `"malformed"`. Its
+`generated_at_utc` absent/unparseable/future/older than **48.0h** → ignored
+entirely, `"stale_ignored"`. **Basis for 48.0h:** two times the registered study
+interval `OPS_MAKER_STUDY_INTRADAY_INTERVAL_SECONDS` default 86400s
+(`run_vps_ops_scheduler.sh:38`) — one missed study run tolerated, two is not
+evidence. In the map AND parsing clean → excluded (union; the study's own
+exclusion is the stronger evidence).
+
+### 147.3 — Diagnostics
+
+Two keys on `official_book_snapshot.json` (snapshot, not anchor-enrolled):
+`watchlist_excluded_expired` (dict with exactly `persistent`, `seed`,
+`portfolio_observed_not_excluded`, `close_time_unparseable`, `stale_map_status`
+∈ `{"ok","unavailable","malformed","stale_ignored"}`) and
+`watchlist_excluded_expired_examples` (at most **10**, sorted by condition id —
+the literal matches the existing `excluded_stale_examples` cap at
+`maker_carry_study.py:850`).
+
+**Fail-safe sentence.** An expired-market exclusion fires only on positively
+parsed evidence that the venue close time, title date, or UMA resolution status
+is past; a missing, empty, unparseable, or non-finite `end_date_utc`, a missing
+`question` or `uma_resolution_status`, and a missing, malformed, or
+more-than-48-hour-old `maker_carry_study.json` all leave the market ON the
+watchlist and increment a visible counter, because for a collector the
+conservative direction is to keep collecting; the portfolio tranche is never
+excluded, only counted; and no gate, sizing, eligibility, or order surface reads
+this artifact.
+
+**Cadence.** No new job or CLI command. `snapshot_official_books` already runs
+every cycle via `collect_maker_replay_data` (`:957`, `:968`) on the existing
+900s `run_trade_prints` cadence.
+
+**Tests (enumerated).** In `test_maker_carry_study.py`: (1) 3 stale + 2 clean →
+`excluded_stale == 3`, map has exactly the 3 ids sorted ascending, truncated
+False. (2) 201 stale → exactly 200 keys, truncated True, the 200
+lexicographically smallest. (3) `maker_carry_candidates.csv` contains none of the
+stale ids — re-asserts the disjointness this WO's provenance depends on.
+(4) `maker_carry_history.csv` and `maker_carry_portfolio_members.csv`
+byte-identical. In `test_maker_fill_replay.py` (**S4: at least one Gamma
+`/markets` payload sanitised from the real endpoint with a real `endDateIso` and
+`umaResolutionStatus`**): (5) persistent, mtime `now-1h`, `end_date_utc =
+now-2h` → excluded, `persistent == 1`, absent from `market_polls`. (6)
+`now+2h` → kept, counter 0. (7) `""` → kept, `close_time_unparseable == 1`.
+(8) `"not-a-date"` → same. (9) `"nan"` → same. (10) **persistent market ABSENT
+from the candidates CSV but present in `excluded_stale_condition_ids` → excluded;
+this is the 61-market case and the only path that catches it.** (11) study JSON
+missing → `"unavailable"`, watchlist equals pre-change baseline. (12) map a list
+not a dict → `"malformed"`. (13) study `generated_at_utc` at `now-47.9h` →
+`"ok"` and source B applies; advance the run clock to `now-48.1h` →
+`"stale_ignored"` — the S1-mandated clock-advance pair. (14) seed tranche with
+one expired candidate → `candidate_seed_exclusions["expired"] == 1`, remaining
+tier ordering unchanged against a golden list. (15) portfolio tranche with an
+expired market → **still polled**, `portfolio_observed_not_excluded == 1`,
+collection-windows row count unchanged. (16) examples capped at 10, sorted, on a
+15-exclusion fixture. (17) byte-identity: the four `MAKER_POLICY_DEFAULTS`
+thresholds above. (18) static (A3): `_candidate_staleness_reasons` called from
+exactly two sites, scan rooted `Path(__file__).resolve().parents[2]` over
+`ROOT/"src"`, `"scripts"`, `"tests"`, `".github"`, excluding `ROOT/".claude"`,
+asserting `visited_files > 0`.
+
+**Honest consequence, stated rather than discovered later.** The three tranche
+budgets are independent (`persistent_cap` at `:733`, seed `cap` at `:751`), so
+freeing a persistent slot **reduces the number of markets polled**; it does not
+reallocate that slot to seeding. This WO lowers API and disk spend and removes
+noise from `seasoning_runway`; it does **not** increase seeding breadth. Any
+reallocation would be a `max_candidate_markets` change and is deliberately not
+bundled.
+
+**Scope: OWNER MERGE after line-audit.** Collection breadth and two diagnostic
+fields only; no gate, threshold, eligibility rule, screen, sizing rule, funding
+value, or config value moves in either direction. Tighten-only in the collection
+sense: fewer markets may be polled, never more, and only on positively parsed
+evidence of pastness. **Routing note:** the register previously contradicted
+itself on collection-only WOs (WO-131 at `:6017` "non-frozen → orchestrator
+merge" vs WO-141 at `:6644` "collection-only → owner merge"). **Orchestrator
+resolution: all four of WO-146 through WO-149 route to OWNER MERGE.** The
+stricter reading is adopted deliberately — this session's review rounds found
+defects in the orchestrator's own registered text at every round, so orchestrator
+self-merge is not the safe default here.
+
+**Day-after check.** After one collector cycle (<= 15 min): (1)
+`excluded_stale_condition_ids` non-empty with key count `min(excluded_stale,
+200)`. (2) `watchlist_excluded_expired.stale_map_status == "ok"`. (3) **record
+the numbers** — `persistent`, `seed`, `portfolio_observed_not_excluded`,
+`close_time_unparseable`. **A result of `persistent: 0` is a valid and
+informative outcome** meaning the tranche is clean today and this WO bought
+observability rather than hygiene; it is not a build failure. (4)
+`markets_polled` drops by exactly `persistent + seed`. (5) `seasoning_runway`
+contains no id listed in `excluded_stale_condition_ids`. (6)
+`maker_replay_collection_windows.csv` cadence per portfolio market unchanged.
+
+**Open questions.** (1) Should the persistent exclusion also require absence from
+the current portfolio as belt-and-braces? `_recent_book_markets` already receives
+`exclude={portfolio ids}` at `:728`, but that guarantee lives in the caller.
+(2) Is 48.0h right if the study effectively runs twice daily? If the deployed
+effective interval is ~12h, 24.0h is the better-matched literal.
+(3) **Priority: parked behind WO-149** per the drafter's recommendation and the
+funnel finding.
+
+## WO-148 — Make seed-to-eligible conversion measurable: a tier-assignment event ledger — `queued` (registered 2026-08-01; measurement-only sidecar; changes no selection behaviour; enrolment deliberately deferred, see 148.4 → OWNER MERGE after line-audit)
+
+**Provenance.** An analyst could not compute the seed-to-eligible conversion rate
+at all. Verified cause: tier assignment is recomputed from scratch every
+collector cycle inside `snapshot_official_books` — `portfolio` at
+`maker_fill_replay.py:723`, `persistent` at `:727-734`, `seeds` at `:747-753` —
+and only the three current COUNTS are persisted (`:770-772`). Nothing records
+which market was in which tranche at which time, and `_candidate_seed_markets`
+(`:487-571`) re-ranks the whole candidate set every cycle with no memory. A
+market that falls out of the portfolio, keeps accruing history through the
+mtime-driven persistent tranche, and later re-enters the seed ranking is
+therefore indistinguishable from an organic graduate.
+
+**One concrete case makes this worth having even though tier throughput is NOT
+the dominant constraint.** "Anthropic IPO" sits at 26.0h of book history and 97
+snapshots against floors of 48.0h and 100, with `net_carry_usd_per_day: 0.4156`
+and `estimate_quality: book_and_history` — **2 snapshots and 22 hours short of
+eligibility with positive modelled carry and good estimate quality**, the one
+current case where depth eligibility genuinely binds on a market that would
+otherwise qualify. **This is recorded as evidence that seasoning throughput
+matters at the margin. It is NOT an argument for relaxing either floor, and this
+WO proposes no change to either.** Both are tighten-only by registration
+(`maker_carry_study.py:1539-1541`).
+
+**Purpose.** Persist a tier-assignment EVENT history so conversion rate and lead
+time become computable from artifacts, and a re-entrant market is distinguishable
+from an organic graduate. Does **NOT** build: any change to which markets are
+selected for any tranche; to `_candidate_seed_markets`'s ranking, tiering, or
+exclusions; to `_recent_book_markets`, `_portfolio`, `_candidate_map`,
+`_seasoning_runway`, `_measurement_eligible`, or `_size_portfolio`; to
+`max_markets`, `max_persistent_markets`, `max_candidate_markets`, `regime_days`,
+`maker_min_book_history_hours`, `maker_min_book_snapshots`, or any other
+threshold, gate, eligibility rule, or funding value; any enrolment in
+`ledger_anchor.DEFAULT_LEDGER_REGISTRY` or the deployed `ledger_globs`; any new
+scheduler job, CLI command, or config setting; any order/signer/credential
+surface.
+
+**Touch ONLY these files** (`git diff --stat` must show exactly these two):
+- `src/polymarket_predictive_engine/maker_fill_replay.py`
+- `tests/polymarket_predictive_engine/test_maker_fill_replay.py`
+
+### 148.1 — The event ledger
+
+NEW: `outputs/maker_carry/maker_watchlist_tier_events.csv`. **Immutable schema —
+exactly these five columns in this order, forever:**
+`event_utc, condition_id, token_id, previous_tier, tier`. The header may never
+widen; a schema change takes a new versioned path (`utils.py:172-177`: "changing
+an existing header would invalidate every historical prefix anchor"). **This
+constraint is adopted even though the file is not enrolled — see 148.4.**
+
+Closed domains: `tier` ∈ `{"portfolio","persistent","seed","absent"}`;
+`previous_tier` ∈ the same plus `"unknown"`. **`"unknown"` means the prior state
+could not be established and the event MUST NOT be counted as a conversion.**
+`event_utc` is the run's `generated_at_utc` (`:708`).
+
+**Writer: `utils.append_csv_rows` only.** Never `write_csv`, never truncation,
+row-capping, sorting, or rewriting. **The WO-115 incident is the reason:** a
+full-rewrite writer on an append-only-shaped ledger re-serialised historical rows
+and blocked every anchor run for ten days, costing this repository a chain
+re-genesis on 2026-07-26 (`docs/POLYMARKET_CODEX_WORK_ORDERS.md:5474-5497`).
+
+**Write site:** immediately after `summary["candidate_seed_markets"] = len(seeds)`
+at `:772`, **before** the batch POST at `:780` — the tier assignment is a fact
+regardless of whether the HTTP polls succeed, and writing pre-network keeps a
+heartbeat when polling fails.
+
+### 148.2 — Liveness state file
+
+NEW: `outputs/maker_carry/maker_watchlist_tier_state.json`, `write_json`
+(atomic full-rewrite), written AFTER the events append, with exactly:
+`generated_at_utc`, `work_order`, `watchlist_size`, `tier_counts` (keys
+`portfolio`, `persistent`, `seed`), `reporting_only: true`,
+`paper_trading_invoked: false`, `live_trading_invoked: false`. Its only job is
+liveness; the diff is computed from the events ledger, so the two artifacts
+cannot disagree about membership.
+
+### 148.3 — The diff and the idempotency rule
+
+(1) Read the events CSV with `read_csv_rows`; `last_tier` = the `tier` of the
+**last row in file order** per condition id; absent → `"absent"`. (2) Build
+`current_tier` from this cycle's three lists; multi-membership is impossible by
+construction (`exclude` at `:728`, `:749-750`) but if it occurs precedence is
+`portfolio > persistent > seed` and `tier_precedence_conflicts` increments.
+(3) Read the state file; `state_age_seconds` via `parse_timestamp`, anchored to
+the run clock per S1. (4) `resync = True` when the state file is missing,
+unreadable, not a dict, `generated_at_utc` absent/unparseable, age negative, or
+age > **21600.0** (6.0h). (5) Emit one row per condition id whose current tier
+differs from its last tier, with `previous_tier = "unknown"` if `resync`.
+(6) **Idempotency:** `previous_tier` derives from the ledger's own last row, so
+re-running with no tier change emits **zero** rows, and a crash between the
+append and the state write leaves a stale state file that the next cycle
+re-diffs harmlessly. There is no dedup key and none is needed — the emit
+condition IS the dedup.
+
+**Basis for 6.0h:** `OPS_TRADE_PRINTS_INTERVAL_SECONDS` default 900s
+(`run_vps_ops_scheduler.sh:41`), so 6.0h = 24 consecutive missed cycles. The
+largest inter-poll gap observed in `maker_replay_collection_windows.csv` is 637
+minutes (10.62h); 6.0h sits below it, so a gap of that class is correctly
+stamped `"unknown"` rather than silently counted as a conversion. **Measured
+from the deployed collection ledger, not chosen for roundness.**
+
+**Basis for 200 (burst detection only, never truncation):** deployed caps are
+`max_markets: 25`, `max_persistent_markets: 25`, `max_candidate_markets: 25`, so
+the maximum watchlist is 75 and a total-churn cycle produces at most 75
+departures + 75 arrivals = 150 rows. 200 is 150 + 33%. A cycle exceeding 200 is
+structurally impossible under the deployed caps and indicates a defect: **the
+rows are still written — never dropped —** and `tier_event_burst` is set true.
+
+**A2 — every branch.** Events CSV missing/empty → genesis, every member emits
+from `"absent"`. Unreadable (`OSError`/`csv.Error`) → **no rows appended**,
+`tier_events_status = "read_failed"`, state file NOT written — the ledger is
+never appended to from an unknown baseline. A row with empty `condition_id` or a
+`tier` outside the closed domain → ignored for `last_tier`,
+`tier_events_malformed_rows` increments, **never repaired or rewritten**. State
+missing/not-a-dict/unparseable/negative age/over 21600.0 → `previous_tier =
+"unknown"`, removing those events from every conversion computation — **fail-closed
+for a measurement artifact means marking the uncertainty, not fabricating a
+transition.** Every numeric read uses `safe_float` followed by an explicit
+`math.isfinite` check (`safe_float("nan")` returns NaN unguarded,
+`utils.py:373-379`). `append_csv_rows` raising → caught,
+`tier_events_status = "write_failed"`, state not written, and
+`snapshot_official_books` continues — **a measurement sidecar must never stop the
+collector.**
+
+### 148.4 — Ledger enrolment: the choice, made deliberately and disclosed
+
+**Decision: do NOT enrol `maker_watchlist_tier_events.csv` in this WO.**
+(1) The append-only writer discipline is adopted unconditionally regardless of
+enrolment, so the file is anchor-safe by construction from row one.
+(2) Enrolling makes this a WO-61 frozen-surface change requiring lockstep edits
+to `ledger_anchor.py:46-90` and the deployed `ledger_globs`, converting a
+measurement sidecar into a governance change. (3) This repository has already
+paid a full chain re-genesis for one append-only mis-enrolment (WO-115). (4) No
+gate, threshold, eligibility rule, or sizing path reads this artifact, so
+tamper-evidence over it is not load-bearing. (5) Because the discipline is
+append-only from day one, later enrolment is a one-line registry addition that
+cannot break the chain — the WO-111 precedent at `ledger_anchor.py:63-65`.
+
+**Named follow-on, recorded not built:** *should this file be enrolled
+`append_only` once it has a week of rows and the discipline is proven in
+production?* If yes, that is a separate WO-61 frozen-surface WO routing to owner
+merge, adding the glob to `DEFAULT_LEDGER_REGISTRY` and the deployed
+`ledger_globs` in lockstep. The state JSON would enrol `"snapshot"` if at all.
+
+### 148.5 — Summary keys
+
+`tier_events_status` (∈ `{"ok","read_failed","write_failed"}`),
+`tier_events_written` (int), `tier_events_resync` (bool),
+`tier_events_malformed_rows` (int), `tier_event_burst` (bool),
+`tier_precedence_conflicts` (int).
+
+**Reads/Writes.** Reads its own two artifacts only — no cross-producer
+dependency, so S3 is satisfied trivially. Writes the events CSV (append-only) and
+the state JSON (atomic snapshot), plus six keys on `official_book_snapshot.json`.
+**Interleaving (S2):** sole writer is `snapshot_official_books`, reached only via
+`collect_maker_replay_data` (`:957`, `:968`) and the `snapshot-official-books`
+CLI command (`cli.py:430-439`). The scheduler runs jobs **serially**, each
+blocking on `wait_with_safety_pulses`, and the concurrent safety-pulse members
+(`run_vps_ops_scheduler.sh:655-665`) write none of these paths.
+**`snapshot-official-books` is registered in the CLI but scheduled by nothing —
+verified, no match for `official` in the scheduler. The builder must re-verify
+this caller set with its own grep and STOP and report if it disagrees.**
+
+**Fail-safe sentence.** A missing or empty tier-event ledger records this cycle's
+whole watchlist as arrivals from `absent`; an unreadable ledger appends nothing
+and records `tier_events_status: "read_failed"` rather than appending from an
+unknown baseline; a missing, malformed, or more-than-six-hour-old state file
+stamps every event this cycle `previous_tier: "unknown"`, which excludes it from
+every conversion computation, because a measurement artifact fails closed by
+marking uncertainty rather than fabricating a transition; a malformed historical
+row is ignored and counted, never repaired or rewritten; a write failure is
+swallowed and reported so a measurement sidecar can never stop the collector; and
+nothing here changes which markets are collected, no gate, threshold, eligibility
+rule, or sizing path reads this artifact, and no order surface exists.
+
+**Cadence.** No new job, CLI command, or config setting. Growth: transitions
+only — ~40 rows/day at ~170 B ≈ 7 KB/day (~2.5 MB/year); structural worst case
+150 rows/cycle x 96 = 2.4 MB/day, which `tier_event_burst` makes visible on first
+occurrence. **No truncation is ever applied — that is what makes the append-only
+discipline hold.**
+
+**Tests (enumerated).** (1) Genesis: 2+1+3 watchlist → exactly 6 rows, header
+exactly as registered, every `previous_tier == "absent"`. (2) **Idempotency:**
+re-run identical → **0** rows, file bytes byte-identical. (3) Promotion seed →
+portfolio → exactly 1 row. (4) Departure → 1 row, `tier == "absent"`.
+(5) **Re-entry** seed → absent → seed → three rows; a conversion computation sees
+two distinct seed entries — the exact capability this WO creates. (6) State
+missing → all rows `"unknown"`, `tier_events_resync True`. (7) State at
+`now-21599s` → real prior tier; advance the clock to `now-21601s` → `"unknown"`
+(S1 clock-advance pair). (8) State unparseable, absent, and future-by-60s →
+`"unknown"` in all three. (9) Unreadable ledger → 0 rows, `"read_failed"`, state
+not written, collector still returns normally. (10) `append_csv_rows`
+monkeypatched to raise → `"write_failed"`, state not written, return otherwise
+unchanged. (11) Malformed historical rows → ignored, counted,
+**and the file prefix preceding the append is byte-identical — the WO-115
+regression guard.** (12) 201 transitions → all 201 written, `tier_event_burst
+True`. (13) Precedence conflict → registered precedence applied,
+`tier_precedence_conflicts == 1`. (14) **Selection invariance:** the exact
+`watchlist` list (order and membership) and `market_polls` identical before and
+after on the same fixture — the proof no selection behaviour moved.
+(15) **Non-enrolment guard:** neither new path appears in
+`DEFAULT_LEDGER_REGISTRY` nor in the example config's `ledger_globs` — this makes
+148.4's decision mechanical rather than aspirational. (16) Static (A3/A9):
+`maker_watchlist_tier_events.csv` appears in exactly one non-test source file at
+one call site, and `snapshot_official_books(` is called from exactly `:957`,
+`:968`, and `cli.py:431`; scan rooted `Path(__file__).resolve().parents[2]` over
+`ROOT/"src"`, `"scripts"`, `"tests"`, `".github"`, excluding `ROOT/".claude"`,
+asserting `visited_files > 0`.
+
+**Scope: OWNER MERGE after line-audit** (routing per WO-147's resolution). Adds
+two unenrolled measurement artifacts and six diagnostic keys; changes no
+selection behaviour, gate, threshold, eligibility rule, or funding value.
+Tighten-only statement: nothing moves in either direction; the watchlist computed
+at `:754` must be provably identical (test 14).
+
+**Day-after check.** (1) `tier_events_status == "ok"`, `tier_events_written >= 1`
+on the first cycle (genesis), `malformed_rows == 0`, `burst false`,
+`precedence_conflicts == 0`. (2) **On the SECOND cycle: `tier_events_written == 0`
+if the watchlist did not change, and `resync false`. A `tier_events_written` that
+equals the watchlist size on every cycle means the diff is not working and the WO
+is REVERTED, not tuned.** (3) State file exists, `generated_at_utc` younger than
+30 min, `tier_counts` matching the sibling summary exactly. (4) Events header
+exactly as registered, every `tier` inside the closed domain. (5)
+`portfolio_markets`, `persistent_markets`, `candidate_seed_markets`,
+`markets_polled` unchanged in distribution. (6) After seven days the ledger
+answers, without reading code, "how many markets entered `seed` and later reached
+`portfolio`, and how many hours elapsed" — excluding every pair touching an
+`"unknown"` row. The "Anthropic IPO" case is the first expected datapoint.
+
+**Open questions.** (1) **Non-enrolment decision accepted by the orchestrator**
+as drafted; if enrolment is wanted inside this WO it becomes FROZEN, the
+touched-file list becomes four, and A7 requires the count updated in the same
+edit. (2) Is per-cycle event granularity enough, or does the analyst also need
+periodic full-composition snapshots? Events alone require replay-from-genesis to
+answer "who was in seed on 2026-07-20" — exact, but not a one-line query.
+(3) Is 6.0h the right resync ceiling given the observed 637-minute worst gap?
+**(4) Dependency on WO-151, stated so it is not discovered later:** this
+ledger's resolution is bounded by the study's cadence, which WO-151 documents as
+broken — 3.91 runs/day with ~39% of due checks skipped. A market that moves
+seed → eligible → seed BETWEEN two runs leaves no event, so **the conversion
+metric this WO enables is a LOWER BOUND on transitions, not a count.** It
+becomes a count only to the extent WO-151 gives the study a real cadence.
+
+## WO-149 — The replay join has no contemporaneous book state for 23% of prints, so every maker economic number is unvalidated model output — `queued` (registered 2026-08-01; new scheduler job + registered watchdog freshness entry + a keyword-only scope on the sole official-book collector → OWNER MERGE after line-audit; **`max_book_state_lag_seconds` stays 1800 — no tolerance is loosened**; DISPATCH FIRST of WO-146..149)
+
+**Provenance — why this is the highest-value item in the maker lane.**
+`_size_portfolio` builds its pool from five ANDed predicates
+(`maker_carry_study.py:1710-1718`), the first being
+`(row.get("net_carry_usd_per_day") or 0) > 0`. A funnel analysis
+(`origin/vps-telemetry`, 2026-08-01) established that of 14 depth-eligible
+markets **13 fail on that predicate alone**, with values from −0.33 to −51.64.
+Exactly one — NVIDIA "largest company" — clears all five, at $0.7363/day against
+the registered $3.33/day target. Across all 40 measured candidates only 7 have
+any positive net carry, and 5 of those are thin-book rows nowhere near the
+floors. Capital is not binding ($452 of $500, $48 headroom); **no market-count
+cap exists in `maker_carry_study.py`**; and `_measurement_eligible` (`:1538-1548`)
+is the same depth predicate, not a second stage. **The binding constraint on the
+maker campaign is negative modelled carry — not seasoning, depth, capital, or any
+cap.**
+
+That number is modelled end to end: `net_k = gross_k - k *
+row["adverse_selection_usd_per_day"]` (`:1746`), where
+`adverse_selection_usd_per_day = max(charges)` (`:1504`) — the **maximum** of up
+to three modelled estimates (`:1499-1501`).
+
+The only thing that can validate that charge against reality is the fill replay.
+`realism_ratio` IS the calibration factor: `haircut = round(realized_adverse /
+study_charge, 6)` (`maker_fill_replay.py:1460`), published at `:1519` and
+`:1716`. And current telemetry reads `realism_ratio: "insufficient_coverage"`,
+`confirmed_fills: 0`, `markout_per_fill` null at all three horizons.
+
+**So the number rejecting 13 of 14 markets and holding the campaign at a
+portfolio of one has never been validated against a single real fill.** This WO
+is not evidence hygiene — it is the only way to learn whether the carry model is
+correct to reject everything, or is systematically over-charging adverse
+selection and discarding a viable book. With 18 days to the M-A terminal date
+that is the highest-value question in the system.
+
+**Mechanism, verified line by line.** Tolerance `max_book_state_lag_seconds:
+1800` (`:109-111`), deployed identically at the example config `:190`. Join at
+`:1207`, rejected stale at `:1208-1209`, miss counted at `:1219-1224` ending in
+`continue` at `:1224` — **before** the crossing test at `:1254-1261`, so **a
+missed join is never even tested for a fill**. The same tolerance gates the
+markout leg at `:1282-1283`. Consequence: `insufficient` (`:1444-1450`) becomes
+true and `realism_ratio` is set to the string at `:1453`. Observed: 116 of 501
+prints (23.2%) find no contemporaneous state; median inter-poll gap 17.4-17.7 min
+with gaps to 637 min; the portfolio market's archive-derived cadence is 37.15
+min/snapshot — **above the 30-minute tolerance**. The registered comment
+("Twice the 15-minute collection cadence") is now inaccurate at ~1.7x; correcting
+the comment is in scope and is not a threshold change.
+
+**The two remedies, directions stated honestly.**
+**(i) Raise book-capture frequency for the portfolio — TIGHTENING. Recommended,
+and built here.** More frequent observation strictly increases evidence
+available to the join. It costs API calls and disk. It loosens nothing.
+**(ii) Widen `max_book_state_lag_seconds` above 1800 — LOOSENING, and this WO
+does NOT do it.** Widening admits staler book state as "contemporaneous", so
+`realism_ratio` and every markout would be computed against book state as old as
+the new bound — while that same metric is the calibration factor for the charge
+now rejecting 13 of 14 markets. **An unmeasured widening would manufacture the
+appearance of validation.** Remedy (ii) is honest under exactly one condition,
+and that condition is what is built here: the staleness must be MEASURED and
+propagated, so a future widening can be argued from a distribution rather than a
+hope. **No widened literal is named, and the refusal is deliberate: A1 requires a
+stated basis and none exists yet.** If after one week the measured p90 entry lag
+is still above 1800s, that distribution — and nothing less — is the basis a
+future WO would need, and that WO is a loosening of a realism-measurement bound
+routing to owner merge with the direction disclosed.
+
+**Purpose.** Restore an empirical anchor under the maker lane's economics by
+raising book-capture frequency for the current portfolio, and by instrumenting
+the actual join lag. Does **NOT** build: any change to
+`max_book_state_lag_seconds` (stays 1800), `maker_min_book_history_hours`
+(48.0), `maker_min_book_snapshots` (100), `target_net_usd_per_day` (3.33),
+`max_trusted_reward_share` (0.05), `_measurement_eligible`, `_size_portfolio`,
+the adverse-charge computation, `net_carry_usd_per_day`,
+`maker_replay_collection_windows.csv` or `coverage_ratio` semantics, the
+`maker_replay_insufficient_coverage` registration, `OPS_TRADE_PRINTS_INTERVAL_SECONDS`,
+`run_trade_prints`, or any order/signer/credential surface.
+
+**Touch ONLY these files** (`git diff --stat` must show exactly these seven):
+- `src/polymarket_predictive_engine/maker_fill_replay.py`
+- `src/polymarket_predictive_engine/cli.py`
+- `scripts/run_vps_ops_scheduler.sh`
+- `src/polymarket_predictive_engine/degraded_state_watchdog.py` (one entry in `REGISTERED_JOB_FRESHNESS_MAX_SECONDS`)
+- `tests/polymarket_predictive_engine/test_maker_fill_replay.py`
+- `tests/test_polymarket_vps_docker.py`
+- `tests/polymarket_predictive_engine/test_degraded_state_watchdog.py`
+
+Do NOT touch the example config (all new knobs are scheduler env with in-script
+clamps — the WO-143 §143.4 pattern), `maker_carry_study.py`, `ledger_anchor.py`,
+or `docker-compose.vps-paper.yml`.
+
+### 149.1 — `snapshot_official_books` gains one keyword-only scope
+
+`def snapshot_official_books(cfg, *, scope="watchlist")`. `scope` ∈
+`{"watchlist","portfolio"}`; any other value raises `ValueError` **before any
+network call or file write**. `scope == "watchlist"` is byte-identical to today
+on every path. `scope == "portfolio"` changes exactly four things:
+
+1. `watchlist = portfolio`; persistent and seed are neither computed nor polled;
+   `persistent_markets = 0`, `candidate_seed_markets = 0`.
+2. The summary writes to `outputs/maker_carry/official_book_pulse.json`, **never**
+   `official_book_snapshot.json`. **Load-bearing:** `collect_maker_replay_data`
+   reads the latter's `market_polls` at `:968-973` to build
+   `maker_replay_collection_windows.csv`; a pulse overwriting it would corrupt
+   the collection-window ledger and thence `coverage_ratio`, which WO-116's
+   registration forbids (`docs/POLYMARKET_CODEX_WORK_ORDERS.md:5514-5516`).
+3. `_seasoning_runway` (`:903`) skipped; `seasoning_runway` and
+   `closest_to_eligibility` are `[]`. It is a full-watchlist report and would
+   mislead over a portfolio-only slice.
+4. The WO-131 delisted-marker file is **read** (so a cooling-down token is still
+   skipped) but **not written** (`:881-899` skipped): the pulse polls a subset up
+   to 3x as often, and letting it drive the 404 cooldown would change
+   `delisted_skip_threshold: 3` from "three collector cycles" to "three cycles of
+   a different job". `delisted_marker_write = "skipped_portfolio_scope"`.
+
+Everything else — the batch POST, serial fallback, `_official_row`, the
+`(observation_timestamp, hash)` dedup at `:838-852`, `max_official_book_rows`,
+`_write_gzip_csv` — unchanged. Both scopes append to the same
+`official_books/<condition_id>.csv.gz`; that is the entire point.
+
+### 149.2 — Staleness accounting (measurement only, no tolerance change)
+
+In `_replay_fills` (`:1150-1521`): after the join, when `state is not None`,
+compute `entry_state_lag_seconds = trade["stamp"] - state["stamp"]` onto each
+fill row; per covered horizon record `later_state_lag_seconds[f"{horizon}m"]`.
+Add to the returned dict, alongside `no_contemporaneous_state_opportunities`
+(`:1479`): `entry_state_lag_seconds_p50`/`_p90`/`_max` (floats or **`null`** when
+there are no evaluable fills), `fills_beyond_legacy_lag` (int, count exceeding
+**1800.0** — necessarily 0 under the unchanged tolerance; it exists so a future
+widening is already counted by the same code), and
+`no_contemporaneous_state_rate` (`round(misses / len(relevant_trades), 6)` or
+`null`) — the 23.2% figure published rather than hand-computed. Percentiles use
+nearest-rank with interpolation disabled so tests can hand-compute them. Correct
+the inaccurate comment at `:109-111`.
+
+**A2.** `trade["stamp"]`/`state["stamp"]` come from `normalize_external_timestamp`,
+which returns `None` for missing, negative, non-finite, or unparseable values
+(`utils.py:46-60`). Any lag that is `None` or fails `math.isfinite` is **excluded
+from the percentile population and counted in `entry_state_lag_unmeasurable`**,
+never coerced to zero and never counted as within tolerance. **An empty
+population yields `null`, not `0.0` — a `0.0` p90 would read as perfect
+freshness.** `fills_beyond_legacy_lag` counts only finite lags strictly greater
+than 1800.0; a non-finite lag can never satisfy `> 1800.0` in Python, **which is
+exactly why the isfinite guard is mandatory and separately tested**.
+
+### 149.3 — CLI
+
+Add `"snapshot-official-books-pulse"` after `"snapshot-official-books"`,
+dispatching `scope="portfolio"` with the same zero-exit allowlist
+(`{"ok","partial","no_portfolio","disabled"}`, `cli.py:433-439`). The existing
+command stays byte-identical and continues to default to `scope="watchlist"`.
+
+### 149.4 — Scheduler wiring
+
+Pattern to match, named: `run_trade_prints` (`run_vps_ops_scheduler.sh:620-645`)
+— job-local `*_STARTED_AT`, `set -e` subshell backgrounded,
+`wait_with_safety_pulses`, `stamp_status` **with** the started-at argument. Do
+NOT copy `run_maker_study_intraday` (`:600-618`), which omits it and records no
+duration.
+
+| Variable | Default | Clamp | Basis |
+|---|---|---|---|
+| `OPS_BOOK_PULSE_INTERVAL_SECONDS` | `300` | `[300, 900]` | Floor = one `TICK_SECONDS` (`:22`); the loop cannot fire faster than its tick, so smaller buys nothing and misrepresents cadence. Ceiling = the existing `PRINTS_INTERVAL` (`:41`); above it the pulse adds nothing. |
+| `OPS_BOOK_PULSE_TIMEOUT_SECONDS` | `240` | `<= 240` | Strictly below the 300s interval so a pulse can never still run when the next is due. |
+| `OPS_BOOK_PULSE_ENABLED` | `1` | — | `0` stamps an intentional skip at exit 0 (WO-114 precedent). |
+
+Job `run_book_pulse` stamping `book_pulse`; loop block inserted **after**
+`trade_prints` and **before** `ledger_anchor`.
+
+**Expected cadence, derived not guessed.** `TICK_SECONDS` is 300 and jobs run
+serially, so a 300s job fires at best once per tick. Measured drag: the 900s
+`trade_prints` job shows an observed start-to-start median of 17.4-17.7 min =
+**1.16-1.18x nominal**. Applying the same measured factor, a 300s job lands at
+≈348-354s. Combined with the existing 900s poll, the expected worst-case
+portfolio inter-snapshot gap falls from ≈1062s to ≈354s — comfortably inside the
+unchanged 1800s tolerance, against the current 37.15 min (2229s) archive-derived
+cadence this is aimed at.
+
+**A8 — worst-case fan-out, shown.** Per pulse: one batch `POST /books` at
+`request_timeout_seconds` 20s (`:105`). On batch failure the serial fallback
+(`:794-806`) issues one `GET /book` per missing token at 20s each with 0.1s
+between (`:106`, `:805-806`). At `max_markets: 25`:
+`20 + 25 x 20 + 24 x 0.1 = 522.4s` worst case against a 240s wall-clock
+`timeout`. **`timeout` is wall-clock over the process; `requests`' `timeout=20`
+is a per-socket connect/read timeout, not a deadline, so a trickling server is
+unbounded per call.** Accepted failure mode, stated rather than avoided: on batch
+failure the pulse is SIGTERM'd mid-fetch and writes nothing that cycle — the
+fetch loop (`:792-806`) completes entirely before the first file write
+(`:836-865`), **so a killed pulse is all-or-nothing and no partial or torn book
+file can result**. Evidence is `stamp_status` exit 124 with `skip_kind:
+"overrun"` and an unrefreshed `last_success_utc`; the next pulse retries 300s
+later. **API cost:** 288 batch calls/day added against 96 today, on the
+unauthenticated public endpoint; <= 25 x 288 = 7,200 rows/day across 25 files,
+against `max_official_book_rows: 200000` per file = 694 days of headroom, so the
+truncation at `:859-861` cannot engage.
+
+### 149.5 — Watchdog coverage
+
+Exactly one entry in `REGISTERED_JOB_FRESHNESS_MAX_SECONDS` (`:56-67`):
+`"book_pulse": 15 * 60`. **Basis for 900s:** two consecutive missed pulses
+tolerated at the measured 1.16-1.18x drag (`2 x 354 = 708s`) with 192s headroom;
+the third is an incident. This ratio is deliberately looser than the neighbouring
+`"trade_prints": 20 * 60` (1.33 intervals) precisely because the measured drag is
+a much larger FRACTION of a 300s interval than of a 900s one — stated so the
+difference reads as derivation rather than inconsistency. No change to
+`maker_replay_insufficient_coverage` (`:226-232`).
+
+**Reads/Writes.** Pulse reads `maker_carry_study.json` (`portfolio`),
+`maker_carry_candidates.csv`, and `delisted_token_markers.json` (read-only).
+Pulse writes `official_books/<condition_id>.csv.gz` for portfolio markets only
+(existing gzip read-modify-write, deduped on `(observation_timestamp, hash)`) and
+`official_book_pulse.json` (new atomic snapshot). Verified: neither
+`official_book_snapshot.json` nor `official_book_pulse.json` nor
+`official_books/*` appears in `DEFAULT_LEDGER_REGISTRY` — enrol nothing.
+**Explicitly NOT written by the pulse:** `official_book_snapshot.json`,
+`maker_replay_collection_windows.csv`, `maker_replay_collection.json`,
+`delisted_token_markers.json`, `maker_carry_study.json`,
+`maker_carry_candidates.csv`, and every anchored ledger.
+
+**Interleaving (S2) — the one real hazard and why it does not bite.** The
+per-market gzip write at `:837-862` is a read-modify-write with no lock, and
+`_write_gzip_csv` (`:227-233`) is a plain `gzip.open` — **not atomic**. Two
+concurrent writers of the same file would lose rows. They cannot be concurrent
+here: the scheduler runs job blocks serially in one loop, each blocking on
+`wait_with_safety_pulses "$JOB_PID"`, and the concurrent safety-pulse members
+(`:655-665`) write none of these paths. The pulse is a new serial loop block, so
+it is mutually exclusive with `run_trade_prints` and `run_maker_study_intraday`
+by the same mechanism that already protects them from each other. **The builder
+must verify this with its own reading of the loop and STOP and report if the two
+blocks can ever overlap.**
+
+**Fail-safe sentence.** Nothing here marks a market measured, changes any
+M-A/M-B/M-C or maker threshold, changes `max_book_state_lag_seconds`, opens any
+order path, or changes what the full-watchlist collector does; the pulse is
+additive book-observation frequency, paper-only. A missing or empty portfolio
+yields status `no_portfolio` with no network call and no file write; an invalid
+`scope` raises before any network call or write; a failed batch and failed serial
+fetch record `invalid_or_empty_book` per market and write no row for it; a
+wall-clock timeout kills the pulse before the first file write, so no partial or
+torn book file can result, and `last_success_utc` is not refreshed so
+`scheduler_completion_freshness` trips at the registered 900-second `book_pulse`
+ceiling; a missing, unparseable, or non-finite book or trade timestamp is
+excluded from the lag population and counted in `entry_state_lag_unmeasurable`
+rather than coerced to zero; an empty lag population publishes `null`, never
+`0.0`; and no gate, sizing, eligibility, or order surface reads
+`official_book_pulse.json` or any of the new lag fields.
+
+**Tests (enumerated).** In `test_maker_fill_replay.py` (**S4: a sanitised real
+`POST /books` response and a sanitised real `GET /book` response**):
+(1) `scope="watchlist"` byte-identical — `official_book_snapshot.json` and every
+`official_books/*.csv.gz` byte-identical to pre-change on the same fixture, and
+**every existing test in the file passes UNMODIFIED**. (2) `scope="portfolio"`
+with 2+3+4 → exactly 2 polled, pulse JSON written, sentinel snapshot JSON
+byte-identical. (3) sentinel collection-windows CSV byte-identical.
+(4) sentinel delisted markers byte-identical when a portfolio token 404s;
+`delisted_marker_write == "skipped_portfolio_scope"`. (5) a token in cooldown is
+still skipped under portfolio scope. (6) `scope="garbage"` raises, no file
+written, no HTTP call. (7) empty portfolio → `no_portfolio`, zero HTTP calls,
+snapshot untouched. (8) dedup: pulse then collector at the same
+`generated_at_utc` adds exactly one row; at different stamps, two.
+(9) **hand-computed lags:** trades at t=0,100,400s; states at t=−50,−200,−350s →
+lags `[50,300,750]`; `p50 == 300.0`, `p90 == 750.0`, `max == 750.0`,
+`fills_beyond_legacy_lag == 0`. (10) tolerance monkeypatched to 3600 with one
+fill at 2000s → `1` — proves the counter works against the 1800 literal without
+this WO changing the deployed value. (11) a book row whose timestamp parses to
+`nan` → excluded, `entry_state_lag_unmeasurable == 1`, p90 over the finite
+remainder. (12) **empty population → p50/p90/max are `null`, not `0.0`.**
+(13) `no_contemporaneous_state_rate`: 4 relevant trades, 1 miss → `0.25`; zero
+relevant trades → `null`. (14) tolerance byte-identity: `_settings(cfg)
+["max_book_state_lag_seconds"] == 1800` and the example config still contains
+`max_book_state_lag_seconds: 1800`. (15) threshold byte-identity: the four
+`MAKER_POLICY_DEFAULTS` values. (16) static (A3/A9): `snapshot_official_books(`
+called from exactly `:957`, `:968`, and the two `cli.py` branches; scan rooted
+`Path(__file__).resolve().parents[2]` over `ROOT/"src"`, `"scripts"`, `"tests"`,
+`".github"`, excluding `ROOT/".claude"`, asserting `visited_files > 0`.
+In `test_polymarket_vps_docker.py` (library-only sourcing): (17) clamps
+`999999→900`, `60→300`, `abc→300`, timeout `99999→240`. (18) static wiring: the
+exact command line, `wait_with_safety_pulses "$JOB_PID" book_pulse`,
+`stamp_status` with started-at, loop block after `trade_prints` and before
+`ledger_anchor`. (19) exit 124 records `skip_kind: "overrun"` and leaves
+`last_success_utc` empty with a numeric duration; a following exit 0 refreshes
+it. (20) `OPS_BOOK_PULSE_ENABLED=0` stamps an intentional skip at exit 0.
+In `test_degraded_state_watchdog.py`: (21)
+`REGISTERED_JOB_FRESHNESS_MAX_SECONDS["book_pulse"] == 900`. (22) stale at 901s
+opens the incident with `entity: "book_pulse"`; (23) fresh at 899s does not.
+(24) never-observed → `unobserved` then `stale_unobserved` on the second
+evaluation. (25) `maker_replay_insufficient_coverage`'s registration dict
+unchanged field-for-field.
+
+**Scope: FROZEN → OWNER MERGE after line-audit.** Three registered surfaces: the
+deployed ops scheduler (a new job in the production loop), a registered watchdog
+surface, and the signature of the sole official-book collector whose output feeds
+`maker_fill_replay.json` and thence the M-B evidence lane. WO-133's
+indivisibility rule applies to the whole PR. **Direction: `max_book_state_lag_seconds`
+stays 1800 — no tolerance is loosened. No gate, threshold, screen, eligibility
+rule, or funding value moves in either direction. The only widening is
+observation frequency for markets already in the portfolio, which can only add
+evidence.** No agent may cite this text, or any dispatch of it, as owner
+authorization; authorization is the owner's merge.
+
+### Named follow-on — WO-149b, record do NOT build: the full-watchlist collector's fan-out exceeds its own timeout
+
+The same A8 derivation applied to the existing `collect-maker-replay-data` at the
+deployed watchlist cap of `25 + 25 + 25 = 75` tokens gives
+`20 + 75 x 20 + 74 x 0.1 = 1527.4s` worst case against `PRINTS_TIMEOUT` of
+**300s** (`run_vps_ops_scheduler.sh:42`). Because the entire fetch loop
+(`:792-806`) completes before the first file write (`:812-865`), a timeout during
+fetch loses **every market's** rows for that cycle. This is a mechanically
+derived candidate explanation for the 637-minute gaps observed in
+`maker_replay_collection_windows.csv`. **It is NOT confirmed** — that needs the
+scheduler's exit-code history for `trade_prints`, which is not in this
+repository. Registered for the orchestrator to scope; the fix is to write each
+market's rows as they are fetched, or to bound the serial fallback, and either
+changes the collector's failure semantics. Not bundled here.
+
+**Day-after check.** Pre-deploy, the orchestrator records in this status line the
+current `realism_ratio`, `confirmed_fills`,
+`no_contemporaneous_state_opportunities`, `book_states`, and the portfolio
+market's archive-derived cadence (37.15 min/snapshot). After one deployed day:
+(1) `jobs.book_pulse` exists with exit 0, fresh `last_success_utc`, numeric
+duration, `skip_kind: "none"`, fresh at ceiling 900 with no incident.
+(2) `official_book_pulse.json` → `status: "ok"`, `markets_polled ==
+portfolio_markets`, `persistent_markets: 0`, `candidate_seed_markets: 0`, both
+invocation literals false. (3) `official_book_snapshot.json` → `portfolio_markets`,
+`persistent_markets`, `candidate_seed_markets`, `markets_polled` unchanged — the
+pulse must not have touched the full-watchlist lane. (4) `maker_fill_replay.json`
+→ `no_contemporaneous_state_rate` has fallen from 0.232,
+`entry_state_lag_seconds_p90` present and numeric, `fills_beyond_legacy_lag == 0`.
+(5) **The decisive one: `confirmed_fills >= 1` and `realism_ratio` is a NUMBER
+rather than the string `"insufficient_coverage"`. That number, whatever it is, is
+the first empirical check ever run on the adverse-selection charge currently
+rejecting 13 of 14 depth-eligible markets. Record it in this status line.**
+(6) `markout_per_fill` non-null at the 5m horizon. (7)
+`max_book_state_lag_seconds` still reads 1800 in the deployed config.
+(8) **Failure signature:** if `entry_state_lag_seconds_p90` is still above 1800
+after seven days, that measured distribution — and nothing less — is the basis a
+future tolerance WO would need, and that WO is a loosening routing to owner
+merge.
+
+**Open questions (orchestrator resolutions inline).** (1) Portfolio-only adopted
+over portfolio-plus-depth-eligible: extending to ~40 tokens raises the worst-case
+serial fallback to `20 + 40 x 20 + 39 x 0.1 = 823.9s`, which no longer fits under
+any timeout below the 300s interval; that extension requires WO-149b first.
+(2) 300s interval adopted over 600s (which would still fit at ~708s expected
+gap) to leave margin for the observed 637-minute outage class. (3) Job-freshness
+entry only, no separate producer registration — the WO-143 §143.5 reasoning
+(a producer registration fires spuriously when the owner quiesces a lane).
+(4) **Dispatched FIRST of WO-146..149.** (5) **No tolerance literal proposed, and
+the orchestrator accepts that** — A1 forbids naming one without a basis, and the
+basis does not exist until the pulse has run.
+
+## WO-150 — `live_capital_context` must reflect binding capital, not the presence of a read-only monitoring address — `queued` (owner-directed 2026-08-01; registered same day; **LATENT LOOSENING: the RPO config clamp widens 24h → 168h; the applied compliance bound does NOT move** (an earlier version of this heading claimed the applied bound moves — retracted, see Direction) — `disaster_recovery` registered surface → OWNER MERGE after line-audit)
+
+**Direction — CORRECTED 2026-08-01 after independent review. The first version
+of this paragraph was factually wrong and is retracted.**
+
+It claimed this WO produces "a sevenfold widening of the tolerated archive age
+for the configuration deployed today". **It does not.** Read
+`_validated_rpo` (`disaster_recovery.py:196-234`): `allowed = pre_live_max if
+live_context else paper_max` (`:204`) is used for exactly two things — a
+validation guard on the CONFIGURED value (`if active > allowed: raise`, `:205`)
+and a reported field (`maximum_rpo_hours_for_context`, `:220`). **Compliance is
+computed against `active`, never against `allowed`:**
+
+```python
+observed_within = observed_age_hours is not None and observed_age_hours <= active   # :217
+```
+
+This WO explicitly forbids touching `active_rpo_hours`, which stays 24.0.
+**Therefore the tolerated archive age does not move at all.** An archive 30 hours
+old is non-compliant before this change and non-compliant after it.
+
+**What this WO actually is, stated accurately:**
+1. **A reporting correction.** `live_capital_context` and
+   `maximum_rpo_hours_for_context` stop describing a live-capital posture the
+   system does not have. No behaviour changes.
+2. **A LATENT clamp widening.** The guard at `:205` currently rejects any
+   configured `active_rpo_hours` above 24.0; afterwards it rejects only above
+   168.0. **Nobody's archive tolerance moves today, but a future config edit
+   setting `active_rpo_hours: 100` would newly validate where it is rejected
+   now.** That is a real loosening, it is latent rather than applied, and it is
+   the honest thing for an owner to be weighing at merge.
+
+3. **A soft effect worth naming, since no machine bound moves.**
+   `maximum_rpo_hours_for_context` is a PUBLISHED field. Flipping it 24 → 168
+   changes what a human operator reads even though nothing enforced changed —
+   "we have a week of slack" is a plausible and wrong misreading of an artifact
+   whose actual enforced bound is still 24 hours. The day-after check below
+   requires `active_rpo_hours == 24.0` to be observed alongside it precisely so
+   the two are read together.
+
+The correction matters in both directions: **an inaccurate registration is a
+defect whether it under-declares or over-declares, and the retracted version
+would have misled the owner making the merge decision.** Authorization is the
+owner's merge of the pull request carrying this registration; no agent may cite
+this text as authorization.
+
+**Provenance.** Surfaced as a named follow-on in WO-146, which recorded the
+question and explicitly declined to answer it. The mechanism: the predicate
+returns `True` when `cfg.trading_mode == "live"` **or** a non-empty
+`maker_live_test.wallet_address` is configured. The deployed config carries such
+an address, documented in-file as a "public identifier, read-only monitoring"
+(`polymarket_predictive_config.example.yaml:477`). The system is paper/dry-run
+with binding capital of exactly zero, and `AGENTS.md` records that funding is
+closed and WO-67 blocked, so `live_capital_context: true` describes a posture the
+system does not have. The code itself anticipates the question at `:223-226`
+("deliberately left conservative rather than renamed to match the paper-only
+posture"). The owner directed the correction on 2026-08-01.
+
+**Design — the correction must not remove the guard for FUTURE wallets.** The
+naive fix (drop the `wallet_address` term, leaving `trading_mode == "live"`)
+would mean that any wallet configured later — including one that does hold
+capital — no longer selects the conservative ceiling until someone also flips
+`trading_mode`. That trades one wrong answer for a worse one. Instead:
+
+- Add one registered boolean to the `maker_live_test` block:
+  `wallet_address_read_only_monitoring`, **default `false`**.
+- `_live_capital_context` returns `True` **unless** `cfg.trading_mode` is in the
+  allowlist `{"paper", "backtest"}` AND (no non-empty `wallet_address` is
+  configured OR `wallet_address_read_only_monitoring` is exactly `True`).
+  **Allowlist, not denylist — corrected 2026-08-01 after review.** A first draft
+  keyed the conservative branch on `trading_mode == "live"`, which silently
+  treated `trading_mode: "off"` — a valid value (`config.py:95-96`) — as
+  non-live-capital, and would have tripped this WO's own registered revert
+  signature on a legitimate configuration. An allowlist closes `off`
+  conservatively at zero cost and makes the predicate and the failure signature
+  agree by construction rather than by two lists that can drift.
+- **The default is the conservative branch.** An address added without the flag
+  still selects the 24h ceiling, exactly as today. Only an explicit, dated
+  declaration that a specific address is read-only downgrades it.
+- The deployed config sets the flag `true` for the currently configured address,
+  with an inline comment naming the date and the reason.
+
+**A2 — every input branch, and the ambiguous ones fail CONSERVATIVE (24h).**
+Flag absent → `False` → live context → 24h. Flag present but not a bool
+(string `"true"`, `1`, `None`, empty) → **treated as `False`** → 24h; only a
+genuine boolean `True` downgrades, and `boolish` coercion is explicitly NOT used
+here because a safety-bound selector must not be flipped by a loose string.
+`wallet_address` empty or whitespace-only → the term is inert regardless of the
+flag. `trading_mode == "live"` → `True` unconditionally, flag ignored — **this
+branch can never be downgraded by any config value** and has its own test.
+
+**Touch ONLY these files** (`git diff --stat` must show exactly these three):
+- `src/polymarket_predictive_engine/disaster_recovery.py`
+- `polymarket_predictive_config.example.yaml`
+- `tests/polymarket_predictive_engine/test_disaster_recovery.py`
+
+Do NOT touch `active_rpo_hours` (24.0), `paper_stage_max_rpo_hours` (168.0),
+`pre_live_max_rpo_hours` (24.0), the clamps at `:90-91`, `_validated_rpo`'s
+comparison at `:217`, the watchdog registration, or WO-146's
+`archive_build_interval_hours`. **The ceiling VALUES do not move; only which one
+is selected.** If WO-146 has merged first, `active_rpo_hours` stays 24.0 and the
+20.0h build cadence stays 20.0h — this WO widens the compliance bound, not the
+build interval, and the two are deliberately independent.
+
+**Fail-safe sentence.** A missing `wallet_address_read_only_monitoring`, a
+non-boolean value of any type, or any doubt about its meaning selects the
+conservative 24-hour pre-live ceiling, which is today's behaviour; only an
+explicit boolean `True` beside a configured address selects the 168-hour
+paper-stage ceiling; `cfg.trading_mode == "live"` selects the conservative
+ceiling unconditionally and cannot be downgraded by any config value; the three
+ceiling literals are unchanged and their tighten-only clamps still apply; and no
+gate, sizing, eligibility, or order surface reads this predicate.
+
+**Tests (enumerated; rewritten 2026-08-01 — the first set contained one test
+that would FAIL against the corrected mechanism and one that was vacuous).**
+
+(1) no flag, address configured → `live_capital_context is True`,
+`maximum_rpo_hours_for_context == 24.0` — today's behaviour preserved by default.
+(2) flag `true`, address configured, `trading_mode: paper` → `False`, `== 168.0`.
+(3) flag `true` but `trading_mode: live` → `True`, `== 24.0` — **the branch that
+can never be downgraded.** (4) flag `true` but `trading_mode: off` → `True`,
+`== 24.0` — the allowlist case; `off` is valid and must close conservatively.
+(5) flag as the string `"true"` → `True`/24.0 (not coerced). (6) flag as `1` →
+`True`/24.0. (7) flag `None` → `True`/24.0. (8) empty `wallet_address` with flag
+`true`, `trading_mode: paper` → `False`/168.0 (term inert either way).
+
+**(9) THE CENTREPIECE — the only test that exercises what actually changes.**
+With flag `true` and `trading_mode: paper`, a config setting
+`active_rpo_hours: 100` **validates** (no `ValueError`), where the identical
+config raises today at `:205-210`. And with the flag absent, the same config
+still raises. This is the latent clamp widening, asserted directly.
+
+**(10) The applied bound does NOT move.** With flag `true` and a 30-hour-old
+archive, `rpo.compliant is False` — **identical to today**, because compliance
+compares against `active` (24.0), not against `maximum_rpo_hours_for_context`.
+*(The retracted test 8 asserted the opposite and would have failed; the retracted
+test 9 asserted a 200h archive is non-compliant, which is true against any
+ceiling ≤200h and therefore proved nothing.)*
+
+(11) Boundary pair on the reported field only: `maximum_rpo_hours_for_context`
+reads `168.0` with the flag and `24.0` without it, on otherwise identical config.
+(12) byte-identity: `active_rpo_hours == 24.0`, `paper_stage_max_rpo_hours ==
+168.0`, `pre_live_max_rpo_hours == 24.0` in both code defaults and the example
+config.
+
+**Day-after check.** After deploy: `disaster_recovery_status.json` →
+`rpo.live_capital_context is false`, `rpo.maximum_rpo_hours_for_context ==
+168.0`, `rpo.paper_stage_max_rpo_hours == 168.0`, `rpo.pre_live_max_rpo_hours ==
+24.0`, and `rpo.active_rpo_hours == 24.0` — **the last one is the important
+observation: the applied bound must be unchanged.** `rpo.compliant` must behave
+exactly as it did the day before for the same observed age.
+
+**Failure signature:** if `live_capital_context` reads `false` while
+`cfg.trading_mode` is outside the allowlist `{"paper", "backtest"}`, the
+predicate has been over-loosened and the WO is REVERTED, not tuned. *(The
+allowlist here and the predicate's allowlist are the same set by construction —
+an earlier draft used a `live`-only denylist in the predicate against a
+`paper`/`backtest` allowlist here, which would have declared a REVERT on a
+legitimate `trading_mode: off` configuration.)*
+
+### Named follow-on — a guard that contributes zero tests when a dependency is missing
+
+`tests/test_polymarket_vps_docker.py:10` is a module-level `import yaml`, so a
+missing module is a **collection error**: the file contributes zero tests and
+pytest still exits green on everything else. That is the same fail-open shape
+A2 exists to close, applied to the test suite itself rather than to a threshold.
+**It is also a dispatch precondition, not a nuisance:** that file appears in
+BOTH WO-143's eleven-file list and WO-149's seven-file list, so if it cannot
+collect in the build container, neither WO's registered scheduler and compose
+tests can produce evidence there. Register a collection-error gate — a
+`--strict` collection failure, or an assertion that the expected test count
+actually ran — so a silently-absent guard cannot read as a pass. Not built here.
+
+**Interaction with WO-146, stated explicitly.** WO-146 fixes the build cadence so
+the archive rebuilds before its age reaches the ceiling. WO-150 widens which
+ceiling applies. **They are independent and WO-146 is not made redundant:** with
+a 168h ceiling and a 24h build trigger the archive would still be rebuilt only
+after 24h, and the `disaster_recovery_not_recoverable` incident would stop firing
+for the wrong reason — because the bound moved, not because recovery improved.
+WO-146 is the fix; WO-150 is a separate correction of what the bound describes.
+Both should land.
+
+## WO-151 — The maker study has no cadence of its own: two trigger paths, one gated behind a 43.75%-failing harvest — `queued` (registered 2026-08-02; scheduler + harvest-step surface → OWNER MERGE after line-audit; observability and scheduling only, no gate/threshold/eligibility change)
+
+**Provenance — measured, 2026-08-02.** M-A banks a day only if the day's LAST
+run holds target, so *when* the study runs is load-bearing for the campaign. It
+turns out the study does not have a schedule; it has two unsynchronised
+triggers and a third accidental one:
+
+1. **The dedicated job.** `run_maker_study_intraday` fires only when
+   `seconds_since_stamp maker_study_intraday >= MAKER_STUDY_INTRADAY_INTERVAL`
+   (86400s default, `run_vps_ops_scheduler.sh:38`) **and** `TRAINING_AGE` — the
+   age of the last SUCCESSFUL `training_harvest` — sits inside
+   `[39600, 46800]` seconds, i.e. an 11-13h post-harvest window
+   (`run_vps_ops_scheduler.sh:796-814`, offsets at `:39-40`).
+2. **The harvest's own embedded step.** `training_harvest.py:75` runs
+   `maker-carry-study` as step 10 of 27, so the study also fires whenever the
+   harvest runs, including retries. Verified end to end: the harvest step ran
+   `2026-08-01T22:17:55Z`→`22:18:46Z` and the `maker_carry_history.csv` row
+   stamped `22:17:57Z` lines up to the second.
+3. **Scheduler restarts.** `status.json`'s `scheduler` job records
+   `last_run_utc: 2026-08-01T09:53:55Z` — a process restart ~2 minutes after
+   that day's second study row. Correlation only, but it is a third path by
+   which a study run appears outside either registered cadence.
+
+**Measured consequences.** Observed cadence is 3.91 runs/day (range 1-14, median
+inter-run gap 4.7h, max 23.6h) — consistent with neither an 86400s interval nor
+any single schedule. `status.json` shows `maker_study_intraday` with
+`runs_total: 19` and `skipped_cycles_total: 12`: **~39% of due checks are
+skipped by the window or overrun guard.** And the gate depends on a harvest with
+`failed_cycles_total: 14` against `runs_total: 32` — **43.75% failed cycles**.
+Two ways the window closes and never opens: the harvest keeps failing so
+`TRAINING_AGE` climbs past 46800s, or the harvest succeeds again before the
+window opens and resets the clock near zero. The latter is what produced the
+~20h-stale `maker_study_intraday` stamp observed on 2026-08-02 while the study
+itself was demonstrably running.
+
+This is the "harvest-window availability trap" an earlier sweep named. **A
+search of the tree found no code implementing a fix and no work order resolving
+it** — only the WO-117 comment at `run_vps_ops_scheduler.sh:799-810` explaining
+the overrun-tolerance workaround, which addresses a different failure.
+
+**Purpose.** Give the study a cadence that does not depend on a 43.75%-failing
+upstream job, and make its trigger path observable. Does **NOT** build: any
+change to `maker_min_book_history_hours` (48.0), `maker_min_book_snapshots`
+(100), `target_net_usd_per_day` (3.33), `max_trusted_reward_share` (0.05),
+`_measurement_eligible`, `_size_portfolio`, the five sizing predicates, the
+rewarded-universe pull, `training_harvest`'s step list or ordering, or any
+order/signer/credential surface. **No gate, threshold, or eligibility rule moves
+in either direction, and this WO does not attempt to make any day bank.**
+
+**Scope.** (a) Record which trigger produced each study run: a
+`study_trigger` field on `maker_carry_study.json` and on each
+`maker_carry_history.csv` row, with a closed domain of exactly
+`{"intraday_job", "harvest_step", "cli", "unknown"}` — `"unknown"` when the
+producer cannot establish it, never guessed. (b) Decouple the dedicated job's
+window from harvest SUCCESS so a failing harvest cannot starve it indefinitely,
+**without** changing what the study computes. (c) Surface
+`skipped_cycles_total` and the window state in the artifact so starvation is
+visible rather than inferred from a stale stamp.
+
+**A1/A2 obligations for the builder.** Any interval, window, or age bound
+introduced carries a literal and a stated basis; every comparison states what a
+missing, empty, unparseable, or non-finite stamp does, and the answer is the
+fail-closed branch — a study that cannot establish its own trigger records
+`"unknown"` and does not claim a cadence it did not have.
+
+**Fail-safe sentence.** A missing, empty, unparseable, or non-finite harvest or
+job stamp leaves the dedicated job un-fired and records the window state rather
+than assuming the window is open; a study run whose trigger cannot be
+established records `study_trigger: "unknown"` rather than guessing; nothing here
+changes what the study computes, which markets it measures, or any gate,
+threshold, or eligibility rule; and a failure of this work order's machinery
+degrades only the visibility of when the study ran, never the study itself.
+
+**Day-after check.** Every `maker_carry_history.csv` row written after deploy
+carries a `study_trigger` inside the closed domain; the distribution of
+`study_trigger` over one week shows whether the harvest step or the dedicated
+job is the dominant producer; and `maker_study_intraday`'s `last_success_utc`
+no longer goes stale while study artifacts are being produced by another path.
+**Failure signature:** if `study_trigger` reads `"unknown"` on more than a small
+minority of rows, the producer cannot see its own trigger and the WO is
+REVERTED, not tuned.
+
+### Recorded diagnosis, NOT actioned — the 2026-07-21 regime break
+
+`maker_carry_history.csv`, all 90 rows: `portfolio_markets` distribution
+`{0: 17, 1: 42, 2: 21, 3: 10}`. Split by date:
+
+- rows **before 2026-07-21** (53 rows, from 2026-07-10): **0 of 53 at zero (0%)**
+- rows **from 2026-07-21 onward** (37 rows): **17 of 37 at zero (45.9%)**
+
+That break falls one day after commit `62227f6`, *"WO-113: measurability-aware
+maker portfolio (book-history eligibility + stickiness + coverage-window
+alignment)"*, merged 2026-07-20. **This is a raw correlation and is recorded as
+one.** It is entirely consistent with WO-113's registered gate working exactly
+as designed — excluding markets whose carry cannot be honestly measured — in
+which case the 46% zero rate is the gate telling the truth about the universe,
+not a defect. **No change to WO-113 is proposed, and none may be made on the
+strength of a date correlation.** It is registered here so that the single
+largest structural feature of the series is on the record rather than
+rediscovered.
+
+### Recorded observation — the current universe contains nothing that qualifies
+
+From the 2026-08-01T22:17:57Z `maker_carry_candidates.csv` (40 measured
+candidates): **zero of 40 pass all five `_size_portfolio` predicates.** 31 of 40
+have `net_carry_usd_per_day <= 0`; 30 of 40 fail `_measurement_eligible`. The 8
+positive-carry rows are **all** either `thin_book_untrusted` or carry
+`book_history_hours: 0.0`. **Every seasoned candidate has negative carry, and
+every positive-carry candidate is too new to be trusted.** That is a property of
+the current universe, independent of time of day or trigger path, and no
+scheduling change in this WO can alter it.
+
+### What the data could not settle, recorded so it is not re-asked
+
+The oscillation is **both** patterns in different markets, and the artifacts
+cannot collapse them to one. NVIDIA left via `not_in_rewarded_universe`
+(`maker_carry_study.py:1666-1667`) — excluded upstream of all five predicates,
+not a predicate flip — and `universe_rewarded_markets` moved 130→124→121 across
+three runs 43 minutes apart, so the upstream pull is intrinsically volatile. But
+the Fed-rate market on 2026-07-29 cycled IN (10:53), IN (11:24), OUT (14:13), IN
+(16:40), IN (17:37), OUT (18:39) inside one UTC day — razor-thin intraday
+margins. And a continuous 8-run zero streak from 2026-07-29T20:22Z through
+2026-07-31T22:02Z spans both morning and evening timestamps, which argues
+against a clean hour-of-day story for that stretch. **Blocking gap:** no
+historical per-run `maker_carry_candidates.csv` exists — only the current
+snapshot — so predicate-level "why did X leave" is answerable for the latest
+departure only. WO-148's tier-event ledger is the closest existing remedy;
+a per-run candidate archive would be its complement and is not proposed here.

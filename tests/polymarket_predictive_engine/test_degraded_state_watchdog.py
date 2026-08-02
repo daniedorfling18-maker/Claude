@@ -13,9 +13,11 @@ from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.degraded_state_watchdog import (
     INCIDENT_LEDGER,
     LEGACY_WALLET_REGISTRATION_ID,
+    REGISTERED_JOB_FRESHNESS_MAX_SECONDS,
     REGISTERED_MAXIMA,
     WALLET_HEALTHY_STATES,
     WALLET_REGISTRATION_ID,
+    _registrations,
     _settings,
     build_degraded_state_watchdog as _build_degraded_state_watchdog,
 )
@@ -1453,3 +1455,118 @@ def test_wo144_f4_wedge_incident_id_is_stable_across_wedged_cycles(tmp_path: Pat
     ]
     assert len(wedged_ids) >= 2, "need at least two wedged cycles to compare identity"
     assert len(set(wedged_ids)) == 1
+
+
+# --- WO-149: book_pulse job-freshness registration ---
+
+
+def test_book_pulse_registered_freshness_ceiling_is_900_seconds():
+    # Test (21): REGISTERED_JOB_FRESHNESS_MAX_SECONDS["book_pulse"] == 900.
+    assert REGISTERED_JOB_FRESHNESS_MAX_SECONDS["book_pulse"] == 900
+
+
+def test_book_pulse_stale_at_901_seconds_opens_incident(tmp_path: Path) -> None:
+    # Test (22): stale at 901s opens the incident with entity: "book_pulse".
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "ops_scheduler" / "status.json",
+        {
+            "generated_at_utc": "2026-07-15T01:00:01Z",
+            "jobs": {
+                "book_pulse": {
+                    "last_exit_code": 1,
+                    "last_run_utc": "2026-07-15T01:00:00Z",
+                    "last_success_utc": "2026-07-15T00:45:00Z",
+                }
+            },
+        },
+    )
+
+    result = build_degraded_state_watchdog(cfg, as_of="2026-07-15T01:00:01Z")
+
+    freshness = next(row for row in result["evaluations"] if row["registration_id"] == "scheduler_completion_freshness")
+    book_pulse = next(row for row in freshness["jobs"] if row["job"] == "book_pulse")
+    assert book_pulse["age_seconds"] == 901.0
+    assert book_pulse["maximum_age_seconds"] == 900
+    assert book_pulse["state"] == "stale"
+    incident = next(
+        row
+        for row in result["active_incidents"]
+        if row["registration_id"] == "scheduler_completion_freshness" and row["entity"] == "book_pulse"
+    )
+    assert incident["owner_notification_eligible"] is True
+    assert result["status"] == "incident"
+
+
+def test_book_pulse_fresh_at_899_seconds_does_not_open_incident(tmp_path: Path) -> None:
+    # Test (23): fresh at 899s does not open an incident.
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "ops_scheduler" / "status.json",
+        {
+            "generated_at_utc": "2026-07-15T01:00:00Z",
+            "jobs": {
+                "book_pulse": {
+                    "last_exit_code": 0,
+                    "last_run_utc": "2026-07-15T01:00:00Z",
+                    "last_success_utc": "2026-07-15T00:45:01Z",
+                }
+            },
+        },
+    )
+
+    result = build_degraded_state_watchdog(cfg, as_of="2026-07-15T01:00:00Z")
+
+    freshness = next(row for row in result["evaluations"] if row["registration_id"] == "scheduler_completion_freshness")
+    book_pulse = next(row for row in freshness["jobs"] if row["job"] == "book_pulse")
+    assert book_pulse["age_seconds"] == 899.0
+    assert book_pulse["state"] == "fresh"
+    assert not any(
+        row
+        for row in result["active_incidents"]
+        if row["registration_id"] == "scheduler_completion_freshness" and row["entity"] == "book_pulse"
+    )
+
+
+def test_book_pulse_never_observed_then_stale_unobserved_on_second_evaluation(tmp_path: Path) -> None:
+    # Test (24): never-observed -> "unobserved" then "stale_unobserved" on
+    # the second evaluation once the first-unobserved age exceeds 900s.
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "ops_scheduler" / "status.json",
+        {
+            "generated_at_utc": "2026-07-13T00:00:00Z",
+            "jobs": {"trade_prints": {"last_exit_code": 0, "last_success_utc": "2026-07-13T00:00:00Z"}},
+        },
+    )
+
+    first = build_degraded_state_watchdog(cfg, as_of="2026-07-13T00:00:01Z")
+    freshness_1 = next(row for row in first["evaluations"] if row["registration_id"] == "scheduler_completion_freshness")
+    book_pulse_1 = next(row for row in freshness_1["jobs"] if row["job"] == "book_pulse")
+    assert book_pulse_1["state"] == "unobserved"
+
+    second = build_degraded_state_watchdog(cfg, as_of="2026-07-13T00:16:00Z")  # +959s since first-unobserved
+    freshness_2 = next(row for row in second["evaluations"] if row["registration_id"] == "scheduler_completion_freshness")
+    book_pulse_2 = next(row for row in freshness_2["jobs"] if row["job"] == "book_pulse")
+    assert book_pulse_2["state"] == "stale_unobserved"
+
+
+def test_maker_replay_insufficient_coverage_registration_is_unchanged_field_for_field(tmp_path: Path) -> None:
+    # Test (25): maker_replay_insufficient_coverage's registration dict is
+    # unchanged field-for-field by WO-149 (which touches only one, unrelated,
+    # new entry in REGISTERED_JOB_FRESHNESS_MAX_SECONDS).
+    cfg = _cfg(tmp_path)
+    settings = _settings(cfg)
+    registrations = {row["id"]: row for row in _registrations(settings)}
+    row = registrations["maker_replay_insufficient_coverage"]
+
+    assert row == {
+        "id": "maker_replay_insufficient_coverage",
+        "artifact": "maker_carry/maker_fill_replay.json",
+        "healthy_reachable_states": ["covered", "partial", "no_simulated_fill_opportunities"],
+        "degraded_condition": "nonzero simulated fill opportunities with zero 5m replay coverage",
+        "max_consecutive_degraded_observations": settings["maker_replay_insufficient_coverage_max_consecutive_cycles"],
+        "incident_on_observation": settings["maker_replay_insufficient_coverage_max_consecutive_cycles"] + 1,
+        "observation_unit": "distinct maker replay",
+        "evaluation_policy": "registered zero-coverage predicate with no-opportunity exemption",
+    }

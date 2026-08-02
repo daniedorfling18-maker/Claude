@@ -18,7 +18,7 @@ import time
 from bisect import bisect_left, bisect_right
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
-from math import isfinite
+from math import ceil, isfinite
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -106,8 +106,13 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         "request_pause_seconds": 0.1,
         "max_official_book_rows": 200000,
         "max_collection_window_rows": 200000,
-        # Twice the 15-minute collection cadence: observations outside this
-        # envelope are missing coverage, not a licence to reuse a stale book.
+        # WO-149: a fixed 30-minute join tolerance. This was registered as
+        # "twice the 15-minute collection cadence", but the portfolio's
+        # measured archive-derived cadence has drifted to ~37.15 min/snapshot
+        # (~1.7x the nominal 15-minute figure this comment used to cite) -
+        # WO-149 raises portfolio-only observation frequency and instruments
+        # the actual join lag so any future change to this value has a
+        # measured basis; it does not change the value itself.
         "max_book_state_lag_seconds": 1800,
         "regime_days": 7,
     }
@@ -694,17 +699,49 @@ def _books_by_token(payload: Any, token_ids: list[str]) -> dict[str, dict[str, A
     return books
 
 
-def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
-    """Append one current official CLOB book for every quote-sheet market.
+_SNAPSHOT_SCOPES = frozenset({"watchlist", "portfolio"})
+
+
+def snapshot_official_books(cfg: EngineConfig, *, scope: str = "watchlist") -> dict[str, Any]:
+    """Append one current official CLOB book for tracked markets.
 
     WO-83 deliberately uses the documented current ``/book``/``/books`` API.
     Repeated cadence snapshots create the history; an undocumented historical
     endpoint must not be treated as coverage.
+
+    WO-149 ``scope``. ``scope="watchlist"`` (the default) is byte-identical to
+    the original full-watchlist collector on every path: portfolio +
+    persistent (WO-104) + candidate-seed (WO-116) tranches, the seasoning
+    runway report, and the WO-131 delisted-marker read/write. It writes
+    ``official_book_snapshot.json``.
+
+    ``scope="portfolio"`` polls ONLY the current maker-carry portfolio - the
+    persistent and candidate-seed tranches are neither computed nor polled -
+    and writes ``official_book_pulse.json``, **never**
+    ``official_book_snapshot.json``: ``collect_maker_replay_data`` reads the
+    latter's ``market_polls`` to build ``maker_replay_collection_windows.csv``,
+    and a pulse overwriting it would corrupt the collection-window ledger and
+    thence ``coverage_ratio`` (WO-116's registration forbids this). The
+    seasoning-runway report is skipped (it is a full-watchlist report and
+    would mislead over a portfolio-only slice). The WO-131 delisted-marker
+    file is READ, so a token already cooling down is still skipped, but never
+    WRITTEN from this scope - the pulse polls up to 3x as often and letting it
+    drive the 404 cooldown would silently change what
+    ``delisted_skip_threshold`` counts.
+
+    Any other ``scope`` raises ``ValueError`` before any network call or file
+    write.
     """
+
+    if scope not in _SNAPSHOT_SCOPES:
+        raise ValueError(
+            f"snapshot_official_books: scope must be one of {sorted(_SNAPSHOT_SCOPES)}, got {scope!r}"
+        )
+    portfolio_scope = scope == "portfolio"
 
     settings = _settings(cfg)
     out_root = cfg.output_root / "maker_carry"
-    summary_path = out_root / "official_book_snapshot.json"
+    summary_path = out_root / ("official_book_pulse.json" if portfolio_scope else "official_book_snapshot.json")
     generated_at = now_utc()
     summary: dict[str, Any] = {
         "status": "disabled",
@@ -713,6 +750,9 @@ def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
     }
+    if portfolio_scope:
+        summary["scope"] = "portfolio"
+        summary["work_order"] = "WO-149"
     if str(settings.get("enabled", True)).strip().lower() in {"0", "false", "no"}:
         write_json(summary_path, summary)
         return summary
@@ -721,36 +761,59 @@ def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
         maker_summary = {}
     candidate_rows = _candidate_map(cfg)
     portfolio = _portfolio(maker_summary, candidate_rows, int(settings["max_markets"]))
-    # WO-104: keep recently-active markets on the watchlist so a persistent or
-    # recurring market accumulates continuous Tier-0 book coverage across
-    # portfolio churn, bounded by max_markets.
-    persistent = _recent_book_markets(
-        cfg, settings, exclude={str(entry["condition_id"]) for entry in portfolio}
-    )
-    # Always cover the FULL current portfolio (already capped at max_markets),
-    # then reserve a separate budget for persistent markets so a full portfolio
-    # can no longer crowd recently-active recurring markets off the watchlist.
-    persistent_cap = max(0, int(settings.get("max_persistent_markets", settings["max_markets"])))
-    persistent = persistent[:persistent_cap]
-    # WO-116: third tranche - seed collection for the best-ranked candidates so
-    # they season toward the WO-113 book-history requirement before selection.
-    # Runs even when the portfolio is empty (exactly the starved state it fixes).
-    # WO-131: tokens inside their delisted cooldown are not seeded this cycle.
-    markers = _read_delisted_markers(out_root)
-    now_dt = parse_timestamp(generated_at) or datetime.now(timezone.utc)
-    skip_tokens = _delisted_skip_tokens(
-        markers,
-        threshold=int(settings["delisted_skip_threshold"]),
-        cooldown_hours=float(settings["delisted_cooldown_hours"]),
-        now=now_dt,
-    )
-    seeds, seed_exclusions = _candidate_seed_markets(
-        candidate_rows,
-        exclude={str(entry["condition_id"]) for entry in portfolio}
-        | {str(entry["condition_id"]) for entry in persistent},
-        cap=max(0, int(settings.get("max_candidate_markets", 0))),
-        skip_tokens=skip_tokens,
-    )
+    if portfolio_scope:
+        # WO-149.1(1): scope="portfolio" polls ONLY the current portfolio; the
+        # persistent (WO-104) and candidate-seed (WO-116) tranches are
+        # full-watchlist collection breadth and are neither computed nor
+        # polled from this scope.
+        persistent: list[dict[str, Any]] = []
+        seeds: list[dict[str, Any]] = []
+        seed_exclusions = {"delisted_cooldown": 0, "non_finite_rank": 0, "missing_token": 0}
+        # WO-149.1(4): the WO-131 cooldown marker is READ (so a cooling-down
+        # token is still skipped here) but never WRITTEN from this scope
+        # (see below) - the pulse polls up to 3x as often, and letting it
+        # drive the 404 cooldown would change delisted_skip_threshold from
+        # "three collector cycles" to "three cycles of a different job".
+        markers = _read_delisted_markers(out_root)
+        now_dt = parse_timestamp(generated_at) or datetime.now(timezone.utc)
+        skip_tokens = _delisted_skip_tokens(
+            markers,
+            threshold=int(settings["delisted_skip_threshold"]),
+            cooldown_hours=float(settings["delisted_cooldown_hours"]),
+            now=now_dt,
+        )
+        portfolio = [entry for entry in portfolio if str(entry["token_id"]) not in skip_tokens]
+    else:
+        # WO-104: keep recently-active markets on the watchlist so a persistent or
+        # recurring market accumulates continuous Tier-0 book coverage across
+        # portfolio churn, bounded by max_markets.
+        persistent = _recent_book_markets(
+            cfg, settings, exclude={str(entry["condition_id"]) for entry in portfolio}
+        )
+        # Always cover the FULL current portfolio (already capped at max_markets),
+        # then reserve a separate budget for persistent markets so a full portfolio
+        # can no longer crowd recently-active recurring markets off the watchlist.
+        persistent_cap = max(0, int(settings.get("max_persistent_markets", settings["max_markets"])))
+        persistent = persistent[:persistent_cap]
+        # WO-116: third tranche - seed collection for the best-ranked candidates so
+        # they season toward the WO-113 book-history requirement before selection.
+        # Runs even when the portfolio is empty (exactly the starved state it fixes).
+        # WO-131: tokens inside their delisted cooldown are not seeded this cycle.
+        markers = _read_delisted_markers(out_root)
+        now_dt = parse_timestamp(generated_at) or datetime.now(timezone.utc)
+        skip_tokens = _delisted_skip_tokens(
+            markers,
+            threshold=int(settings["delisted_skip_threshold"]),
+            cooldown_hours=float(settings["delisted_cooldown_hours"]),
+            now=now_dt,
+        )
+        seeds, seed_exclusions = _candidate_seed_markets(
+            candidate_rows,
+            exclude={str(entry["condition_id"]) for entry in portfolio}
+            | {str(entry["condition_id"]) for entry in persistent},
+            cap=max(0, int(settings.get("max_candidate_markets", 0))),
+            skip_tokens=skip_tokens,
+        )
     watchlist = portfolio + persistent + seeds
     if not watchlist:
         summary.update(
@@ -876,31 +939,42 @@ def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
     successful = sum(row["status"] == "ok" for row in market_polls)
     status = "ok" if successful == len(watchlist) else ("partial" if successful else "failed")
 
-    # WO-131: fold this cycle's 404s into the cooldown ledger, and clear any
-    # token that returned a book. Written atomically by this lane only.
-    updated_markers = _update_delisted_markers(
-        markers,
-        polls=market_polls,
-        generated_at=generated_at,
-        cooldown_hours=float(settings["delisted_cooldown_hours"]),
-    )
-    write_json(
-        out_root / DELISTED_MARKER_FILE,
-        {
-            "work_order": "WO-131",
-            "generated_at_utc": generated_at,
-            "reporting_only": True,
-            "skip_threshold": int(settings["delisted_skip_threshold"]),
-            "cooldown_hours": float(settings["delisted_cooldown_hours"]),
-            "tokens": updated_markers,
-            "paper_trading_invoked": False,
-            "live_trading_invoked": False,
-        },
-    )
+    if portfolio_scope:
+        # WO-149.1(4): this scope never writes the WO-131 cooldown ledger -
+        # the marker file above was read-only. `delisted_token_count` still
+        # reports the as-read state so the field stays meaningful.
+        updated_markers = markers
+    else:
+        # WO-131: fold this cycle's 404s into the cooldown ledger, and clear any
+        # token that returned a book. Written atomically by this lane only.
+        updated_markers = _update_delisted_markers(
+            markers,
+            polls=market_polls,
+            generated_at=generated_at,
+            cooldown_hours=float(settings["delisted_cooldown_hours"]),
+        )
+        write_json(
+            out_root / DELISTED_MARKER_FILE,
+            {
+                "work_order": "WO-131",
+                "generated_at_utc": generated_at,
+                "reporting_only": True,
+                "skip_threshold": int(settings["delisted_skip_threshold"]),
+                "cooldown_hours": float(settings["delisted_cooldown_hours"]),
+                "tokens": updated_markers,
+                "paper_trading_invoked": False,
+                "live_trading_invoked": False,
+            },
+        )
 
-    # WO-131: the 48h/100-snapshot runway, measured by the SAME helper the
-    # eligibility rule uses, so the report and the rule cannot drift.
-    runway = _seasoning_runway(out_root, watchlist)
+    if portfolio_scope:
+        # WO-149.1(3): a full-watchlist-only report; it would mislead over a
+        # portfolio-only slice, so it is skipped entirely for this scope.
+        runway = {"markets": [], "closest": []}
+    else:
+        # WO-131: the 48h/100-snapshot runway, measured by the SAME helper the
+        # eligibility rule uses, so the report and the rule cannot drift.
+        runway = _seasoning_runway(out_root, watchlist)
     summary.update(
         {
             "status": status,
@@ -922,6 +996,8 @@ def snapshot_official_books(cfg: EngineConfig) -> dict[str, Any]:
             ),
         }
     )
+    if portfolio_scope:
+        summary["delisted_marker_write"] = "skipped_portfolio_scope"
     write_json(summary_path, summary)
     return summary
 
@@ -1044,6 +1120,23 @@ def _percentile(values: Iterable[float], quantile: float) -> float | None:
     upper = min(lower + 1, len(ordered) - 1)
     weight = position - lower
     return round(ordered[lower] * (1.0 - weight) + ordered[upper] * weight, 6)
+
+
+def _nearest_rank_percentile(values: list[float], quantile: float) -> float | None:
+    """Nearest-rank percentile - no interpolation, so tests can hand-compute it.
+
+    WO-149.2: ``ordinal rank = ceil(quantile * n)`` (1-indexed) over the
+    ascending-sorted population; the element at that rank is returned as-is.
+    An empty population returns ``None`` (never ``0.0`` - a ``0.0`` p90 would
+    read as perfect freshness).
+    """
+
+    ordered = sorted(values)
+    n = len(ordered)
+    if n == 0:
+        return None
+    rank = max(1, min(n, ceil(quantile * n)))
+    return round(ordered[rank - 1], 6)
 
 
 def _distribution(values: Iterable[float]) -> dict[str, Any]:
@@ -1194,6 +1287,14 @@ def _replay_against_states(
     last_in_queue_evaluable_opportunities = 0
     no_contemporaneous_state_opportunities = 0
     relevant_trades: list[dict[str, Any]] = []
+    # WO-149.2: entry-side book-state staleness at the fill join, measured
+    # (never gated - max_book_state_lag_seconds is unchanged at 1800). Only
+    # finite lags enter the percentile population; A2 excludes None/non-finite
+    # lags and counts them separately so a corrupt timestamp can never read as
+    # "fresh".
+    entry_state_lags: list[float] = []
+    entry_state_lag_unmeasurable = 0
+    fills_beyond_legacy_lag = 0
     for trade in trades:
         if start_stamp is not None and trade["stamp"] < start_stamp:
             continue
@@ -1317,6 +1418,43 @@ def _replay_against_states(
                 per_share = later["midpoint"] - fill_price
             markouts[f"{horizon}m"] = round(per_share, 6)
             adverse_usd[f"{horizon}m"] = round(per_share * fill_size, 6)
+
+        # WO-149.2: entry-side book-state staleness for THIS confirmed fill.
+        # `state` is guaranteed not None here (both `continue`s above already
+        # require it); the `state is not None` guard is A2 defence-in-depth
+        # against a non-finite stamp, not dead code for the documented path.
+        # A2: None or non-finite excludes the lag from the percentile
+        # population and counts it in `entry_state_lag_unmeasurable` - never
+        # coerced to zero, which would read as perfect freshness.
+        entry_state_lag_seconds: float | None = None
+        if state is not None:
+            raw_entry_lag = trade["stamp"] - state["stamp"]
+            if isfinite(raw_entry_lag):
+                entry_state_lag_seconds = round(raw_entry_lag, 6)
+                entry_state_lags.append(raw_entry_lag)
+                # Fixed 1800.0 literal, independent of `max_state_lag_seconds`:
+                # this counts fills against the LEGACY tolerance so a future
+                # widening of the deployed value is measured against today's
+                # bound by the same code, not a moving target.
+                if raw_entry_lag > 1800.0:
+                    fills_beyond_legacy_lag += 1
+            else:
+                entry_state_lag_unmeasurable += 1
+
+        # WO-149.2: markout-leg staleness per covered horizon - how stale the
+        # LATER state was relative to its markout target. Already bounded by
+        # `max_state_lag_seconds` above (the tolerance gates the markout leg
+        # too); recorded here for observability, not a new gate.
+        later_state_lag_seconds: dict[str, float] = {}
+        for horizon in HORIZONS_MINUTES:
+            later = later_by_horizon.get(horizon)
+            if later is None:
+                continue
+            target_stamp = trade["stamp"] + horizon * 60.0
+            raw_later_lag = later["stamp"] - target_stamp
+            if isfinite(raw_later_lag):
+                later_state_lag_seconds[f"{horizon}m"] = round(raw_later_lag, 6)
+
         fills.append(
             {
                 "source": source,
@@ -1333,6 +1471,8 @@ def _replay_against_states(
                 "trade_size": trade["size"],
                 "markout_per_share": markouts,
                 "adverse_usd": adverse_usd,
+                "entry_state_lag_seconds": entry_state_lag_seconds,
+                "later_state_lag_seconds": later_state_lag_seconds,
             }
         )
 
@@ -1477,6 +1617,25 @@ def _replay_against_states(
             simulated_fill_opportunities - last_in_queue_evaluable_opportunities
         ),
         "no_contemporaneous_state_opportunities": no_contemporaneous_state_opportunities,
+        # WO-149.2: the 23.2%-class figure published rather than hand-computed.
+        # `None` when there are no relevant trades to rate (never a spurious 0.0).
+        "no_contemporaneous_state_rate": (
+            round(no_contemporaneous_state_opportunities / len(relevant_trades), 6)
+            if relevant_trades
+            else None
+        ),
+        # WO-149.2: entry-side book-state staleness at the join, over the
+        # CONFIRMED fills. Nearest-rank percentiles (no interpolation) so
+        # tests can hand-compute them; `None` (never `0.0`) on an empty
+        # population. `fills_beyond_legacy_lag` is measured against the fixed
+        # 1800.0 literal regardless of the configured tolerance, so a future
+        # widening of `max_book_state_lag_seconds` is already counted by this
+        # same code.
+        "entry_state_lag_seconds_p50": _nearest_rank_percentile(entry_state_lags, 0.5),
+        "entry_state_lag_seconds_p90": _nearest_rank_percentile(entry_state_lags, 0.9),
+        "entry_state_lag_seconds_max": round(max(entry_state_lags), 6) if entry_state_lags else None,
+        "entry_state_lag_unmeasurable": entry_state_lag_unmeasurable,
+        "fills_beyond_legacy_lag": fills_beyond_legacy_lag,
         "quoting_basis": quoting_basis,
         "queue_depth_standard": "full_book_levels_or_quote_aligned_depth_only",
         "confirmed_fills": len(fills),
@@ -1694,6 +1853,15 @@ def run_maker_fill_replay(cfg: EngineConfig) -> dict[str, Any]:
             "no_contemporaneous_state_opportunities": primary[
                 "no_contemporaneous_state_opportunities"
             ],
+            # WO-149.2: the join-lag measurement that lets a future widening
+            # of max_book_state_lag_seconds (unchanged, still 1800) be argued
+            # from a distribution rather than a hope.
+            "no_contemporaneous_state_rate": primary["no_contemporaneous_state_rate"],
+            "entry_state_lag_seconds_p50": primary["entry_state_lag_seconds_p50"],
+            "entry_state_lag_seconds_p90": primary["entry_state_lag_seconds_p90"],
+            "entry_state_lag_seconds_max": primary["entry_state_lag_seconds_max"],
+            "entry_state_lag_unmeasurable": primary["entry_state_lag_unmeasurable"],
+            "fills_beyond_legacy_lag": primary["fills_beyond_legacy_lag"],
             "last_in_queue_evaluable_opportunities": primary[
                 "last_in_queue_evaluable_opportunities"
             ],

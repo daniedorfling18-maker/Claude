@@ -60,6 +60,12 @@ REGISTERED_JOB_FRESHNESS_MAX_SECONDS: dict[str, int] = {
     "training_harvest": 25 * 60 * 60,
     "maker_study_intraday": 25 * 60 * 60,
     "trade_prints": 20 * 60,
+    # WO-149: two consecutive missed pulses tolerated at the measured
+    # 1.16-1.18x scheduler drag (2 x ~354s = ~708s) with ~192s headroom; the
+    # third is an incident. Looser (as a fraction of its own 300s interval)
+    # than trade_prints' 20/15 ratio because the measured drag is a larger
+    # fraction of a 300s interval than of a 900s one.
+    "book_pulse": 15 * 60,
     "executor_ops_monitor": 15 * 60,
     "degraded_state_watchdog": 15 * 60,
     "ledger_anchor": 26 * 60 * 60,

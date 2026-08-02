@@ -40,6 +40,25 @@ MAKER_STUDY_INTRADAY_OFFSET_MIN="${OPS_MAKER_STUDY_INTRADAY_OFFSET_MIN_SECONDS:-
 MAKER_STUDY_INTRADAY_OFFSET_MAX="${OPS_MAKER_STUDY_INTRADAY_OFFSET_MAX_SECONDS:-46800}"
 PRINTS_INTERVAL="${OPS_TRADE_PRINTS_INTERVAL_SECONDS:-900}"
 PRINTS_TIMEOUT="${OPS_TRADE_PRINTS_TIMEOUT_SECONDS:-300}"
+# WO-149: higher-frequency official-book observation for the CURRENT
+# maker-carry portfolio only (never the full-watchlist collector). Floor is
+# one TICK_SECONDS (300s) - the serial loop cannot fire faster than its own
+# tick, so a smaller interval buys nothing and misrepresents cadence. Ceiling
+# is the existing 900s trade-prints interval - above it the pulse adds no
+# coverage the 15-minute collector does not already provide. Timeout is kept
+# strictly below the 300s default interval so a pulse can never still be
+# running when the next one is due. 0 stamps an intentional skip at exit 0
+# (WO-114 precedent) so an owner can quiesce the pulse without accruing an
+# overrun SLO incident.
+BOOK_PULSE_INTERVAL="${OPS_BOOK_PULSE_INTERVAL_SECONDS:-300}"
+BOOK_PULSE_TIMEOUT="${OPS_BOOK_PULSE_TIMEOUT_SECONDS:-240}"
+BOOK_PULSE_ENABLED="${OPS_BOOK_PULSE_ENABLED:-1}"
+case "$BOOK_PULSE_INTERVAL" in ''|*[!0-9]*) BOOK_PULSE_INTERVAL=300 ;; esac
+case "$BOOK_PULSE_TIMEOUT" in ''|*[!0-9]*) BOOK_PULSE_TIMEOUT=240 ;; esac
+[ "$BOOK_PULSE_INTERVAL" -ge 300 ] 2>/dev/null || BOOK_PULSE_INTERVAL=300
+[ "$BOOK_PULSE_TIMEOUT" -gt 0 ] 2>/dev/null || BOOK_PULSE_TIMEOUT=240
+[ "$BOOK_PULSE_INTERVAL" -le 900 ] || BOOK_PULSE_INTERVAL=900
+[ "$BOOK_PULSE_TIMEOUT" -le 240 ] || BOOK_PULSE_TIMEOUT=240
 # WO-85/WO-86 completion correction: safety reporting must remain live while
 # a bounded long job (especially the daily harvest) is running. Configuration
 # may tighten these registered maxima, never widen them.
@@ -644,6 +663,32 @@ run_trade_prints() {
   log "trade_prints: exit $CODE"
 }
 
+run_book_pulse() {
+  # WO-149: higher-frequency official-book observation for the CURRENT
+  # maker-carry portfolio only (never the full-watchlist collector - that
+  # stays on collect-maker-replay-data's own cadence above). Additive
+  # observation frequency so the realism-ratio join has more contemporaneous
+  # book state between the existing 15-min collector's snapshots; never
+  # widens max_book_state_lag_seconds (unchanged at 1800s) and never touches
+  # official_book_snapshot.json or the collection-window ledger.
+  if [ "$BOOK_PULSE_ENABLED" = "0" ]; then
+    stamp_status book_pulse 0 "skipped: official-book pulse disabled (OPS_BOOK_PULSE_ENABLED=0)" "" intentional
+    log "book_pulse: skipped (disabled)"
+    return
+  fi
+  log "book_pulse: starting"
+  BOOK_PULSE_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  (
+    set -e
+    timeout "$BOOK_PULSE_TIMEOUT" python -m polymarket_predictive_engine.cli snapshot-official-books-pulse --config "$CONFIG_PATH"
+  ) >> "$LOG_FILE" 2>&1 &
+  JOB_PID=$!
+  wait_with_safety_pulses "$JOB_PID" book_pulse
+  CODE=$?
+  stamp_status book_pulse "$CODE" "WO-149 portfolio-only official-book pulse; additive observation frequency" "$BOOK_PULSE_STARTED_AT"
+  log "book_pulse: exit $CODE"
+}
+
 run_maker_safety_refresh() {
   # WO-85/WO-86/WO-88: keep the human maker scoreboard, fail-safe kill
   # decision, and pull/STOP advice on their own short cadence. This lane is
@@ -817,6 +862,12 @@ while :; do
     JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind trade_prints "$PRINTS_INTERVAL")"
     touch_stamp trade_prints
     run_trade_prints
+    JOB_SCHEDULE_SKIP_KIND=""
+  fi
+  if [ "$(seconds_since_stamp book_pulse)" -ge "$BOOK_PULSE_INTERVAL" ]; then
+    JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind book_pulse "$BOOK_PULSE_INTERVAL")"
+    touch_stamp book_pulse
+    run_book_pulse
     JOB_SCHEDULE_SKIP_KIND=""
   fi
   if [ "$(seconds_since_stamp ledger_anchor)" -ge "$LEDGER_ANCHOR_INTERVAL" ]; then

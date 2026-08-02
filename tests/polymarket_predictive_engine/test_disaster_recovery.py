@@ -42,13 +42,34 @@ def test_tracked_vps_config_meets_pre_live_rpo_after_wallet_configuration() -> N
     ]
 
 
-def _config(tmp_path: Path, *, wallet: str = ""):
+# WO-150: distinguishes "the flag key is entirely absent from maker_live_test"
+# (tests 1 and 7's sibling case) from "explicitly set to None" (test 7) - both
+# read as False through `_live_capital_context`'s `is True` check, but the
+# fixture needs to be able to produce either shape on request.
+_UNSET = object()
+
+
+def _config(
+    tmp_path: Path,
+    *,
+    wallet: str = "",
+    trading_mode: str = "paper",
+    wallet_read_only_monitoring=_UNSET,
+):
     raw = yaml.safe_load((ROOT / "polymarket_predictive_config.example.yaml").read_text(encoding="utf-8"))
     raw["paths"]["data_root"] = str(tmp_path)
     raw["paths"]["output_root"] = str(tmp_path / "outputs")
     raw["paths"]["database_path"] = str(tmp_path / "work" / "paper.sqlite")
     raw["maker_live_test"]["wallet_address"] = wallet
-    raw["trading"]["mode"] = "paper"
+    # WO-150: the deployed example config declares ITS OWN address read-only
+    # monitoring (wallet_address_read_only_monitoring: true). A test exercising
+    # a different, synthetic wallet must not silently inherit that declaration,
+    # so the flag defaults to fully ABSENT here unless a caller opts in.
+    if wallet_read_only_monitoring is _UNSET:
+        raw["maker_live_test"].pop("wallet_address_read_only_monitoring", None)
+    else:
+        raw["maker_live_test"]["wallet_address_read_only_monitoring"] = wallet_read_only_monitoring
+    raw["trading"]["mode"] = trading_mode
     raw["ledger_anchor"] = {
         "enabled": True,
         "external_anchor_branch": "vps-anchor",
@@ -1171,3 +1192,181 @@ def test_wo127_archive_declaring_and_including_a_prefix_is_refused(tmp_path: Pat
 
     # And the honest archive built by this code still restores.
     assert verify_and_restore_archive(cfg, source, dry_run=True)["status"] == "ok"
+
+
+# --- WO-150: live_capital_context must reflect BINDING capital, not the mere
+# presence of a read-only monitoring address ---
+
+
+_FAKE_WALLET = "0x" + "a" * 40
+
+
+@pytest.mark.parametrize(
+    "wallet, trading_mode, flag, expected_live_context, expected_max_hours",
+    [
+        # (1) no flag, address configured: today's behaviour preserved by default.
+        (_FAKE_WALLET, "paper", _UNSET, True, 24.0),
+        # (2) flag true, address configured, trading_mode paper: downgrades to
+        # the paper-stage ceiling.
+        (_FAKE_WALLET, "paper", True, False, 168.0),
+        # (3) flag true but trading_mode live: the branch that can never be
+        # downgraded by any config value.
+        (_FAKE_WALLET, "live", True, True, 24.0),
+        # (4) flag true but trading_mode off: the allowlist case - "off" is a
+        # valid trading.mode (config.py:95-96) and must close conservatively.
+        (_FAKE_WALLET, "off", True, True, 24.0),
+        # (5) flag as the string "true": boolish coercion is deliberately not
+        # used here, so a loose string must not downgrade the ceiling.
+        (_FAKE_WALLET, "paper", "true", True, 24.0),
+        # (6) flag as int 1: `1 == True` in Python (bool subclasses int), but
+        # `1 is True` is False - only the latter may gate a safety bound.
+        (_FAKE_WALLET, "paper", 1, True, 24.0),
+        # (7) flag explicitly None: same as absent, not coerced.
+        (_FAKE_WALLET, "paper", None, True, 24.0),
+        # (8) empty wallet_address with flag true: the wallet term is inert
+        # regardless of the flag, so the paper-stage ceiling still applies.
+        ("", "paper", True, False, 168.0),
+    ],
+    ids=[
+        "1_no_flag_wallet_configured",
+        "2_flag_true_paper",
+        "3_flag_true_live_mode_never_downgrades",
+        "4_flag_true_off_mode_closes_conservative",
+        "5_flag_string_true_not_coerced",
+        "6_flag_int_one_not_coerced",
+        "7_flag_none_not_coerced",
+        "8_empty_wallet_term_inert_either_way",
+    ],
+)
+def test_wo150_live_capital_context_predicate_matrix(
+    tmp_path: Path,
+    monkeypatch,
+    wallet,
+    trading_mode,
+    flag,
+    expected_live_context,
+    expected_max_hours,
+):
+    from polymarket_predictive_engine.disaster_recovery import _settings, _validated_rpo
+
+    if trading_mode == "live":
+        # config.py:97-98 requires the dual opt-in env var before trading_mode
+        # "live" even loads; unrelated to and does not enable any order path.
+        monkeypatch.setenv("POLYMARKET_LIVE_TRADING", "1")
+    cfg = _config(tmp_path, wallet=wallet, trading_mode=trading_mode, wallet_read_only_monitoring=flag)
+    # Held at 24h throughout: it satisfies both ceilings (24h and 168h), so
+    # every case here exercises ONLY which ceiling is selected, never the
+    # config guard at :205 (that latent widening is test 9, below).
+    cfg.raw["disaster_recovery"]["active_rpo_hours"] = 24
+
+    rpo = _validated_rpo(cfg, _settings(cfg))
+
+    assert rpo["live_capital_context"] is expected_live_context
+    assert rpo["maximum_rpo_hours_for_context"] == expected_max_hours
+
+
+def test_wo150_flag_widens_the_config_guard_but_only_with_the_flag(tmp_path: Path) -> None:
+    """(9) THE CENTREPIECE - the only test that exercises what actually
+    changes. With the flag and trading_mode paper, active_rpo_hours: 100
+    validates (no ValueError) where the identical config raises today at
+    :205-210; with the flag absent, the same config still raises."""
+    from polymarket_predictive_engine.disaster_recovery import _settings, _validated_rpo
+
+    with_flag = _config(tmp_path, wallet=_FAKE_WALLET, trading_mode="paper", wallet_read_only_monitoring=True)
+    with_flag.raw["disaster_recovery"]["active_rpo_hours"] = 100
+    rpo = _validated_rpo(with_flag, _settings(with_flag))  # must not raise
+    assert rpo["live_capital_context"] is False
+    assert rpo["maximum_rpo_hours_for_context"] == 168.0
+    assert rpo["active_rpo_hours"] == 100.0
+
+    without_flag = _config(tmp_path, wallet=_FAKE_WALLET, trading_mode="paper")
+    without_flag.raw["disaster_recovery"]["active_rpo_hours"] = 100
+    with pytest.raises(ValueError, match="24h maximum"):
+        _validated_rpo(without_flag, _settings(without_flag))
+
+
+def test_wo150_applied_compliance_bound_does_not_move_with_the_flag(tmp_path: Path) -> None:
+    """(10) The applied bound does NOT move. With the flag true and a
+    30-hour-old archive, rpo.compliant is False - identical to today, because
+    compliance compares the OBSERVED age against active_rpo_hours (24.0,
+    unchanged), never against maximum_rpo_hours_for_context (:217, untouched
+    by this WO)."""
+    cfg = _config(tmp_path, wallet=_FAKE_WALLET, trading_mode="paper", wallet_read_only_monitoring=True)
+    cfg.raw["disaster_recovery"]["active_rpo_hours"] = 24
+    _seed_two_day_chain(cfg)
+    status_path = cfg.output_root / "performance" / "disaster_recovery_status.json"
+
+    first = create_ledger_archive(cfg, force=True)
+    assert first["rpo"]["live_capital_context"] is False
+    assert first["rpo"]["maximum_rpo_hours_for_context"] == 168.0
+
+    stale_stamp = (datetime.now(timezone.utc) - timedelta(hours=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    status = read_json(status_path)
+    status["last_remote_success_at_utc"] = stale_stamp
+    write_json(status_path, status)
+    stale = create_ledger_archive(cfg, force=True)
+
+    assert stale["rpo"]["live_capital_context"] is False
+    assert stale["rpo"]["active_rpo_hours"] == 24.0
+    assert stale["rpo"]["compliant"] is False
+
+
+def test_wo150_maximum_rpo_hours_for_context_boundary_pair(tmp_path: Path) -> None:
+    """(11) Boundary pair on the reported field only: maximum_rpo_hours_for_context
+    reads 168.0 with the flag and 24.0 without it, on an otherwise identical
+    config."""
+    from polymarket_predictive_engine.disaster_recovery import _settings, _validated_rpo
+
+    with_flag = _config(tmp_path, wallet=_FAKE_WALLET, trading_mode="paper", wallet_read_only_monitoring=True)
+    with_flag.raw["disaster_recovery"]["active_rpo_hours"] = 24
+    assert _validated_rpo(with_flag, _settings(with_flag))["maximum_rpo_hours_for_context"] == 168.0
+
+    without_flag = _config(tmp_path, wallet=_FAKE_WALLET, trading_mode="paper")
+    without_flag.raw["disaster_recovery"]["active_rpo_hours"] = 24
+    assert _validated_rpo(without_flag, _settings(without_flag))["maximum_rpo_hours_for_context"] == 24.0
+
+
+def test_wo150_ceiling_literals_are_byte_identical_in_defaults_and_example_config() -> None:
+    """(12) byte-identity: the three ceiling literals this WO must not move,
+    both as computed by the code and as deployed in the example config."""
+    from polymarket_predictive_engine.disaster_recovery import _settings
+
+    cfg = load_config(ROOT / "polymarket_predictive_config.example.yaml")
+    settings = _settings(cfg)
+    assert settings["active_rpo_hours"] == 24.0
+    assert settings["paper_stage_max_rpo_hours"] == 168.0
+    assert settings["pre_live_max_rpo_hours"] == 24.0
+
+    raw = yaml.safe_load((ROOT / "polymarket_predictive_config.example.yaml").read_text(encoding="utf-8"))
+    assert raw["disaster_recovery"]["active_rpo_hours"] == 24
+    assert raw["disaster_recovery"]["paper_stage_max_rpo_hours"] == 168
+    assert raw["disaster_recovery"]["pre_live_max_rpo_hours"] == 24
+
+
+@pytest.mark.parametrize(
+    "corrupt_block",
+    ["a string", 7, 1.5, True, ["wallet_address"]],
+)
+def test_wo150_corrupt_maker_live_test_block_selects_the_conservative_ceiling(corrupt_block: object) -> None:
+    """A structurally corrupt `maker_live_test` is "doubt about its meaning",
+    and WO-150's fail-safe sentence says doubt selects the CONSERVATIVE ceiling.
+
+    Found by independent line audit of the first build: that version normalised
+    a non-dict block to `{}`, which makes `wallet` empty, reads as inert, and
+    selects the PERMISSIVE 168h branch — the one direction a corrupt config must
+    never buy. A well-formed-but-absent block (`None`, missing) is a different
+    case and deliberately keeps its permissive-for-paper behaviour.
+    """
+    from polymarket_predictive_engine.disaster_recovery import _live_capital_context
+
+    class _Cfg:
+        trading_mode = "paper"
+
+        def __init__(self, block: object) -> None:
+            self.raw = {"maker_live_test": block}
+
+    assert _live_capital_context(_Cfg(corrupt_block)) is True, corrupt_block
+
+    # The well-formed empty cases are unchanged: no wallet means no binding capital.
+    for benign in (None, {}, {"wallet_address": ""}):
+        assert _live_capital_context(_Cfg(benign)) is False, benign

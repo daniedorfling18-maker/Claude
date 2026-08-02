@@ -475,6 +475,16 @@ maker_live_test:
   # identifier, read-only monitoring). Deposits go via the bridge, never
   # to this address. Set during the R250 pipe test; SA access verified.
   wallet_address: "0xD2EC3c8f541ad3aaC9396d63650D9d297bd55D2f"
+  # 2026-08-01 WO-150: declares the address above read-only monitoring, dated.
+  # It is a public identifier used to watch balance/fills via free public
+  # endpoints only (see the wallet_address comment above) - the system holds
+  # zero binding capital (AGENTS.md; WO-67 funding blocked) and never signs or
+  # submits anything through it. This is what lets disaster_recovery's
+  # _live_capital_context select the paper-stage RPO ceiling instead of the
+  # pre-live one for this configuration. Default is false; only an explicit
+  # boolean true here downgrades a configured wallet, and it never downgrades
+  # trading.mode: live.
+  wallet_address_read_only_monitoring: true
   # Historical WO-73 field, superseded by signed custody Amendment A1. Keep it
   # empty: any future executor uses wallet_address in a non-overlapping,
   # mode/time-attributed executor window. No credential is loaded here.

@@ -185,8 +185,50 @@ def _write_status(cfg: EngineConfig, settings: dict[str, Any], payload: dict[str
 
 
 def _live_capital_context(cfg: EngineConfig) -> bool:
-    wallet = str((cfg.raw.get("maker_live_test", {}) or {}).get("wallet_address") or "").strip()
-    return cfg.trading_mode == "live" or bool(wallet)
+    """True selects the conservative pre-live RPO ceiling; False selects the
+    paper-stage ceiling. Neither ceiling literal is decided here - see
+    ``_validated_rpo`` - only which one this predicate selects.
+
+    WO-150: this used to flip True on ``trading_mode == "live"`` **or** the
+    mere presence of a ``maker_live_test.wallet_address``, so a read-only
+    public monitoring address alone selected the tighter ceiling on a system
+    with zero binding capital (funding closed, WO-67 blocked). Corrected to
+    require actual binding capital: True unless ``trading_mode`` is in the
+    paper-stage allowlist ``{"paper", "backtest"}`` AND either no non-empty
+    wallet is configured or the configured wallet is explicitly declared
+    ``wallet_address_read_only_monitoring: true``.
+
+    This is an ALLOWLIST of paper-stage modes, not a ``trading_mode == "live"``
+    denylist. ``trading.mode`` also allows ``"off"`` (config.py:95-96), and a
+    denylist keyed only on ``"live"`` would silently treat that valid mode as
+    non-live-capital. ``trading_mode == "live"`` always returns True here,
+    unconditionally, and can never be downgraded by any config value.
+    """
+    maker_live_test = cfg.raw.get("maker_live_test", {})
+    if maker_live_test is None:
+        # Well-formed "nothing configured": a `maker_live_test:` key with an
+        # empty value parses to None, and an absent key defaults to {}. Both
+        # genuinely carry no wallet, so both fall through to the paper-stage
+        # branch below - today's behaviour, unchanged.
+        maker_live_test = {}
+    if not isinstance(maker_live_test, dict):
+        # A2: a block that is a scalar or a list is STRUCTURALLY CORRUPT, which
+        # is "doubt about its meaning", and this WO's fail-safe sentence says
+        # doubt selects the CONSERVATIVE ceiling. Normalising it to {} instead
+        # would make `wallet` empty and so read as inert - the permissive 168h
+        # branch - which is the one direction a corrupt config must never buy.
+        return True
+    wallet = str(maker_live_test.get("wallet_address") or "").strip()
+    # A2: only an exact boolean True downgrades a configured wallet to inert.
+    # A missing flag, or any non-bool value (string "true", int 1, None, ...),
+    # reads as False - the conservative branch - because a safety-bound
+    # selector must not be flippable by a loose or corrupt config value.
+    # `is True` (rather than `== True`) also excludes `1`, since bool is a
+    # subclass of int in Python and `1 == True` is True.
+    read_only = maker_live_test.get("wallet_address_read_only_monitoring") is True
+    wallet_is_inert = not wallet or read_only
+    paper_stage_mode = cfg.trading_mode in {"paper", "backtest"}
+    return not (paper_stage_mode and wallet_is_inert)
 
 
 def _validated_rpo(
@@ -220,10 +262,15 @@ def _validated_rpo(
         "maximum_rpo_hours_for_context": allowed,
         "paper_stage_max_rpo_hours": paper_max,
         "pre_live_max_rpo_hours": pre_live_max,
-        # True when a monitored wallet is configured OR trading_mode is live.
-        # This only ever TIGHTENS the ceiling (24h instead of 168h), so it is
-        # deliberately left conservative rather than renamed to match the
-        # paper-only posture.
+        # True when trading_mode carries binding capital (see
+        # _live_capital_context: outside the paper-stage allowlist, or a
+        # configured wallet not declared read-only monitoring). This only ever
+        # TIGHTENS the ceiling (24h instead of 168h), so it is deliberately
+        # left conservative rather than renamed to match the paper-only
+        # posture. WO-150: corrected from flipping on trading_mode == "live"
+        # OR the mere presence of a wallet_address, which read a read-only
+        # public monitoring address as live capital on a system holding zero
+        # binding capital.
         "live_capital_context": live_context,
         "configured_rpo_within_registered_ceiling": True,
         "observed_archive_age_hours": (

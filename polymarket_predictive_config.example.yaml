@@ -437,6 +437,12 @@ disaster_recovery:
   # excluded_path_prefixes key here may only SHRINK it (put corpora back into
   # the archive), never add exclusions. Left unset so the registered set applies.
   active_rpo_hours: 24
+  # WO-146: the archive BUILD trigger, left commented so the registered
+  # default (20) applies. Derivation: 24h ceiling minus 0.5h measured
+  # scheduling latency (host cron */30, push_vps_telemetry.sh:19) leaves a
+  # 3.5h margin - seven consecutive missed 30-minute cycles - instead of
+  # today's -0.5h (24 - 24 - 0.5), a breach by construction.
+  # archive_build_interval_hours: 20
   paper_stage_max_rpo_hours: 168
   pre_live_max_rpo_hours: 24
   lock_stale_seconds: 3600

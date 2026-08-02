@@ -1513,9 +1513,15 @@ def test_wo146_test9_regression_the_build_is_due_before_the_ceiling_is_breached(
 ) -> None:
     # THE regression this WO exists to fix. Under unmodified `main` (the build
     # trigger and the compliance ceiling are the same 24.0h number), the
-    # identical fixture below yields age 24.5h and compliant False - the
-    # archive cannot be rebuilt until its age has ALREADY breached the
-    # ceiling. With the 20.0h interval, the same elapsed time is already due,
+    # identical fixture below yields status "not_due" at age 20.5h and
+    # compliant True - the archive is simply NOT REBUILT, and keeps aging
+    # toward the ceiling it can only reach by breaching it. (Corrected after
+    # line audit: an earlier version of this comment said the fixture yields
+    # 24.5h / compliant False on main. It does not - that is what happens four
+    # hours LATER, not what this fixture produces. The assertion below was
+    # always right; the comment describing it was not, and this is the WO's
+    # centrepiece regression proof.) With the 20.0h interval, the same elapsed
+    # time is already due,
     # so the rebuild happens while the ceiling is still satisfied.
     cfg = _config(tmp_path)
     cfg.raw["disaster_recovery"]["active_rpo_hours"] = 24

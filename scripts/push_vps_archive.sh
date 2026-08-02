@@ -87,7 +87,12 @@ if state == "ok":
     interval_hours = float("nan")
     try:
         interval_hours = float((payload.get("rpo") or {}).get("archive_build_interval_hours"))
-    except (TypeError, ValueError):
+    # AttributeError covers a non-mapping `rpo` (a list, string or number in a
+    # corrupt status file), which `.get` would raise on. WO-146.4 registers the
+    # 6.0 fallback for "missing / non-numeric / non-finite / <= 0"; without this
+    # the heredoc raised, `stamp_remote ... || true` swallowed it, and the script
+    # printed success while the status artifact kept its previous timestamp.
+    except (AttributeError, TypeError, ValueError):
         pass
     if not math.isfinite(interval_hours) or interval_hours <= 0:
         interval_hours = 6.0

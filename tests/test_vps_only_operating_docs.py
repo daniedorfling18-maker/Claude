@@ -77,6 +77,40 @@ def test_wo133_two_deploy_paths_are_named_and_path_a_stays_required() -> None:
     assert "ad-hoc pull/rebuild remains forbidden" in agents
 
 
+def test_wo145_policy_vs_capability_amendment_is_additive_and_names_the_invocation_form() -> None:
+    # WO-145 / §145.1. The amendment is additive and dated - it must not
+    # rewrite the AGENTS.md:85-90 sentences the assertions above pin, and it
+    # must record: (1) the policy-vs-capability distinction (no eligible
+    # independent reviewer can exist, which is a POLICY limit, not a
+    # capability one); (2) that the Path B permission is permanent, not
+    # sunset-lapsing; (3) the literal, non-substituted Path B invocation form
+    # §145.1(a1b) registers, because the bare form refuses after the :99
+    # fallback is deleted.
+    agents = _text("AGENTS.md")
+
+    assert "Amendment, 2026-08-01/2026-08-02 (WO-145 / §145.1)" in agents
+    assert "no eligible reviewer exists" in agents
+    assert "POLICY** limit, not a capability one" in agents
+    assert "merge_independently_reviewed_pr.py:340-347" in agents
+    assert "permanent, by owner direction (2026-08-01)" in agents
+    assert "not a\n  temporary allowance pending a lapsing condition" in agents
+
+    assert "deploy_vps_paper_dispatch.yml" in agents
+    assert "trigger_mechanism" in agents
+    assert "workflow_dispatch` | `push` | `vps_shell" in agents
+
+    assert "PM_DEPLOY_TARGET_SHA=<40-hex commit sha> scripts/deploy_vps_paper_manual.sh" in agents
+    assert "A LITERAL forty-hex SHA, read from the merged pull request on GitHub" in agents
+    assert "NOT\n  a shell substitution" in agents
+    assert "$(git rev-parse origin/main)" in agents
+    assert "is withdrawn as defective" in agents
+
+    # The existing Path A/Path B sentences (:85-107, pinned above) survive
+    # byte-for-byte - this amendment only adds text after them.
+    assert "Path A — the `Deploy Polymarket VPS Paper` workflow. REQUIRED whenever" in agents
+    assert "Path B — `scripts/deploy_vps_paper_manual.sh`, for when Path A is not" in agents
+
+
 def test_legacy_local_runbooks_are_loudly_archived() -> None:
     expected_markers = {
         "docs/POLYMARKET_SHADOW_RESEARCH_RUNBOOK.md": "Retired local runbook",

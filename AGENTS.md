@@ -200,6 +200,44 @@ Reason for the amendment: registered in WO-132 (`docs/POLYMARKET_CODEX_WORK_ORDE
 after review found dozens of unresolved inline threads sitting on already-merged
 PRs, every one of which had passed the required gate.
 
+### Amendment, 2026-08-01 — the work-order lifecycle standard
+
+Binding on every agent that authors, registers, reviews, dispatches, builds, or
+closes a work order: the admission checklist **S8** in
+`docs/ENGINEERING_STANDARDS.md` and the **GLOBAL RULE** at the top of
+`docs/POLYMARKET_CODEX_WORK_ORDERS.md`. `.claude/skills/wo-lifecycle/SKILL.md`
+is the non-binding operating companion to those two — deliberately not itself a
+binding surface, because agent-configuration space is not register-reviewed and
+carries no frozen-surface protection, and because it is not mounted into the
+containers. Where the companion and S8 differ, S8 governs. Three rules bind at
+all times. A draft work
+order is not registerable until every S8 rule passes. A build is not
+dispatchable until the `origin/main` tip at dispatch is an ancestor of the build
+branch — the GLOBAL RULE at the top of
+`docs/POLYMARKET_CODEX_WORK_ORDERS.md`, whose test is run at dispatch and whose
+BOTH SHAs (the `origin/main` tip and the build-branch head) are appended to the
+work order's status line, one token per dispatch. The dispatch prompt cites the
+work order by section and does not restate its content, so the register remains
+the sole source of what was registered. And no agent both
+produces and approves the same artifact: the orchestrator never reviews its own
+adjudication and never merges an owner-routed pull request.
+
+That standard governs process only — work-order authoring, gate ordering, agent
+allocation, and the feedback loop. It does not touch and cannot relax the
+constraints in this file: paper/dry-run posture, no live order path, no
+loosening of any gate, threshold, or eligibility rule, VPS-only runtime, and
+owner-merge routing for frozen and registered surfaces. It does not change merge
+routing for any work-order class; routing remains as this file and the register
+set it. Where the standard and those constraints appear to conflict, the
+constraints govern and the standard is the text that must change.
+
+Reason for the amendment: an independent review round found that the cycle's
+defects originated in work-order authoring — a threshold named but never given a
+value, a remediation scan rooted at the wrong directory, a Scope paragraph
+contradicting its own amendment — and that builds had been dispatched against
+registered text that had not yet been reviewed or merged. Every S8 rule is
+derived from one of those defects and carries its attribution.
+
 ## Stable references
 
 | Topic | File |

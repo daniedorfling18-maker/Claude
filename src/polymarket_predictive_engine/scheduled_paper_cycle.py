@@ -15,17 +15,19 @@ failure case the scheduler's ``last_success_utc`` is not refreshed so
 from __future__ import annotations
 
 import json
+import math
 import os
 import resource
 import signal
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .config import EngineConfig
 from .paper_cycle import run_paper_cycle
 from .refresh_governance import LOCK_CONTENTION_EXIT_CODE
-from .utils import now_utc, read_json
+from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float
 
 # Bounded lock-wait budget: retry a `prediction_cycle`-lock-contended cycle
 # on this cadence instead of failing on the first contended attempt (the
@@ -35,8 +37,32 @@ from .utils import now_utc, read_json
 LOCK_WAIT_MAX_SECONDS = 300.0
 LOCK_WAIT_SLEEP_SECONDS = 10.0
 
+# WO-143.7(b), registered 2026-08-01: the maximum age of the freshest
+# `websocket_market_features.csv` observation that still counts as a CURRENT
+# scoring input. Basis: 6x the 300s `websocket_max_gap_seconds` reporting
+# target, and well inside the job's 4h default cadence. Configurable
+# tighten-only (a config value may only SHRINK it) via
+# `scheduled_paper_cycle.max_websocket_observation_age_seconds`.
+#
+# Deliberately a NEW registered setting rather than a reuse of either
+# near-miss candidate: `operating_state_slos.websocket_max_gap_seconds` lives
+# in `REGISTERED_SLO_TARGETS`, annotated "never read by a gate, broker,
+# sizing rule, or order path" (operating_state.py:44-52), so wiring it in
+# here would make a reporting-only block gate-bearing; and
+# `mispricing_alpha.max_websocket_quote_enrichment_age_seconds` bounds
+# per-row quote/prediction PAIRING (mispricing_alpha.py:363), not feed
+# freshness, and is unset in config.
+MAX_WEBSOCKET_OBSERVATION_AGE_SECONDS = 1800.0
+
 _RECEIPT_RELATIVE = Path("polymarket_model_governance") / "scheduled_paper_cycle.json"
 _LIVE_SUMMARY_RELATIVE = Path("polymarket_model_governance") / "mispricing_alpha_live_summary.json"
+_WEBSOCKET_FEATURES_RELATIVE = Path("polymarket_training") / "websocket_market_features.csv"
+_OBSERVATION_TIMESTAMP_COLUMNS = (
+    "collected_at_utc",
+    "snapshot_timestamp",
+    "timestamp",
+    "collected_at",
+)
 
 
 def _install_sigterm_handler() -> Any:
@@ -69,6 +95,83 @@ def _live_summary_generated_at(cfg: EngineConfig) -> str:
     if not isinstance(payload, dict):
         return ""
     return str(payload.get("generated_at_utc") or "")
+
+
+def _finite(value: Any) -> float | None:
+    """`safe_float` that also rejects non-finite (NaN/inf) values.
+
+    WO-143.7(b): `safe_float("nan")` returns NaN (`utils.py:373-379`), and a
+    NaN on either side of a `<=` threshold comparison makes it False. An
+    unguarded age comparison would therefore read a CORRUPT timestamp as
+    fresh -- the exact fail-open hole item (b) exists to close -- so
+    non-finite is treated as missing, never as fresh.
+    """
+
+    parsed = safe_float(value)
+    if parsed is None or not math.isfinite(parsed):
+        return None
+    return parsed
+
+
+def _websocket_observation_max_age_seconds(cfg: EngineConfig) -> float:
+    """The registered ceiling, tighten-only: config may only SHRINK it.
+
+    Mirrors the `_mb_tighter_max` precedent (`maker_carry_study.py:1864`):
+    a negative or non-finite override falls back to the registered default
+    rather than silently widening the window.
+    """
+
+    settings = cfg.raw.get("scheduled_paper_cycle", {}) or {}
+    value = _finite(settings.get("max_websocket_observation_age_seconds"))
+    if value is None or value < 0:
+        return MAX_WEBSOCKET_OBSERVATION_AGE_SECONDS
+    return min(MAX_WEBSOCKET_OBSERVATION_AGE_SECONDS, value)
+
+
+def _websocket_observation_age_seconds(cfg: EngineConfig) -> float | None:
+    """Age in seconds of the freshest `websocket_market_features.csv` row.
+
+    Returns `None` -- meaning UNMEASURABLE, which the caller treats as
+    blocked, never as fresh -- for every bad-input class WO-143.7(b)
+    enumerates: an absent file, an empty file, a malformed file (whose
+    garbage-keyed `csv.DictReader` rows carry none of the timestamp
+    columns), rows whose timestamps are unparseable, and rows whose
+    timestamps are non-finite.
+    """
+
+    rows = read_csv_rows(cfg.output_root / _WEBSOCKET_FEATURES_RELATIVE)
+    if not rows:
+        return None
+    freshest: datetime | None = None
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw = next(
+            (row.get(column) for column in _OBSERVATION_TIMESTAMP_COLUMNS if row.get(column)),
+            None,
+        )
+        if raw is None:
+            continue
+        # If the cell parses as a number at all, it must be finite before it
+        # can be treated as a timestamp: safe_float("nan") returns NaN, and a
+        # NaN silently passes the `<=` ceiling comparison in the caller.
+        numeric = safe_float(raw)
+        if numeric is not None and not math.isfinite(numeric):
+            continue
+        candidate = parse_timestamp(raw)
+        if candidate is None:
+            continue
+        stamp = candidate.timestamp()
+        if not math.isfinite(stamp):
+            continue
+        if freshest is None or candidate > freshest:
+            freshest = candidate
+    if freshest is None:
+        return None
+    age = (datetime.now(timezone.utc) - freshest).total_seconds()
+    if not math.isfinite(age):
+        return None
+    return max(0.0, age)
 
 
 def _write_ordered_json_atomic(path: Path, payload: dict[str, Any]) -> Path:
@@ -109,18 +212,37 @@ def run_scheduled_paper_cycle(cfg: EngineConfig, *, source: str = "websocket") -
         before = _live_summary_generated_at(cfg)
         deadline_monotonic = started_monotonic + LOCK_WAIT_MAX_SECONDS
         lock_attempts = 0
+        lock_wait_seconds = 0.0
         report: dict[str, Any] = {}
         while True:
+            # WO-143.7(e): bracket each attempt individually and add its span
+            # to `lock_wait_seconds` ONLY on the branches below where the
+            # attempt was turned away by a held lock. A first-attempt
+            # acquisition breaks out before any accumulation, so it reports
+            # ~0 instead of the whole feature/model/scoring runtime (which
+            # previously made this field a duplicate of `duration_seconds`).
+            attempt_started_monotonic = time.monotonic()
             lock_attempts += 1
             report = run_paper_cycle(cfg, source=source, scope="scoring_only")
             if report.get("status") != "skipped_existing_prediction_cycle":
                 break
             if time.monotonic() >= deadline_monotonic:
+                lock_wait_seconds += max(0.0, time.monotonic() - attempt_started_monotonic)
                 break
             time.sleep(LOCK_WAIT_SLEEP_SECONDS)
-        lock_wait_seconds = max(0.0, time.monotonic() - started_monotonic)
+            lock_wait_seconds += max(0.0, time.monotonic() - attempt_started_monotonic)
 
-        has_predictions = "predictions" in report
+        # WO-143.7(b): the old `"predictions" in report` was a KEY-PRESENCE
+        # test, which passes even when the value is 0 -- what a missing,
+        # empty, or malformed `websocket_market_features.csv` produces, since
+        # `read_csv_rows` returns `[]`/garbage rows rather than raising.
+        # Require a POSITIVE count instead.
+        prediction_count = report.get("predictions")
+        has_predictions = (
+            isinstance(prediction_count, int)
+            and not isinstance(prediction_count, bool)
+            and prediction_count > 0
+        )
         cycle_status = report.get("status")
         if report.get("status") == "skipped_existing_prediction_cycle":
             status = "skipped_prediction_cycle_lock"
@@ -131,14 +253,34 @@ def run_scheduled_paper_cycle(cfg: EngineConfig, *, source: str = "websocket") -
         else:
             after = _live_summary_generated_at(cfg)
             overlay_refreshed = bool(after and after != before)
-            cycle_completed = has_predictions
-            if has_predictions and cycle_status == "ran" and overlay_refreshed:
+            # WO-143.7(b): also validate the websocket observation age against
+            # its registered ceiling BEFORE classifying completion. A present,
+            # parseable file whose freshest row has aged out is not current
+            # evidence even though it "parses and scores" (produces predictions
+            # and refreshes the overlay). `_websocket_observation_age_seconds`
+            # returns None for every bad-input class -- absent, empty,
+            # malformed, unparseable, non-finite -- and None is treated as
+            # blocked, never fresh (fail-closed, WO-121/129).
+            #
+            # Scoped to `source == "websocket"`, the deployed job's only
+            # source and the only source for which this file is an input at
+            # all; a `raw_snapshot`-sourced cycle never reads it, and the
+            # registered §143.2 test set exercises exactly that path.
+            websocket_observation_fresh = True
+            if source == "websocket":
+                websocket_age = _websocket_observation_age_seconds(cfg)
+                websocket_observation_fresh = (
+                    websocket_age is not None
+                    and websocket_age <= _websocket_observation_max_age_seconds(cfg)
+                )
+            cycle_completed = has_predictions and websocket_observation_fresh
+            if has_predictions and websocket_observation_fresh and cycle_status == "ran" and overlay_refreshed:
                 status = "ran"
                 exit_code = 0
-            elif has_predictions and cycle_status == "blocked" and overlay_refreshed:
+            elif has_predictions and websocket_observation_fresh and cycle_status == "blocked" and overlay_refreshed:
                 status = "blocked_readiness"
                 exit_code = 0
-            elif has_predictions and not overlay_refreshed:
+            elif has_predictions and websocket_observation_fresh and not overlay_refreshed:
                 status = "blocked_overlay_disabled"
                 exit_code = 1
             else:

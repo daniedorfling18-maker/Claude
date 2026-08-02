@@ -1208,6 +1208,13 @@ def test_wo143_paper_cycle_interval_and_timeout_clamp_bands(tmp_path):
     assert interval_for("60") == 3600
     assert interval_for("abc") == 14400
     assert timeout_for("99999") == 1800
+    # WO-143.7(d) registered test (6): "0" is all digits, so it passes the
+    # case-statement check unchanged and previously reached GNU `timeout`,
+    # where "a duration of 0 disables the associated timeout" -- an unbounded
+    # cycle holding the prediction_cycle lock. It must resolve to the
+    # registered positive default instead.
+    assert timeout_for("0") == 1800
+    assert timeout_for("900") == 900
 
 
 def test_wo143_paper_cycle_job_wiring_and_loop_position():

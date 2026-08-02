@@ -20,7 +20,7 @@ from .runtime_lock import runtime_lock
 from .shadow_cohort import update_shadow_cohort_evidence
 from .storage import connect_db
 from .strategy import generate_signals
-from .utils import now_utc, safe_float, write_json
+from .utils import now_utc, read_json, safe_float, write_json
 
 
 def _persist_predictions(cfg: EngineConfig, predictions: list[dict[str, Any]]) -> None:
@@ -67,6 +67,20 @@ def _persist_predictions(cfg: EngineConfig, predictions: list[dict[str, Any]]) -
         con.close()
 
 
+_LIVE_SUMMARY_FILENAME = "mispricing_alpha_live_summary.json"
+
+
+def _mispricing_alpha_overlay_enabled(cfg: EngineConfig) -> bool:
+    return bool((cfg.raw.get("mispricing_alpha", {}) or {}).get("enabled", True))
+
+
+def _live_summary_generated_at(cfg: EngineConfig) -> str:
+    payload = read_json(cfg.governance_root / _LIVE_SUMMARY_FILENAME, default={}) or {}
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("generated_at_utc") or "")
+
+
 _SCOPES = {"full", "scoring_only"}
 
 
@@ -110,6 +124,24 @@ def run_paper_cycle(
         "source": source,
         "scope": scope,
         "live_trading": False,
+        # WO-143.7(a): AGENTS.md L131-135 requires every new artifact to state
+        # both invocation literals. `scheduled_paper_cycle_report.json` is a new
+        # artifact, and this dict is the base that EVERY writing path (the
+        # trading-mode block, the feature/model-load block, the lock-skip block,
+        # and the happy path) builds on, so stating them once here covers them
+        # all. The lock-skip branch below re-states them explicitly; that
+        # re-statement is deliberately left in place rather than relied upon.
+        #
+        # Registered exception to §143.1 (amended 2026-08-01): this dict is
+        # shared by BOTH scopes, so the two keys also land in
+        # `forward_paper_cycle.json` on full-scope paths, which §143.1's
+        # "byte-identical on every path" clause would otherwise forbid. The two
+        # requirements cannot both hold literally; AGENTS.md L131-135 wins and
+        # §143.1 now reads "byte-identical except for the two invocation flags,
+        # which every artifact must carry". Resolving this by skipping the flags
+        # on the full path is explicitly forbidden by the amendment.
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
     }
     if cfg.trading_mode not in {"paper", "backtest"}:
         report.update(
@@ -179,7 +211,37 @@ def _run_paper_cycle_unlocked(
         category_models=category_models,
         training_cutoff=str(global_model.get("trained_at", "")),
     )
+    # WO-143.7(c): capture the live-summary stamp BEFORE apply_mispricing_alpha
+    # so a disabled-or-unrefreshed overlay is detectable BEFORE generate_signals
+    # is ever called. apply_mispricing_alpha's ONLY early return (the
+    # `enabled` check) skips its live-summary write, so comparing the stamp
+    # across this call detects the disabled overlay here -- rather than in the
+    # scheduled wrapper, which only learns of it AFTER generate_signals has
+    # already written trade_signals.csv, too late for its exit 1 to retract.
+    #
+    # Why publishing anyway would be a loosening, not merely noise: with the
+    # overlay absent generate_signals drops THREE named alpha-dependent gates.
+    # `alpha_edge` is None (write_predictions emits no `edge_lower_bound`
+    # column) so the alpha-candidate rejection at strategy.py:426-438 cannot
+    # fire; `require_same_category_labels` (:221-224) and
+    # `require_positive_cohort` (:228-230) are both `alpha_enabled and ...`
+    # -> False, disabling the gates at :456-470 and :471-485. Only
+    # `risk_decision` survives, and the rows are stamped
+    # "predictive_directional" at :303 -- signals published past gates that
+    # would otherwise have rejected them, which "do not loosen ... controls to
+    # manufacture activity" forbids.
+    #
+    # Scoped to scoring_only: §143.1 requires scope="full" to stay
+    # byte-identical (bar the two invocation flags), and the live container's
+    # full-scope behaviour with a disabled overlay is pre-existing behaviour
+    # this WO does not touch.
+    live_summary_before = _live_summary_generated_at(cfg) if scoring_only else ""
     predictions = apply_mispricing_alpha(cfg, predictions, output_path=str(prediction_path))
+    overlay_blocked = False
+    if scoring_only:
+        live_summary_after = _live_summary_generated_at(cfg)
+        overlay_refreshed = bool(live_summary_after and live_summary_after != live_summary_before)
+        overlay_blocked = not _mispricing_alpha_overlay_enabled(cfg) or not overlay_refreshed
     _persist_predictions(cfg, predictions)
     longshot_scan = build_longshot_bias_scan(cfg, emit_shadow=False)
     longshot_candidates = [
@@ -208,7 +270,14 @@ def _run_paper_cycle_unlocked(
             con.close()
 
     gate = paper_trade_readiness(cfg)
-    approved, rejected = generate_signals(cfg, readiness=gate)
+    if overlay_blocked:
+        # WO-143.7(c): publish no approved-signal file on this path. Do not
+        # call generate_signals at all, so trade_signals.csv (and its sibling
+        # rejected_signals.csv) are left byte-unchanged rather than rewritten
+        # from a disabled-or-unrefreshed overlay's ungated predictions.
+        approved, rejected = [], []
+    else:
+        approved, rejected = generate_signals(cfg, readiness=gate)
 
     if scoring_only:
         # The live container remains the sole broker/profit-target writer;
@@ -254,7 +323,17 @@ def _run_paper_cycle_unlocked(
                 "candidate_cohorts": longshot_scan.get("candidate_cohorts", {}),
                 "decision_use": longshot_scan.get("decision_use"),
                 "emit_shadow_positions": False,
-                "shadow_candidates_forwarded": len(longshot_candidates),
+                # WO-143.7(f): under scoring_only the shadow update above is
+                # skipped, so nothing was forwarded -- report 0 rather than the
+                # size of what would have been passed in. `shadow_cohort`
+                # carries "skipped_scoring_only" alongside this field in the
+                # same report, so the skip is visible rather than inferred from
+                # a bare zero. The general caller-honesty contract (derive the
+                # count from update_shadow_cohort_evidence's returned status,
+                # covering the lock-held skip) is §143b.1 and lands on the
+                # WO-143b branch; the merged predicate becomes
+                # "0 if scoring_only or status startswith skipped_".
+                "shadow_candidates_forwarded": 0 if scoring_only else len(longshot_candidates),
             },
             "cohort_pnl": cohort_pnl,
             "readiness": gate,

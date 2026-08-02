@@ -8353,9 +8353,12 @@ reported, so reliance on the un-attested route stays measured. Under a permanent
 Path B the honesty field is the only standing record of what is not proven,
 which makes it MORE load-bearing than it was under a sunset, not less.
 
-**Touch ONLY these files** (`git diff --stat` must show exactly these six).
-The register is deliberately EXCLUDED — a build PR does not edit its own WO
-status, matching WO-143's list:
+**Touch ONLY these files** (`git diff --stat` must show exactly these seven —
+**count corrected 2026-08-02 by §145.1: the list said six and omitted
+`tests/test_required_pr_gate.py`, whose pinned workflow inventory the new
+workflow file fails until it is updated. As registered, the build could not have
+passed its own suite**). The register is deliberately EXCLUDED — a build PR does
+not edit its own WO status, matching WO-143's list:
 - NEW `.github/workflows/deploy_vps_paper_dispatch.yml`
 - `scripts/deploy_vps_paper_manual.sh` (`trigger_mechanism` and actor fields
   replacing the hardcoded `"authorised_by": "owner"` at `:391`; attestation
@@ -8367,6 +8370,14 @@ status, matching WO-143's list:
   **`:337` asserts `record["authorised_by"] == "owner"` and this WO changes that
   field**; omitting it would force the build to either fail the suite or edit
   outside its own contract
+- `tests/test_required_pr_gate.py` (added by §145.1) —
+  `test_workflow_inventory_has_only_registered_triggers` (`:259`) pins the exact
+  set of workflow filenames and each one's trigger set. The new workflow must be
+  registered there as
+  `"deploy_vps_paper_dispatch.yml": {"push", "workflow_dispatch"}`. **Nothing
+  else in this file may be touched** — `:861` parametrises `tests/conftest.py`,
+  `pytest.ini` and `pyproject.toml` as protected merge controls, and this bullet
+  does not extend to them
 
 **Register cross-reference to update in a later docs pass (not this build):**
 WO-133's acceptance list names *"authoriser recorded"* as a deploy-record
@@ -8417,6 +8428,113 @@ surfaced so Path-B reliance is **measured rather than invisible** — making the
 un-attested route the ergonomic one is a de facto loosening of the deploy
 control even though no threshold moves, and it must be visible.
 
+### 145.1 — Auto-trigger the deploy on merge to `main`, holding at the approval gate (registered 2026-08-02, owner-directed)
+
+**What changes.** WO-145 registers the new workflow as `workflow_dispatch` only.
+The owner directed 2026-08-02 that it additionally trigger on merge to `main`.
+The `environment:` required-reviewer gate is **unchanged** — the deploy still
+stops there and waits for a human. What is removed is the owner having to
+*remember to start it*, which is the remaining laptop-shaped step.
+
+**Registered trigger:**
+
+```yaml
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+```
+
+`pull_request_target`, fork triggers and `schedule` remain **forbidden**, as
+WO-145 already registers.
+
+**No `paths:` filter — stated so a builder does not add one as an
+"optimisation".** A docs-only merge still moves the `main` SHA, and the VPS
+refuses to deploy unless its checkout equals `origin/main`
+(`deploy-polymarket-vps-paper.yml:263-269`, and the same guard in
+`scripts/deploy_vps_paper_manual.sh`). Skipping deploys for docs-only merges
+would therefore leave `source_vs_deployed_sha` reading `DIVERGED` until some
+later code merge, which is exactly the invisible-drift condition WO-145 exists
+to end. Every merge deploys.
+
+**(a) The stale-SHA guard, which auto-trigger makes necessary**
+
+Under `push`, two merges in quick succession queue two runs. WO-145 registers
+`concurrency: group: deploy-polymarket-vps-paper, cancel-in-progress: false`,
+so they run in order — and by the time the **first** runs, `origin/main` has
+moved past its `github.sha`. The VPS-side check then errors, producing a red run
+for a condition that is not a fault.
+
+**Required:** before the `environment:` gate is reached, the workflow resolves
+the current `origin/main` tip and, when `github.sha` is not that tip,
+**terminates NEUTRAL and performs no deploy** — no SSH, no approval request, no
+`vps_manual_deploy.json` record. It is a superseded run, not a failed one.
+
+**Fail-closed direction, stated because "neutral" is the permissive-sounding
+branch.** The guard may only ever *skip* a deploy; it can never cause one. If
+the tip cannot be resolved — network failure, ref read error, empty result — the
+run **fails** rather than exiting neutral, because an unresolvable tip means the
+precondition is unknown and an unknown precondition must not deploy. Missing,
+empty, and unparseable all take the fail branch.
+
+**Explicitly NOT the fix: `cancel-in-progress: true`.** It would abort a
+*running* deploy mid-rollout, which is the unverified-deploy failure
+`deploy-polymarket-vps-paper.yml`'s own timeout history documents twice. WO-145
+registers `cancel-in-progress: false` to prevent two concurrent writers, and
+that stands.
+
+**(b) `trigger_mechanism` gains a third value**
+
+WO-145 registers `trigger_mechanism` as `workflow_dispatch | vps_shell`. It
+becomes **`workflow_dispatch | push | vps_shell`**. A `push`-triggered run
+records `push` plus `github.actor` and the environment-approval actor — never a
+claimed identity, and never the literal `authorised_by: "owner"` this WO exists
+to remove. Nothing here upgrades `attestation_verified`, which stays `false`.
+
+**(c) Touched-file list: six → SEVEN, and the edit is performed here**
+
+Adding a workflow file fails
+`tests/test_required_pr_gate.py::test_workflow_inventory_has_only_registered_triggers`
+(`:259`), which pins the exact set of workflow filenames **and** each one's
+trigger set, and asserts every workflow carries `timeout-minutes:`,
+`concurrency:` and `permissions:`. WO-145's six-file list omits it, so the build
+as registered could not pass its own suite. The list above now reads **seven**
+with `tests/test_required_pr_gate.py` named, registering
+`deploy_vps_paper_dispatch.yml: {"push", "workflow_dispatch"}`.
+
+*(This reconciliation is performed in the parent list in this same diff, not
+merely stated here. An amendment that declares a list change and does not make
+it is the defect that cost PR #421 four review rounds.)*
+
+**Tests (additive to WO-145's set).** (1) the workflow's `on:` block contains
+exactly `push` and `workflow_dispatch`, and no `schedule`,
+`pull_request_target`, or `pull_request`; (2) `push` is restricted to `main`;
+(3) the inventory test recognises the new file with that exact trigger set;
+(4) with `github.sha` behind the resolved tip, the guard exits **neutral** and
+no SSH step runs, asserted by a sentinel the SSH step would have written;
+(5) with `github.sha` equal to the tip, the run proceeds to the gate;
+(6) with the tip unresolvable (stubbed to fail, and separately to return empty),
+the run **fails** and does not deploy — the fail-closed branch;
+(7) `concurrency` is byte-identical to Path A's group with
+`cancel-in-progress: false`; (8) a `push`-triggered record carries
+`trigger_mechanism: push` and no `authorised_by` key at all.
+
+**Fail-safe sentence for §145.1.** Nothing here marks a market measured, changes
+any M-A/M-B/M-C or `maker_min_*` threshold, opens or enables any order path, or
+upgrades any attestation; the `environment:` approval gate is unchanged, so the
+set of deploys a human must approve is **identical** — only the step of
+remembering to start one is removed. The one new branch, the neutral exit, can
+only ever skip a deploy and never cause one, and its unknown-state case fails
+rather than skips.
+
+**Day-after check for §145.1.** After the first auto-triggered deploy:
+`vps_manual_deploy.json` records `trigger_mechanism: push` with a non-empty
+approval actor and **no `authorised_by` key**; `source_vs_deployed_sha` reads
+`ALIGNED` and `divergence_started_at_utc` is absent in
+`telemetry/manifest.json`; and after two merges landed inside one deploy window,
+exactly one run reached the VPS while the superseded run shows **neutral**, not
+failure.
+
 ## S8 admission records (2026-08-01)
 
 S8 was registered in the same change as WO-143's §143.7, WO-143b's §143b.1 and
@@ -8427,7 +8545,7 @@ against them retroactively, and recording the result rather than assuming it:
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | WO-143 §143.7 | PASS (1800 with basis, two alternatives rejected) | PASS (non-finite → `blocked_inputs`) | n/a | PASS | PASS (§143.1 exception recorded) | PASS | **FAILED, now FIXED** — the count said ten and the config file was absent after its prohibition was struck; now eleven with the file listed | n/a | n/a | PASS | **ADMITTED after fix** |
 | WO-143b §143b.1 | **FAILED TWICE, now FIXED** — F1 first named four constants with no literals; the fix then introduced a FIFTH (`heartbeat_cap`) with no literal and an unsatisfiable ordering (`1320 < 1320`). Six constants are now literals with bases and the ordering is `1320 < 1800 < 2400` | PASS | PASS (roots widened to `src/`+`scripts/` off `__file__`) | PASS (Scope reconciled) | PASS | PASS (F4 antecedent) | PASS (fourteen) | PASS (F1 fan-out shown) | n/a | PASS | **ADMITTED after fix** |
-| WO-145 | PASS | n/a | n/a | n/a | PASS | n/a | PASS (six→seven) | n/a | PASS (both deploy paths enumerated) | PASS | **ADMITTED** |
+| WO-145 | PASS | n/a | n/a | n/a | PASS | n/a | **A7 PASS RETRACTED 2026-08-02** — the cell read "PASS (six→seven)" while the list itself declared **six** and enumerated six bullets, so the record and the list disagreed at the moment the PASS was granted. The list also omitted `tests/test_required_pr_gate.py`, whose pinned workflow inventory the registered new workflow file fails. Corrected to **seven** by §145.1, with the bullet added. **Third A7 escape; the first two are recorded on the rows above** | n/a | PASS (both deploy paths enumerated) | PASS | **ADMITTED; A7 re-opened and re-closed 2026-08-02** |
 
 The A1 failure on F1 is the checklist working on its first use, against text
 written by the same agent that registered the checklist. It was found by the

@@ -8406,8 +8406,28 @@ additive and dated. It states: Path A remains
 required whenever an eligible independent reviewer exists; where the independent
 review requirement cannot be satisfied because no eligible reviewer exists — a
 POLICY limit, not a capability limit — Path B is permitted, records
-`attestation_verified: false`, and this permission lapses under the sunset
-above.
+`attestation_verified: false`, and **this permission is PERMANENT, not
+time-limited** — see the "No sunset" section above, which records the owner's
+2026-08-01 direction and the durable gate reduction it carries.
+
+**§145.2 — corrected 2026-08-02, escalated by the WO-145 builder.** This
+verbatim string previously ended *"and this permission lapses under the sunset
+above."* **There is no sunset.** The section ~60 lines above is headed "**No
+sunset — Path B is PERMANENT by owner direction**" and states that a lapsing
+sunset "was drafted" and the owner directed permanence instead. The registered
+verbatim text therefore instructed the builder to write a lapse condition into
+`AGENTS.md` that this same work order says does not exist — and because the
+string is registered **verbatim**, a faithful builder would have put a false
+statement into the governance surface `AGENTS.md` exists to protect. That is the
+artifact-lies class, reached through the one mechanism that forbids the builder
+from exercising judgment.
+
+The builder escalated with file:line evidence and built against the permanence
+language rather than the stale fragment. **That was the correct call** and this
+correction ratifies it: the registered string now matches the registered
+decision. Recorded rather than silently fixed, because a "verbatim" clause is
+the highest-leverage place in a work order to be wrong — it is the one a builder
+is explicitly told not to think about.
 
 **Added by §145.1(a1b) 2026-08-02 — the Path B invocation form, registered here
 because (5c) makes the bare form refuse.** The amendment additionally states

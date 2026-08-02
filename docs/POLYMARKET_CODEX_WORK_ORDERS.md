@@ -13145,3 +13145,111 @@ tightening, and both reduce the number of runs that can publish signals.
 absent, or unusable; `trade_signals.csv`'s modification time does not advance on
 any such run; and no run reports a fresh observation while its predictions
 derive from rows older than the ceiling.
+
+### 143b.2 — Three P1/P2 corrections from Codex review of `29f6498a` (registered 2026-08-02)
+
+All three re-verified against the code. **All three are gaps in §143b.1's F1
+text — this orchestrator's registered design — not build defects.**
+
+#### (a) The heartbeat design creates a stale-writer window. It needs a FENCING TOKEN.
+
+Verified: `heartbeat.note_progress("settlement_position")` fires at
+`shadow_cohort.py:636`, immediately **before** the potentially unbounded
+`_settlement_price_for_position` call at `:638`. A grep of the module for
+`still_owned` / `owns_lock` / `fence` returns nothing — **no ownership check
+exists anywhere before the ledgers are published.**
+
+The failure sequence, and it is a direct consequence of the design §143b.1
+registered:
+
+1. The worker records progress, then stalls inside the unbounded call.
+2. The progress-derived heartbeat correctly **stops** — this is the anti-wedge
+   behaviour §143b.1 demanded, working as specified.
+3. Because the beat stopped, another writer **legitimately** reclaims the lock
+   after `shadow_cohort_stale_after_seconds`. This is also correct.
+4. The original call eventually returns. The worker resumes with **stale
+   in-memory ledgers**, never checks that it still holds the lock, and
+   **publishes** — over a writer that legitimately owns it.
+
+**§143b.1 solved the wedge and created a lost update.** The two are the same
+trade-off: any lease that can expire under a live holder makes that holder
+unsafe to trust on resume. This is the standard result that a lease-based lock
+without a fencing token is not mutual exclusion, and F1's registered text
+required the heartbeat while never requiring the fence. **The design was
+incomplete as registered, and the builder implemented it faithfully.**
+
+**Corrected requirement.** The lock carries a **unique fencing token**,
+generated per acquisition (not per process — a process that re-acquires after
+losing the lock must receive a NEW token). The worker captures its token at
+acquisition and **re-reads the on-disk lock immediately before any ledger
+write**; if the token differs or the lock is absent, it **aborts publication
+entirely**, discards its in-memory ledgers, and returns a distinct status
+(`skipped_lock_lost_during_settlement`). It does NOT retry inside the same call
+and it does NOT write a partial result. Losing a lease means losing the right to
+write, not the right to finish.
+
+Note this composes with §143.8(b), which independently requires a
+collision-resistant owner identity on the `prediction_cycle` lock. **The same
+token mechanism should serve both** — one per-acquisition unique value used for
+identity and for fencing — and whichever branch lands second must reconcile them
+rather than introduce two token schemes in one module.
+
+**Tests.** (1) with the lock reclaimed by a foreign writer mid-settlement, the
+original worker publishes NOTHING and returns
+`skipped_lock_lost_during_settlement`; (2) the anchor-enrolled
+`shadow_fills.csv` and `shadow_positions.csv` are **byte-identical** after that
+run — the assertion that actually proves the lost update is prevented;
+(3) an uncontended run still publishes normally; (4) a token is unique across
+two acquisitions **by the same process**; (5) an absent or unparseable on-disk
+token aborts publication, never proceeds.
+
+#### (b) The new checkpoint artifact must carry the invocation flags
+
+`shadow_settlement_checkpoints.json` (`shadow_cohort.py:532`) is a **new
+persistent governance artifact** and carries neither `paper_trading_invoked` nor
+`live_trading_invoked` — `paper_trading_invoked` does not appear in the module
+at all. `AGENTS.md` L133-135 requires both on every new artifact. Both are
+`false` here: this is a scheduling-only checkpoint and no broker path is
+reachable from it.
+
+**This is a gap in my own permission.** §143b.1 authorised "an equivalent
+rotating offset" as an alternative to the `last_settlement_check_utc` column,
+and the builder correctly chose a sidecar to preserve the byte-identity tests —
+but the registration never said that choosing a sidecar creates a new artifact
+subject to L133-135. **A permission that authorises a new file must state the
+artifact obligations that come with it.**
+
+**Tests.** (6) the checkpoint artifact contains literal
+`paper_trading_invoked: false` and `live_trading_invoked: false` on every path
+that writes it.
+
+#### (c) The load-time validator is not wired to configuration loading (P2)
+
+§143b.1's test (10) requires "a load-time validator rejects any configuration
+violating the FULL registered ordering". As built, that validation runs inside
+`update_shadow_cohort_evidence`, so `load_config` and `config-check` both
+**succeed** on a configuration that violates the ordering, and the deployment
+fails on its first live-loop shadow-maintenance tick instead of at its
+configuration gate. A validator that only runs on the hot path is not a
+load-time validator — the phrase in my registration described a location the
+implementation was never told to use.
+
+**Corrected requirement.** The ordering check is invoked from configuration
+validation, so `config-check` fails closed on a violating configuration before
+any deployment starts. The hot-path check may remain as a defence in depth.
+
+**Tests.** (7) `config-check` exits nonzero on a configuration violating any of
+the four registered relations, naming the relation violated; (8) it exits zero
+on the registered defaults.
+
+**Fail-safe sentence for §143b.2.** Nothing here marks a market measured,
+changes any M-A/M-B/M-C or `maker_min_*` threshold, opens or enables any order
+path, or loosens any gate; (a) narrows the conditions under which a worker may
+write, (b) adds two honesty fields to an artifact, and (c) moves an existing
+check earlier — all three strictly tightening, and (a) strictly reduces the set
+of runs that can publish.
+
+**Day-after check.** No `shadow_fills.csv` row is ever written by a process that
+does not hold the current fencing token; `shadow_settlement_checkpoints.json`
+carries both invocation literals; and a deliberately invalid timing
+configuration fails `config-check` rather than the first live tick.

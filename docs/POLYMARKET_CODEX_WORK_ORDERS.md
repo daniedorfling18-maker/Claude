@@ -7963,9 +7963,21 @@ four are literals with stated bases, all tighten-only:
   than `heartbeat_cap_seconds` so the cap can never sit at or above the stale
   window.
 
-**Registered ordering, validated in full by test (10):**
-`settlement_budget_seconds + remainder_budget_seconds + heartbeat_margin_seconds  <  heartbeat_cap_seconds  <  shadow_cohort_stale_after_seconds`
-— i.e. `1320 < 1800 < 2400`.
+**Registered ordering, validated in full by test (10) — FOUR relations:**
+
+1. `settlement_budget_seconds + remainder_budget_seconds + heartbeat_margin_seconds  <  heartbeat_cap_seconds`  — i.e. `1320 < 1800`
+2. `heartbeat_cap_seconds  <  shadow_cohort_stale_after_seconds`  — i.e. `1800 < 2400`
+3. **`heartbeat_cap_seconds + critical_section_max_seconds  <  shadow_cohort_stale_after_seconds`  — i.e. `1800 + 120 = 1920 < 2400`**
+4. every constant is positive and finite.
+
+**Relation 3 was added 2026-08-01 after review and is the one a later edit would
+silently break.** The effective maximum hold is `heartbeat_cap +
+critical_section_max`, because the cap does not fire inside the critical
+section. A subsequent edit setting `critical_section_max_seconds: 700` gives
+`1800 + 700 = 2500 > 2400` and **re-opens the exact reclaim-mid-critical-section
+hole that the critical section exists to close — while a three-relation test (10)
+would still pass.** The registered values already satisfy it; the relation is
+registered so they cannot drift apart unnoticed.
 
 **Naming note:** `settlement_budget_seconds` ABANDONS remaining work when
 exceeded; `remainder_budget_seconds` is advisory and only sizes the constants

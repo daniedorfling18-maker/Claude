@@ -52,6 +52,63 @@ jobs:
             echo "superseded=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # WO-145 registered control (i), which replaces the deleted sunset:
+      # "the workflow still runs the existing eligibility query and emits a
+      # WARNING whenever an eligible independent reviewer does exist - not as a
+      # lapse trigger, but so a change in the collaborator set is never
+      # silently ignored." Path B is permanent BECAUSE no eligible reviewer can
+      # exist (merge_independently_reviewed_pr.py:340-347 excludes both the PR
+      # author and the repository owner). If that ever stops being true, Path A
+      # becomes satisfiable again and this permanent loosening should be
+      # revisited - so the condition is surfaced on every deploy rather than
+      # assumed to hold forever.
+      #
+      # This step NEVER fails the run. It is observability, not a gate: a
+      # transient API error must not block a deploy, and the presence of an
+      # eligible reviewer is information for the owner, not a fault.
+      - name: Warn if an eligible independent reviewer now exists (registered control i)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER_LOGIN: ${{ github.repository_owner }}
+        run: |
+          set -uo pipefail
+          if ! body="$(curl -fsS --max-time 30 \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/collaborators?per_page=100" 2>/dev/null)"; then
+            echo "::notice::eligibility query unavailable this run; Path B remains the registered route regardless"
+            exit 0
+          fi
+          eligible="$(printf '%s' "$body" | OWNER_LOGIN="$OWNER_LOGIN" python3 -c "
+          import json, os, sys
+          owner = os.environ.get('OWNER_LOGIN', '').casefold()
+          try:
+              rows = json.load(sys.stdin)
+          except Exception:
+              sys.exit(0)
+          if not isinstance(rows, list):
+              sys.exit(0)
+          names = []
+          for row in rows:
+              if not isinstance(row, dict):
+                  continue
+              login = str(row.get('login') or '')
+              if not login or login.casefold() == owner:
+                  continue
+              if str(row.get('type') or '').casefold() == 'bot' or login.endswith('[bot]'):
+                  continue
+              perms = row.get('permissions') or {}
+              if isinstance(perms, dict) and (perms.get('push') or perms.get('maintain') or perms.get('admin')):
+                  names.append(login)
+          print(','.join(sorted(names)))
+          " 2>/dev/null)" || eligible=""
+          if [ -n "$eligible" ]; then
+            echo "::warning::an eligible independent reviewer now exists (${eligible}). Path A may be satisfiable again; WO-145's permanent Path B loosening was registered on the premise that it is not, and should be revisited. This is a NOTICE, not a gate - the deploy continues."
+          else
+            echo "::notice::no eligible independent reviewer exists; the WO-145 premise still holds"
+          fi
+
   # Check 2 lives inside this job, as its FIRST step (§145.1(a)). The
   # `environment:` gate below is what a human approves; check 2 re-resolves
   # origin/main immediately after that approval and fails, rather than

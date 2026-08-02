@@ -333,9 +333,16 @@ def test_1451_check2_message_is_interpolated_not_literal(tmp_path: Path) -> None
 
 
 def test_1451_check2_failure_branch_is_exit_1_not_success_or_continue() -> None:
-    workflow_text = _text()
     check2 = _step("deploy", CHECK2_NAME)
-    assert "continue-on-error" not in workflow_text
+    # NARROWED after line audit: this previously asserted `continue-on-error`
+    # appeared NOWHERE in the workflow. That was right when the file had one
+    # gating job, but WO-145's registered control (i) is observability and MUST
+    # carry continue-on-error ("not as a lapse trigger"). The guarantee that
+    # actually matters is unchanged and is now stated precisely: no step in the
+    # DEPLOY job may swallow its own failure, so a superseded or unapproved run
+    # can never be reported green.
+    for step in _job("deploy")["steps"]:
+        assert step.get("continue-on-error") is not True, step.get("name")
     run = check2["run"]
     assert "exit 1" in run
     assert "exit 0" not in run
@@ -402,16 +409,23 @@ def test_1451_2d_approved_entry_proceeds_and_rejected_entry_fails(tmp_path: Path
 
     bin_dir2 = tmp_path / "rejected"
     _fake_curl(bin_dir2, json.dumps([{"state": "rejected", "user": {"login": "someone"}}]))
-    result2 = _run_shell(script, {"GH_TOKEN": "tok", "APPROVALS_URL": "https://example.test/approvals"}, bin_dir=bin_dir2)
-    assert result2.returncode != 0
+    out2 = tmp_path / "rejected.out"
+    # github_output MUST be passed even on the negative paths. Without it the
+    # step's final `echo ... >> "$GITHUB_OUTPUT"` dies on an unbound variable
+    # under `set -u`, so the assertion below would pass for ANY approval logic -
+    # including `approved = list(entries)`, the exact len>0 defect this test is
+    # registered to distinguish. Found by line audit of the first build.
+    result2 = _run_shell(script, {"GH_TOKEN": "tok", "APPROVALS_URL": "https://example.test/approvals"}, bin_dir=bin_dir2, github_output=out2)
+    assert result2.returncode != 0, "a rejected-only approvals response must fail the job"
 
 
 def test_1451_2c_an_empty_approvals_response_fails_and_no_ssh_step_runs(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     _fake_curl(bin_dir, "[]")
     script = _run("deploy", APPROVAL_NAME)
-    result = _run_shell(script, {"GH_TOKEN": "tok", "APPROVALS_URL": "https://example.test/approvals"}, bin_dir=bin_dir)
-    assert result.returncode != 0
+    out = tmp_path / "empty.out"
+    result = _run_shell(script, {"GH_TOKEN": "tok", "APPROVALS_URL": "https://example.test/approvals"}, bin_dir=bin_dir, github_output=out)
+    assert result.returncode != 0, "an empty approvals response must fail the job"
     # The step that would invoke ssh never runs because this step already
     # failed - proven the same way as the guard/deploy skip: the job's steps
     # execute sequentially and a nonzero step aborts the job under `set -e`
@@ -431,8 +445,9 @@ def test_1451_2e_query_errors_or_returns_non_json_fails_closed(tmp_path: Path, m
         _fake_curl(bin_dir, "", http_fail=True)
     else:
         _fake_curl(bin_dir, "not json at all")
-    result = _run_shell(script, {"GH_TOKEN": "tok", "APPROVALS_URL": "https://example.test/approvals"}, bin_dir=bin_dir)
-    assert result.returncode != 0
+    out = tmp_path / f"{mode}.out"
+    result = _run_shell(script, {"GH_TOKEN": "tok", "APPROVALS_URL": "https://example.test/approvals"}, bin_dir=bin_dir, github_output=out)
+    assert result.returncode != 0, f"{mode} must fail closed"
 
 
 def test_1451_approvals_query_has_a_bounded_timeout() -> None:
@@ -571,3 +586,96 @@ def test_wo145_5_remote_script_removes_its_own_sentinel_file() -> None:
 def test_1451_c_workflow_appears_in_the_required_pr_gate_inventory() -> None:
     inventory_test = (ROOT / "tests" / "test_required_pr_gate.py").read_text(encoding="utf-8")
     assert '"deploy_vps_paper_dispatch.yml": {"push", "workflow_dispatch"}' in inventory_test
+
+
+ELIGIBILITY_NAME = "Warn if an eligible independent reviewer now exists (registered control i)"
+
+
+def _eligibility_env() -> dict[str, str]:
+    return {
+        "GH_TOKEN": "tok",
+        "OWNER_LOGIN": "daniedorfling18-maker",
+        "GITHUB_REPOSITORY": "daniedorfling18-maker/Claude",
+    }
+
+
+def test_wo145_control_i_eligibility_query_exists_in_the_guard_job() -> None:
+    """WO-145 registers TWO controls that replace the deleted sunset, because
+    "permanent" must not mean "unobserved". Control (i) is the eligibility
+    query that warns whenever an eligible independent reviewer exists.
+
+    The first build shipped the permanent Path A loosening with control (i)
+    absent entirely - `grep -rn eligib .github/workflows/` returned nothing -
+    so the register's "never silently ignored" claim would have been false from
+    merge day. Found by line audit.
+    """
+    step = _step("guard", ELIGIBILITY_NAME)
+    # Observability, never a gate: a transient API error must not block a deploy.
+    assert step.get("continue-on-error") is True
+    assert "collaborators" in step["run"]
+
+
+def test_wo145_control_i_warns_when_an_eligible_reviewer_exists(tmp_path: Path) -> None:
+    """A second human collaborator with push access makes Path A potentially
+    satisfiable again, which is exactly the condition the owner must not miss."""
+    bin_dir = tmp_path / "bin"
+    _fake_curl(
+        bin_dir,
+        json.dumps(
+            [
+                {"login": "daniedorfling18-maker", "type": "User", "permissions": {"admin": True}},
+                {"login": "second-human", "type": "User", "permissions": {"push": True}},
+            ]
+        ),
+    )
+    result = _run_shell(_run("guard", ELIGIBILITY_NAME), _eligibility_env(), bin_dir=bin_dir)
+    assert result.returncode == 0, result.stderr
+    assert "::warning::" in result.stdout
+    assert "second-human" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        # Owner alone - the registered premise, no warning.
+        [{"login": "daniedorfling18-maker", "type": "User", "permissions": {"admin": True}}],
+        # A bot is never an eligible human reviewer.
+        [
+            {"login": "daniedorfling18-maker", "type": "User", "permissions": {"admin": True}},
+            {"login": "some-bot[bot]", "type": "Bot", "permissions": {"push": True}},
+        ],
+        # Read-only access cannot carry a trusted APPROVED review.
+        [
+            {"login": "daniedorfling18-maker", "type": "User", "permissions": {"admin": True}},
+            {"login": "readonly", "type": "User", "permissions": {"pull": True}},
+        ],
+    ],
+)
+def test_wo145_control_i_stays_quiet_when_the_premise_holds(tmp_path: Path, rows: list) -> None:
+    bin_dir = tmp_path / "bin"
+    _fake_curl(bin_dir, json.dumps(rows))
+    result = _run_shell(_run("guard", ELIGIBILITY_NAME), _eligibility_env(), bin_dir=bin_dir)
+    assert result.returncode == 0, result.stderr
+    assert "::warning::" not in result.stdout
+
+
+@pytest.mark.parametrize("mode", ["http_fail", "nonjson"])
+def test_wo145_control_i_never_fails_the_deploy(tmp_path: Path, mode: str) -> None:
+    """Observability, not a gate. A transient API error or a shape change must
+    not block a deploy - the registered wording is "not as a lapse trigger"."""
+    bin_dir = tmp_path / "bin"
+    if mode == "http_fail":
+        _fake_curl(bin_dir, "", http_fail=True)
+    else:
+        _fake_curl(bin_dir, "not json at all")
+    result = _run_shell(_run("guard", ELIGIBILITY_NAME), _eligibility_env(), bin_dir=bin_dir)
+    assert result.returncode == 0, result.stderr
+    assert "::warning::" not in result.stdout
+
+
+def test_wo145_check_2_is_still_the_deploy_jobs_first_step() -> None:
+    """Control (i) was added to the GUARD job deliberately. If it had landed in
+    `deploy`, check 2 would no longer be that job's first step, which §145.1
+    pins by position."""
+    assert _job("deploy")["steps"][0]["name"] == CHECK2_NAME
+    assert ELIGIBILITY_NAME not in [s.get("name") for s in _job("deploy")["steps"]]

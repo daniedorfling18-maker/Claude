@@ -12914,3 +12914,100 @@ reads and string-compares two fields, which is "reading a result," not
 same two fields from `refresh_governance.py` into `governance_refresh.json`
 would be redundant now that every deploy already republishes them in
 `deploy_acceptance.json`, and is not registered here or anywhere.
+
+### 143.8 — Two P1 corrections from Codex review of `3cf7509` (registered 2026-08-02)
+
+Both were re-verified against the code before registration. **The first is a
+defect in §143.7(a) — this orchestrator's own registered text — not in the
+build.**
+
+#### (a) `paper_trading_invoked` must be TRUE when the paper broker genuinely ran
+
+§143.7(a) instructed: *"Add both to the initial `report` dict at construction so
+every writing path carries them."* Implemented exactly as written
+(`paper_cycle.py:143`), that sets `paper_trading_invoked: False`
+**unconditionally** — including on the full-scope path, which calls
+`paper_trade(cfg)` at `:290` and may produce fills. `forward_paper_cycle.json`
+therefore states that no paper trading occurred on runs that genuinely executed
+paper orders. **The artifact lies, and the instruction that made it lie is
+mine.**
+
+**The rule I cited five times across five review rounds contains the exception I
+missed.** `AGENTS.md` L131-135 reads in full:
+
+> Every new artifact is fail-closed and states `paper_trading_invoked=false` and
+> `live_trading_invoked=false` **unless an already-authorized paper path
+> genuinely produced it.**
+
+The full paper cycle IS an already-authorized paper path. The clause anticipates
+exactly this case. Quoting the first half of a rule as authority for five rounds
+while its second half said the opposite is the failure mode S8's A5
+(contradiction checking) exists to catch, applied to an external document rather
+than to a sibling clause — and A5 as written only requires checking against
+clauses *of the same WO*. **Widen A5 at the next `ENGINEERING_STANDARDS.md`
+amendment: a new clause is checked against every clause it cites, including in
+`AGENTS.md`, not only against its own WO.**
+
+**Corrected requirement.** `paper_trading_invoked` is `False` at construction and
+is set `True` immediately after `paper_trade(cfg)` returns on the full-scope
+path. It stays `False` on every blocked path, every `scoring_only` path, and the
+lock-skip branch — none of which reach the broker. `live_trading_invoked` stays
+`False` unconditionally on every path; no live path exists.
+
+**Tests.** (1) a full-scope cycle that reaches `paper_trade` writes
+`forward_paper_cycle.json` with `paper_trading_invoked: true`; (2) a
+`scoring_only` cycle writes `false`; (3) every blocked path writes `false`;
+(4) the lock-skip branch writes `false`; (5) `live_trading_invoked` is `false`
+on all of the above; (6) a full-scope cycle blocked BEFORE `paper_trade` (bad
+`trading_mode`, feature/model load failure) writes `false` — the flag tracks the
+call, not the scope.
+
+#### (b) The §143.6 lock-clearer needs a collision-resistant owner identity
+
+`_PROCESS_STARTED_AT_UTC = now_utc()` (`runtime_lock.py:15`) and `now_utc()`
+returns `strftime(ISO_FORMAT)` (`utils.py:20-21`) — **second resolution**. Two
+containers whose namespaced PIDs collide and which import `runtime_lock` within
+the same UTC second therefore produce **identical owner stamps**. §143.6's
+lock-clearer compares PID plus that stamp, so it would mistake the scheduler's
+**actively held** lock for a same-process orphan and unlink it, letting the live
+loop enter the prediction cycle concurrently with the scheduled writer. That is
+the precise failure §143.6 was tightened to prevent, reachable through the
+identity it uses to decide.
+
+Namespaced PID collision across containers is ordinary, not exotic: each
+container has its own PID namespace, so low PIDs recur. The second-resolution
+window makes the rest a coincidence rather than an impossibility.
+
+**Corrected requirement.** The owner identity must be unique across processes
+and containers — a per-process random token (e.g. `uuid4().hex`) generated once
+at import and stamped into the lock payload, compared as a whole. PID and
+`process_started_at_utc` may remain in the payload for diagnostics but **must
+not be the identity that authorises an unlink.**
+
+**Fail-safe.** An unlink happens only on an exact match of the unique token; a
+missing, empty, or unparseable token means **no unlink** — the lock is left
+alone and the caller backs off, which is the existing fail-closed behaviour.
+
+**Tests.** (1) two payloads with identical PID and identical
+`process_started_at_utc` but different tokens do NOT authorise an unlink;
+(2) a matching token does; (3) a missing or empty token does not;
+(4) the token is stable within a process and differs across processes.
+
+**Touched-file impact.** Item (b) requires `src/polymarket_predictive_engine/runtime_lock.py`,
+which is **NOT** in WO-143's eleven-file list — the preamble explicitly forbids
+touching it. **This raises WO-143's list to twelve** (`runtime_lock.py` added)
+and strikes `runtime_lock.py` from the do-not-touch sentence for this item only.
+Note WO-143b also edits `runtime_lock.py` for the F1 heartbeat; the two changes
+are independent (identity vs heartbeat) but land in the same file, so whichever
+branch merges second resolves.
+
+**Fail-safe sentence for §143.8.** Nothing here marks a market measured, changes
+any M-A/M-B/M-C or `maker_min_*` threshold, opens or enables any order path, or
+loosens any gate; item (a) makes an artifact state what actually happened rather
+than an unconditional falsehood, and item (b) narrows the conditions under which
+a held lock may be unlinked, so both are strictly tightening.
+
+**Day-after check.** `forward_paper_cycle.json` reads
+`paper_trading_invoked: true` on cycles whose broker block records filled or
+rejected orders, and `false` on every scoring-only and blocked cycle; and no
+`prediction_cycle` lock is unlinked by a process that did not create it.

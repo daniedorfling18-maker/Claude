@@ -8206,8 +8206,13 @@ image tag, checkout update preserving runtime state, markers written before
 container recreation, `--profile deploy-acceptance` with the scheduler stopped,
 `check_polymarket_vps_paper.sh`, and `rollback_vps_paper_deploy.py` on any
 failure past the arming boundary. Add
-`.github/workflows/deploy_vps_paper_dispatch.yml`: a `workflow_dispatch` job
-that runs that script on the VPS over SSH.
+`.github/workflows/deploy_vps_paper_dispatch.yml`: **two jobs — an un-gated
+guard job and an `environment:`-gated deploy job on `needs:` + `if:`** — that
+run that script on the VPS over SSH. **Triggers are `push` on `main` and
+`workflow_dispatch` (amended by §145.1 2026-08-02; this paragraph previously
+said "a `workflow_dispatch` job", singular and dispatch-only).** The two-job
+split is not cosmetic: `environment:` gates a job's START, so a guard inside the
+gated job cannot suppress the approval request — see §145.1(a).
 
 ### The two honesty fields this WO must NOT silently invalidate
 
@@ -8222,7 +8227,8 @@ BOTH paths.** "Preserve the literal for a genuine owner shell" was wrong —
 nothing can establish "a genuine owner shell"; anyone with SSH to the VPS
 produces one, and that unprovability is the very reason `attestation_verified`
 is `false`. So: `authorised_by` is replaced by `trigger_mechanism`
-(`workflow_dispatch` | `vps_shell`) plus, on the workflow path, `github.actor`
+(`workflow_dispatch` | **`push`** | `vps_shell` — **`push` added in place by
+§145.1 2026-08-02**) plus, on the workflow path, `github.actor`
 and **the `environment:` approval actor**.
 
 **Register the inversion this creates, because it is the honest reading.** With
@@ -8276,8 +8282,12 @@ registered verbatim below rather than delegated.
 
 ### Trigger, concurrency and credential controls (all previously missing)
 
-- **`environment:` with required reviewers** on the `workflow_dispatch` job.
-  Without it, anyone with write access — including the orchestrator, which posts
+- **`environment:` with required reviewers** on the **`deploy` job**
+  (*amended by §145.1 2026-08-02: this read "the `workflow_dispatch` job", which
+  named a job that no longer exists — §145.1 registers a `guard` job and a
+  `deploy` job, both fed by both triggers. The gate belongs on `deploy` and must
+  NOT be placed on `guard`, or check 1 could never suppress an approval
+  request*). Without it, anyone with write access — including the orchestrator, which posts
   from the owner's account — can deploy production unreviewed. This is the most
   dangerous omission in the first draft.
 - **Share Path A's concurrency group exactly**: `group:
@@ -8353,13 +8363,18 @@ reported, so reliance on the un-attested route stays measured. Under a permanent
 Path B the honesty field is the only standing record of what is not proven,
 which makes it MORE load-bearing than it was under a sunset, not less.
 
-**Touch ONLY these files** (`git diff --stat` must show exactly these six).
-The register is deliberately EXCLUDED — a build PR does not edit its own WO
-status, matching WO-143's list:
+**Touch ONLY these files** (`git diff --stat` must show exactly these seven —
+**count corrected 2026-08-02 by §145.1: the list said six and omitted
+`tests/test_required_pr_gate.py`, whose pinned workflow inventory the new
+workflow file fails until it is updated. As registered, the build could not have
+passed its own suite**). The register is deliberately EXCLUDED — a build PR does
+not edit its own WO status, matching WO-143's list:
 - NEW `.github/workflows/deploy_vps_paper_dispatch.yml`
 - `scripts/deploy_vps_paper_manual.sh` (`trigger_mechanism` and actor fields
   replacing the hardcoded `"authorised_by": "owner"` at `:391`; attestation
-  reason string)
+  reason string; **and, added by §145.1(a1b) 2026-08-02, removal of the
+  `:-$remote_sha` tip-defaulting fallback at `:99` so an unset
+  `PM_DEPLOY_TARGET_SHA` is rejected instead of silently retargeting**)
 - `AGENTS.md` (dated policy-vs-capability amendment, text registered below)
 - NEW `tests/test_deploy_vps_paper_dispatch_workflow.py`
 - `tests/test_vps_only_operating_docs.py` (extend for the amended text)
@@ -8367,6 +8382,15 @@ status, matching WO-143's list:
   **`:337` asserts `record["authorised_by"] == "owner"` and this WO changes that
   field**; omitting it would force the build to either fail the suite or edit
   outside its own contract
+- `tests/test_required_pr_gate.py` (added by §145.1) —
+  `test_workflow_inventory_has_only_registered_triggers` (`:259`) pins the exact
+  set of workflow filenames and each one's trigger set. The new workflow must be
+  registered there as
+  `"deploy_vps_paper_dispatch.yml": {"push", "workflow_dispatch"}`. **Nothing
+  else in this file may be touched** — the parametrisation at `:837-859` names `conftest.py`,
+  `tests/integration/conftest.py`, `pytest.ini` and `pyproject.toml` as protected
+  merge controls, and this bullet
+  does not extend to them
 
 **Register cross-reference to update in a later docs pass (not this build):**
 WO-133's acceptance list names *"authoriser recorded"* as a deploy-record
@@ -8385,6 +8409,36 @@ POLICY limit, not a capability limit — Path B is permitted, records
 `attestation_verified: false`, and this permission lapses under the sunset
 above.
 
+**Added by §145.1(a1b) 2026-08-02 — the Path B invocation form, registered here
+because (5c) makes the bare form refuse.** The amendment additionally states
+that a `vps_shell` deploy is invoked as:
+
+```
+PM_DEPLOY_TARGET_SHA=<40-hex commit sha> scripts/deploy_vps_paper_manual.sh
+```
+
+**A LITERAL forty-hex SHA, read from the merged pull request on GitHub. NOT a
+shell substitution.** `PM_DEPLOY_TARGET_SHA=$(git rev-parse origin/main)` was
+offered in an earlier draft of (a1b) and is **withdrawn as defective** — proven
+by execution against the real `assert_target_is_origin_main`
+(`scripts/deploy_vps_paper_manual.sh:96-105`):
+
+- The script's own `git fetch` (`:97`) runs **after** the operator's
+  substitution has already been evaluated, so on a VPS whose local `origin/main`
+  ref is stale — the normal state, and the state Path B exists to serve when
+  Actions is down — the substitution yields the *old* SHA and the deploy
+  **refuses**.
+- On a freshly fetched ref it yields the tip, which is **byte-for-byte the
+  `:-$remote_sha` behaviour (5c) exists to delete**: the guard compares the tip
+  to itself and can never fail.
+
+**The justification is corrected too.** An earlier draft said "an operator
+typing the command is present and deciding". That is true only of a literal
+SHA. Typing a command substitution decides nothing — it delegates the choice
+back to whatever the ref happens to be. The registered property is that the
+operator **names the commit being deployed**, which is the same property (a1)
+restores on the workflow path.
+
 **Tests (enumerated; rewritten — the first draft's set mostly asserted
 pre-existing script behaviour, and its "no secret appears in the log" test had
 no offline implementation and would have required holding the secret).**
@@ -8396,8 +8450,11 @@ new fields:
 2. the workflow declares `environment:`, the shared concurrency group
    `deploy-polymarket-vps-paper` with `cancel-in-progress: false`, and a
    `permissions:` block no broader than Path A's.
-3. only `workflow_dispatch` is declared — no `pull_request_target`, no fork
-   trigger, no `schedule`.
+3. **AMENDED IN PLACE by §145.1 2026-08-02 — this previously read "only
+   `workflow_dispatch` is declared", which §145.1's own test (1) contradicts.**
+   As amended: exactly `push` (restricted to `main`) and `workflow_dispatch` are
+   declared — no `pull_request`, no `pull_request_target`, no fork trigger, no
+   `schedule`.
 4. `StrictHostKeyChecking` is not disabled anywhere in the workflow.
 5. a nonzero script exit inside `tmux` yields a nonzero job (exercise the
    sentinel/poll contract directly, not through a real deploy).
@@ -8417,6 +8474,387 @@ surfaced so Path-B reliance is **measured rather than invisible** — making the
 un-attested route the ergonomic one is a de facto loosening of the deploy
 control even though no threshold moves, and it must be visible.
 
+### 145.1 — Auto-trigger the deploy on merge to `main`, holding at the approval gate (registered 2026-08-02, owner-directed)
+
+**What changes.** WO-145 registers the new workflow as `workflow_dispatch` only.
+The owner directed 2026-08-02 that it additionally trigger on merge to `main`.
+The `environment:` required-reviewer gate is **unchanged** — the deploy still
+stops there and waits for a human. What is removed is the owner having to
+*remember to start it*, which is the remaining laptop-shaped step.
+
+**Registered trigger:**
+
+```yaml
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+```
+
+`pull_request_target`, fork triggers and `schedule` remain **forbidden**, as
+WO-145 already registers.
+
+**No `paths:` filter — stated so a builder does not add one as an
+"optimisation".** A docs-only merge still moves the `main` SHA, and the VPS
+refuses to deploy unless its checkout equals `origin/main`
+(`deploy-polymarket-vps-paper.yml:263-269`; `scripts/deploy_vps_paper_manual.sh`
+enforces the same *property* by a different and weaker mechanism — see (a1),
+which corrects an earlier version of this sentence that called them "the same
+guard"). Skipping deploys for docs-only merges
+would therefore leave `source_vs_deployed_sha` reading `DIVERGED` until some
+later code merge, which is exactly the invisible-drift condition WO-145 exists
+to end. Every merge deploys.
+
+**(a) The stale-SHA guard, which auto-trigger makes necessary**
+
+Under `push`, two merges in quick succession queue two runs. WO-145 registers
+`concurrency: group: deploy-polymarket-vps-paper, cancel-in-progress: false`,
+so they run in order — and by the time the **first** runs, `origin/main` has
+moved past its `github.sha`. The VPS-side check then errors, producing a red run
+for a condition that is not a fault.
+
+**Required — TWO CHECKS at two different times, because supersession happens in
+two different places (corrected 2026-08-02 after the second registration gate,
+which showed the first two-job design could not produce its own registered
+outcome).**
+
+**Check 1 — before pickup, un-gated.** A `guard` job resolves the current
+`origin/main` tip and sets an output. The `deploy` job carries the
+`environment:` gate and runs only on `needs: [guard]` with an `if:` on that
+output. When `github.sha` is already not the tip, the deploy job is
+**`skipped`** — it never starts, so no SSH runs, no `vps_manual_deploy.json` is
+written, and **no approval request is emitted**. This catches back-to-back
+merges landing within seconds of each other.
+
+**Check 2 — after approval, inside the gated job.** The deploy job re-resolves
+`origin/main` as its first step and, when `github.sha` is no longer the tip,
+**fails** with the literal message `superseded: approved <github.sha>, main is
+now <tip>; approve the newer run`. It does **not** deploy and does **not**
+write a deploy record.
+
+**Why check 1 alone is insufficient — this is the flaw the second gate found.**
+A job's outputs are **frozen when that job completes**. The guard is un-gated,
+so it finishes seconds after the merge and the entire approval wait happens
+*downstream* of it. In §145.1(a1)'s own scenario — merge A, park at the gate,
+merge B lands, the owner approves the run labelled A — the guard had already
+passed, because A **was** the tip when it ran. The deploy job is therefore not
+skipped. The first version of this clause registered `skipped` as the outcome
+for exactly the case it cannot produce.
+
+**The unavoidable trade-off, stated rather than engineered around.** Check 2
+runs *after* the approval, so a run superseded **during** the wait **does** page
+the owner. That cannot be fixed: the approval wait is precisely the window in
+which supersession occurs, and no check placed before the wait can observe an
+event that happens during it. What is bounded is the harm — check 2 plus the
+(a1) pinning make a wrong deploy impossible; the cost is one approval request
+that resolves to a red run.
+
+**Check 2's outcome is `failure`, and that is deliberate.** It cannot be
+`skipped` — the job has already started. It must not be `success`: a green run
+that deployed nothing is indistinguishable in the run list from a real deploy,
+which is the defect this section already rejected once. A red run reading
+`superseded: approved A, main is now B; approve the newer run` is accurate and
+actionable.
+
+**Why check 1 cannot be a step inside the gated job** (this concerns CHECK 1
+only — check 2 *is* a step inside the gated job, deliberately, and the reasoning
+below is why the two cannot be the same step; heading corrected 2026-08-02 after
+a gate found the previous wording read as an instruction against check 2): `environment:` is a *job-level*
+property and its protection rules gate the job's **start**. The reviewer
+notification fires before any step of that job executes, so a guard step could
+not suppress it — every superseded run would page the owner, which is the exact
+noise this amendment exists to remove.
+
+**No registered outcome is ever "neutral".** An earlier version of this clause
+required the run "terminate NEUTRAL". **GitHub Actions has no producible neutral
+outcome** — the `exit 78` neutral exit was removed at GA in 2019, and a job ends
+`success`, `failure`, `cancelled`, `skipped` or `timed_out`. A builder
+implementing "neutral" would substitute `success`, producing a **green run that
+deployed nothing** — indistinguishable in the run list from a real deploy. The
+two registered outcomes are `skipped` (check 1) and `failure` (check 2), both
+producible and both visibly distinct from a deploy.
+
+**(a1) The deploy target is PINNED to `github.sha`. This is the most important
+requirement in §145.1 and the first version omitted it entirely.**
+
+`scripts/deploy_vps_paper_manual.sh:99` reads
+`target_sha="${PM_DEPLOY_TARGET_SHA:-$remote_sha}"` — **with the variable unset
+it retargets to whatever `origin/main` is at that moment**, and the guard on the
+next line then compares the tip to itself and can never fail. Under
+`workflow_dispatch` the exposure was seconds and human-attended. **This
+amendment makes the owner absent by design, so it converts a theoretical window
+into the normal case:** merge A creates a run; the run parks at the gate; merge
+B lands; the owner approves the run *labelled A*; the VPS deploys **B**, and
+`vps_manual_deploy.json` records B's SHA against A's approval actor with
+`source_vs_deployed_sha: ALIGNED`. Nothing anywhere flags it.
+
+**Required:** the SSH invocation passes `PM_DEPLOY_TARGET_SHA: ${{ github.sha }}`
+explicitly. An invocation that does not pin it is a defect, not a default. The
+approval and the deployed commit must be the same commit.
+
+**This also corrects a mis-citation.** An earlier version of this section called
+the manual script's check "the same guard" as
+`deploy-polymarket-vps-paper.yml:263-269`. They are not the same: Path A
+compares a *caller-supplied* SHA to the tip and fails closed on drift; the
+manual script *defaults the target to the tip* and therefore cannot detect
+drift. One fails closed, the other silently retargets.
+
+**Fail-closed direction, stated for BOTH checks because "skipped" is the
+permissive-sounding branch (reconciled to the two-check design 2026-08-02; the
+previous wording spoke only of "the guard" and predated check 2).** Neither
+check can ever *cause* a deploy: check 1 may only skip, check 2 may only fail.
+**Both resolve the tip, so both carry the same A2 branches** — if the tip cannot
+be resolved for network failure, ref read error, empty result, or an unparseable
+value, the job **fails** rather than proceeding, because an unresolvable tip
+means the precondition is unknown and an unknown precondition must not deploy.
+Missing, empty and unparseable take the fail branch in check 1 and in check 2
+alike.
+
+**(a1b) Deleting the fallback changes the `vps_shell` route, and that must be
+registered rather than fall out (added 2026-08-02, second gate).** Test (5c) is
+satisfiable only by removing the `:-$remote_sha` default at
+`scripts/deploy_vps_paper_manual.sh:99`. Three consequences the first version
+did not account for:
+
+- `AGENTS.md:92` names Path B as `scripts/deploy_vps_paper_manual.sh` in a
+  **prose heading** — *"Path B — `scripts/deploy_vps_paper_manual.sh`, for when
+  Path A is not available"* — not as a command-line invocation, and `AGENTS.md`
+  carries no invocation of the script anywhere. *(Citation corrected 2026-08-02:
+  an earlier draft of this bullet called it "a bare invocation".)* The gap is
+  therefore that **no registered text shows how to invoke Path B at all**, and
+  after (5c) the obvious bare form refuses. **The explicit form is now
+  registered in the `AGENTS.md` amendment block above, with a literal SHA.**
+  `AGENTS.md` is already file 3 of the seven, so this is in scope.
+- WO-145's enumerated test 6 requires `trigger_mechanism` "on BOTH paths" and
+  §145.1(b) keeps `vps_shell` in the closed set. A `vps_shell` deploy therefore
+  still works, but the operator supplies a **literal** target SHA. **It must not
+  be a shell substitution** — see the amendment block above, where
+  `$(git rev-parse origin/main)` is withdrawn as defective in both directions.
+  The registered property is that the operator names the commit being deployed.
+- The touched-file bullet for `scripts/deploy_vps_paper_manual.sh` scopes the
+  edit to the `trigger_mechanism`/actor fields at `:391` and the attestation
+  reason string. **It is widened here to name the `:99` fallback removal.**
+  Without that, the build could not satisfy (5c) inside its own contract.
+
+**(a2) `timeout-minutes` literal and basis (A1).** The new workflow registers
+**`timeout-minutes: 70`**, the same literal Path A carries. Basis: it is not a
+fresh estimate — Path A's value has three dated derivations in its own header
+(20 → 30 → 40 → 70) driven by measured deploy durations, a 20-minute governance
+wait and a 25-minute acceptance ceiling, and **this workflow runs the same
+guarded deploy on the same host**, so the same worst case applies. A smaller
+value would reintroduce the cancelled-mid-rollout failure that history
+documents twice. The guard job registers **`timeout-minutes: 5`** — it performs
+one `git ls-remote` and nothing else.
+
+**Explicitly NOT the fix: `cancel-in-progress: true`.** It would abort a
+*running* deploy mid-rollout, which is the unverified-deploy failure
+`deploy-polymarket-vps-paper.yml`'s own timeout history documents twice. WO-145
+registers `cancel-in-progress: false` to prevent two concurrent writers, and
+that stands.
+
+**(b) `trigger_mechanism` gains a third value**
+
+WO-145 registers `trigger_mechanism` as `workflow_dispatch | vps_shell`. It
+becomes **`workflow_dispatch | push | vps_shell`**. A `push`-triggered run
+records `push` plus `github.actor` and the environment-approval actor — never a
+claimed identity, and never the literal `authorised_by: "owner"` this WO exists
+to remove. Nothing here upgrades `attestation_verified`, which stays `false`.
+
+**(c) Touched-file list: six → SEVEN, and the edit is performed here**
+
+Adding a workflow file fails
+`tests/test_required_pr_gate.py::test_workflow_inventory_has_only_registered_triggers`
+(`:259`), which pins the exact set of workflow filenames **and** each one's
+trigger set, and asserts every workflow carries `timeout-minutes:`,
+`concurrency:` and `permissions:`. WO-145's six-file list omits it, so the build
+as registered could not pass its own suite. The list above now reads **seven**
+with `tests/test_required_pr_gate.py` named, registering
+`deploy_vps_paper_dispatch.yml: {"push", "workflow_dispatch"}`.
+
+*(This reconciliation is performed in the parent list in this same diff, not
+merely stated here. An amendment that declares a list change and does not make
+it is the defect that cost PR #421 four review rounds.)*
+
+**Tests (additive to WO-145's set).** (1) the workflow's `on:` block contains
+exactly `push` and `workflow_dispatch`, and no `schedule`,
+`pull_request_target`, or `pull_request`; (2) `push` is restricted to `main`;
+(3) the inventory test recognises the new file with that exact trigger set;
+(4) with `github.sha` behind the resolved tip, the deploy job is **`skipped`**
+and no SSH step runs, asserted by a sentinel the SSH step would have written;
+(4b) the guard job carries **no** `environment:` key and the deploy job carries
+it, so a superseded run emits no approval request;
+(5) with `github.sha` equal to the tip, the run proceeds to the gate;
+(5b) **the SSH invocation passes `PM_DEPLOY_TARGET_SHA` set to `github.sha`**,
+asserted against the workflow text; (2c) with the approvals response stubbed **empty**, the deploy job fails and
+**no SSH step runs**, asserted by a sentinel the SSH step would have written;
+(2d) with an entry whose state is `approved` it proceeds, and with an entry
+whose state is **`rejected`** it **fails** — the case that distinguishes
+`any(state == "approved")` from a non-empty check; (2e) with the query
+erroring, timing out, or returning non-JSON it fails. All three are executed
+offline against the step's `run:` block with the API call shimmed, the harness
+(4f) and (4g) already require. **(2f) the query names THIS run**: the URL
+contains `${{ github.repository }}` and `${{ github.run_id }}`, asserted against
+the workflow text — *added 2026-08-02 after a gate showed a step with a
+hardcoded or wrong `run_id` behaves identically under every stubbed response,
+so the shimmed tests alone cannot see which run is being queried*;
+(4c) **CHECK 2 EXISTS** — the deploy job's **first** step re-resolves
+`origin/main`, asserted against the workflow text by position, not merely by
+presence: no step may precede it in that job. **This test was absent from the
+first version of the check-2 design, and a gate demonstrated that a workflow
+omitting check 2 entirely passed every other registered test with a green
+suite** — reproducing the exact structural defect check 2 was added to fix,
+undetectably; (4d) that step emits the message
+`superseded: approved <github.sha>, main is now <tip>; approve the newer run`,
+where **`<github.sha>` and `<tip>` are SUBSTITUTED, not literal**. The test
+pins the three invariant fragments — `superseded: approved `, `, main is now `,
+`; approve the newer run` — **and asserts each placeholder position holds an
+interpolation rather than the literal angle-bracket text**. *(Corrected
+2026-08-02 after a gate demonstrated both failure directions: a test pinning the
+whole line as a string FAILS on a correct build, which is the very defect this
+clause claims to prevent and the same one already corrected once for
+`divergence_started_at_utc`; and a build that echoes `<github.sha>` verbatim
+PASSES every other registered test while emitting a message containing no SHAs
+at all.)*;
+(4e) that step's failure branch is `exit 1` — **not** `exit 0`, and not a
+`continue-on-error` step, so a superseded run reads `failure` and never
+`success`; (4f) check 2's own tip resolution has the same A2 branches as check
+1's: a missing, empty, or unparseable tip **fails** the job rather than
+proceeding to deploy. **(4f) is executed offline**, by extracting the step's
+`run:` block and shimming `git` on `PATH` — no Actions harness is required;
+(4g) **check 2's comparison is exercised behaviourally on the same harness**:
+with the resolved tip **differing** from `github.sha` the step exits **nonzero**,
+and with it **equal** the step exits **zero**. *(Added 2026-08-02: (4c)-(4f) are
+text assertions plus one unresolvable-tip case, and a gate showed that a check 2
+whose comparison is wrapped `( ... ) || true` — or whose polarity is inverted —
+passes all of them. The harm is bounded by (a1)'s pinning, since the VPS guard
+refuses a stale SHA before touching the host, but the registered `superseded:`
+message would be lost and only the day-after check would notice.)*; (5c) an invocation with
+`PM_DEPLOY_TARGET_SHA` unset or empty is **rejected** — the registered pinning
+must not be satisfiable by the script's tip-defaulting fallback at
+`scripts/deploy_vps_paper_manual.sh:99`; (5d) the remote process actually
+receives the value — `PM_DEPLOY_TARGET_SHA: ${{ github.sha }}` as workflow
+`env:` does **not** cross the `ssh` boundary on its own, so the test asserts the
+variable is present in the command string sent to the host, not merely declared
+in the workflow;
+(6) with the tip unresolvable (stubbed to fail, and separately to return empty),
+the run **fails** and does not deploy — the fail-closed branch;
+(7) `concurrency` is byte-identical to Path A's group with
+`cancel-in-progress: false`; (8) a `push`-triggered record carries
+`trigger_mechanism: push` and no `authorised_by` key at all.
+
+**Fail-safe sentence for §145.1.** Nothing here marks a market measured, changes
+any M-A/M-B/M-C or `maker_min_*` threshold, opens or enables any order path, or
+upgrades any attestation, and the `environment:` approval gate itself is
+unchanged.
+
+**(a3) The approval gate must be ENFORCED AT RUNTIME, not assumed from
+configuration (added 2026-08-02, fourth gate).** An earlier version of this
+sentence asserted "every deploy still requires a human approval and none can
+proceed without one". **No registered artifact can establish that.** Enumerated
+test 2 asserts only that the workflow *declares* `environment:`; whether that
+environment carries a required-reviewer protection rule lives in GitHub
+repository settings, which no test in this repo can read and no reviewer here
+can inspect.
+
+Under WO-145's dispatch-only design that gap was tolerable — an unconfigured
+environment still had a human in the loop by construction, because the owner
+started the run. **§145.1 removes that human.** With `push` and no `paths:`
+filter, an environment lacking its protection rule means **every merge to `main`
+deploys the VPS unattended**, and this section's fail-safe sentence would be
+false. That is the single largest blast-radius change in this amendment and it
+was previously left to a post-hoc day-after check, which by construction only
+fires *after* the first unattended deploy.
+
+**Required:** the deploy job's SSH step is preceded by a step that queries
+`/repos/{owner}/{repo}/actions/runs/{run_id}/approvals` and **fails the job
+unless that response contains an entry whose state is `approved`**, naming the
+missing protection rule. *(Corrected 2026-08-02: the first wording was "fails
+when the list is empty", and a gate showed a `state: "rejected"` entry makes the
+list non-empty, so a correct implementation would PROCEED on a rejection. The
+stated intent is "did a human approve this"; `any(state == "approved")` matches
+that intent by construction, `length > 0` does not.)* This converts
+an unpinnable repository setting into a runtime-enforced precondition. It is
+belt-and-braces when the environment IS configured — the query simply returns
+the approver — and it is the only thing standing between an unconfigured
+environment and an unattended production deploy.
+
+**Fail-closed, per A2:** an approvals query that errors, times out, returns
+non-JSON, returns an empty list, or returns entries none of which is `approved`
+**fails the job**. It never proceeds on doubt, because the doubt in question is
+"did a human approve this".
+
+**The (a3) tests are (2c)-(2f), and they live in the enumerated list ABOVE** —
+*numbering corrected 2026-08-02: a first draft called this "test (2b)", which
+collides with WO-145's own parent test 2 and appeared only in this prose, so a
+builder enumerating from the registered list would have missed it entirely. It
+belongs in `tests/test_deploy_vps_paper_dispatch_workflow.py` with the rest.
+Two further slips in that correction, caught by the same gate and fixed here:
+the roll-up read "(2c)-(2e)" and omitted **(2f)**, which is registered in the
+same insertion and is unambiguously an (a3) test since it constrains the
+approvals query URL; and it said the list was "below" when it is 108 lines
+above. Noted for what it is — a correction that needed correcting twice is the
+duplicate-set failure mode this PR has now hit in five separate rounds.*
+
+*Naming caveat, recorded rather than renumbered a fourth time:* under §145.1's
+own suffix convention — (4b) extends (4), (5b)-(5d) extend (5) — the label
+`(2c)-(2f)` reads as an extension of §145.1's test (2), which is "`push` is
+restricted to `main`", not the approval gate. The parent number is topically
+wrong. **No functional consequence** — each label is defined exactly once and
+collides with nothing — and a fourth renumbering has its own track record in
+this PR, so the label stands and the mismatch is recorded instead.
+
+**Owner precondition, stated because it is not mine to do:** the `environment`
+must carry a required-reviewer protection rule **before** WO-145's build merges.
+(a3) enforces it at runtime; it does not create it.
+
+**Related owner setting, recorded rather than assumed.** GitHub permits
+**self-approval** by default — "prevent self-review" is a separate rule that is
+**off** unless enabled. Under the `push` trigger `github.actor` is whoever
+merged, so the owner can merge and then approve their own deploy. That is still
+a human approval and (a3)'s registered claim holds, but §145.1's honest story is
+**"one human, two clicks"**, not "two humans". If the stronger property is
+wanted, enabling "prevent self-review" belongs beside the precondition above —
+it is an owner setting and this amendment does not assume it.
+
+**But the set of deploys a human must approve is NOT identical, and an earlier
+version of this sentence claimed it was (corrected 2026-08-02, second gate).**
+The population goes from *{deploys the owner chose to start}* to *{every merge
+to `main`}*, with no `paths:` filter, docs-only merges included. That is a
+strict increase in approval events and it is the approval-fatigue direction —
+the same de-facto pressure WO-145's parent insists be made visible rather than
+asserted away. **It is recorded here as an operational loosening: the gate is
+unchanged, the frequency at which it is exercised increases.** The mitigation is
+that check 1 suppresses the request entirely for runs superseded before pickup,
+so the increase is bounded by the merge rate, not by the merge rate plus
+retries.
+
+Neither new check can cause a deploy that would not otherwise happen: check 1
+can only skip, check 2 can only fail, and an unresolvable tip fails rather than
+proceeding.
+
+**Day-after check for §145.1.** After the first auto-triggered deploy:
+`vps_manual_deploy.json` records `trigger_mechanism: push` with a non-empty
+approval actor and **no `authorised_by` key**; `source_vs_deployed_sha` reads
+`ALIGNED` and `divergence_started_at_utc` is the **empty string** in
+`outputs/performance/vps_telemetry_manifest.json` (*corrected 2026-08-02: the
+first version named `telemetry/manifest.json`, which is the path on the
+`vps-telemetry` publication branch rather than the artifact the producer writes,
+and asserted the key was ABSENT — `build_manifest` emits it unconditionally at
+`write_vps_telemetry_manifest.py:122`, empty when aligned, so the original check
+would have failed on the success case*); **the deployed SHA equals the SHA the
+approval was issued against**; and after two merges landed inside one deploy
+window, exactly one run reached the VPS while the superseded run's **deploy
+job** shows **`skipped`** (superseded before pickup, check 1), **`failure`
+carrying the registered `superseded:` message** (superseded during the approval
+wait, check 2), or **`cancelled`** (a third merge entered the concurrency group
+while one run was pending). *(Corrected twice: the first version asserted
+`skipped` for both cases, which the design cannot produce for the
+during-approval one; the second omitted the level and the `cancelled` outcome —
+a check-1 suppression leaves the **run** green even though the **deploy job**
+is skipped, so an operator checking the run list would have read a correct build
+as a defect.)* **The deploy job of a superseded run must never read
+`success`.**
+
 ## S8 admission records (2026-08-01)
 
 S8 was registered in the same change as WO-143's §143.7, WO-143b's §143b.1 and
@@ -8427,7 +8865,7 @@ against them retroactively, and recording the result rather than assuming it:
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | WO-143 §143.7 | PASS (1800 with basis, two alternatives rejected) | PASS (non-finite → `blocked_inputs`) | n/a | PASS | PASS (§143.1 exception recorded) | PASS | **FAILED, now FIXED** — the count said ten and the config file was absent after its prohibition was struck; now eleven with the file listed | n/a | n/a | PASS | **ADMITTED after fix** |
 | WO-143b §143b.1 | **FAILED TWICE, now FIXED** — F1 first named four constants with no literals; the fix then introduced a FIFTH (`heartbeat_cap`) with no literal and an unsatisfiable ordering (`1320 < 1320`). Six constants are now literals with bases and the ordering is `1320 < 1800 < 2400` | PASS | PASS (roots widened to `src/`+`scripts/` off `__file__`) | PASS (Scope reconciled) | PASS | PASS (F4 antecedent) | PASS (fourteen) | PASS (F1 fan-out shown) | n/a | PASS | **ADMITTED after fix** |
-| WO-145 | PASS | n/a | n/a | n/a | PASS | n/a | PASS (six→seven) | n/a | PASS (both deploy paths enumerated) | PASS | **ADMITTED** |
+| WO-145 | PASS | n/a | n/a | n/a | PASS | n/a | **A7 PASS RETRACTED 2026-08-02** — the cell read "PASS (six→seven)" while the list itself declared **six** and enumerated six bullets, so the record and the list disagreed at the moment the PASS was granted. The list also omitted `tests/test_required_pr_gate.py`, whose pinned workflow inventory the registered new workflow file fails. Corrected to **seven** by §145.1, with the bullet added. **Second A7 escape; the first is WO-143 §143.7 on the row above — WO-143b §143b.1's failure was A1, not A7, and an earlier version of this cell miscounted it** | n/a | PASS (both deploy paths enumerated) | PASS | **A7 RE-OPENED 2026-08-02; re-closure NOT granted here.** The correction was authored by §145.1's drafter, and S8 forbids the same agent producing and approving an artifact. The A7 cell above is a defect record, not a pass. §145.1 itself carries **no S8 row** for the same reason — an independent admission pass must add both |
 
 The A1 failure on F1 is the checklist working on its first use, against text
 written by the same agent that registered the checklist. It was found by the

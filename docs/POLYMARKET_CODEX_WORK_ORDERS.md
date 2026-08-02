@@ -8882,6 +8882,36 @@ before that date predate this log and are not retroactively reopened. Seeded 202
 | WO | class | tiers used | subagent tokens | spec-review defects | build-review defects | escaped to deploy | day-after |
 |---|---|---|---|---|---|---|---|
 | WO-143.7 / 143b.1 amendment round | D | Opus draft, Opus review x3 | ~570k reviewer + ~390k engineers (parked) | 7 (round 1), 4 blockers (round 2), 5 blockers (round 3) | not yet built | — | pending |
+| WO-149 | M | Opus spec, Sonnet build, Opus review x2 (disjoint halves) | ~250k | 0 (registered clean in #419) | 0 blocking, 6 informational | **1 — an `F821` the offline suite could not see**, because `from __future__ import annotations` leaves the annotation unevaluated; caught by the required PR gate's `ruff`, not by pytest or either audit | pending deploy |
+| WO-150 | F | Opus spec, Sonnet build, Opus review + delta re-verify | ~230k | 0 | 1 — a corrupt `maker_live_test` block regressed to the PERMISSIVE branch, where `main` had raised | 0 | pending deploy |
+| WO-146 | F | Opus spec, Sonnet build, Opus review + delta re-verify | ~360k | 0 | 2 fixed (`AttributeError` escaping the shell fallback; a test comment misstating what `main` produces), 3 recorded (§146.5, unreachable `isfinite` guards, a dead test branch) | 0 | pending deploy |
+| WO-145.1 registration | D | Opus draft, Opus registration gate **x6** | ~700k reviewer | **7 → 6 → 2 → 0 blockers**, then 3 delta rounds | not yet built | — | pending |
+
+**Reading of the 2026-08-02 rows — the tiering held, the review shape did not.**
+Three class-F/M builds went Sonnet-built and Opus-reviewed and produced **zero
+blocking build defects between them**; every defect found was a fail-closed
+regression or an inaccuracy, and each was caught by an independent audit rather
+than by the author. That is Part 3's split working as designed.
+
+**The one escape is the informative row.** WO-149's `F821` reached the required
+PR gate because *three* checks could not see it: pytest cannot (the annotation is
+never evaluated under `from __future__ import annotations`), and neither line
+audit ran a linter because both were auditing code against registered spec.
+**A green offline suite is not the gate's definition of green**, and the
+orchestrator's PR body said "full suite green" while the gate disagreed. Cheap
+fix already adopted: `ruff check .` runs before every push, not after a red CI.
+
+**WO-145.1 is the outlier and its shape is the lesson.** Six gate rounds on a
+~300-line docs diff, converging 7 → 6 → 2 → 0. Rounds 1-3 were substantive
+reasoning defects; rounds 4-6 were almost entirely **a correction applied in one
+place and not its duplicates** — a withdrawn instruction surviving in the
+touched-file list that scoped it, a file count corrected in the preamble and
+stale in three cross-references, a test list renumbered and not updated where it
+was cited. A4, A7 and the proposed A-new all target that class and none caught
+it, because each is stated per-claim while the failure is per-*duplicate*. The
+cheaper remedy is structural and is now standing practice: **keep an amendment
+small enough that its own duplicate set is enumerable by inspection**, and run
+the mechanical count checks before dispatching a gate rather than after.
 
 Reading of the seed row: spec-review defect count did not fall between rounds,
 which by Part 4's rule means the admission checklist gains the rule that would
@@ -8890,7 +8920,7 @@ have caught the recurring one. Rounds 2 and 3 were both dominated by
 already A4, A5 and A7. Those rules were written after this cycle, so the next
 cycle is the first real test of whether they bite.
 
-## WO-146 — The DR archive build trigger IS its own RPO ceiling — `queued` (registered 2026-08-01; `disaster_recovery` tighten-only settings block + a registered watchdog-read artifact → OWNER MERGE after line-audit; build cadence 24.0h → 20.0h, no ceiling changes)
+## WO-146 — The DR archive build trigger IS its own RPO ceiling — `done` (2026-08-02, PR #426; registered 2026-08-01; `disaster_recovery` tighten-only settings block + a registered watchdog-read artifact, routed owner-merge after line-audit; build cadence 24.0h → 20.0h, no ceiling changes — the line audit confirmed `compliant` bit-identical to `main` across a 13-point age sweep, so only the DUE decision moves; two audit findings fixed in the build (an `AttributeError` escaping the shell fallback, and a test comment that misstated what `main` produces), three recorded — see §146.5; **DEPLOY PENDING** — the daily `disaster_recovery_not_recoverable` incident keeps firing on the VPS until a deploy carries this revision, because the deployed build cadence is still 24.0h)
 
 **Provenance.** 2026-08-01 telemetry: `disaster_recovery_status.json` reads
 `status: ok`, archive built 13:00:11Z, `remote_push_status: ok` — yet
@@ -9109,6 +9139,80 @@ day. (3) shell fallback `6.0` ("displays sooner") adopted over omitting the
 field. (4) 146.2 accepted into this WO: strictly tightening, and A2 compels it
 once `_validated_rpo` is edited. (5) TS-4 provenance resolved above by
 withdrawal.
+
+### 146.5 — The build interval is not coupled to the ceiling it protects (registered 2026-08-02 from PR #426's line audit; NOT built in #426)
+
+**The gap.** 146.1 clamps `archive_build_interval_hours` to `[6.0, 20.0]` with
+**no coupling to `active_rpo_hours`**. Before WO-146 the build trigger *was*
+`active_rpo_hours`, so tightening the ceiling automatically tightened the
+cadence. It no longer does. Measured by the line audit:
+
+| `active_rpo_hours` | build trigger before WO-146 | after | margin |
+|---|---|---|---|
+| 6 | 6.0h | **20.0h** | -14.5 |
+| 12 | 12.0h | **20.0h** | -8.5 |
+| 24 | 24.0h | 20.0h | +3.5 |
+
+**Failure scenario.** An operator responds to a DR incident by tightening
+`active_rpo_hours: 24 → 12`, expecting more frequent archives. The rebuild
+cadence stays at 20h — the real recovery point degrades to **1.67× worse than
+before WO-146**, `archive_build_margin_hours` publishes `-8.5`, **nothing reads
+that field** (the audit found zero readers of it in `src` or `scripts`), no
+error is raised, and the incident does not clear.
+
+**Why this is a registration gap, not a build defect, and why #426 shipped
+anyway.** 146.1's ceiling basis argues only that config may make the archive
+*more* frequent than the 20.0 default; it never considers a ceiling **below**
+20.0. The #426 build is faithful to the clamp as registered, and changing it
+there would have deviated from the registration. The condition is **not
+reachable under the deployed config** (`active_rpo_hours: 24.0`) and the
+resulting state is loudly alarmed (`compliant: false`) both before and after
+WO-146 — so this degrades real archive freshness, never the alarm.
+
+**Corrected requirement.** The resolved interval is
+`min(20.0, active_rpo_hours - 0.5)`, then clamped up to the `6.0` floor. The
+`0.5` is the same measured scheduling-latency literal 146.1 already registers
+and derives. Restated: the interval may never sit at or above the ceiling it
+exists to stay under.
+
+**A2.** `active_rpo_hours` reaches this expression only after 146.2's
+`math.isfinite` guard, so a NaN or infinite ceiling has already raised. If the
+subtraction yields a value below the `6.0` floor, the floor wins and the
+resulting interval is **recorded as `clamped_to_floor`** — it is not an error,
+because a tighter cadence is always safe. A resolved interval that would still
+be `>= active_rpo_hours` after clamping is a **hard error**: it means the floor
+and the ceiling are irreconcilable and no cadence can satisfy the registration.
+
+**Touch ONLY these files** (`git diff --stat` must show exactly these two):
+
+- `src/polymarket_predictive_engine/disaster_recovery.py` — the resolver only.
+  `_validated_rpo`'s compliance comparison, the three ceiling literals, and
+  `_live_capital_context` stay byte-identical.
+- `tests/polymarket_predictive_engine/test_disaster_recovery.py`
+
+**Tests (enumerated).** (1) with `active_rpo_hours: 24.0` the resolved interval
+is **20.0**, unchanged from #426, and every WO-146 test still passes;
+(2) with `12.0` it is **11.5**, not 20.0; (3) with `6.0` it is the `6.0` floor
+with source `clamped_to_floor`; (4) with `6.4` the subtraction gives `5.9`,
+below the floor, so the result is `6.0` and is **not** an error; (5) with a
+ceiling low enough that even the floor exceeds it — `active_rpo_hours: 5.0` —
+the resolver **raises** and no archive is built; (6) `archive_build_margin_hours`
+is `>= 0` for every `active_rpo_hours` the clamps admit, which is the invariant
+this amendment exists to restore; (7) the compliance comparison is byte-identical
+to #426's across the same 13-point age sweep the line audit used.
+
+**Fail-safe sentence for §146.5.** Nothing here marks a market measured, changes
+any M-A/M-B/M-C or `maker_min_*` threshold, opens or enables any order path, or
+loosens any gate; the change strictly **shortens** the build interval for every
+ceiling below 20.5h and leaves it unchanged at the deployed ceiling, so the
+archive can only become fresher, never staler.
+
+**Day-after check.** `disaster_recovery_status.json` reads
+`archive_build_margin_hours >= 0` on every run, and at the deployed
+`active_rpo_hours: 24.0` the interval still reads `20.0` — this amendment is
+invisible at the deployed configuration and only binds if the ceiling is ever
+tightened.
+
 
 ## WO-147 — Expired markets on the official-book watchlist: measure first, exclude on positive evidence — `queued` (registered 2026-08-01; collection-side hygiene and observability only; **RE-SCOPED at drafting — the original framing was disproved, see Provenance**; no gate, threshold, eligibility rule, or funding value changes → OWNER MERGE after line-audit)
 
@@ -9549,7 +9653,7 @@ seed → eligible → seed BETWEEN two runs leaves no event, so **the conversion
 metric this WO enables is a LOWER BOUND on transitions, not a count.** It
 becomes a count only to the extent WO-151 gives the study a real cadence.
 
-## WO-149 — The replay join has no contemporaneous book state for 23% of prints, so every maker economic number is unvalidated model output — `queued` (registered 2026-08-01; new scheduler job + registered watchdog freshness entry + a keyword-only scope on the sole official-book collector → OWNER MERGE after line-audit; **`max_book_state_lag_seconds` stays 1800 — no tolerance is loosened**; DISPATCH FIRST of WO-146..149)
+## WO-149 — The replay join has no contemporaneous book state for 23% of prints, so every maker economic number is unvalidated model output — `done` (2026-08-02, PR #422; registered 2026-08-01; new scheduler job + registered watchdog freshness entry + a keyword-only scope on the sole official-book collector, routed owner-merge after two independent line-audits covering disjoint halves; **`max_book_state_lag_seconds` stays 1800 — no tolerance is loosened**; one lint fix round for an `F821` the offline suite could not see, because `from __future__ import annotations` makes the annotation unevaluated; **DEPLOY PENDING, and this is the binding one for the campaign** — `run_book_pulse` never fires on the VPS, so no `official_book_pulse.json` is produced and `M-B`'s `mb1_tier0_coverage_sufficient` stays `false`. Merging this WO did not move M-B; deploying it is what will)
 
 **Provenance — why this is the highest-value item in the maker lane.**
 `_size_portfolio` builds its pool from five ANDed predicates
@@ -9899,7 +10003,7 @@ entry only, no separate producer registration — the WO-143 §143.5 reasoning
 the orchestrator accepts that** — A1 forbids naming one without a basis, and the
 basis does not exist until the pulse has run.
 
-## WO-150 — `live_capital_context` must reflect binding capital, not the presence of a read-only monitoring address — `queued` (owner-directed 2026-08-01; registered same day; **LATENT LOOSENING: the RPO config clamp widens 24h → 168h; the applied compliance bound does NOT move** (an earlier version of this heading claimed the applied bound moves — retracted, see Direction) — `disaster_recovery` registered surface → OWNER MERGE after line-audit)
+## WO-150 — `live_capital_context` must reflect binding capital, not the presence of a read-only monitoring address — `done` (2026-08-02, PR #425; owner-directed 2026-08-01, registered same day; **LATENT LOOSENING: the RPO config clamp widens 24h → 168h; the applied compliance bound does NOT move** (an earlier version of this heading claimed the applied bound moves — retracted, see Direction) — `disaster_recovery` registered surface, routed owner-merge after line-audit, which verified the non-movement by differential execution and enumerated every consumer: none reads `maximum_rpo_hours_for_context` or `live_capital_context`, so the widened clamp reaches no gate; one fix round after the audit found a corrupt `maker_live_test` block regressing to the permissive branch; **DEPLOY PENDING** — the VPS still reads `live_capital_context: true` off a read-only monitoring address. Note this WO alone would never have silenced the DR incident: `compliant` compares against `active_rpo_hours`, which it deliberately does not move. WO-146 is that fix)
 
 **Direction — CORRECTED 2026-08-01 after independent review. The first version
 of this paragraph was factually wrong and is retracted.**
@@ -10153,6 +10257,78 @@ established records `study_trigger: "unknown"` rather than guessing; nothing her
 changes what the study computes, which markets it measures, or any gate,
 threshold, or eligibility rule; and a failure of this work order's machinery
 degrades only the visibility of when the study ran, never the study itself.
+
+### 151.1 — Touched-file list and enumerated tests (added 2026-08-02; WO-151 was registered without either and was therefore NOT dispatchable)
+
+**Why this amendment exists.** A pre-dispatch A10 sweep found WO-151 carried a
+Day-after check and a Fail-safe sentence but **no touched-file list and no
+enumerated tests**, so it failed A10 and could not be built. It was caught
+before a builder was dispatched against it, which is the check working; it is
+recorded here rather than quietly fixed.
+
+**Touch ONLY these files** (`git diff --stat` must show exactly these five):
+
+- `src/polymarket_predictive_engine/maker_carry_study.py` — scope (a) the
+  `study_trigger` field on `maker_carry_study.json` and on each
+  `maker_carry_history.csv` row, and scope (c) the `skipped_cycles_total` and
+  window-state surfacing. **The five `_size_portfolio` predicates,
+  `_measurement_eligible`, the rewarded-universe pull and every threshold in
+  this module are OUT of scope and must be byte-identical.**
+- `src/polymarket_predictive_engine/training_harvest.py` — the embedded
+  `maker-carry-study` step at `:75` must pass `study_trigger="harvest_step"`.
+  **The step list and its ordering do not change** — the parent WO's exclusion
+  stands; only the argument passed to the existing step is added.
+- `scripts/run_vps_ops_scheduler.sh` — scope (b), decoupling
+  `run_maker_study_intraday`'s window from harvest SUCCESS. The relevant lines
+  today are the interval at `:38`, the window guard at `:841-856`, and the
+  status stamp at `:635`.
+- `tests/polymarket_predictive_engine/test_maker_carry_study.py`
+- `tests/polymarket_predictive_engine/test_training_harvest.py`
+
+**Do NOT touch** `maker_min_book_history_hours` (48.0), `maker_min_book_snapshots`
+(100), `target_net_usd_per_day` (3.33), `max_trusted_reward_share` (0.05),
+`_measurement_eligible`, `_size_portfolio`, the rewarded-universe pull, or any
+order/signer/credential surface. **No gate, threshold or eligibility rule moves
+in either direction, and this WO does not attempt to make any day bank.**
+
+**The decoupling literal, with its basis (A1).** The dedicated job's window
+condition changes from *"`TRAINING_AGE` inside `[39600, 46800]`"* to *"the
+`maker_study_intraday` stamp is at least `MAKER_STUDY_INTRADAY_INTERVAL` old"*
+alone — the harvest-age offset guard is **removed as a precondition**, not
+widened. Basis: the offset guard exists to place the study after a fresh
+harvest, but the harvest fails 43.75% of cycles (`runs_total: 32`,
+`failed_cycles_total: 14`), and a precondition on a job that fails almost half
+the time is a starvation source, not a freshness guarantee. The study reads
+whatever corpus exists; it does not require a harvest to have just succeeded.
+**The interval literal `86400` is unchanged.** The observed harvest age is
+**recorded in the artifact** rather than gating on it, so the relationship stays
+measurable.
+
+**A2 for every new comparison.** A missing, empty, unparseable, or non-finite
+`maker_study_intraday` stamp leaves the job **un-fired** and records the window
+state; it never reads as "due". A run whose trigger cannot be established
+records `study_trigger: "unknown"` and never guesses.
+
+**Tests (enumerated).** (1) a study run invoked by the dedicated job records
+`study_trigger: "intraday_job"`; (2) invoked as harvest step 10, it records
+`"harvest_step"`; (3) invoked directly via the CLI, `"cli"`; (4) a run whose
+trigger cannot be established records `"unknown"` and does **not** guess;
+(5) every value written is inside the closed domain
+`{"intraday_job", "harvest_step", "cli", "unknown"}` — a value outside it is a
+test failure, not a new domain member; (6) the field appears on **both**
+`maker_carry_study.json` and every new `maker_carry_history.csv` row;
+(7) pre-existing `maker_carry_history.csv` rows without the column still parse —
+the reader tolerates the legacy header; (8) with the harvest stamp absent,
+unparseable, non-finite, and 200000s old, the dedicated job still fires once its
+own interval has elapsed — the decoupling, and the test that proves starvation
+is closed; (9) with the `maker_study_intraday` stamp absent or unparseable the
+job does **not** fire and the window state is recorded (A2 fail-closed);
+(10) `skipped_cycles_total` and the window state appear in the artifact and match
+the scheduler's own counter; (11) the observed harvest age is recorded in the
+artifact on every path; (12) byte-identity — a study run over a fixed fixture
+produces identical `net_carry_usd_per_day`, `portfolio_markets` and
+`portfolio_net_carry_usd_per_day` before and after this WO, proving the study's
+economics are untouched.
 
 **Day-after check.** Every `maker_carry_history.csv` row written after deploy
 carries a `study_trigger` inside the closed domain; the distribution of

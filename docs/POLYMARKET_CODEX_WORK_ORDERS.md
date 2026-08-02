@@ -7252,9 +7252,12 @@ excluded, which is why §143.9(b)'s shared usability predicate is registered as 
 differential test against `_normalise_rows_from_file` rather than as a symbol
 exported from it.
 
-**Touch ONLY these files** (`git diff --stat` must show exactly these twelve —
+**Touch ONLY these files** (`git diff --stat` must show exactly these thirteen —
 count corrected 2026-08-01; §143.6 added the ninth and tenth, §143.7(b) the
-eleventh, §143.8(b) the twelfth):
+eleventh, §143.8(b) the twelfth, and **§143.8(b)'s own seven token tests the
+thirteenth — added 2026-08-02 by the third gate, which found that
+`test_runtime_lock.py` had to change and appeared in NO list while both lists
+declare themselves authoritative for a line audit**):
 - NEW `src/polymarket_predictive_engine/scheduled_paper_cycle.py`
 - `src/polymarket_predictive_engine/paper_cycle.py` (one keyword-only `scope` parameter; `scope="full"` behaviour byte-identical **except for the two invocation flags — amended by §143.7(a)**)
 - `src/polymarket_predictive_engine/cli.py` (one command, one import, one dispatch branch)
@@ -7291,6 +7294,14 @@ eleventh, §143.8(b) the twelfth):
 
   WO-143b independently edits the same file for the heartbeat; the two changes
   are reconciled in §143b.3, not left to merge order.
+- `tests/polymarket_predictive_engine/test_runtime_lock.py` — §143.8(b)'s seven
+  token tests. **This file had no registered home until 2026-08-02.** Note it
+  already contains `test_runtime_lock_blocks_second_acquire_in_same_process`
+  (`:34`) and
+  `test_runtime_lock_replaces_same_pid_lock_from_prior_process_start`
+  (`:55-72`); **both must continue to pass unchanged.** §143.8(b)'s token
+  fields are additive to the payload and must not alter either behaviour —
+  that pair is the regression fence for the defect withdrawn in §143b.3(ii).
 
 Do NOT touch `docker-compose.vps-paper.yml` (the scheduler service already
 loads `env_file: .env`, so `OPS_PAPER_CYCLE_*` overrides reach the container;
@@ -7351,7 +7362,12 @@ fixed module constants `LOCK_WAIT_MAX_SECONDS = 300.0`,
 unwinds the `runtime_lock` context manager instead of leaking the
 `prediction_cycle` lock for the 1800s stale window — the scheduler must NOT
 use `timeout -k` for this job; read the pre-run `generated_at_utc` of
-`mispricing_alpha_live_summary.json`; bounded acquisition loop calling
+`mispricing_alpha_live_summary.json`; **evaluate §143.9(a)'s websocket
+observation freshness gate — added to this ordered list 2026-08-02; on failure
+write the pre-gate receipt and return WITHOUT taking the lock or invoking the
+cycle** (the table row above was performed while this ordered-behaviour prose
+was not, which left §143.2 describing a sequence with no pre-gate step);
+bounded acquisition loop calling
 `run_paper_cycle(cfg, source=source, scope="scoring_only")`, retrying on
 `skipped_existing_prediction_cycle` every `LOCK_WAIT_SLEEP_SECONDS` up to
 `LOCK_WAIT_MAX_SECONDS`, counting attempts (no second lock; do not reduce
@@ -7399,10 +7415,13 @@ here marks a market measured, changes any M-A/M-B/M-C or maker threshold,
 opens any order path, or changes what the live loop does per cycle; the
 scheduled job is additive evidence accrual, paper-only, and a failed or
 skipped scheduled cycle degrades only the taker alpha lane's evidence
-freshness — loudly: a missing, stale, or malformed input is detected before the
-cycle is invoked, so no cycle runs, no signal file is written, and the receipt
-records `blocked_inputs` with `cycle_completed: false` and a null `predictions`
-and exits nonzero, a held
+freshness — loudly: a missing, stale, or malformed **websocket observation** is
+detected before the cycle is invoked, so no cycle runs, no signal file is
+written, and the receipt records `blocked_inputs` with `cycle_completed: false`
+and a null `predictions` and exits nonzero; any **other** missing or malformed
+input — a bad `trading_mode`, a feature or model load failure — is detected
+inside the cycle and leaves the cycle report without a `predictions` key, also
+`blocked_inputs` at nonzero exit, a held
 `prediction_cycle` lock exits 75 after a bounded 300-second wait, a disabled
 alpha overlay exits 1 rather than reporting success, and in every failure
 case the scheduler's `last_success_utc` is not refreshed so
@@ -8045,19 +8064,60 @@ Against `REGISTERED_JOB_FRESHNESS_MAX_SECONDS`
 
 | entry | ceiling | in scope? |
 |---|---|---|
-| `paper_cycle` (§143.5) | 18000s | **yes** — 18000 > 4320 ✓ |
-| `trade_prints` | 1200s | **no** — collector; does not call `update_shadow_cohort_evidence` |
-| `executor_ops_monitor` | 900s | **no** — read-only monitor |
-| `degraded_state_watchdog` | 900s | **no** — read-only monitor |
-| `maker_safety_refresh` | 3600s | **no** — maker attribution; no shadow-cohort write path |
-| all remaining entries | ≥ 7h | **yes where applicable** — all exceed 4320s |
+| `paper_cycle` (§143.5) | 18000s | **NO — corrected 2026-08-02, third gate.** The lane runs `scope="scoring_only"`, which **skips** `update_shadow_cohort_evidence` entirely (`paper_cycle.py:250-257`; §143.5 lists "every shadow and portfolio ledger" as explicitly NOT written by the scheduled path). The first version of this table marked it in-scope by matching the *file* name `paper_cycle.py` against the *lane* name `paper_cycle` — name-matched, not derived |
+| `trade_prints` | 1200s | no — collector; no transitive path to `update_shadow_cohort_evidence` |
+| `executor_ops_monitor` | 900s | no — read-only monitor |
+| `degraded_state_watchdog` | 900s | no — read-only monitor |
+| `maker_safety_refresh` | 3600s | no — maker attribution; no shadow-cohort write path |
+| all remaining entries | ≥ 7h | no — none reaches the caller list |
+| **the live loop** | **600s** (`POLYMARKET_PREDICTION_MAX_RUNTIME_SECONDS`) | **YES — and this is the one that fails** |
 
-**Result: no registered ceiling in scope sits below 4320s.** The four entries
-below 4320s are all out of scope because none of them acquires the
-`shadow_cohort` lock. The live loop's own cadence is not a
-`REGISTERED_JOB_FRESHNESS_MAX_SECONDS` entry and is governed separately.
+**The conclusion first registered here — "no registered ceiling in scope sits
+below 4320s" — is FALSE and is withdrawn.** It was reached by enumerating only
+`REGISTERED_JOB_FRESHNESS_MAX_SECONDS` and dismissing the live loop in one
+sentence as "governed separately" without naming its ceiling. The live loop is
+the **primary** in-scope producer: both `run_paper_cycle` call sites in its
+prediction executor reach the shadow lock.
+
+**The conflict, stated exactly.** The live loop's prediction phase is bounded by
+`POLYMARKET_PREDICTION_MAX_RUNTIME_SECONDS`, default **600**
+(`docker-compose.vps-paper.yml:74`, `run_polymarket_local_live_loop.py:1483`),
+enforced by `_future_exceeded_runtime` (`:1160-1176`) →
+`_exit_for_stale_background_job` (`:1570-1596`), which **exits the container
+fail-closed**. Against WO-143b's own registered constants:
+
+| quantity | value | vs the 600s ceiling |
+|---|---|---|
+| `settlement_budget_seconds` alone | 900s | **already exceeds it** |
+| "a legitimately slow pass is never cut off" bound | 1320s | exceeds it |
+| registered worst-case lock hold | 4320s | exceeds it 7x |
+
+So a settlement pass operating **exactly as WO-143b registers it** trips a
+registered container-exit guard. §143b.1's constants and this ceiling were never
+reconciled, and neither this amendment nor §143b.1 can reconcile them:
+`docker-compose.vps-paper.yml` is in WO-143's do-not-touch list and is not in
+WO-143b's sixteen-file list, so **the builder cannot fix it either.**
+
+**A second, worse leg.** `_lightweight_shadow_maintenance` runs **unguarded on
+the main loop thread** (`:2040`) — no runtime future, no timeout. A 4320s hold
+there stalls websocket marking, the paper bridge and the dashboard for 72
+minutes, and the container healthcheck
+(`docker-compose.vps-paper.yml:107-116`) tests **file existence only**, so it
+never fires. The stall is invisible to every registered surface.
+
+**Registered as named follow-on WO-143b-e, do NOT build here.** Reconcile the
+live-loop prediction runtime ceiling with WO-143b's registered budgets, and
+either bound the main-thread maintenance call or give it a guard that a
+registered surface can observe. It requires touching
+`docker-compose.vps-paper.yml`, which is a scope widening → **OWNER MERGE**.
+**This is a pre-existing production conflict that this amendment surfaced, not
+one it creates** — the 600s ceiling and the 900s budget both already exist on
+the VPS today.
+
 **Day-after obligation:** if a future WO adds a producer to the caller list
-above, this table is re-derived before that WO is admitted.
+above, this table is re-derived before that WO is admitted — and the derivation
+enumerates **every** ceiling that can stop a producer, not only
+`REGISTERED_JOB_FRESHNESS_MAX_SECONDS` entries.
 
 **Registered ordering, validated in full by test (10) — FOUR relations:**
 
@@ -9043,6 +9103,27 @@ before that date predate this log and are not retroactively reopened. Seeded 202
 | WO-145.1 registration | D | Opus draft, Opus registration gate **x6** | ~700k reviewer | **7 → 6 → 2 → 0 blockers**, then 3 delta rounds | not yet built | — | pending |
 | §143.8 / 143.9 / 143b.2 / 143b.3 / 143b.4 registration round (PR #421), gate 1 | D | Opus draft, Opus registration gate (independent) | ~137k reviewer | **14 (6 blocking)** — verdict NOT ADMISSIBLE | not yet built | — | pending |
 | same round, gate 2 (on the corrections) | D | Opus correction, Opus registration gate (independent) | ~171k reviewer | **10 (4 blocking)** — verdict NOT ADMISSIBLE. **3 of 4 blockers were INTRODUCED OR LEFT STANDING BY THE CORRECTION ROUND ITSELF** | not yet built | — | pending |
+| same round, gate 3 | D | Opus correction, Opus registration gate (independent) | ~250k reviewer | **6 blocking + 5 non-blocking** — verdict NOT ADMISSIBLE. **2 blockers newly INTRODUCED by round 3**, incl. a concurrency-gate LOOSENING inside a clause declaring itself "strictly narrowing" | not yet built | — | pending |
+
+**Reading of gate 3 — the process conclusion, which matters more than any single
+finding.** Three consecutive correction rounds, each authored by the
+orchestrator and each independently gated, and **every one introduced at least
+one new defect.** The defect rate did not fall between rounds. Part 4's rule
+says a flat trend means the checklist gains the rule that would have caught the
+recurring one — but the recurring failure here is not a missing checklist rule.
+Rounds 2 and 3 both broke the *same mechanism* (`runtime_lock`'s reclaim paths),
+and both were written by reading code rather than running it.
+
+**Registered as the operating change, not as another rule:** a clause that
+changes a **concurrency invariant** — lock acquisition, reclaim, release, or
+ownership — may not be settled inside an amendment paragraph. It is split into
+its own WO, dispatched to a builder, and validated by an executed test before it
+is registered as a requirement. §143b.3(ii)'s reclaim-path fix has been
+withdrawn on those grounds and is now WO-143b-d. The evidence for this rule is
+that two Opus correction rounds and two Opus reviews all passed a clause whose
+literal implementation breaks
+`test_runtime_lock_blocks_second_acquire_in_same_process` — a test that already
+exists in the repository and that a single execution would have caught.
 
 **Reading of the 2026-08-02 rows — the tiering held, the review shape did not.**
 Three class-F/M builds went Sonnet-built and Opus-reviewed and produced **zero
@@ -13458,10 +13539,18 @@ reading §143.9.
 standing.** It read *"a missing, stale, or malformed input leaves the cycle
 report without a `predictions` key and exits nonzero."* Under §143.9(a) a stale
 input leaves **no cycle report at all**, so the registered verbatim string
-became false. §143.2 now reads *"a missing, stale, or malformed input is
-detected before the cycle is invoked, so no cycle runs, no signal file is
-written, and the receipt records `blocked_inputs` with `cycle_completed: false`
-and a null `predictions` and exits nonzero."* The rest of §143.2's fail-safe
+became false. §143.2 now distinguishes the two classes, **because a first
+attempt at this replacement over-claimed and was caught by the third gate**: it
+said *"a missing, stale, or malformed input is detected before the cycle is
+invoked"* — true only of the **websocket observation**, which is the sole input
+§143.9(a)'s pre-gate reads. Row 6 of §143.2's own table
+(`"predictions" not in report`) is reachable **only** when the cycle *was*
+invoked: a bad `trading_mode` (`paper_cycle.py:80-90`) and a feature/model load
+failure (`:188-193`) both return a report with no `predictions`, and on the
+zero-prediction path `generate_signals` has already written `trade_signals.csv`
+(`strategy.py:513`). A registered **verbatim** fail-safe string that the builder
+must reproduce byte-for-byte cannot be true of one class and false of two. The
+amended string now covers both. The rest of §143.2's fail-safe
 sentence is unchanged and remains verbatim and contiguous. **The build's module
 docstring must be updated to match** — the string is registered as verbatim, so
 this is a required build change, not a documentation nicety.
@@ -13912,33 +14001,78 @@ publish regardless of the cap, and that does not clear `_cap_stopped` or
 otherwise re-enable ordinary beating. It is not a heartbeat; it is a
 publish-admission step that happens to write the same field.
 
-**A second reclaim path is not closed by the re-stamp, and must be closed
-separately.** `acquire_runtime_lock`'s reclaim is an `elif` chain: when the age
-branch fails, control reaches `_same_pid_lock_predates_current_process`
-(`runtime_lock.py:66-86` on `main`), which compares the *contender's* process
-start against the lock's **`acquired_at_utc`** — a field `_write_beat`
-deliberately never re-stamps. A namespaced-PID collision, which §143.8(b)
-establishes as ordinary rather than exotic, therefore reclaims mid-section no
-matter how fresh `heartbeat_at_utc` is. **Required:** that predicate is
-re-expressed against §143.8(b)'s `owner_process_token` instead of
-`pid` + `acquired_at_utc`. A payload whose `owner_process_token` differs from
-this process's is **not** a same-process orphan and must not be reclaimed by
-this path; it falls through to the ordinary stale-age path. A genuine
-same-process orphan carries the *same* `owner_process_token` and is still
-reclaimed, so no wedge is introduced. A payload missing the token fails closed
-(not reclaimed by this path). This is strictly narrowing, and it is the reason
-§143.8(b)'s identity field exists.
+**A second reclaim path is not closed by the re-stamp. The fix registered here
+for it was WRONG and is WITHDRAWN — the residual is registered as an open item,
+not re-specified (2026-08-02, third gate).**
 
-**Only after both are closed** does relation 3
-(`heartbeat_cap + critical_section_max < stale_after`) give the section a margin
-that is derived rather than assumed.
+The observation stands: `acquire_runtime_lock`'s reclaim is an `elif` chain, so
+when the age branch fails, control reaches
+`_same_pid_lock_predates_current_process` (`runtime_lock.py:66-86` on `main`),
+which compares the contender's process start against the lock's
+**`acquired_at_utc`** — a field `_write_beat` deliberately never re-stamps. A
+namespaced-PID collision therefore reclaims mid-section no matter how fresh
+`heartbeat_at_utc` is. That much is verified and real.
 
-**(iii) The publish is indivisible, and the two `os.replace` calls are
-REORDERED.** As built, the section is
+**The registered remedy was not.** It required the predicate be re-expressed
+against `owner_process_token` *"instead of `pid` + `acquired_at_utc`"*.
+Implemented literally, that **destroys same-process mutual exclusion**:
+`owner_process_token` is stable for the life of a process (§143.8(b)), and
+`return acquired_at < process_started_at` (`:86`) is the *only* thing that
+excludes a lock the current process is **holding right now**. Drop it and the
+predicate is true for a live self-held lock, so a second acquire in the same
+process succeeds. `tests/polymarket_predictive_engine/test_runtime_lock.py:34`
+fails, and the live loop holds these locks from two threads of one process —
+`_lightweight_shadow_maintenance` on the main thread
+(`scripts/run_polymarket_local_live_loop.py:723`, called at `:2040`) and
+`_run_prediction_cycle` / `_run_degraded_prediction_cycle` in
+`prediction_executor` (`:1838`, `:1875`), both reaching
+`update_shadow_cohort_evidence`. **The clause declared itself "strictly
+narrowing" while re-opening the exact two-concurrent-writers harm WO-143b exists
+to close.**
+
+The clause was also wrong about its own population: today's predicate fires
+**only** for a *prior* process that reused the PID (its own docstring: "Container
+restarts can reuse the same small PID"), because `acquired_at < process_started`
+excludes same-process orphans by construction. "A genuine same-process orphan is
+still reclaimed" described a case the predicate never served.
+
+**Nothing is registered here to replace it.** The conservative alternative —
+keep the age condition and add the token as an additional conjunct — makes the
+predicate unreachable for the container-restart case it exists for, which
+silently deletes a registered behaviour and costs a full stale window (1800s for
+`prediction_cycle`) on every container restart. That is a real trade-off with a
+real cost, and it is **not** the kind of decision an amendment should settle in
+a paragraph. **Registered as named follow-on WO-143b-d, do NOT build here:**
+close the `acquired_at_utc` reclaim path against a re-stamping holder, with the
+container-restart reclaim cost stated and measured, designed against the code
+rather than in the register.
+
+**Consequence, stated plainly rather than hidden:** until WO-143b-d lands, a
+namespaced-PID collision can still reclaim mid-critical-section. Relation 3's
+margin therefore holds against the **age-based** reclaim path only. §143b.3's
+(i) beat check and (iii) indivisible publish still bound the damage — the losing
+holder writes nothing — but the window is not fully closed, and this section no
+longer claims it is.
+
+**Recorded for calibration.** This is the third consecutive correction round in
+which the correction introduced a new defect, and the second in this same
+mechanism. The lesson is not "review harder": it is that **concurrency
+invariants must not be redesigned inside an amendment paragraph.** Each attempt
+here was written against a reading of the code rather than against a running
+test, and each passed its author's own review. WO-143b-d exists so the next
+attempt is made where it can be executed.
+
+**(iii) The publish is indivisible. The existing publish ORDER IS KEPT — do not
+reorder it.** *(Heading corrected 2026-08-02, third gate: it previously read
+"…and the two `os.replace` calls are REORDERED", which was the instruction the
+third bullet below withdraws. A builder reading only the bolded heading would
+have performed the inverted reorder. The withdrawal is stated at the heading,
+not buried three bullets down.)* As built, the section is
 `os.replace(positions)` → `_progress("positions_published")` →
-`os.replace(fills)` (`shadow_cohort.py:1391-1398` on `29f6498a` — the range includes
-`_progress("fills_published")` at `:1398`, which is also inside the section).
-Two defects:
+`os.replace(fills)` → `_progress("fills_published")`
+(`shadow_cohort.py:1391-1398` on `29f6498a`; `:1398` is also inside the
+section). **One defect, plus one ordering decision that is deliberately left
+alone:**
 
 - **No beat may occur between the two replaces.** The `_progress` call between
   them can detect ownership loss *after* `shadow_positions.csv` has already been
@@ -13946,8 +14080,13 @@ Two defects:
   publish" is undefined in that state. §143b.2(a) requires that a losing holder
   "does NOT write a partial result"; the first version of this section could
   produce exactly one. Both ledgers are staged outside the section; the section
-  contains **exactly the two `os.replace` calls and nothing else** — no
-  `_progress`, no beat, no branch that can raise between them. Once the section
+  contains **at most the two `os.replace` calls and nothing else** — no
+  `_progress`, no beat, and no branch that can raise between them. *("At most",
+  corrected 2026-08-02: the `if new_fill_rows:` guard at `shadow_cohort.py:1396`
+  is KEPT — §143b.1 registers deliberately that a pass with nothing to append
+  leaves the append_only ledger's exact bytes and inode untouched — so a common
+  pass has exactly one replace. The earlier "exactly two ... no branch" wording
+  contradicted test (h7) in the same section.)* Once the section
   is entered, no beat result may abort a started publish.
 - **KEEP the existing order: positions first, fills second.** An earlier version
   of this section required the opposite, on the reasoning that a snapshot
@@ -14033,7 +14172,7 @@ assertion that proves the residual is repairable rather than a chain break.
 ### 143b.4 — Three further corrections from the same audit
 
 **(a) Settlement order changed, and the registered test cannot see it.**
-`_settlement_check_sort_key` (`shadow_cohort.py:550-563`) keys never-checked
+`_settlement_check_sort_key` (`shadow_cohort.py:558-571` on `29f6498a`) keys never-checked
 positions as `(0, "", position_id)`. `sorted` is already stable, so the
 `position_id` tiebreaker is **gratuitous and reorders** — production ids are
 `_stable_id` hashes (`:1246`), unrelated to file order. Probe against the
@@ -14046,7 +14185,7 @@ from the never-checked key** — it costs the rotation nothing — and **strengt
 test 11's fixture to non-id-sorted ids** so it can detect a reorder.
 
 **(b) The checkpoint advances on passes that never publish.** The stamp is
-written at `shadow_cohort.py:634` and persisted at `:677-683`, inside
+written at `shadow_cohort.py:634` and persisted at `:679-683` (all on `29f6498a`), inside
 `_settle_due_positions`; the publish is ~250 lines later at `:1391-1397`. Any
 exception between them — the mark-to-market loop, `_candidate_rows`, the staging
 `write_csv`, a full disk — discards the settlement work **while the rotation has
@@ -14057,7 +14196,7 @@ nothing is ever settled, and the sidecar records them all as "checked" — **the
 the checkpoint **only after the publish succeeds**.
 
 **(c) The sidecar artifact must be registered, flagged, and bounded.**
-`shadow_settlement_checkpoints.json` (`:531`, `:678-682`) carries neither
+`shadow_settlement_checkpoints.json` (`:531`, `:679-683` on `29f6498a`) carries neither
 invocation flag (see §143b.2(b)) **and was never contemplated by the
 registration** — §143b.1 asked for a column or a rotating offset. It also
 **accumulates position ids forever with no pruning**. Register the artifact
@@ -14151,7 +14290,12 @@ file beyond it:
   reordered indivisible publish, §143b.4(a)'s sort-key change, §143b.4(b)'s
   checkpoint-after-publish, §143b.4(c)'s prune.
 - `tests/polymarket_predictive_engine/test_shadow_cohort.py` — §143b.3 tests
-  (1)-(8), §143b.4(a)'s strengthened test-11 fixture, §143b.4(c) tests (c1)-(c3).
+  **(h1)-(h8b)** (ten tests), §143b.4(a)'s strengthened test-11 fixture, and
+  §143b.4(c) tests **(d1)-(d3)**. *(Corrected 2026-08-02, third gate: this list
+  still carried the pre-renumbering `(1)-(8)` and `(c1)-(c3)` — the former
+  colliding with §143b.1's bare `(1)-(11)` and the latter now belonging to
+  §143b.2(c), which lives in `test_config.py`. A renumbering that does not
+  update the list that cites it has not been performed.)*
 
 **Explicit count reconciliation:** §143b.1's list stands at **sixteen** files
 (fifteen if the runtime-lock tests fold into `test_shadow_cohort.py`), and

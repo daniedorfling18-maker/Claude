@@ -73,40 +73,62 @@ jobs:
           OWNER_LOGIN: ${{ github.repository_owner }}
         run: |
           set -uo pipefail
-          if ! body="$(curl -fsS --max-time 30 \
+          # THREE states, and the third one is the point. An earlier version had
+          # only two - "eligible reviewer found" and "premise holds" - and
+          # reported the reassuring second state whenever the query failed OR
+          # returned an unexpected shape. That is the SILENT IGNORE this control
+          # exists to prevent, wearing the mask of a passing check.
+          #
+          # Known and expected today: GET /collaborators requires
+          # `administration: read`. This workflow declares
+          # `permissions: {actions: read, contents: read}` per WO-145's
+          # least-privilege registration, and an explicit permissions block sets
+          # every unlisted scope to none - so this call is expected to 403 and
+          # take the UNDETERMINED branch on every run until the permission
+          # question is registered and resolved. That is why undetermined is a
+          # ::warning:: and not a ::notice::: an operator must be able to see
+          # that control (i) is not currently answering, rather than read a
+          # green notice that implies it is.
+          state="undetermined"
+          eligible=""
+          if body="$(curl -fsS --max-time 30 \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/collaborators?per_page=100" 2>/dev/null)"; then
-            echo "::notice::eligibility query unavailable this run; Path B remains the registered route regardless"
-            exit 0
-          fi
-          eligible="$(printf '%s' "$body" | OWNER_LOGIN="$OWNER_LOGIN" python3 -c "
+            parsed="$(printf '%s' "$body" | OWNER_LOGIN="$OWNER_LOGIN" python3 -c "
           import json, os, sys
           owner = os.environ.get('OWNER_LOGIN', '').casefold()
           try:
               rows = json.load(sys.stdin)
           except Exception:
-              sys.exit(0)
-          if not isinstance(rows, list):
-              sys.exit(0)
+              print('UNDETERMINED'); sys.exit(0)
+          if not isinstance(rows, list) or any(not isinstance(r, dict) for r in rows):
+              print('UNDETERMINED'); sys.exit(0)
           names = []
           for row in rows:
-              if not isinstance(row, dict):
-                  continue
               login = str(row.get('login') or '')
               if not login or login.casefold() == owner:
                   continue
               if str(row.get('type') or '').casefold() == 'bot' or login.endswith('[bot]'):
                   continue
-              perms = row.get('permissions') or {}
-              if isinstance(perms, dict) and (perms.get('push') or perms.get('maintain') or perms.get('admin')):
+              perms = row.get('permissions')
+              if not isinstance(perms, dict):
+                  print('UNDETERMINED'); sys.exit(0)
+              if perms.get('push') or perms.get('maintain') or perms.get('admin'):
                   names.append(login)
-          print(','.join(sorted(names)))
-          " 2>/dev/null)" || eligible=""
-          if [ -n "$eligible" ]; then
+          print('OK:' + ','.join(sorted(names)))
+          " 2>/dev/null)" || parsed="UNDETERMINED"
+            case "$parsed" in
+              OK:*) state="determined"; eligible="${parsed#OK:}" ;;
+              *)    state="undetermined" ;;
+            esac
+          fi
+          if [ "$state" != "determined" ]; then
+            echo "::warning::WO-145 control (i) could NOT run this deploy - the eligibility query did not return a usable answer. This is EXPECTED under the registered least-privilege permissions block (GET /collaborators needs administration:read, which this workflow deliberately does not carry) and is registered as an open question. Treat the Path B permanence premise as UNVERIFIED for this run, not as confirmed."
+          elif [ -n "$eligible" ]; then
             echo "::warning::an eligible independent reviewer now exists (${eligible}). Path A may be satisfiable again; WO-145's permanent Path B loosening was registered on the premise that it is not, and should be revisited. This is a NOTICE, not a gate - the deploy continues."
           else
-            echo "::notice::no eligible independent reviewer exists; the WO-145 premise still holds"
+            echo "::notice::eligibility query answered: no eligible independent reviewer exists; the WO-145 premise still holds"
           fi
 
   # Check 2 lives inside this job, as its FIRST step (§145.1(a)). The
@@ -270,16 +292,15 @@ jobs:
           REPO_DIR="${PM_VPS_REPO_DIR/#\~/$HOME}"
           cd "$REPO_DIR"
 
-          # Sentinel-plus-wait-for: `tmux new-session -d` returns 0 the instant
+          # Sentinel-plus-poll: `tmux new-session -d` returns 0 the instant
           # the pane is created, before the deploy script inside it has run at
           # all. Running detached also means a dropped SSH connection does not
           # abort a half-recreated container - the tmux server keeps the pane
           # alive independently of this ssh session. The pane writes its own
-          # exit code to SENTINEL and then signals CHANNEL; this shell blocks
-          # on `tmux wait-for` (a real signal, not a poll loop) and only then
-          # re-exits with the code the deploy script actually returned.
+          # exit code to SENTINEL; this shell polls the session and then re-exits
+          # with the code the deploy script actually returned. See the poll
+          # block below for why `tmux wait-for` is NOT used.
           SESSION="pm-deploy-${GITHUB_RUN_ID}"
-          CHANNEL="pm-deploy-done-${GITHUB_RUN_ID}"
           SENTINEL="/tmp/pm_deploy_dispatch_exit.${GITHUB_RUN_ID}"
           rm -f "$SENTINEL"
           # A re-run of the same run_id (GitHub's "re-run failed jobs") would
@@ -288,9 +309,41 @@ jobs:
           # name rather than silently reusing it, so clear it first.
           tmux kill-session -t "$SESSION" 2>/dev/null || true
           tmux new-session -d -s "$SESSION" \
-            "cd '$REPO_DIR' && PM_DEPLOY_TARGET_SHA='$PM_DEPLOY_TARGET_SHA' PM_DEPLOY_TRIGGER_MECHANISM='$PM_DEPLOY_TRIGGER_MECHANISM' PM_DEPLOY_TRIGGER_ACTOR='$PM_DEPLOY_TRIGGER_ACTOR' PM_DEPLOY_APPROVAL_ACTOR='$PM_DEPLOY_APPROVAL_ACTOR' bash '$REPO_DIR/scripts/deploy_vps_paper_manual.sh'; echo \$? > '$SENTINEL'; tmux wait-for -S '$CHANNEL'"
-          tmux wait-for "$CHANNEL"
+            "cd '$REPO_DIR' && PM_DEPLOY_TARGET_SHA='$PM_DEPLOY_TARGET_SHA' PM_DEPLOY_TRIGGER_MECHANISM='$PM_DEPLOY_TRIGGER_MECHANISM' PM_DEPLOY_TRIGGER_ACTOR='$PM_DEPLOY_TRIGGER_ACTOR' PM_DEPLOY_APPROVAL_ACTOR='$PM_DEPLOY_APPROVAL_ACTOR' bash '$REPO_DIR/scripts/deploy_vps_paper_manual.sh'; echo \$? > '$SENTINEL'"
+          # SENTINEL-PLUS-POLL, not `tmux wait-for`. WO-145 registers either, and
+          # wait-for is the one that breaks: the pane signals the channel and
+          # then the session ends; if that was the last session the tmux SERVER
+          # exits and discards the latched signal, so a subsequent
+          # `tmux wait-for` starts a fresh server with nothing latched and
+          # blocks until the 70-minute job timeout. The exposure is worst on the
+          # FASTEST path - a successful deploy - which is the one that must not
+          # hang. Observed as a real intermittent failure of the exit-code-0
+          # case under load.
+          #
+          # Polling has no such dependency: the session's existence is the
+          # liveness signal and the sentinel is the result. A poll every 5s is
+          # nothing against a deploy bounded at 70 minutes.
+          while tmux has-session -t "$SESSION" 2>/dev/null; do
+            sleep 5
+          done
+          # The session is gone, so the pane's final `echo $? > SENTINEL` has
+          # run - but allow a brief window for the write to land before giving
+          # up, and fail CLOSED if it never appears (a killed pane, a full disk).
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            [ -f "$SENTINEL" ] && break
+            sleep 1
+          done
+          if [ ! -f "$SENTINEL" ]; then
+            echo "::error::the deploy pane exited without writing its exit code to $SENTINEL; treating as FAILED - the deploy state on the host is unknown and must be checked before retrying"
+            exit 1
+          fi
           exit_code="$(cat "$SENTINEL")"
           rm -f "$SENTINEL"
+          # Guard the value itself: `exit` truncates modulo 256, so a corrupt
+          # sentinel containing e.g. 256 would turn a failed deploy green.
+          if ! printf '%s' "$exit_code" | grep -Eq '^[0-9]{1,3}$' || [ "$exit_code" -gt 255 ]; then
+            echo "::error::sentinel held an unusable exit code: '$exit_code'; treating as FAILED"
+            exit 1
+          fi
           exit "$exit_code"
           REMOTE

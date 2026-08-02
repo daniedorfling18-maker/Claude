@@ -334,15 +334,37 @@ def test_1451_check2_message_is_interpolated_not_literal(tmp_path: Path) -> None
 
 def test_1451_check2_failure_branch_is_exit_1_not_success_or_continue() -> None:
     check2 = _step("deploy", CHECK2_NAME)
-    # NARROWED after line audit: this previously asserted `continue-on-error`
-    # appeared NOWHERE in the workflow. That was right when the file had one
-    # gating job, but WO-145's registered control (i) is observability and MUST
-    # carry continue-on-error ("not as a lapse trigger"). The guarantee that
-    # actually matters is unchanged and is now stated precisely: no step in the
-    # DEPLOY job may swallow its own failure, so a superseded or unapproved run
-    # can never be reported green.
-    for step in _job("deploy")["steps"]:
-        assert step.get("continue-on-error") is not True, step.get("name")
+    # NARROWED after line audit, then WIDENED again after the delta audit found
+    # the narrowing had lost three guarantees. The original asserted
+    # `continue-on-error` appeared NOWHERE in the workflow; that was right for a
+    # one-job file but forbids WO-145's registered control (i), which is
+    # observability and must carry it ("not as a lapse trigger").
+    #
+    # The first narrowing checked only `is not True` on DEPLOY's steps, which
+    # missed three mutations that all yield a GREEN run for a superseded or
+    # rejected deploy - the exact "green run that deployed nothing is
+    # indistinguishable from a real deploy" defect §145.1 rejects:
+    #   NT3  job-level `continue-on-error: true` on `deploy` (a documented key
+    #        the step loop never inspects) - the worst, and not dependent on any
+    #        expression-coercion semantics;
+    #   NT1  `continue-on-error: 'true'` (quoted string, truthy to Actions);
+    #   NT2  `continue-on-error: ${{ true }}` (expression, truthy to Actions).
+    deploy_job = _job("deploy")
+    # Job level: a truthy value here swallows EVERY step's failure at once.
+    assert str(deploy_job.get("continue-on-error", "")).strip().lower() not in {
+        "true",
+        "${{ true }}",
+    }, "deploy job must not carry a job-level continue-on-error"
+    for step in deploy_job["steps"]:
+        assert str(step.get("continue-on-error", "")).strip().lower() not in {
+            "true",
+            "${{ true }}",
+        }, step.get("name")
+    # Belt and braces against a form neither check above anticipates: the deploy
+    # job's serialised text must not mention it at all. Control (i) lives in
+    # `guard`, so this stays scoped and cannot be satisfied by moving the
+    # observability step into the gated job.
+    assert "continue-on-error" not in yaml.safe_dump(deploy_job)
     run = check2["run"]
     assert "exit 1" in run
     assert "exit 0" not in run
@@ -578,8 +600,11 @@ def test_wo145_5_tmux_sentinel_wrapper_propagates_the_real_exit_code(tmp_path: P
 def test_wo145_5_remote_script_removes_its_own_sentinel_file() -> None:
     remote_script = _extract_remote_block(_run("deploy", DEPLOY_SSH_NAME))
     assert remote_script.count("rm -f \"$SENTINEL\"") == 2
-    assert "tmux wait-for \"$CHANNEL\"" in remote_script
-    assert "tmux wait-for -S '$CHANNEL'" in remote_script
+    assert "has-session" in remote_script  # poll, not wait-for (see the wrapper comment)
+    # The pane no longer signals a wait-for channel: nothing waits on it now, and
+    # dead signalling in a production deploy path invites a future reader to
+    # re-introduce the dependency the poll exists to remove.
+    assert "CHANNEL" not in remote_script
 
 
 # --- workflow inventory (§145.1(c)) ---------------------------------------------
@@ -657,20 +682,40 @@ def test_wo145_control_i_stays_quiet_when_the_premise_holds(tmp_path: Path, rows
     result = _run_shell(_run("guard", ELIGIBILITY_NAME), _eligibility_env(), bin_dir=bin_dir)
     assert result.returncode == 0, result.stderr
     assert "::warning::" not in result.stdout
+    assert "premise still holds" in result.stdout
 
 
-@pytest.mark.parametrize("mode", ["http_fail", "nonjson"])
-def test_wo145_control_i_never_fails_the_deploy(tmp_path: Path, mode: str) -> None:
-    """Observability, not a gate. A transient API error or a shape change must
-    not block a deploy - the registered wording is "not as a lapse trigger"."""
+@pytest.mark.parametrize(
+    "body,http_fail",
+    [
+        ("", True),                                  # curl failed - the 403 case
+        ("not json at all", False),                  # unparseable
+        ('{"message": "Forbidden"}', False),         # 200 with a dict, not a list
+        ('["alice", "bob"]', False),                 # rows are strings
+        ('[{"login": "x", "type": "User"}]', False), # permissions key absent
+    ],
+)
+def test_wo145_control_i_reports_undetermined_loudly(tmp_path: Path, body: str, http_fail: bool) -> None:
+    """The third state, and the reason this control is not theatre.
+
+    An earlier version had only two states and printed the reassuring "premise
+    still holds" whenever the query failed or returned an unexpected shape -
+    the silent ignore this control exists to prevent, wearing the mask of a
+    passing check. The delta audit also established that the real runtime case
+    IS this branch: GET /collaborators needs `administration: read`, which the
+    registered least-privilege permissions block deliberately withholds, so the
+    call is expected to 403 on every run until that question is resolved.
+
+    Undetermined must therefore be a WARNING, never a notice, and must never be
+    mistaken for a confirmed premise.
+    """
     bin_dir = tmp_path / "bin"
-    if mode == "http_fail":
-        _fake_curl(bin_dir, "", http_fail=True)
-    else:
-        _fake_curl(bin_dir, "not json at all")
+    _fake_curl(bin_dir, body, http_fail=http_fail)
     result = _run_shell(_run("guard", ELIGIBILITY_NAME), _eligibility_env(), bin_dir=bin_dir)
     assert result.returncode == 0, result.stderr
-    assert "::warning::" not in result.stdout
+    assert "::warning::" in result.stdout
+    assert "could NOT run" in result.stdout
+    assert "premise still holds" not in result.stdout
 
 
 def test_wo145_check_2_is_still_the_deploy_jobs_first_step() -> None:
@@ -679,3 +724,66 @@ def test_wo145_check_2_is_still_the_deploy_jobs_first_step() -> None:
     pins by position."""
     assert _job("deploy")["steps"][0]["name"] == CHECK2_NAME
     assert ELIGIBILITY_NAME not in [s.get("name") for s in _job("deploy")["steps"]]
+
+
+@pytest.mark.skipif(
+    subprocess.run(["which", "tmux"], capture_output=True).returncode != 0,
+    reason="tmux is not installed in this sandbox",
+)
+def test_wo145_5_missing_sentinel_fails_closed(tmp_path: Path) -> None:
+    """A pane that dies without writing its exit code must FAIL the job.
+
+    The deploy state on the host is unknown at that point; reporting success
+    would be the same green-run-that-deployed-nothing defect the whole check-2
+    design rejects.
+    """
+    remote_script = _extract_remote_block(_run("deploy", DEPLOY_SSH_NAME))
+    repo = tmp_path / "repo" / "scripts"
+    repo.mkdir(parents=True)
+    stub = repo / "deploy_vps_paper_manual.sh"
+    # Kill the pane's own shell before it can write the sentinel.
+    stub.write_text("#!/usr/bin/env bash\nkill -9 $PPID\n", encoding="utf-8")
+    stub.chmod(0o755)
+
+    run_id = f"pytest-missing-{tmp_path.name}"
+    subprocess.run(["tmux", "kill-session", "-t", f"pm-deploy-{run_id}"], capture_output=True)
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(Path.home()),
+        "PM_VPS_REPO_DIR": str(tmp_path / "repo"),
+        "GITHUB_RUN_ID": run_id,
+        "PM_DEPLOY_TARGET_SHA": SHA_A,
+        "PM_DEPLOY_TRIGGER_MECHANISM": "push",
+        "PM_DEPLOY_TRIGGER_ACTOR": "someone",
+        "PM_DEPLOY_APPROVAL_ACTOR": "someone-else",
+    }
+    result = subprocess.run(
+        ["bash", "-c", remote_script], capture_output=True, text=True, env=env, timeout=90
+    )
+    assert result.returncode != 0
+    assert "without writing its exit code" in result.stdout + result.stderr
+
+
+def test_wo145_5_sentinel_value_is_validated() -> None:
+    """`exit` truncates modulo 256, so a sentinel holding 256 would turn a
+    failed deploy green. Verified against bash itself, then pinned."""
+    probe = subprocess.run(["bash", "-c", "exit 256"], capture_output=True)
+    assert probe.returncode == 0, "bash still truncates exit codes mod 256"
+
+    remote = _extract_remote_block(_run("deploy", DEPLOY_SSH_NAME))
+    assert "^[0-9]{1,3}$" in remote
+    assert "-gt 255" in remote
+    assert "unusable exit code" in remote
+
+
+def test_wo145_5_wrapper_does_not_depend_on_tmux_wait_for() -> None:
+    """`tmux wait-for` loses its latched signal when the tmux server exits
+    after the last session closes - which is exactly what happens on the
+    FASTEST path, a successful deploy. Observed as a real intermittent hang.
+    The wrapper polls the session instead."""
+    remote = _extract_remote_block(_run("deploy", DEPLOY_SSH_NAME))
+    executable = "\n".join(
+        line for line in remote.splitlines() if not line.strip().startswith("#")
+    )
+    assert "tmux wait-for" not in executable
+    assert "has-session" in executable

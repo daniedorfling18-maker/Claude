@@ -109,6 +109,48 @@ documented in `docs/OPERATING_STATE.md`.
   An ad-hoc pull/rebuild remains forbidden on both paths: it skips every guard
   above.
 
+  **Amendment, 2026-08-01/2026-08-02 (WO-145 / §145.1) — policy vs capability,
+  and Path B's invocation form.** The paragraphs above are unchanged: Path A
+  stays **REQUIRED whenever an eligible independent reviewer exists** to
+  satisfy `merge_independently_reviewed_pr.py:340-347`'s APPROVED-review
+  requirement (excluding both the PR author and the repository owner). This
+  amendment names the case where that requirement cannot be satisfied because
+  **no eligible reviewer exists** in a single-owner repository with
+  agent-authored PRs — a **POLICY** limit, not a capability one. Giving GitHub
+  Actions an SSH route to run Path B strengthens the factual predicate "Actions
+  can run it" without touching that policy limit. Where the independent-review
+  requirement cannot be satisfied for this reason, Path B is permitted and
+  records `attestation_verified: false`.
+
+  This permission is **permanent, by owner direction (2026-08-01)**, not a
+  temporary allowance pending a lapsing condition: `attestation_verified: false`
+  is therefore the steady state of every deploy this repository makes, not an
+  exception.
+
+  Path B is now triggerable two ways: from the VPS shell directly
+  (`vps_shell`), and from the `deploy_vps_paper_dispatch.yml` GitHub Actions
+  workflow, which SSHes in and runs this same guarded script after its
+  `environment:` approval gate, on `push` to `main` or `workflow_dispatch`.
+  Both record `trigger_mechanism` (`workflow_dispatch` | `push` | `vps_shell`)
+  in `outputs/performance/vps_manual_deploy.json` in place of a claimed
+  `authorised_by` identity; the two workflow-triggered mechanisms additionally
+  record the GitHub actor and the environment-approval actor — facts about who
+  did what, never an authorization claim.
+
+  A `vps_shell` invocation of Path B is:
+
+  ```
+  PM_DEPLOY_TARGET_SHA=<40-hex commit sha> scripts/deploy_vps_paper_manual.sh
+  ```
+
+  **A LITERAL forty-hex SHA, read from the merged pull request on GitHub — NOT
+  a shell substitution.** `PM_DEPLOY_TARGET_SHA=$(git rev-parse origin/main)`
+  is withdrawn as defective: evaluated before the script's own `git fetch`, a
+  stale local `origin/main` ref makes the deploy refuse; evaluated after a
+  fresh fetch, it compares the tip to itself and can never fail. The operator
+  names the commit being deployed — the ref is not consulted to decide for
+  them.
+
 Read-only operator checks after SSHing to the VPS:
 
 ```bash

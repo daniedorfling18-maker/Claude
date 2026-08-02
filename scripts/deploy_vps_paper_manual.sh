@@ -96,7 +96,16 @@ env_value() {
 assert_target_is_origin_main() {
   git -C "$REPO_DIR" fetch --quiet origin main || fail "cannot fetch origin/main"
   remote_sha="$(git -C "$REPO_DIR" rev-parse origin/main)"
-  target_sha="${PM_DEPLOY_TARGET_SHA:-$remote_sha}"
+  # WO-145 §145.1(a1b): no tip-defaulting fallback. An unset or empty
+  # PM_DEPLOY_TARGET_SHA must be REJECTED, not silently retargeted to whatever
+  # origin/main happens to be at this moment - that would make the comparison
+  # below compare the tip to itself, which can never fail. The operator (or the
+  # dispatch workflow, which pins it to github.sha) must name the commit.
+  target_sha="${PM_DEPLOY_TARGET_SHA:-}"
+  if [ -z "$target_sha" ]; then
+    fail "PM_DEPLOY_TARGET_SHA is not set; Path B refuses to default to origin/main's tip. \
+Set it to the exact 40-hex commit sha being deployed."
+  fi
   if [ "$target_sha" != "$remote_sha" ]; then
     fail "target $target_sha is not the current origin/main tip $remote_sha; \
 Path B deploys reviewed merged main only"
@@ -359,9 +368,24 @@ restart_scheduler() {
 }
 
 # --- the honest deploy record --------------------------------------------------
+# WO-145: authorised_by was a hardcoded "owner" literal, stamped unconditionally
+# on every deploy - including one this script cannot show a human ever ran. That
+# is an agent-writable owner-authorization CLAIM landing in a runtime artifact,
+# which AGENTS.md forbids outright. The record now names the MECHANISM instead
+# (trigger_mechanism: workflow_dispatch | push | vps_shell) plus, on the two
+# workflow-triggered mechanisms, the real GitHub actor and the environment
+# approval actor - facts about who did what, never a claimed authorization.
 write_deploy_record() {
   target_sha="$1"
   output_root="${PM_OUTPUT_ROOT:-$REPO_DIR/outputs}"
+  trigger_mechanism="${PM_DEPLOY_TRIGGER_MECHANISM:-vps_shell}"
+  case "$trigger_mechanism" in
+    workflow_dispatch|push|vps_shell) ;;
+    *) fail "PM_DEPLOY_TRIGGER_MECHANISM must be one of workflow_dispatch, push, vps_shell (got '$trigger_mechanism')" ;;
+  esac
+  PM_DEPLOY_TRIGGER_MECHANISM="$trigger_mechanism" \
+  PM_DEPLOY_TRIGGER_ACTOR="${PM_DEPLOY_TRIGGER_ACTOR:-}" \
+  PM_DEPLOY_APPROVAL_ACTOR="${PM_DEPLOY_APPROVAL_ACTOR:-}" \
   python3 - "$output_root/$DEPLOY_RECORD_RELATIVE" "$target_sha" <<'PY'
 import json
 import os
@@ -371,6 +395,9 @@ from pathlib import Path
 
 target = Path(sys.argv[1])
 target.parent.mkdir(parents=True, exist_ok=True)
+
+trigger_mechanism = os.environ["PM_DEPLOY_TRIGGER_MECHANISM"]
+
 payload = {
     "work_order": "WO-133",
     "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -383,12 +410,20 @@ payload = {
     # above: it can only ship reviewed, merged code, but it cannot prove a second
     # identity reviewed it.
     "attestation_verified": False,
+    # WO-145 option (b): name the ACTUAL blocker - no eligible independent
+    # reviewer can exist in a single-owner repository, per
+    # merge_independently_reviewed_pr.py's APPROVED-review requirement excluding
+    # both the PR author and the repository owner - rather than a capability the
+    # Actions context, unlike a VPS shell, actually possesses (a GitHub token and
+    # the acceptance run artifact). The prior string described only the shell's
+    # limitation and became misleading once a workflow could reach this route.
     "attestation_unverifiable_reason": (
-        "verify_independent_main_acceptance.py requires GitHub API credentials and the "
-        "acceptance run artifact; neither is available from the VPS shell"
+        "no eligible independent reviewer can exist in this single-owner repository: "
+        "merge_independently_reviewed_pr.py requires an APPROVED review excluding both "
+        "the PR author and the repository owner, which no collaborator here satisfies"
     ),
     "target_equals_origin_main_tip": True,
-    "authorised_by": "owner",
+    "trigger_mechanism": trigger_mechanism,
     "guard_order": [
         "assert_target_is_origin_main",
         "stage_target_scripts",
@@ -406,6 +441,11 @@ payload = {
     "paper_trading_invoked": False,
     "live_trading_invoked": False,
 }
+
+if trigger_mechanism in ("workflow_dispatch", "push"):
+    payload["trigger_actor"] = os.environ.get("PM_DEPLOY_TRIGGER_ACTOR", "")
+    payload["approval_actor"] = os.environ.get("PM_DEPLOY_APPROVAL_ACTOR", "")
+
 temporary = target.with_name(target.name + ".tmp")
 temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 temporary.replace(target)

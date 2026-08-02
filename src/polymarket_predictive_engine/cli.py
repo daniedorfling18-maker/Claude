@@ -137,6 +137,7 @@ COMMANDS = [
     "collect-maker-replay-data",
     "maker-fill-replay",
     "snapshot-official-books",
+    "snapshot-official-books-pulse",
     "maker-live-test",
     "flow-toxicity",
     "decision-policy",
@@ -431,6 +432,19 @@ def main(argv: list[str] | None = None) -> int:
             books_summary = snapshot_official_books(cfg)
             _print(books_summary)
             if books_summary.get("status") not in {
+                "ok",
+                "partial",
+                "no_portfolio",
+                "disabled",
+            }:
+                return 1
+        elif args.command == "snapshot-official-books-pulse":
+            # WO-149: higher-frequency official-book observation for the
+            # CURRENT maker-carry portfolio only. Same zero-exit allowlist as
+            # the full-watchlist collector above.
+            pulse_summary = snapshot_official_books(cfg, scope="portfolio")
+            _print(pulse_summary)
+            if pulse_summary.get("status") not in {
                 "ok",
                 "partial",
                 "no_portfolio",

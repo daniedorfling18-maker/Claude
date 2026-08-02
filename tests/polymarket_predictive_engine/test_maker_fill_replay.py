@@ -3,9 +3,13 @@ from __future__ import annotations
 
 import csv
 import gzip
+import json
 import os
+import re
 from pathlib import Path
+from typing import Any
 
+import pytest
 import yaml
 
 from polymarket_predictive_engine import maker_fill_replay
@@ -1276,3 +1280,756 @@ def test_wo131_a_missing_marker_artifact_polls_every_candidate(tmp_path, monkeyp
 
     assert {"tokA", "tokB"} <= set(polled)
     assert summary["delisted_tokens_skipped"] == []
+
+
+# --- WO-149: portfolio-scope official-book pulse + join-lag staleness ---
+
+FIXTURE_ROOT = Path(__file__).parents[1] / "fixtures" / "recorded"
+
+
+def _recorded_fixture(name: str):
+    return json.loads((FIXTURE_ROOT / name).read_text(encoding="utf-8"))
+
+
+def test_wo149_default_scope_is_byte_identical_to_explicit_watchlist_scope(tmp_path, monkeypatch):
+    # Test (1): scope="watchlist" (the default, and the explicit keyword) is
+    # byte-identical on every path. Two independent fixtures, one run with no
+    # scope argument (today's callers) and one with scope="watchlist"
+    # explicit, must produce identical official_book_snapshot.json content
+    # and identical official_books/*.csv.gz row content.
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    monkeypatch.setattr(maker_fill_replay.time, "sleep", lambda _: None)
+
+    def fake_get(url, params=None, timeout=None):
+        return _Response(
+            {
+                "asset_id": params["token_id"],
+                "timestamp": 1_000,
+                "hash": "h1",
+                "bids": [{"price": "0.48", "size": "20"}],
+                "asks": [{"price": "0.52", "size": "20"}],
+            }
+        )
+
+    monkeypatch.setattr(maker_fill_replay.requests, "get", fake_get)
+
+    def _run(root: Path):
+        root.mkdir()
+        cfg = _config(root)
+        _seed_maker_portfolio(cfg)
+        return cfg
+
+    cfg_default = _run(tmp_path / "default")
+    summary_default = maker_fill_replay.snapshot_official_books(cfg_default)
+    cfg_explicit = _run(tmp_path / "explicit")
+    summary_explicit = maker_fill_replay.snapshot_official_books(cfg_explicit, scope="watchlist")
+
+    # `files_written` legitimately differs: it is an absolute path under each
+    # fixture's own tmp_path root. Compare basenames for that field and
+    # everything else as-is.
+    assert [Path(p).name for p in summary_default["files_written"]] == [
+        Path(p).name for p in summary_explicit["files_written"]
+    ]
+    comparable_default = {k: v for k, v in summary_default.items() if k != "files_written"}
+    comparable_explicit = {k: v for k, v in summary_explicit.items() if k != "files_written"}
+    assert comparable_default == comparable_explicit
+    # The persisted official_book_snapshot.json is exactly the returned
+    # summary dict (write_json serialises it verbatim), so the in-memory
+    # equality just proven already covers file content; `files_written`
+    # embeds each fixture's own absolute tmp_path root, so the two files'
+    # raw bytes cannot be identical across separate tmp_path roots for a
+    # reason unrelated to `scope` - normalize that one field before the
+    # on-disk comparison instead of asserting raw-byte equality directly.
+    read_default = read_json(cfg_default.output_root / "maker_carry" / "official_book_snapshot.json")
+    read_explicit = read_json(cfg_explicit.output_root / "maker_carry" / "official_book_snapshot.json")
+    read_default["files_written"] = [Path(p).name for p in read_default["files_written"]]
+    read_explicit["files_written"] = [Path(p).name for p in read_explicit["files_written"]]
+    assert read_default == read_explicit
+    # Gzip embeds a write-time mtime in its header, so raw bytes of two
+    # separate writes legitimately differ even with identical content -
+    # compare the decompressed rows instead.
+    rows_default = maker_fill_replay._read_csv_any(
+        cfg_default.output_root / "maker_carry" / "official_books" / "0xcond.csv.gz"
+    )
+    rows_explicit = maker_fill_replay._read_csv_any(
+        cfg_explicit.output_root / "maker_carry" / "official_books" / "0xcond.csv.gz"
+    )
+    assert rows_default == rows_explicit
+    assert not (cfg_default.output_root / "maker_carry" / "official_book_pulse.json").exists()
+
+
+def test_wo149_portfolio_scope_polls_only_the_current_portfolio_2_3_4(tmp_path, monkeypatch):
+    # Test (2): scope="portfolio" with 2 portfolio + 3 persistent-eligible +
+    # 4 candidate-seed-eligible markets on the watchlist fixture -> exactly 2
+    # polled (persistent_markets=0, candidate_seed_markets=0), the pulse JSON
+    # is written, and the pre-existing (sentinel) watchlist snapshot JSON is
+    # byte-identical afterward - this scope never touches it.
+    cfg = _config(tmp_path)
+    raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    raw["maker_fill_replay"].update(
+        {"book_source": "official", "request_pause_seconds": 0, "regime_days": 7, "max_candidate_markets": 4}
+    )
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(raw), encoding="utf-8")
+    cfg = load_config(tmp_path / "config.yaml")
+
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {
+            "generated_at_utc": "2026-07-10T00:00:00Z",
+            "portfolio": [
+                {"condition_id": "0xp1", "token_id": "tokP1", "quote_size_shares": 10, "quote_distance": 0.01},
+                {"condition_id": "0xp2", "token_id": "tokP2", "quote_size_shares": 10, "quote_distance": 0.01},
+            ],
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    write_csv(
+        cfg.output_root / "maker_carry" / "maker_carry_candidates.csv",
+        [
+            {"condition_id": "0xp1", "token_id": "tokP1", "net_carry_usd_per_day": "5.0"},
+            {"condition_id": "0xp2", "token_id": "tokP2", "net_carry_usd_per_day": "4.0"},
+            {"condition_id": "0xc1", "token_id": "tokC1", "net_carry_usd_per_day": "3.0"},
+            {"condition_id": "0xc2", "token_id": "tokC2", "net_carry_usd_per_day": "2.0"},
+            {"condition_id": "0xc3", "token_id": "tokC3", "net_carry_usd_per_day": "1.0"},
+            {"condition_id": "0xc4", "token_id": "tokC4", "net_carry_usd_per_day": "0.5"},
+        ],
+        fieldnames=["condition_id", "token_id", "net_carry_usd_per_day"],
+    )
+    for cond, tok in (("0xr1", "tokR1"), ("0xr2", "tokR2"), ("0xr3", "tokR3")):
+        _recent_book_file(cfg, cond, tok)
+
+    sentinel = {"sentinel": True, "note": "pre-existing watchlist snapshot must not move"}
+    write_json(cfg.output_root / "maker_carry" / "official_book_snapshot.json", sentinel)
+    sentinel_bytes = (cfg.output_root / "maker_carry" / "official_book_snapshot.json").read_bytes()
+
+    monkeypatch.setattr(maker_fill_replay.time, "sleep", lambda _: None)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    polled: list[str] = []
+
+    def fake_get(url, params=None, timeout=None):
+        token = (params or {}).get("token_id")
+        polled.append(token)
+        return _Response(
+            {
+                "asset_id": token,
+                "timestamp": 2000,
+                "hash": "h1",
+                "bids": [{"price": "0.48", "size": "20"}],
+                "asks": [{"price": "0.52", "size": "20"}],
+            }
+        )
+
+    monkeypatch.setattr(maker_fill_replay.requests, "get", fake_get)
+
+    summary = maker_fill_replay.snapshot_official_books(cfg, scope="portfolio")
+
+    assert summary["status"] == "ok"
+    assert summary["markets_polled"] == 2
+    assert summary["portfolio_markets"] == 2
+    assert summary["persistent_markets"] == 0
+    assert summary["candidate_seed_markets"] == 0
+    assert set(polled) == {"tokP1", "tokP2"}
+    pulse_path = cfg.output_root / "maker_carry" / "official_book_pulse.json"
+    assert pulse_path.is_file()
+    pulse = read_json(pulse_path)
+    assert pulse["scope"] == "portfolio"
+    assert (cfg.output_root / "maker_carry" / "official_book_snapshot.json").read_bytes() == sentinel_bytes
+
+
+def test_wo149_portfolio_scope_never_touches_the_collection_window_ledger(tmp_path, monkeypatch):
+    # Test (3): sentinel collection-windows CSV byte-identical.
+    cfg = _config(tmp_path)
+    _seed_maker_portfolio(cfg)
+    ledger_path = cfg.output_root / "maker_carry" / "maker_replay_collection_windows.csv"
+    write_csv(
+        ledger_path,
+        [
+            {
+                "window_id": "sentinel",
+                "condition_id": "0xsentinel",
+                "asset_id": "toksentinel",
+                "portfolio_generated_at_utc": "",
+                "collected_at_utc": "sentinel",
+                "quote_bid_price": "",
+                "quote_ask_price": "",
+                "quote_size_shares": "",
+                "book_poll_status": "ok",
+                "book_snapshot_rows": "0",
+                "trade_poll_status": "ok",
+                "trade_prints_returned": "0",
+                "covered": "True",
+            }
+        ],
+        fieldnames=maker_fill_replay.COLLECTION_WINDOW_FIELDS,
+    )
+    sentinel_bytes = ledger_path.read_bytes()
+
+    monkeypatch.setattr(maker_fill_replay.time, "sleep", lambda _: None)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+
+    def fake_get(url, params=None, timeout=None):
+        return _Response(
+            {
+                "asset_id": "tok1",
+                "timestamp": 2000,
+                "hash": "h1",
+                "bids": [{"price": "0.48", "size": "20"}],
+                "asks": [{"price": "0.52", "size": "20"}],
+            }
+        )
+
+    monkeypatch.setattr(maker_fill_replay.requests, "get", fake_get)
+
+    maker_fill_replay.snapshot_official_books(cfg, scope="portfolio")
+
+    assert ledger_path.read_bytes() == sentinel_bytes
+
+
+def test_wo149_portfolio_scope_never_writes_delisted_markers_even_on_404(tmp_path, monkeypatch):
+    # Test (4): sentinel delisted markers byte-identical when a portfolio
+    # token 404s; delisted_marker_write == "skipped_portfolio_scope".
+    cfg = _config(tmp_path)
+    _seed_maker_portfolio(cfg)
+    marker_path = cfg.output_root / "maker_carry" / "delisted_token_markers.json"
+    write_json(
+        marker_path,
+        {
+            "work_order": "WO-131",
+            "generated_at_utc": "sentinel",
+            "reporting_only": True,
+            "skip_threshold": 3,
+            "cooldown_hours": 24.0,
+            "tokens": {},
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    sentinel_bytes = marker_path.read_bytes()
+
+    monkeypatch.setattr(maker_fill_replay.time, "sleep", lambda _: None)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+
+    def fake_get(url, params=None, timeout=None):
+        raise maker_fill_replay.requests.HTTPError("404 Client Error: Not Found for url: /book")
+
+    monkeypatch.setattr(maker_fill_replay.requests, "get", fake_get)
+
+    summary = maker_fill_replay.snapshot_official_books(cfg, scope="portfolio")
+
+    assert summary["status"] == "failed"
+    assert summary["delisted_marker_write"] == "skipped_portfolio_scope"
+    assert marker_path.read_bytes() == sentinel_bytes
+
+
+def test_wo149_portfolio_scope_still_skips_a_token_in_cooldown(tmp_path, monkeypatch):
+    # Test (5): a token in cooldown is still skipped under portfolio scope,
+    # even though this scope never writes the marker file.
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {
+            "generated_at_utc": "2026-07-27T02:00:00Z",
+            "portfolio": [
+                {"condition_id": "0xdead", "token_id": "tokD", "quote_size_shares": 10, "quote_distance": 0.01}
+            ],
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    write_csv(
+        cfg.output_root / "maker_carry" / "maker_carry_candidates.csv",
+        [{"condition_id": "0xdead", "token_id": "tokD", "adverse_selection_usd_per_day": 2.0}],
+        fieldnames=["condition_id", "token_id", "adverse_selection_usd_per_day"],
+    )
+    write_json(
+        cfg.output_root / "maker_carry" / "delisted_token_markers.json",
+        {"tokens": {"tokD": {"condition_id": "0xdead", "consecutive_404s": 3, "last_404_utc": "2026-07-27T02:00:00Z"}}},
+    )
+
+    monkeypatch.setattr(maker_fill_replay.time, "sleep", lambda _: None)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-27T03:00:00Z")
+    polled: list[str] = []
+
+    def fake_get(url, params=None, timeout=None):
+        polled.append((params or {}).get("token_id"))
+        return _Response(
+            {
+                "asset_id": "tokD",
+                "timestamp": 2000,
+                "hash": "h1",
+                "bids": [{"price": "0.48", "size": "20"}],
+                "asks": [{"price": "0.52", "size": "20"}],
+            }
+        )
+
+    monkeypatch.setattr(maker_fill_replay.requests, "get", fake_get)
+
+    summary = maker_fill_replay.snapshot_official_books(cfg, scope="portfolio")
+
+    assert summary["status"] == "no_portfolio"
+    assert polled == []
+    assert summary["markets_polled"] == 0
+
+
+def test_wo149_invalid_scope_raises_before_any_network_or_write(tmp_path, monkeypatch):
+    # Test (6): scope="garbage" raises, no file written, no HTTP call.
+    cfg = _config(tmp_path)
+    _seed_maker_portfolio(cfg)
+    calls: list[int] = []
+    monkeypatch.setattr(maker_fill_replay.requests, "get", lambda *a, **k: calls.append(1))
+    monkeypatch.setattr(maker_fill_replay.requests, "post", lambda *a, **k: calls.append(1))
+
+    with pytest.raises(ValueError):
+        maker_fill_replay.snapshot_official_books(cfg, scope="garbage")
+
+    assert calls == []
+    assert not (cfg.output_root / "maker_carry" / "official_book_snapshot.json").exists()
+    assert not (cfg.output_root / "maker_carry" / "official_book_pulse.json").exists()
+
+
+def test_wo149_portfolio_scope_empty_portfolio_makes_zero_http_calls(tmp_path, monkeypatch):
+    # Test (7): empty portfolio -> no_portfolio, zero HTTP calls, watchlist
+    # snapshot untouched.
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"portfolio": [], "paper_trading_invoked": False, "live_trading_invoked": False},
+    )
+    sentinel_path = cfg.output_root / "maker_carry" / "official_book_snapshot.json"
+    write_json(sentinel_path, {"sentinel": True})
+    sentinel_bytes = sentinel_path.read_bytes()
+    calls: list[int] = []
+    monkeypatch.setattr(maker_fill_replay.requests, "get", lambda *a, **k: calls.append(1))
+    monkeypatch.setattr(maker_fill_replay.requests, "post", lambda *a, **k: calls.append(1))
+
+    summary = maker_fill_replay.snapshot_official_books(cfg, scope="portfolio")
+
+    assert summary["status"] == "no_portfolio"
+    assert calls == []
+    assert sentinel_path.read_bytes() == sentinel_bytes
+
+
+def test_wo149_pulse_and_collector_dedupe_the_shared_official_books_file(tmp_path, monkeypatch):
+    # Test (8): dedup - pulse then collector at the SAME generated_at_utc adds
+    # exactly one row (same observation_timestamp+hash key); a later pulse at
+    # a DIFFERENT stamp adds a second, distinct row.
+    cfg = _config(tmp_path)
+    _seed_maker_portfolio(cfg)
+    monkeypatch.setattr(maker_fill_replay.time, "sleep", lambda _: None)
+
+    def fake_get(url, params=None, timeout=None):
+        return _Response(
+            {
+                "asset_id": "tok1",
+                "timestamp": 1_000,
+                "hash": "h1",
+                "bids": [{"price": "0.48", "size": "20"}],
+                "asks": [{"price": "0.52", "size": "20"}],
+            }
+        )
+
+    monkeypatch.setattr(maker_fill_replay.requests, "get", fake_get)
+    book_path = cfg.output_root / "maker_carry" / "official_books" / "0xcond.csv.gz"
+
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    maker_fill_replay.snapshot_official_books(cfg, scope="portfolio")
+    maker_fill_replay.snapshot_official_books(cfg)  # watchlist collector, same generated_at_utc
+
+    assert len(maker_fill_replay._read_csv_any(book_path)) == 1
+
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:30:00Z")
+    maker_fill_replay.snapshot_official_books(cfg, scope="portfolio")
+
+    assert len(maker_fill_replay._read_csv_any(book_path)) == 2
+
+
+def test_wo149_entry_state_lag_percentiles_are_nearest_rank_hand_computed():
+    # Test (9): trades at t=0,100,400s; states at t=-50,-200,-350s -> lags
+    # [50,300,750]; p50==300.0, p90==750.0, max==750.0, fills_beyond_legacy_lag==0.
+    portfolio = [
+        {
+            "condition_id": f"0x{name}",
+            "token_id": f"tok{name.upper()}",
+            "quote_size_shares": 10.0,
+            "quote_distance": 0.01,
+            "quote_bid_price": 0.49,
+            "quote_ask_price": 0.51,
+        }
+        for name in ("a", "b", "c")
+    ]
+    trades = [
+        {"token_id": "tokA", "side": "BUY", "price": 0.52, "size": 20.0, "stamp": 0.0},
+        {"token_id": "tokB", "side": "BUY", "price": 0.52, "size": 20.0, "stamp": 100.0},
+        {"token_id": "tokC", "side": "BUY", "price": 0.52, "size": 20.0, "stamp": 400.0},
+    ]
+    states = {
+        "tokA": [{"stamp": -50.0, "midpoint": 0.50, "resting_ask_depth_at_quote": 0.0}],
+        "tokB": [{"stamp": -200.0, "midpoint": 0.50, "resting_ask_depth_at_quote": 0.0}],
+        "tokC": [{"stamp": -350.0, "midpoint": 0.50, "resting_ask_depth_at_quote": 0.0}],
+    }
+
+    result = maker_fill_replay._replay_against_states(
+        source="official",
+        states_by_token=states,
+        trades=trades,
+        portfolio=portfolio,
+        study_charge=1.0,
+        study_charge_by_condition={"0xa": 1 / 3, "0xb": 1 / 3, "0xc": 1 / 3},
+        max_state_lag_seconds=1800.0,
+    )
+
+    assert result["confirmed_fills"] == 3
+    lags = sorted(fill["entry_state_lag_seconds"] for fill in result["fills_preview"])
+    assert lags == [50.0, 300.0, 750.0]
+    assert result["entry_state_lag_seconds_p50"] == 300.0
+    assert result["entry_state_lag_seconds_p90"] == 750.0
+    assert result["entry_state_lag_seconds_max"] == 750.0
+    assert result["fills_beyond_legacy_lag"] == 0
+    assert result["entry_state_lag_unmeasurable"] == 0
+
+
+def test_wo149_fills_beyond_legacy_lag_uses_the_fixed_1800_literal(tmp_path):
+    # Test (10): tolerance monkeypatched to 3600 with one fill at a 2000s lag
+    # -> fills_beyond_legacy_lag == 1, proving the counter works against the
+    # 1800.0 literal without this WO changing the deployed tolerance value.
+    portfolio = [
+        {
+            "condition_id": "0xa",
+            "token_id": "tokA",
+            "quote_size_shares": 10.0,
+            "quote_distance": 0.01,
+            "quote_bid_price": 0.49,
+            "quote_ask_price": 0.51,
+        }
+    ]
+    trades = [{"token_id": "tokA", "side": "BUY", "price": 0.52, "size": 20.0, "stamp": 2000.0}]
+    states = {"tokA": [{"stamp": 0.0, "midpoint": 0.50, "resting_ask_depth_at_quote": 0.0}]}
+
+    result = maker_fill_replay._replay_against_states(
+        source="official",
+        states_by_token=states,
+        trades=trades,
+        portfolio=portfolio,
+        study_charge=1.0,
+        study_charge_by_condition={"0xa": 1.0},
+        max_state_lag_seconds=3600.0,
+    )
+
+    assert result["confirmed_fills"] == 1
+    assert result["fills_preview"][0]["entry_state_lag_seconds"] == 2000.0
+    assert result["fills_beyond_legacy_lag"] == 1
+
+
+def test_wo149_non_finite_state_stamp_is_excluded_and_counted_unmeasurable():
+    # Test (11): a book row whose timestamp parses to nan -> excluded from
+    # the percentile population, entry_state_lag_unmeasurable == 1, and the
+    # p90 is computed over the finite remainder.
+    portfolio = [
+        {
+            "condition_id": f"0x{name}",
+            "token_id": token,
+            "quote_size_shares": 10.0,
+            "quote_distance": 0.01,
+            "quote_bid_price": 0.49,
+            "quote_ask_price": 0.51,
+        }
+        for name, token in (("a", "tokA"), ("b", "tokB"), ("nan", "tokNan"))
+    ]
+    trades = [
+        {"token_id": "tokA", "side": "BUY", "price": 0.52, "size": 20.0, "stamp": 100.0},
+        {"token_id": "tokB", "side": "BUY", "price": 0.52, "size": 20.0, "stamp": 300.0},
+        {"token_id": "tokNan", "side": "BUY", "price": 0.52, "size": 20.0, "stamp": 3000.0},
+    ]
+    states = {
+        "tokA": [{"stamp": 0.0, "midpoint": 0.50, "resting_ask_depth_at_quote": 0.0}],
+        "tokB": [{"stamp": 0.0, "midpoint": 0.50, "resting_ask_depth_at_quote": 0.0}],
+        "tokNan": [{"stamp": float("nan"), "midpoint": 0.50, "resting_ask_depth_at_quote": 0.0}],
+    }
+
+    result = maker_fill_replay._replay_against_states(
+        source="official",
+        states_by_token=states,
+        trades=trades,
+        portfolio=portfolio,
+        study_charge=1.0,
+        study_charge_by_condition={"0xa": 1 / 3, "0xb": 1 / 3, "0xnan": 1 / 3},
+        max_state_lag_seconds=1800.0,
+    )
+
+    assert result["confirmed_fills"] == 3
+    assert result["entry_state_lag_unmeasurable"] == 1
+    assert result["entry_state_lag_seconds_p90"] == 300.0
+    assert result["entry_state_lag_seconds_max"] == 300.0
+
+
+def test_wo149_empty_lag_population_is_null_not_zero():
+    # Test (12): empty population -> p50/p90/max are null, not 0.0.
+    portfolio = [
+        {
+            "condition_id": "0xa",
+            "token_id": "tokA",
+            "quote_size_shares": 10.0,
+            "quote_distance": 0.01,
+            "quote_bid_price": 0.49,
+            "quote_ask_price": 0.51,
+        }
+    ]
+    trades = [{"token_id": "tokA", "side": "BUY", "price": 0.52, "size": 20.0, "stamp": 100.0}]
+
+    result = maker_fill_replay._replay_against_states(
+        source="official",
+        states_by_token={"tokA": []},
+        trades=trades,
+        portfolio=portfolio,
+        study_charge=1.0,
+        study_charge_by_condition={"0xa": 1.0},
+        max_state_lag_seconds=1800.0,
+    )
+
+    assert result["confirmed_fills"] == 0
+    assert result["entry_state_lag_seconds_p50"] is None
+    assert result["entry_state_lag_seconds_p90"] is None
+    assert result["entry_state_lag_seconds_max"] is None
+    assert result["entry_state_lag_unmeasurable"] == 0
+    assert result["fills_beyond_legacy_lag"] == 0
+
+
+def test_wo149_no_contemporaneous_state_rate_uses_relevant_trade_denominator():
+    # Test (13): no_contemporaneous_state_rate - 4 relevant trades, 1 miss ->
+    # 0.25; zero relevant trades -> null.
+    portfolio = [
+        {
+            "condition_id": "0xa",
+            "token_id": "tokA",
+            "quote_size_shares": 10.0,
+            "quote_distance": 0.01,
+            "quote_bid_price": 0.49,
+            "quote_ask_price": 0.51,
+        },
+        {
+            "condition_id": "0xb",
+            "token_id": "tokB",
+            "quote_size_shares": 10.0,
+            "quote_distance": 0.01,
+            "quote_bid_price": 0.49,
+            "quote_ask_price": 0.51,
+        },
+    ]
+    trades = [
+        {"token_id": "tokA", "side": "BUY", "price": 0.40, "size": 5.0, "stamp": 10.0},
+        {"token_id": "tokA", "side": "BUY", "price": 0.40, "size": 5.0, "stamp": 20.0},
+        {"token_id": "tokA", "side": "BUY", "price": 0.40, "size": 5.0, "stamp": 30.0},
+        {"token_id": "tokB", "side": "BUY", "price": 0.40, "size": 5.0, "stamp": 15.0},
+    ]
+    states = {"tokA": [{"stamp": 0.0, "midpoint": 0.50, "resting_ask_depth_at_quote": 20.0}], "tokB": []}
+
+    result = maker_fill_replay._replay_against_states(
+        source="official",
+        states_by_token=states,
+        trades=trades,
+        portfolio=portfolio,
+        study_charge=1.0,
+        study_charge_by_condition={"0xa": 0.5, "0xb": 0.5},
+        max_state_lag_seconds=1800.0,
+        quote_sheet_generated_stamp=10_000.0,
+        quoting_basis="contemporaneous",
+    )
+
+    assert result["no_contemporaneous_state_opportunities"] == 1
+    assert result["no_contemporaneous_state_rate"] == 0.25
+
+    empty_result = maker_fill_replay._replay_against_states(
+        source="official",
+        states_by_token={},
+        trades=[],
+        portfolio=portfolio,
+        study_charge=1.0,
+        study_charge_by_condition={"0xa": 0.5, "0xb": 0.5},
+        max_state_lag_seconds=1800.0,
+    )
+    assert empty_result["no_contemporaneous_state_rate"] is None
+
+
+def test_wo149_max_book_state_lag_seconds_byte_identity(tmp_path):
+    # Test (14): tolerance byte-identity.
+    cfg = _config(tmp_path)
+    settings = maker_fill_replay._settings(cfg)
+    assert settings["max_book_state_lag_seconds"] == 1800
+
+    example_config_text = Path("polymarket_predictive_config.example.yaml").read_text(encoding="utf-8")
+    assert "max_book_state_lag_seconds: 1800" in example_config_text
+
+
+def test_wo149_maker_policy_defaults_byte_identity():
+    # Test (15): threshold byte-identity - the four MAKER_POLICY_DEFAULTS
+    # values this WO explicitly does not move.
+    from polymarket_predictive_engine.maker_carry_study import MAKER_POLICY_DEFAULTS
+
+    assert MAKER_POLICY_DEFAULTS["maker_min_book_history_hours"] == 48.0
+    assert MAKER_POLICY_DEFAULTS["maker_min_book_snapshots"] == 100
+    assert MAKER_POLICY_DEFAULTS["target_net_usd_per_day"] == 3.33
+    assert MAKER_POLICY_DEFAULTS["max_trusted_reward_share"] == 0.05
+
+
+def test_wo149_snapshot_official_books_caller_set_is_exhaustively_scanned():
+    # Test (16): A3/A9 - exhaustive scan roots anchored off __file__, a
+    # non-zero visit count, and the production (src/) caller set is exactly
+    # the two internal maker_fill_replay.py callers plus the two cli.py
+    # command branches. scripts/ and .github/ (deployed automation, not
+    # Python callers) contribute zero call sites - proving the scan would
+    # catch a stray caller there, not just assert a hand-picked total.
+    root = Path(__file__).resolve().parents[2]
+    roots = {
+        "src": root / "src",
+        "scripts": root / "scripts",
+        "tests": root / "tests",
+        ".github": root / ".github",
+    }
+    call_pattern = re.compile(r"(?<!def )snapshot_official_books\(")
+
+    visited_files = 0
+    calls_by_root: dict[str, list[str]] = {name: [] for name in roots}
+    for name, scan_root in roots.items():
+        if not scan_root.exists():
+            continue
+        for path in scan_root.rglob("*.py"):
+            # Exclude ROOT/".claude" specifically. Checking ".claude" against
+            # the full absolute path is wrong here: this worktree itself is
+            # checked out under ".../.claude/worktrees/...", so every single
+            # file's absolute path contains ".claude" as an ANCESTOR of ROOT,
+            # not just an excluded subdirectory of the repo - that bug would
+            # silently exclude every file and pass `visited_files > 0`
+            # vacuously false, exactly the A3 failure mode this rule guards.
+            if path.relative_to(root).parts[0] == ".claude":
+                continue
+            visited_files += 1
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for match in call_pattern.finditer(text):
+                line_no = text.count("\n", 0, match.start()) + 1
+                calls_by_root[name].append(f"{path.name}:{line_no}")
+
+    assert visited_files > 0
+    assert calls_by_root["scripts"] == []
+    assert calls_by_root[".github"] == []
+    src_calls = calls_by_root["src"]
+    assert len(src_calls) == 4
+    assert sum(1 for site in src_calls if site.startswith("maker_fill_replay.py:")) == 2
+    assert sum(1 for site in src_calls if site.startswith("cli.py:")) == 2
+
+
+def test_wo149_s4_portfolio_pulse_against_a_recorded_books_and_book_response(tmp_path, monkeypatch):
+    # S4: at least one recorded-reality fixture. A sanitised real POST
+    # /books response (clob_books_2026-07-15.json) resolves the first
+    # market via the batch endpoint; a sanitised real GET /book response
+    # (clob_book_2026-07-15.json) resolves the second via the serial
+    # fallback - both recorded 2026-07-15, not hand-written.
+    recorded_books = _recorded_fixture("clob_books_2026-07-15.json")
+    recorded_book = _recorded_fixture("clob_book_2026-07-15.json")
+    batch_token = recorded_books[0]["asset_id"]
+
+    cfg = _config(tmp_path)
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {
+            "generated_at_utc": "2026-07-15T18:30:00Z",
+            "portfolio": [
+                {"condition_id": "0xbatch", "token_id": batch_token, "quote_size_shares": 10, "quote_distance": 0.01},
+                {"condition_id": "0xfallback", "token_id": "tokFallback", "quote_size_shares": 10, "quote_distance": 0.01},
+            ],
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    write_csv(
+        cfg.output_root / "maker_carry" / "maker_carry_candidates.csv",
+        [
+            {"condition_id": "0xbatch", "token_id": batch_token, "adverse_selection_usd_per_day": 2.0},
+            {"condition_id": "0xfallback", "token_id": "tokFallback", "adverse_selection_usd_per_day": 2.0},
+        ],
+        fieldnames=["condition_id", "token_id", "adverse_selection_usd_per_day"],
+    )
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-15T18:30:00Z")
+    monkeypatch.setattr(maker_fill_replay.time, "sleep", lambda _: None)
+    post_calls: list[Any] = []
+    get_calls: list[Any] = []
+
+    def fake_post(url, json=None, timeout=None):
+        post_calls.append(json)
+        assert url.endswith("/books")
+        return _Response(recorded_books)
+
+    def fake_get(url, params=None, timeout=None):
+        get_calls.append(params)
+        assert url.endswith("/book")
+        return _Response(recorded_book)
+
+    monkeypatch.setattr(maker_fill_replay.requests, "post", fake_post)
+    monkeypatch.setattr(maker_fill_replay.requests, "get", fake_get)
+
+    summary = maker_fill_replay.snapshot_official_books(cfg, scope="portfolio")
+
+    assert summary["status"] == "ok"
+    assert len(post_calls) == 1
+    assert len(get_calls) == 1
+    assert get_calls[0] == {"token_id": "tokFallback"}
+
+    batch_rows = maker_fill_replay._read_csv_any(cfg.output_root / "maker_carry" / "official_books" / "0xbatch.csv.gz")
+    fallback_rows = maker_fill_replay._read_csv_any(
+        cfg.output_root / "maker_carry" / "official_books" / "0xfallback.csv.gz"
+    )
+    assert float(batch_rows[0]["best_bid"]) == 0.25
+    assert float(batch_rows[0]["best_ask"]) == 0.26
+    assert batch_rows[0]["hash"] == "recorded-sanitized-book-hash"
+    assert float(fallback_rows[0]["best_bid"]) == 0.25
+    assert float(fallback_rows[0]["best_ask"]) == 0.26
+
+
+def test_wo149_cli_pulse_command_dispatches_portfolio_scope(tmp_path, monkeypatch):
+    # Bonus (beyond the enumerated 25): confirms the CLI branch actually
+    # passes scope="portfolio", complementing the static scan in test (16).
+    from polymarket_predictive_engine import cli as engine_cli
+
+    calls: list[str] = []
+
+    def fake_snapshot(cfg, *, scope="watchlist"):
+        calls.append(scope)
+        return {"status": "ok"}
+
+    monkeypatch.setattr(engine_cli, "snapshot_official_books", fake_snapshot)
+    raw = yaml.safe_load(Path("polymarket_predictive_config.example.yaml").read_text(encoding="utf-8"))
+    raw["paths"]["data_root"] = str(tmp_path)
+    raw["paths"]["output_root"] = str(tmp_path / "outputs")
+    raw["paths"]["database_path"] = str(tmp_path / "work" / "paper.sqlite")
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    assert "snapshot-official-books-pulse" in engine_cli.COMMANDS
+    exit_code = engine_cli.main(["snapshot-official-books-pulse", "--config", str(cfg_path)])
+
+    assert exit_code == 0
+    assert calls == ["portfolio"]
+
+
+def test_wo149_run_maker_fill_replay_publishes_lag_fields_at_top_level(tmp_path):
+    # Bonus: the Day-after check reads these fields directly off
+    # maker_fill_replay.json's top level, not just off the internal replay
+    # result - confirm run_maker_fill_replay actually propagates them.
+    cfg = _config(tmp_path)
+    _seed_maker_portfolio(cfg)
+    _seed_archive(cfg)
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xcond", "asset_id": "tok1", "side": "SELL", "price": 0.49, "size": 25, "timestamp": 1_000}],
+        fieldnames=["market", "asset_id", "side", "price", "size", "timestamp"],
+    )
+
+    summary = run_maker_fill_replay(cfg)
+
+    assert summary["confirmed_fills"] == 1
+    assert summary["entry_state_lag_seconds_p50"] == 0.0
+    assert summary["entry_state_lag_seconds_p90"] == 0.0
+    assert summary["entry_state_lag_seconds_max"] == 0.0
+    assert summary["fills_beyond_legacy_lag"] == 0
+    assert summary["entry_state_lag_unmeasurable"] == 0
+    assert summary["no_contemporaneous_state_rate"] == 0.0

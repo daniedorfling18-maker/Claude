@@ -1117,3 +1117,123 @@ def test_private_dashboard_setup_waits_for_recreated_backend():
     retry_loop = text.index("backend_ready=false")
     serve_enable = text.index("tailscale serve --bg --yes --https=443")
     assert recreate < retry_loop < serve_enable
+
+
+# --- WO-149: book_pulse scheduler job ---
+
+
+def test_book_pulse_interval_and_timeout_env_clamps(tmp_path):
+    # Test (17): clamps 999999->900, 60->300, abc->300, timeout 99999->240.
+    script = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+
+    def _read(**env_overrides):
+        env = {
+            **os.environ,
+            "OPS_SCHEDULER_LIBRARY_ONLY": "1",
+            "OPS_SCHEDULER_OUT_DIR": str(out_dir),
+            **env_overrides,
+        }
+        result = subprocess.run(
+            ["sh", "-c", '. "$1"; printf "%s %s\\n" "$BOOK_PULSE_INTERVAL" "$BOOK_PULSE_TIMEOUT"', "sh", str(script)],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        interval, timeout = result.stdout.strip().split()
+        return int(interval), int(timeout)
+
+    assert _read(OPS_BOOK_PULSE_INTERVAL_SECONDS="999999")[0] == 900
+    assert _read(OPS_BOOK_PULSE_INTERVAL_SECONDS="60")[0] == 300
+    assert _read(OPS_BOOK_PULSE_INTERVAL_SECONDS="abc")[0] == 300
+    assert _read(OPS_BOOK_PULSE_TIMEOUT_SECONDS="99999")[1] == 240
+    # Defaults, sanity-checked alongside the clamps.
+    assert _read() == (300, 240)
+
+
+def test_book_pulse_job_is_wired_like_trade_prints_and_ordered_before_ledger_anchor():
+    # Test (18): static wiring - the exact command line,
+    # wait_with_safety_pulses "$JOB_PID" book_pulse, stamp_status with
+    # started-at, loop block after trade_prints and before ledger_anchor.
+    script = (ROOT / "scripts" / "run_vps_ops_scheduler.sh").read_text(encoding="utf-8")
+
+    assert "run_book_pulse() {" in script
+    assert (
+        'python -m polymarket_predictive_engine.cli snapshot-official-books-pulse --config "$CONFIG_PATH"'
+        in script
+    )
+    assert 'wait_with_safety_pulses "$JOB_PID" book_pulse' in script
+    body = script.split("run_book_pulse() {", 1)[1].split("\nrun_maker_safety_refresh() {", 1)[0]
+    assert "BOOK_PULSE_STARTED_AT=$(date" in body
+    assert 'stamp_status book_pulse "$CODE"' in body
+    assert '"$BOOK_PULSE_STARTED_AT"' in body
+
+    loop = script.split("while :; do", 1)[1]
+    trade_call_idx = loop.index("run_trade_prints\n")
+    pulse_call_idx = loop.index("run_book_pulse\n")
+    ledger_call_idx = loop.index("run_ledger_anchor\n")
+    assert trade_call_idx < pulse_call_idx < ledger_call_idx
+
+
+def test_book_pulse_overrun_leaves_last_success_empty_with_numeric_duration_and_recovers(tmp_path):
+    # Test (19): exit 124 records skip_kind: "overrun" and leaves
+    # last_success_utc empty with a numeric duration; a following exit 0
+    # refreshes it.
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    script = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
+    env = {**os.environ, "OPS_SCHEDULER_LIBRARY_ONLY": "1", "OPS_SCHEDULER_OUT_DIR": str(out_dir)}
+
+    overrun = subprocess.run(
+        ["sh", "-c", '. "$1"; stamp_status book_pulse 124 "overrun" "2026-08-01T00:00:00Z"', "sh", str(script)],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert overrun.returncode == 0, overrun.stderr
+    job = json.loads((out_dir / "status.json").read_text(encoding="utf-8"))["jobs"]["book_pulse"]
+    assert job["skip_kind"] == "overrun"
+    assert job["last_success_utc"] == ""
+    assert isinstance(job["duration_seconds"], (int, float))
+
+    recovered = subprocess.run(
+        ["sh", "-c", '. "$1"; stamp_status book_pulse 0 "ok" "2026-08-01T00:05:00Z"', "sh", str(script)],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert recovered.returncode == 0, recovered.stderr
+    job_recovered = json.loads((out_dir / "status.json").read_text(encoding="utf-8"))["jobs"]["book_pulse"]
+    assert job_recovered["last_success_utc"] != ""
+    assert job_recovered["skip_kind"] == "none"
+
+
+def test_book_pulse_disabled_stamps_intentional_skip_at_exit_zero(tmp_path):
+    # Test (20): OPS_BOOK_PULSE_ENABLED=0 stamps an intentional skip at exit 0.
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    script = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
+    env = {
+        **os.environ,
+        "OPS_SCHEDULER_LIBRARY_ONLY": "1",
+        "OPS_SCHEDULER_OUT_DIR": str(out_dir),
+        "OPS_BOOK_PULSE_ENABLED": "0",
+    }
+
+    result = subprocess.run(
+        ["sh", "-c", '. "$1"; run_book_pulse', "sh", str(script)],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    job = json.loads((out_dir / "status.json").read_text(encoding="utf-8"))["jobs"]["book_pulse"]
+    assert job["last_exit_code"] == 0
+    assert job["skip_kind"] == "intentional"

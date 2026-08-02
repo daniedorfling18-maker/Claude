@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import io
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -24,7 +25,7 @@ from polymarket_predictive_engine.disaster_recovery import (
     verify_and_restore_archive,
 )
 from polymarket_predictive_engine.ledger_anchor import anchor_ledgers, verify_ledger_chain
-from polymarket_predictive_engine.utils import read_json, write_json
+from polymarket_predictive_engine.utils import read_json, safe_float, write_json
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1370,3 +1371,317 @@ def test_wo150_corrupt_maker_live_test_block_selects_the_conservative_ceiling(co
     # The well-formed empty cases are unchanged: no wallet means no binding capital.
     for benign in (None, {}, {"wallet_address": ""}):
         assert _live_capital_context(_Cfg(benign)) is False, benign
+
+
+# --- WO-146: the DR archive build trigger is its own RPO ceiling ---
+#
+# The build cadence moves 24.0h -> 20.0h. No RPO ceiling value moves:
+# active_rpo_hours (24.0), paper_stage_max_rpo_hours (168.0), and
+# pre_live_max_rpo_hours (24.0) are pinned unchanged by test (14) below. Tests
+# are numbered to match the WO's own enumeration.
+
+
+def test_wo146_test1_absent_config_uses_the_registered_default(tmp_path: Path) -> None:
+    from polymarket_predictive_engine.disaster_recovery import _settings, _validated_rpo
+
+    cfg = _config(tmp_path)
+    cfg.raw["disaster_recovery"]["active_rpo_hours"] = 24
+    rpo = _validated_rpo(cfg, _settings(cfg))
+
+    assert rpo["archive_build_interval_hours"] == pytest.approx(20.0, abs=1e-12)
+    assert rpo["archive_build_interval_source"] == "registered_default"
+    assert rpo["archive_build_margin_hours"] == pytest.approx(3.5, abs=1e-12)
+
+
+def test_wo146_test2_configured_value_inside_range_passes_through(tmp_path: Path) -> None:
+    from polymarket_predictive_engine.disaster_recovery import _settings, _validated_rpo
+
+    cfg = _config(tmp_path)
+    cfg.raw["disaster_recovery"]["active_rpo_hours"] = 24
+    cfg.raw["disaster_recovery"]["archive_build_interval_hours"] = 12.0
+    rpo = _validated_rpo(cfg, _settings(cfg))
+
+    assert rpo["archive_build_interval_hours"] == pytest.approx(12.0, abs=1e-12)
+    assert rpo["archive_build_interval_source"] == "config"
+    assert rpo["archive_build_margin_hours"] == pytest.approx(11.5, abs=1e-12)
+
+
+def test_wo146_test3_below_floor_clamps_up_to_6_0(tmp_path: Path) -> None:
+    from polymarket_predictive_engine.disaster_recovery import _settings, _validated_rpo
+
+    cfg = _config(tmp_path)
+    cfg.raw["disaster_recovery"]["active_rpo_hours"] = 24
+    cfg.raw["disaster_recovery"]["archive_build_interval_hours"] = 2.0
+    rpo = _validated_rpo(cfg, _settings(cfg))
+
+    assert rpo["archive_build_interval_hours"] == pytest.approx(6.0, abs=1e-12)
+    assert rpo["archive_build_interval_source"] == "clamped_to_floor"
+    assert rpo["archive_build_margin_hours"] == pytest.approx(17.5, abs=1e-12)
+
+
+def test_wo146_test4_above_ceiling_clamps_down_to_20_0(tmp_path: Path) -> None:
+    from polymarket_predictive_engine.disaster_recovery import _settings, _validated_rpo
+
+    cfg = _config(tmp_path)
+    cfg.raw["disaster_recovery"]["active_rpo_hours"] = 24
+    cfg.raw["disaster_recovery"]["archive_build_interval_hours"] = 48.0
+    rpo = _validated_rpo(cfg, _settings(cfg))
+
+    assert rpo["archive_build_interval_hours"] == pytest.approx(20.0, abs=1e-12)
+    assert rpo["archive_build_interval_source"] == "clamped_to_ceiling"
+    assert rpo["archive_build_margin_hours"] == pytest.approx(3.5, abs=1e-12)
+
+
+def test_wo146_test5_non_numeric_value_fails_closed_before_any_archive_is_built(
+    tmp_path: Path,
+) -> None:
+    cfg = _config(tmp_path)
+    _seed_two_day_chain(cfg)
+    cfg.raw["disaster_recovery"]["archive_build_interval_hours"] = "abc"
+
+    with pytest.raises(DisasterRecoveryError):
+        create_ledger_archive(cfg, force=True)
+
+    status = read_json(cfg.output_root / "performance" / "disaster_recovery_status.json")
+    assert status["status"] == "error"
+    assert status["failure_stamped"] is True
+    assert not Path(status["archive_path"]).exists()
+
+
+def test_wo146_test6_non_finite_value_fails_closed_and_the_guard_is_proven(
+    tmp_path: Path,
+) -> None:
+    # `safe_float("nan")` returns NaN, not None - proves the guard is needed,
+    # not the parser: an unguarded `nan > ceiling` reads corrupt input as fresh.
+    assert math.isnan(safe_float("nan"))
+
+    cfg = _config(tmp_path)
+    _seed_two_day_chain(cfg)
+    cfg.raw["disaster_recovery"]["archive_build_interval_hours"] = float("nan")
+
+    with pytest.raises(DisasterRecoveryError):
+        create_ledger_archive(cfg, force=True)
+
+    status = read_json(cfg.output_root / "performance" / "disaster_recovery_status.json")
+    assert status["status"] == "error"
+    assert status["failure_stamped"] is True
+    assert not Path(status["archive_path"]).exists()
+
+
+@pytest.mark.parametrize("bad_value", [0, -1.0])
+def test_wo146_test7_zero_or_negative_value_fails_closed(tmp_path: Path, bad_value) -> None:
+    cfg = _config(tmp_path)
+    _seed_two_day_chain(cfg)
+    cfg.raw["disaster_recovery"]["archive_build_interval_hours"] = bad_value
+
+    with pytest.raises(DisasterRecoveryError):
+        create_ledger_archive(cfg, force=True)
+
+    status = read_json(cfg.output_root / "performance" / "disaster_recovery_status.json")
+    assert status["status"] == "error"
+    assert status["failure_stamped"] is True
+
+
+def test_wo146_test8_not_due_before_the_build_interval_elapses(tmp_path: Path) -> None:
+    cfg = _config(tmp_path)
+    cfg.raw["disaster_recovery"]["active_rpo_hours"] = 24
+    _seed_two_day_chain(cfg)
+    create_ledger_archive(cfg, force=True)
+    status_path = cfg.output_root / "performance" / "disaster_recovery_status.json"
+    last = datetime.now(timezone.utc) - timedelta(hours=19.9)
+    status = read_json(status_path)
+    status.update(
+        {
+            "remote_push_status": "ok",
+            "last_remote_success_at_utc": last.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "last_remote_snapshot_date": status["snapshot_date"],
+        }
+    )
+    write_json(status_path, status)
+
+    result = create_ledger_archive(cfg)
+
+    assert result["status"] == "not_due"
+    assert result["last_remote_archive_age_hours"] == pytest.approx(19.9, abs=0.01)
+    assert result["rpo"]["compliant"] is True
+    expected_next_due = (last + timedelta(hours=20.0)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert result["next_archive_due_at_utc"] == expected_next_due
+
+
+def test_wo146_test9_regression_the_build_is_due_before_the_ceiling_is_breached(
+    tmp_path: Path,
+) -> None:
+    # THE regression this WO exists to fix. Under unmodified `main` (the build
+    # trigger and the compliance ceiling are the same 24.0h number), the
+    # identical fixture below yields age 24.5h and compliant False - the
+    # archive cannot be rebuilt until its age has ALREADY breached the
+    # ceiling. With the 20.0h interval, the same elapsed time is already due,
+    # so the rebuild happens while the ceiling is still satisfied.
+    cfg = _config(tmp_path)
+    cfg.raw["disaster_recovery"]["active_rpo_hours"] = 24
+    _seed_two_day_chain(cfg)
+    create_ledger_archive(cfg, force=True)
+    status_path = cfg.output_root / "performance" / "disaster_recovery_status.json"
+    stale_stamp = (datetime.now(timezone.utc) - timedelta(hours=20.5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    status = read_json(status_path)
+    status.update(
+        {
+            "remote_push_status": "ok",
+            "last_remote_success_at_utc": stale_stamp,
+            "last_remote_snapshot_date": status["snapshot_date"],
+        }
+    )
+    write_json(status_path, status)
+
+    result = create_ledger_archive(cfg)  # not forced: the due decision must trigger this alone
+
+    assert result["status"] == "ok"
+    assert result["last_remote_archive_age_hours"] == pytest.approx(20.5, abs=0.01)
+    assert result["rpo"]["compliant"] is True
+
+
+def test_wo146_test10_the_alarm_still_fires_past_the_unchanged_ceiling(tmp_path: Path) -> None:
+    cfg = _config(tmp_path)
+    cfg.raw["disaster_recovery"]["active_rpo_hours"] = 24
+    _seed_two_day_chain(cfg)
+    create_ledger_archive(cfg, force=True)
+    status_path = cfg.output_root / "performance" / "disaster_recovery_status.json"
+    stale_stamp = (datetime.now(timezone.utc) - timedelta(hours=24.5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    status = read_json(status_path)
+    status.update(
+        {
+            "remote_push_status": "ok",
+            "last_remote_success_at_utc": stale_stamp,
+            "last_remote_snapshot_date": status["snapshot_date"],
+        }
+    )
+    write_json(status_path, status)
+
+    result = create_ledger_archive(cfg)
+
+    assert result["status"] == "ok"
+    assert result["last_remote_archive_age_hours"] == pytest.approx(24.5, abs=0.01)
+    assert result["rpo"]["compliant"] is False
+
+
+def test_wo146_test11_never_archived_host_still_alarms(tmp_path: Path) -> None:
+    cfg = _config(tmp_path)
+    _seed_two_day_chain(cfg)
+
+    result = create_ledger_archive(cfg)  # not forced: due=True purely from absence
+
+    assert result["status"] == "ok"
+    assert result["last_remote_archive_age_hours"] is None
+    assert result["rpo"]["observed_archive_age_hours"] is None
+    assert result["rpo"]["compliant"] is False
+
+
+def test_wo146_test12_nan_active_rpo_hours_fails_closed(tmp_path: Path) -> None:
+    # 146.2: `nan <= 0` is False, so an unguarded active_rpo_hours: nan used to
+    # pass validation. Strictly tightening - it can only stamp an error where
+    # today's code would silently accept the corrupt value.
+    cfg = _config(tmp_path)
+    _seed_two_day_chain(cfg)
+    cfg.raw["disaster_recovery"]["active_rpo_hours"] = float("nan")
+
+    with pytest.raises(DisasterRecoveryError):
+        create_ledger_archive(cfg, force=True)
+
+    status = read_json(cfg.output_root / "performance" / "disaster_recovery_status.json")
+    assert status["status"] == "error"
+    assert status["failure_stamped"] is True
+
+
+def test_wo146_test13_pre_live_ceiling_violation_message_is_unchanged(tmp_path: Path) -> None:
+    cfg = _config(tmp_path, wallet="0x" + "a" * 40)
+    _seed_two_day_chain(cfg)
+    cfg.raw["disaster_recovery"]["active_rpo_hours"] = 200
+
+    with pytest.raises(DisasterRecoveryError, match="24h maximum"):
+        create_ledger_archive(cfg, force=True)
+
+
+def test_wo146_test14_static_ceiling_literals_unchanged_in_example_config() -> None:
+    raw = yaml.safe_load((ROOT / "polymarket_predictive_config.example.yaml").read_text(encoding="utf-8"))
+    dr = raw["disaster_recovery"]
+
+    assert dr["active_rpo_hours"] == 24
+    assert dr["paper_stage_max_rpo_hours"] == 168
+    assert dr["pre_live_max_rpo_hours"] == 24
+    assert dr["size_cap_mb"] == 240
+
+
+def test_wo146_test15_archive_build_interval_hours_caller_set_is_exhaustively_scanned() -> None:
+    # Test (15): A3 - exhaustive scan of every root the WO names, anchored off
+    # __file__ (never CWD), over src/scripts/tests/docs/.github plus root
+    # yaml/yml/toml, excluding ROOT/".claude", asserting a non-zero visit
+    # count.
+    #
+    # ESCALATION (see build report): the WO's enumerated text says the string
+    # "appears in exactly the four touched files" once "docs" is one of the
+    # scanned roots. That is not achievable without editing
+    # docs/POLYMARKET_CODEX_WORK_ORDERS.md - not on the touch list, and it is
+    # the WO's OWN registered specification, which necessarily names the
+    # setting it registers. This test therefore asserts the demonstrable
+    # property the scan exists to prove (no unexpected code location outside
+    # the touched set references the setting name) by naming that one
+    # pre-existing, out-of-scope, expected exception explicitly rather than
+    # silently narrowing the scan to make the literal wording pass.
+    root = Path(__file__).resolve().parents[2]
+    roots = {
+        "src": root / "src",
+        "scripts": root / "scripts",
+        "tests": root / "tests",
+        "docs": root / "docs",
+        ".github": root / ".github",
+    }
+    needle = "archive_build_interval_hours"
+
+    visited_files = 0
+    hits: set[str] = set()
+    for scan_root in roots.values():
+        if not scan_root.exists():
+            continue
+        for path in scan_root.rglob("*"):
+            if not path.is_file():
+                continue
+            relative_parts = path.relative_to(root).parts
+            # ROOT/".claude" is excluded, not any ancestor containing the
+            # literal substring ".claude" - this worktree itself is checked
+            # out under ".../.claude/worktrees/...", so every path's absolute
+            # string contains ".claude" as an ANCESTOR of ROOT. "__pycache__"
+            # holds compiled bytecode, which embeds source string literals
+            # (including this setting's name) verbatim and is not a caller.
+            if relative_parts[0] == ".claude" or "__pycache__" in relative_parts:
+                continue
+            visited_files += 1
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if needle in text:
+                hits.add(path.relative_to(root).as_posix())
+    for pattern in ("*.yaml", "*.yml", "*.toml"):
+        for path in root.glob(pattern):
+            if not path.is_file():
+                continue
+            visited_files += 1
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if needle in text:
+                hits.add(path.relative_to(root).as_posix())
+
+    assert visited_files > 0
+    touched = {
+        "src/polymarket_predictive_engine/disaster_recovery.py",
+        "scripts/push_vps_archive.sh",
+        "polymarket_predictive_config.example.yaml",
+        "tests/polymarket_predictive_engine/test_disaster_recovery.py",
+    }
+    registered_text_only = {"docs/POLYMARKET_CODEX_WORK_ORDERS.md"}
+    assert hits == touched | registered_text_only
+
+
+def test_wo146_test16_shell_advisory_carries_the_6_0_fallback() -> None:
+    # Coverage limit stated honestly: the shell script is not executed by the
+    # offline suite (it force-pushes a Git branch and is VPS-only), so this is
+    # a text assertion, not behavioural.
+    push = (ROOT / "scripts" / "push_vps_archive.sh").read_text(encoding="utf-8")
+    assert "archive_build_interval_hours" in push
+    assert "interval_hours = 6.0" in push

@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import io
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import shutil
@@ -28,7 +29,7 @@ from .ledger_anchor import (
     verify_ledger_chain,
 )
 from .runtime_lock import runtime_lock
-from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, write_json
+from .utils import now_utc, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
 
 
 class DisasterRecoveryError(RuntimeError):
@@ -73,6 +74,14 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
         "paper_stage_max_rpo_hours": 168,
         "pre_live_max_rpo_hours": 24,
         "lock_stale_seconds": 3600,
+        # WO-146: the archive BUILD trigger, distinct from active_rpo_hours (the
+        # compliance CEILING). Deliberately left unclamped and unvalidated here -
+        # `_resolved_archive_build_interval` does that fail-closed inside
+        # create_ledger_archive's try block, matching the registered precedent
+        # for `excluded_path_prefixes` above: a malformed value must stamp
+        # `status: "error"`, never raise past `_base_payload` with nothing
+        # recorded (the WO-122a/WO-127 blind-failure class).
+        "archive_build_interval_hours": 20.0,
     }
     merged.update({key: value for key, value in raw.items() if value is not None})
     # 2026-07-11 WO-65 tighten-only registration: overrides may reduce the
@@ -231,6 +240,61 @@ def _live_capital_context(cfg: EngineConfig) -> bool:
     return not (paper_stage_mode and wallet_is_inert)
 
 
+_ARCHIVE_BUILD_INTERVAL_FLOOR_HOURS = 6.0
+_ARCHIVE_BUILD_INTERVAL_CEILING_HOURS = 20.0
+
+
+def _resolved_archive_build_interval(cfg: EngineConfig, settings: dict[str, Any]) -> dict[str, Any]:
+    """WO-146 A2: fail-closed resolution of the archive BUILD interval.
+
+    Presence is read from the raw config, not from ``settings``: the merged
+    default is the same number (20.0) as the top of the valid ``"config"``
+    range, so the merge alone cannot distinguish "omitted" from "explicitly
+    set to 20.0" - only the raw config can.
+
+    Deliberately not resolved inside `_settings`, which runs before
+    `create_ledger_archive`'s `try` block: a malformed value must raise from
+    inside that `try` (the registered precedent for `active_rpo_hours` et al.
+    at `_validated_rpo`, and for `excluded_path_prefixes` above) so it stamps
+    `status: "error"` instead of escaping with nothing recorded - the
+    WO-122a/WO-127 blind-failure class.
+    """
+
+    raw_disaster_recovery = cfg.raw.get("disaster_recovery", {})
+    raw_disaster_recovery = raw_disaster_recovery if isinstance(raw_disaster_recovery, dict) else {}
+    raw_value = raw_disaster_recovery.get("archive_build_interval_hours")
+    if raw_value is None:
+        return {
+            "archive_build_interval_hours": float(settings["archive_build_interval_hours"]),
+            "archive_build_interval_source": "registered_default",
+        }
+    parsed = safe_float(raw_value)
+    # A2: `safe_float("nan")` returns NaN, not None, so a bare `parsed is None`
+    # check would let a non-finite value fall through to the arithmetic below
+    # and read as fresh input (`nan > ceiling` is `False`). `math.isfinite`
+    # rejects both `nan` and `inf` explicitly.
+    if parsed is None or not math.isfinite(parsed):
+        raise ValueError(
+            "disaster_recovery.archive_build_interval_hours must be a finite number: "
+            f"{raw_value!r}"
+        )
+    if parsed <= 0:
+        raise ValueError(
+            f"disaster_recovery.archive_build_interval_hours must be positive: {parsed:g}"
+        )
+    if parsed < _ARCHIVE_BUILD_INTERVAL_FLOOR_HOURS:
+        return {
+            "archive_build_interval_hours": _ARCHIVE_BUILD_INTERVAL_FLOOR_HOURS,
+            "archive_build_interval_source": "clamped_to_floor",
+        }
+    if parsed > _ARCHIVE_BUILD_INTERVAL_CEILING_HOURS:
+        return {
+            "archive_build_interval_hours": _ARCHIVE_BUILD_INTERVAL_CEILING_HOURS,
+            "archive_build_interval_source": "clamped_to_ceiling",
+        }
+    return {"archive_build_interval_hours": parsed, "archive_build_interval_source": "config"}
+
+
 def _validated_rpo(
     cfg: EngineConfig,
     settings: dict[str, Any],
@@ -240,7 +304,18 @@ def _validated_rpo(
     active = float(settings["active_rpo_hours"])
     paper_max = float(settings["paper_stage_max_rpo_hours"])
     pre_live_max = float(settings["pre_live_max_rpo_hours"])
-    if active <= 0 or paper_max <= 0 or pre_live_max <= 0:
+    # WO-146 (146.2): `nan <= 0` and `nan > allowed` are both False, so a `nan`
+    # RPO value used to pass validation silently. Adding `math.isfinite` is
+    # strictly tightening - it can only convert a currently-accepted malformed
+    # config into a stamped error, never accept anything rejected today.
+    if (
+        active <= 0
+        or paper_max <= 0
+        or pre_live_max <= 0
+        or not math.isfinite(active)
+        or not math.isfinite(paper_max)
+        or not math.isfinite(pre_live_max)
+    ):
         raise ValueError("disaster-recovery RPO values must be positive")
     live_context = _live_capital_context(cfg)
     allowed = pre_live_max if live_context else paper_max
@@ -250,12 +325,16 @@ def _validated_rpo(
             f"active RPO {active:g}h exceeds the {allowed:g}h maximum for {context}; "
             "tighten disaster_recovery.active_rpo_hours with a dated config change before proceeding"
         )
+    interval = _resolved_archive_build_interval(cfg, settings)
+    interval_hours = float(interval["archive_build_interval_hours"])
     # WO-122: `compliant` used to be hardcoded True, asserting only that the
     # CONFIGURED ceiling was respected. Published beside a 233-hour archive age
     # against a 24-hour RPO, it read as "backups are fine" while the archive
     # builder had been failing for ten days. It now also requires the OBSERVED
     # archive age to be inside the active RPO, and fails closed when the age is
     # unknown (never-archived is not compliance).
+    # WO-146: still compares against `active`, never the build interval - the
+    # compliance ceiling is unchanged and still binds.
     observed_within = observed_age_hours is not None and observed_age_hours <= active
     return {
         "active_rpo_hours": active,
@@ -273,6 +352,14 @@ def _validated_rpo(
         # binding capital.
         "live_capital_context": live_context,
         "configured_rpo_within_registered_ceiling": True,
+        # WO-146: the archive BUILD trigger, distinct from `active_rpo_hours`
+        # (the compliance ceiling, unchanged). Making the archive build more
+        # often than the ceiling means scheduling latency no longer guarantees
+        # the observed age already exceeds it at the moment compliance is
+        # evaluated.
+        "archive_build_interval_hours": interval_hours,
+        "archive_build_interval_source": interval["archive_build_interval_source"],
+        "archive_build_margin_hours": round(active - interval_hours - 0.5, 4),
         "observed_archive_age_hours": (
             None if observed_age_hours is None else round(observed_age_hours, 4)
         ),
@@ -447,7 +534,14 @@ def create_ledger_archive(cfg: EngineConfig, *, force: bool = False) -> dict[str
 
     try:
         rpo = _validated_rpo(cfg, settings)
-        due, next_due, age_hours = _snapshot_due(previous, rpo_hours=float(rpo["active_rpo_hours"]))
+        # WO-146: the archive build is triggered by the (tighter) build
+        # interval, never by the RPO ceiling itself - the two used to be the
+        # same number, so the archive could not be rebuilt until its age had
+        # ALREADY reached the ceiling. `observed_within_rpo`/`compliant` below
+        # still compare against `active_rpo_hours`; only the DUE decision moves.
+        due, next_due, age_hours = _snapshot_due(
+            previous, rpo_hours=float(rpo["archive_build_interval_hours"])
+        )
         # Re-derive compliance now that the observed archive age is known.
         rpo = _validated_rpo(cfg, settings, observed_age_hours=age_hours)
         payload["rpo"] = rpo

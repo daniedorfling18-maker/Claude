@@ -48,6 +48,7 @@ stamp_remote() {
   mkdir -p "$(dirname "$STATUS_FILE")"
   "$HOST_PYTHON" - "$STATUS_FILE" "$state" "$commit" "$error" "$BRANCH" <<'PY'
 import json
+import math
 import os
 import sys
 from datetime import datetime, timedelta, timezone
@@ -77,11 +78,22 @@ if state == "ok":
     payload["last_remote_success_at_utc"] = stamp
     payload["last_remote_snapshot_date"] = payload.get("snapshot_date")
     payload["last_remote_archive_age_hours"] = 0.0
-    active_rpo = (payload.get("rpo") or {}).get("active_rpo_hours")
-    if active_rpo is not None:
-        payload["next_archive_due_at_utc"] = (
-            datetime.now(timezone.utc) + timedelta(hours=float(active_rpo))
-        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # WO-146: advisory only - the real due decision is made in Python
+    # (create_ledger_archive / _snapshot_due), which reads
+    # archive_build_interval_hours, not active_rpo_hours. Falling back to
+    # 6.0 (the registered clamp floor) on any missing/non-numeric/
+    # non-finite/non-positive value means this display can only read
+    # EARLIER than the truth, never later.
+    interval_hours = float("nan")
+    try:
+        interval_hours = float((payload.get("rpo") or {}).get("archive_build_interval_hours"))
+    except (TypeError, ValueError):
+        pass
+    if not math.isfinite(interval_hours) or interval_hours <= 0:
+        interval_hours = 6.0
+    payload["next_archive_due_at_utc"] = (
+        datetime.now(timezone.utc) + timedelta(hours=interval_hours)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
     payload["failure_stamped"] = False
 else:
     payload["last_remote_failure_at_utc"] = stamp

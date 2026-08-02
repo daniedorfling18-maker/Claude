@@ -64,6 +64,9 @@ REGISTERED_JOB_FRESHNESS_MAX_SECONDS: dict[str, int] = {
     "degraded_state_watchdog": 15 * 60,
     "ledger_anchor": 26 * 60 * 60,
     "maker_safety_refresh": 60 * 60,
+    # WO-143: the scheduled scoring-only paper cycle's 4h default cadence,
+    # +1h at the house ratio (6h->7h, 8h->9h, 12h->13h, 24h->25h).
+    "paper_cycle": 5 * 60 * 60,
 }
 
 PUSH_STATUS_MAX_SECONDS = 2 * 60 * 60

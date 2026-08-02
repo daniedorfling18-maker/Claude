@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from polymarket_predictive_engine.config import EngineConfig
+from polymarket_predictive_engine import runtime_lock as runtime_lock_module
 from polymarket_predictive_engine.runtime_lock import runtime_lock_path
 from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_json
 
@@ -905,6 +906,9 @@ def test_live_prediction_cycle_can_still_run_full_canonical_path(tmp_path, monke
 
 
 def test_live_loop_clears_orphaned_same_process_prediction_lock(tmp_path):
+    # WO-143.6: a genuine same-process orphan always carries THIS process's
+    # own `process_started_at_utc` stamp (runtime_lock.acquire writes it at
+    # runtime_lock.py:133), so the tightened predicate still clears it.
     loop = _load_loop_module()
     cfg = EngineConfig(
         raw={"paths": {"output_root": str(tmp_path / "outputs")}},
@@ -917,7 +921,7 @@ def test_live_loop_clears_orphaned_same_process_prediction_lock(tmp_path):
             {
                 "name": "prediction_cycle",
                 "pid": os.getpid(),
-                "process_started_at_utc": "2026-07-04T14:00:00Z",
+                "process_started_at_utc": runtime_lock_module._PROCESS_STARTED_AT_UTC,
                 "acquired_at_utc": "2026-07-04T14:01:00Z",
             }
         ),
@@ -943,7 +947,7 @@ def test_live_loop_keeps_prediction_lock_while_future_is_running(tmp_path):
             {
                 "name": "prediction_cycle",
                 "pid": os.getpid(),
-                "process_started_at_utc": "2026-07-04T14:00:00Z",
+                "process_started_at_utc": runtime_lock_module._PROCESS_STARTED_AT_UTC,
                 "acquired_at_utc": "2026-07-04T14:01:00Z",
             }
         ),
@@ -956,6 +960,138 @@ def test_live_loop_keeps_prediction_lock_while_future_is_running(tmp_path):
 
     assert result["status"] == "active_prediction_future"
     assert lock_path.exists()
+
+
+# --- WO-143.6 (amended 2026-08-01: now unconditional) -----------------------
+#
+# `_clear_orphaned_same_process_prediction_lock` unlinked any `prediction_cycle`
+# lock whose payload `pid` equalled `os.getpid()` and nothing else. PID
+# namespaces are per-container and the lock file lives on the shared
+# ./outputs mount, so a PID collision could let this container delete a lock
+# a DIFFERENT container (e.g. the WO-143 scheduled scoring-only cycle)
+# genuinely holds. The clearer must ALSO require the payload's
+# `process_started_at_utc` to equal this process's own stamp before unlinking.
+
+
+def _write_prediction_lock(cfg: EngineConfig, payload: dict[str, object]) -> Path:
+    lock_path = runtime_lock_path(cfg, "prediction_cycle")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text(json.dumps(payload), encoding="utf-8")
+    return lock_path
+
+
+def test_wo143_6_same_pid_and_matching_process_started_at_is_cleared(tmp_path):
+    # (a) the legitimate same-process orphan.
+    loop = _load_loop_module()
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    lock_path = _write_prediction_lock(
+        cfg,
+        {
+            "name": "prediction_cycle",
+            "pid": os.getpid(),
+            "process_started_at_utc": runtime_lock_module._PROCESS_STARTED_AT_UTC,
+            "acquired_at_utc": "2026-07-04T14:01:00Z",
+        },
+    )
+
+    result = loop._clear_orphaned_same_process_prediction_lock(cfg, None)
+
+    assert result["status"] == "cleared_same_process_orphan"
+    assert not lock_path.exists()
+
+
+def test_wo143_6_same_pid_but_foreign_process_started_at_is_not_cleared(tmp_path):
+    # (b) the cross-container collision: same PID (namespaces are
+    # per-container), but a DIFFERENT process_started_at_utc stamp -> a
+    # different process genuinely owns this lock and it must survive.
+    loop = _load_loop_module()
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    lock_path = _write_prediction_lock(
+        cfg,
+        {
+            "name": "prediction_cycle",
+            "pid": os.getpid(),
+            "process_started_at_utc": "2026-01-01T00:00:00Z",
+            "acquired_at_utc": "2026-07-04T14:01:00Z",
+        },
+    )
+
+    result = loop._clear_orphaned_same_process_prediction_lock(cfg, None)
+
+    assert result["status"] == "foreign_process_started_at"
+    assert result["pid"] == os.getpid()
+    assert result["lock_process_started_at_utc"] == "2026-01-01T00:00:00Z"
+    assert lock_path.exists()
+
+
+def test_wo143_6_missing_process_started_at_is_not_cleared(tmp_path):
+    # (c) fail-closed: a payload missing the field entirely is ambiguous, not
+    # provably a same-process orphan, so it must not be cleared.
+    loop = _load_loop_module()
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+    lock_path = _write_prediction_lock(
+        cfg,
+        {
+            "name": "prediction_cycle",
+            "pid": os.getpid(),
+            "acquired_at_utc": "2026-07-04T14:01:00Z",
+        },
+    )
+
+    result = loop._clear_orphaned_same_process_prediction_lock(cfg, None)
+
+    assert result["status"] == "missing_process_started_at"
+    assert result["pid"] == os.getpid()
+    assert lock_path.exists()
+
+
+def test_wo143_6_foreign_name_malformed_pid_and_other_pid_paths_are_unchanged(tmp_path):
+    # (d) the existing foreign-name, malformed-pid, and other-pid paths are
+    # unchanged by the tightening (they all short-circuit before the new
+    # process_started_at_utc check is ever reached).
+    loop = _load_loop_module()
+    cfg = EngineConfig(
+        raw={"paths": {"output_root": str(tmp_path / "outputs")}},
+        path=tmp_path / "cfg.yaml",
+    )
+
+    foreign_name_path = _write_prediction_lock(
+        cfg,
+        {"name": "some_other_lock", "pid": os.getpid(), "process_started_at_utc": runtime_lock_module._PROCESS_STARTED_AT_UTC},
+    )
+    result = loop._clear_orphaned_same_process_prediction_lock(cfg, None)
+    assert result["status"] == "foreign_lock_name"
+    assert foreign_name_path.exists()
+
+    malformed_pid_path = _write_prediction_lock(
+        cfg,
+        {"name": "prediction_cycle", "pid": "not-a-pid", "process_started_at_utc": runtime_lock_module._PROCESS_STARTED_AT_UTC},
+    )
+    result = loop._clear_orphaned_same_process_prediction_lock(cfg, None)
+    assert result["status"] == "foreign_or_malformed_lock"
+    assert malformed_pid_path.exists()
+
+    other_pid_path = _write_prediction_lock(
+        cfg,
+        {
+            "name": "prediction_cycle",
+            "pid": os.getpid() + 1,
+            "process_started_at_utc": runtime_lock_module._PROCESS_STARTED_AT_UTC,
+        },
+    )
+    result = loop._clear_orphaned_same_process_prediction_lock(cfg, None)
+    assert result["status"] == "owned_by_other_process"
+    assert result["pid"] == os.getpid() + 1
+    assert other_pid_path.exists()
 
 
 def test_live_dashboard_mark_does_not_carry_stale_prediction_lock_blockers(tmp_path, monkeypatch):

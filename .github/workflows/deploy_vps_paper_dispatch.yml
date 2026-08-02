@@ -225,6 +225,11 @@ jobs:
           CHANNEL="pm-deploy-done-${GITHUB_RUN_ID}"
           SENTINEL="/tmp/pm_deploy_dispatch_exit.${GITHUB_RUN_ID}"
           rm -f "$SENTINEL"
+          # A re-run of the same run_id (GitHub's "re-run failed jobs") would
+          # otherwise collide with a stale session from a prior attempt that
+          # never cleaned up; `new-session -d -s` fails closed on a duplicate
+          # name rather than silently reusing it, so clear it first.
+          tmux kill-session -t "$SESSION" 2>/dev/null || true
           tmux new-session -d -s "$SESSION" \
             "cd '$REPO_DIR' && PM_DEPLOY_TARGET_SHA='$PM_DEPLOY_TARGET_SHA' PM_DEPLOY_TRIGGER_MECHANISM='$PM_DEPLOY_TRIGGER_MECHANISM' PM_DEPLOY_TRIGGER_ACTOR='$PM_DEPLOY_TRIGGER_ACTOR' PM_DEPLOY_APPROVAL_ACTOR='$PM_DEPLOY_APPROVAL_ACTOR' bash '$REPO_DIR/scripts/deploy_vps_paper_manual.sh'; echo \$? > '$SENTINEL'; tmux wait-for -S '$CHANNEL'"
           tmux wait-for "$CHANNEL"

@@ -1118,6 +1118,20 @@ runtime_resource_guard:
   degraded_prediction_cycle_seconds: 60
   prediction_cycle_lock_stale_seconds: 1800
   render_dashboard_on_skip: true
+# 2026-08-01 WO-143.7(b): the scheduled scoring-only paper cycle
+# (`cli scheduled-paper-cycle`). The freshest row of
+# websocket_market_features.csv must be no older than this for the run to be
+# classified as a completed observation; a missing, empty, malformed,
+# unparseable, or non-finite observation timestamp classifies blocked_inputs
+# at exit 1 and does NOT refresh the scheduler's last_success_utc. Basis for
+# 1800: 6x the 300s websocket_max_gap_seconds reporting target, and well
+# inside the job's 4h default cadence. This is a registered MAXIMUM and is
+# tighten-only - a configured value may only SHRINK it; a larger, negative,
+# or non-finite override falls back to the registered 1800. No gate,
+# threshold, eligibility rule, sizing rule, or order path reads this value;
+# it only decides whether a scheduled run is allowed to report success.
+scheduled_paper_cycle:
+  max_websocket_observation_age_seconds: 1800
 runtime_schedule:
   full_scan_every_iterations: 2
   # 2026-07-07: the three ML trainers (optimize/alpha/edge-search) are staggered

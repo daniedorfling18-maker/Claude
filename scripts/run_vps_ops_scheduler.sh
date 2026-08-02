@@ -77,6 +77,13 @@ case "$PAPER_CYCLE_INTERVAL" in ''|*[!0-9]*) PAPER_CYCLE_INTERVAL=14400 ;; esac
 [ "$PAPER_CYCLE_INTERVAL" -le 14400 ] || PAPER_CYCLE_INTERVAL=14400
 PAPER_CYCLE_TIMEOUT="${OPS_PAPER_CYCLE_TIMEOUT_SECONDS:-1800}"
 case "$PAPER_CYCLE_TIMEOUT" in ''|*[!0-9]*) PAPER_CYCLE_TIMEOUT=1800 ;; esac
+# WO-143.7(d): "0" is all digits, so it passes the case check above unchanged,
+# and GNU coreutils documents "a duration of 0 disables the associated
+# timeout" - an unbounded scoring cycle holding the prediction_cycle lock and
+# stalling the serial scheduler behind it. Clamp two-sided, matching the
+# PAPER_CYCLE_INTERVAL shape a few lines above, so a zero (or any sub-floor)
+# value falls back to the registered positive default instead.
+[ "$PAPER_CYCLE_TIMEOUT" -ge 1 ] 2>/dev/null || PAPER_CYCLE_TIMEOUT=1800
 [ "$PAPER_CYCLE_TIMEOUT" -le 1800 ] || PAPER_CYCLE_TIMEOUT=1800
 PAPER_CYCLE_ENABLED="${OPS_PAPER_CYCLE_ENABLED:-1}"
 # Ledger-anchor cadence: 12h gives three chances inside deploy-acceptance's

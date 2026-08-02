@@ -12948,19 +12948,61 @@ clauses *of the same WO*. **Widen A5 at the next `ENGINEERING_STANDARDS.md`
 amendment: a new clause is checked against every clause it cites, including in
 `AGENTS.md`, not only against its own WO.**
 
+**Scope of the truncation, established rather than assumed.** An independent
+sweep of the register for `L131-135`, `already-authorized paper path` and
+`genuinely produced it` returned **two hits, both inside §143.7(a)**, neither
+carrying the trailing clause. The register cites that rule nowhere else, so the
+truncation is **localised to §143.7(a)** and is not a pattern repeated
+elsewhere. Stated plainly: the error happened once, in the only place the rule
+was ever quoted.
+
+**A gap that remains open, recorded so it is not mistaken for closed.** That
+sweep checked ONE rule's citations. A general pass over every rule the register
+cites, looking for any quoted with its qualifier dropped, has **not** been done.
+That failure mode is invisible to every test in this repository — no guard
+compares a quotation against its source. It warrants its own dedicated pass and
+is registered here as an open item, not a finding.
+
 **Corrected requirement.** `paper_trading_invoked` is `False` at construction and
 is set `True` immediately after `paper_trade(cfg)` returns on the full-scope
 path. It stays `False` on every blocked path, every `scoring_only` path, and the
 lock-skip branch — none of which reach the broker. `live_trading_invoked` stays
 `False` unconditionally on every path; no live path exists.
 
+**A4 reconciliation with §143.7(a) — mandatory, and I failed to do it when I
+first drafted this.** A4 requires an amendment to reconcile its parent's text.
+Three specific reconciliations, all of which a builder would otherwise have to
+discover:
+
+1. **§143.7(a)'s instruction is amended, not merely supplemented.** It reads
+   "add both to the initial `report` dict at construction so every writing path
+   carries them". It now reads: *"...as the DEFAULT, overwritten to `true` on the
+   full-scope path once `paper_trade` has actually returned."* **The
+   construction-time value is no longer final** for `paper_trading_invoked`.
+   `live_trading_invoked` remains final at `false` on every path.
+2. **The early-exit paths legitimately keep `false`, and this is stated so a
+   builder does not over-correct.** The `trading_mode` block, the
+   feature/model-load failure branch, and the lock-skip branch all return
+   **before** `paper_trade` is reached. `false` is correct on each. A blanket
+   `true` for full scope would re-introduce the same lie in the opposite
+   direction — the artifact would claim paper execution that never happened.
+   **The flag tracks the CALL, not the scope.**
+3. **§143.7(a)'s registered test (1) INVERTS for full scope and must be
+   rewritten, not left standing.** It asserts that the artifact written on the
+   success path contains literal `paper_trading_invoked=false`. Under §143.8(a)
+   the full-scope success path must assert `true`. Leaving both registered would
+   put two registered tests in direct contradiction — the exact condition A5
+   exists to prevent. §143.7(a) test (1) is hereby narrowed to the
+   `scoring_only` and blocked paths; the full-scope success assertion is test
+   (1) of §143.8(a) below.
+
 **Tests.** (1) a full-scope cycle that reaches `paper_trade` writes
-`forward_paper_cycle.json` with `paper_trading_invoked: true`; (2) a
-`scoring_only` cycle writes `false`; (3) every blocked path writes `false`;
-(4) the lock-skip branch writes `false`; (5) `live_trading_invoked` is `false`
-on all of the above; (6) a full-scope cycle blocked BEFORE `paper_trade` (bad
-`trading_mode`, feature/model load failure) writes `false` — the flag tracks the
-call, not the scope.
+`forward_paper_cycle.json` with `paper_trading_invoked: true` — **this replaces
+the full-scope half of §143.7(a) test (1)**; (2) a `scoring_only` cycle writes
+`false`; (3) every blocked path writes `false`; (4) the lock-skip branch writes
+`false`; (5) `live_trading_invoked` is `false` on all of the above; (6) a
+full-scope cycle blocked BEFORE `paper_trade` (bad `trading_mode`, feature/model
+load failure) writes `false` — the flag tracks the call, not the scope.
 
 #### (b) The §143.6 lock-clearer needs a collision-resistant owner identity
 

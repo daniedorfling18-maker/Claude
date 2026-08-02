@@ -8559,7 +8559,7 @@ actionable.
 **Why check 1 cannot be a step inside the gated job** (this concerns CHECK 1
 only — check 2 *is* a step inside the gated job, deliberately, and the reasoning
 below is why the two cannot be the same step; heading corrected 2026-08-02 after
-a gate found the previous wording read as an instruction against check 2).* `environment:` is a *job-level*
+a gate found the previous wording read as an instruction against check 2): `environment:` is a *job-level*
 property and its protection rules gate the job's **start**. The reviewer
 notification fires before any step of that job executes, so a guard step could
 not suppress it — every superseded run would page the owner, which is the exact
@@ -8685,7 +8685,19 @@ and no SSH step runs, asserted by a sentinel the SSH step would have written;
 it, so a superseded run emits no approval request;
 (5) with `github.sha` equal to the tip, the run proceeds to the gate;
 (5b) **the SSH invocation passes `PM_DEPLOY_TARGET_SHA` set to `github.sha`**,
-asserted against the workflow text; (4c) **CHECK 2 EXISTS** — the deploy job's **first** step re-resolves
+asserted against the workflow text; (2c) with the approvals response stubbed **empty**, the deploy job fails and
+**no SSH step runs**, asserted by a sentinel the SSH step would have written;
+(2d) with an entry whose state is `approved` it proceeds, and with an entry
+whose state is **`rejected`** it **fails** — the case that distinguishes
+`any(state == "approved")` from a non-empty check; (2e) with the query
+erroring, timing out, or returning non-JSON it fails. All three are executed
+offline against the step's `run:` block with the API call shimmed, the harness
+(4f) and (4g) already require. **(2f) the query names THIS run**: the URL
+contains `${{ github.repository }}` and `${{ github.run_id }}`, asserted against
+the workflow text — *added 2026-08-02 after a gate showed a step with a
+hardcoded or wrong `run_id` behaves identically under every stubbed response,
+so the shimmed tests alone cannot see which run is being queried*;
+(4c) **CHECK 2 EXISTS** — the deploy job's **first** step re-resolves
 `origin/main`, asserted against the workflow text by position, not merely by
 presence: no step may precede it in that job. **This test was absent from the
 first version of the check-2 design, and a gate demonstrated that a workflow
@@ -8754,25 +8766,41 @@ was previously left to a post-hoc day-after check, which by construction only
 fires *after* the first unattended deploy.
 
 **Required:** the deploy job's SSH step is preceded by a step that queries
-`/repos/{owner}/{repo}/actions/runs/{run_id}/approvals` and **fails the job when
-the approval list is empty**, naming the missing protection rule. This converts
+`/repos/{owner}/{repo}/actions/runs/{run_id}/approvals` and **fails the job
+unless that response contains an entry whose state is `approved`**, naming the
+missing protection rule. *(Corrected 2026-08-02: the first wording was "fails
+when the list is empty", and a gate showed a `state: "rejected"` entry makes the
+list non-empty, so a correct implementation would PROCEED on a rejection. The
+stated intent is "did a human approve this"; `any(state == "approved")` matches
+that intent by construction, `length > 0` does not.)* This converts
 an unpinnable repository setting into a runtime-enforced precondition. It is
 belt-and-braces when the environment IS configured — the query simply returns
 the approver — and it is the only thing standing between an unconfigured
 environment and an unattended production deploy.
 
 **Fail-closed, per A2:** an approvals query that errors, times out, returns
-non-JSON, or returns an empty list **fails the job**. It never proceeds on
-doubt, because the doubt in question is "did a human approve this".
+non-JSON, returns an empty list, or returns entries none of which is `approved`
+**fails the job**. It never proceeds on doubt, because the doubt in question is
+"did a human approve this".
 
-**Test (2b):** with the approvals response stubbed empty, the deploy job fails
-and no SSH step runs; with one approver present it proceeds; with the query
-erroring it fails. Executable offline against the step's `run:` block with the
-API call shimmed, the same harness (4f) and (4g) already require.
+**The (a3) tests are (2c)-(2e), and they live in the enumerated list below** —
+*numbering corrected 2026-08-02: a first draft called this "test (2b)", which
+collides with WO-145's own parent test 2 and appeared only in this prose, so a
+builder enumerating from the registered list would have missed it entirely. It
+belongs in `tests/test_deploy_vps_paper_dispatch_workflow.py` with the rest.*
 
 **Owner precondition, stated because it is not mine to do:** the `environment`
 must carry a required-reviewer protection rule **before** WO-145's build merges.
 (a3) enforces it at runtime; it does not create it.
+
+**Related owner setting, recorded rather than assumed.** GitHub permits
+**self-approval** by default — "prevent self-review" is a separate rule that is
+**off** unless enabled. Under the `push` trigger `github.actor` is whoever
+merged, so the owner can merge and then approve their own deploy. That is still
+a human approval and (a3)'s registered claim holds, but §145.1's honest story is
+**"one human, two clicks"**, not "two humans". If the stronger property is
+wanted, enabling "prevent self-review" belongs beside the precondition above —
+it is an owner setting and this amendment does not assume it.
 
 **But the set of deploys a human must approve is NOT identical, and an earlier
 version of this sentence claimed it was (corrected 2026-08-02, second gate).**
@@ -8801,12 +8829,17 @@ and asserted the key was ABSENT — `build_manifest` emits it unconditionally at
 `write_vps_telemetry_manifest.py:122`, empty when aligned, so the original check
 would have failed on the success case*); **the deployed SHA equals the SHA the
 approval was issued against**; and after two merges landed inside one deploy
-window, exactly one run reached the VPS while the superseded run shows either
-**`skipped`** (superseded before pickup, check 1) or **`failure` carrying the
-registered `superseded:` message** (superseded during the approval wait, check
-2). *(Corrected 2026-08-02: the first version asserted `skipped` for both, which
-the design cannot produce for the during-approval case — see check 2.)* **A
-superseded run must never read `success`.**
+window, exactly one run reached the VPS while the superseded run's **deploy
+job** shows **`skipped`** (superseded before pickup, check 1), **`failure`
+carrying the registered `superseded:` message** (superseded during the approval
+wait, check 2), or **`cancelled`** (a third merge entered the concurrency group
+while one run was pending). *(Corrected twice: the first version asserted
+`skipped` for both cases, which the design cannot produce for the
+during-approval one; the second omitted the level and the `cancelled` outcome —
+a check-1 suppression leaves the **run** green even though the **deploy job**
+is skipped, so an operator checking the run list would have read a correct build
+as a defect.)* **The deploy job of a superseded run must never read
+`success`.**
 
 ## S8 admission records (2026-08-01)
 

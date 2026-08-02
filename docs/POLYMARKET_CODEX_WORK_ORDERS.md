@@ -13253,3 +13253,132 @@ of runs that can publish.
 does not hold the current fencing token; `shadow_settlement_checkpoints.json`
 carries both invocation literals; and a deliberately invalid timing
 configuration fails `config-check` rather than the first live tick.
+
+### 143b.3 — The heartbeat can steal a reclaimed lock and then delete it (registered 2026-08-02)
+
+**Supersedes and extends §143b.2(a).** Independent delivery audit of `29f6498a`
+demonstrated **empirically**, with a probe, a failure worse than the stale-write
+window §143b.2(a) described. The heartbeat does not merely fail to notice it
+lost the lock — **it takes the lock back and then unlinks it while the rightful
+owner is writing.**
+
+**Mechanism, verified line by line.** `_write_beat` (`runtime_lock.py:280-296`)
+does `payload = dict(self._lock.payload)` and `os.replace`s it over the lock
+path via `_rewrite_lock_payload` (`:135-160`). **It never re-reads what is on
+disk and never checks that this holder still owns the lock.** Then:
+
+1. Holder A runs past `heartbeat_cap_seconds`; beats stop; the lock ages.
+2. After `shadow_cohort_stale_after_seconds`, holder B **legitimately** reclaims
+   (`acquire_runtime_lock:144-173`) — B's payload, B's pid.
+3. A is still alive. F1's own text establishes a single `urlopen` read is
+   unbounded in wall-clock terms, so a pass exceeding 4200s is the **registered**
+   scenario, not an exotic one. A reaches the ledger-publish step, where
+   `_beating_allowed` (`:222-241`) **re-enables beating inside the critical
+   section by design, per requirement 2b**. So A beats.
+4. **A's beat overwrites B's payload with A's pid and A's `acquired_at_utc`.**
+   A now looks like the owner and the age clock resets.
+5. A finishes. `release_runtime_lock` (`:186-195`) compares `current["pid"]` to
+   A's pid — **which matches, because A's own beat put it there** — and
+   **unlinks**. B is mid-write, and a third contender can now acquire.
+
+Probe output, single process with the reclaim simulated:
+
+```
+B reclaimed: True              on-disk owner pid after B: 999999
+A beats now: 2                 on-disk owner pid after A's beat: 21930   <- expected 999999
+lock file still present after A releases: False
+```
+
+**Two concurrent writers on the anchor-enrolled append-only `shadow_fills.csv` —
+the exact re-genesis harm WO-143b exists to prevent — reached THROUGH the
+mechanism added to prevent it.** Registered test (9c) covers "never unlinks";
+**nothing covered "never overwrites someone else's lock"**, because I never
+required it.
+
+**This also defeats §143.8(b) before it lands.** §143.8(b) registers "an unlink
+happens only on an exact match of the unique token". `_write_beat` is a new
+write path to a held lock that bypasses identity entirely, so a stale-reclaimed
+lock can be overwritten **carrying the previous owner's token** — `dict(self._lock.payload)`
+propagates it automatically. Whichever of #421 and this branch merges second
+**must extend the identity check to the heartbeat write**; the four tests
+registered in §143.8(b) do not cover `_write_beat`.
+
+**Corrected requirement.** `_write_beat` re-reads the on-disk payload and
+**refuses the `os.replace` unless ownership still matches this holder**. On
+mismatch it marks the heartbeat dead, and the caller **skips the ledger publish
+fail-closed** and returns `skipped_lock_lost_during_settlement`. A holder that
+lost its lease must not write the lock file, the ledgers, or the release.
+
+**Tests.** (1) a beat issued after a foreign reclaim leaves the lock file
+**byte-identical**; (2) the original holder's release does **not** unlink a lock
+it no longer owns; (3) the ledger publish is skipped on that path and
+`shadow_fills.csv` is byte-identical; (4) an uncontended beat still updates
+normally.
+
+### 143b.4 — Three further corrections from the same audit
+
+**(a) Settlement order changed, and the registered test cannot see it.**
+`_settlement_check_sort_key` (`shadow_cohort.py:550-563`) keys never-checked
+positions as `(0, "", position_id)`. `sorted` is already stable, so the
+`position_id` tiebreaker is **gratuitous and reorders** — production ids are
+`_stable_id` hashes (`:1246`), unrelated to file order. Probe against the
+committed pre-fix fixture: `['zeta-9','alpha-1','mike-5']` → `['alpha-1','mike-5','zeta-9']`,
+**BYTE IDENTICAL: False**. Registered test (11) (`test_shadow_cohort.py:1216`)
+seeds `pos-0/pos-1/pos-2`, whose id order **coincides** with file order, so it
+passes without exercising what it was registered to catch. The WO's "do NOT
+change what the function computes" is untrue as shipped. **Drop `position_id`
+from the never-checked key** — it costs the rotation nothing — and **strengthen
+test 11's fixture to non-id-sorted ids** so it can detect a reorder.
+
+**(b) The checkpoint advances on passes that never publish.** The stamp is
+written at `shadow_cohort.py:634` and persisted at `:677-683`, inside
+`_settle_due_positions`; the publish is ~250 lines later at `:1391-1397`. Any
+exception between them — the mark-to-market loop, `_candidate_rows`, the staging
+`write_csv`, a full disk — discards the settlement work **while the rotation has
+already moved on**. The WO's own test (4) deliberately raises on that path.
+Under a persistently failing remainder phase every due position rotates forward,
+nothing is ever settled, and the sidecar records them all as "checked" — **the
+"merely records that starvation happened" failure, now demonstrated.** Persist
+the checkpoint **only after the publish succeeds**.
+
+**(c) The sidecar artifact must be registered, flagged, and bounded.**
+`shadow_settlement_checkpoints.json` (`:531`, `:678-682`) carries neither
+invocation flag (see §143b.2(b)) **and was never contemplated by the
+registration** — §143b.1 asked for a column or a rotating offset. It also
+**accumulates position ids forever with no pruning**. Register the artifact
+explicitly, require both invocation literals, and require a bound on its growth.
+
+### Adjudications and corrections to my own registered text
+
+**Deviation 1 (sidecar vs column): the sidecar IS a genuine equivalent.**
+Verified via test 10d (`test_shadow_cohort.py:1175`): three passes of two cover
+all six due positions exactly once, no overlap. It **prevents** starvation
+rather than recording it — subject to §143b.4(b). The builder's reason for
+avoiding a `shadow_positions.csv` column is sound: a column would change that
+file's bytes on every settling pass and widen an **enrolled** ledger's schema
+for scheduling bookkeeping.
+
+**Deviation 2 (test placement): correct the REGISTER, not the branch.** The
+touched-file bullet reads "NEW test file(s) covering the two `scripts/` call
+sites that have none", but F4 test (2) demands all five call sites and the live
+loop **has** an existing test file absent from the list. Coverage is genuinely
+added, not moved — `test_scripts_shadow_caller_honesty.py:184` and `:227` load
+the real `scripts/run_polymarket_local_live_loop.py` by path and assert
+`prediction_rows == 0` with verbatim status when contended. **The list's wording
+is what is wrong**; amend it to name the live-loop coverage explicitly.
+
+**Relation 3's stated rationale is arithmetically wrong.** §143b.1 says "the
+effective maximum lock hold is `heartbeat_cap + critical_section_max`" = 1920.
+**A beat inside the critical section resets the age clock**, so the true
+worst-case hold is `heartbeat_cap + critical_section_max + stale_after` =
+`1800 + 120 + 2400 = 4320s`. The branch implements the registered relation
+faithfully; **my reasoning for it is what is off**, and the relation is still
+worth keeping — it just does not bound what I claimed it bounds. Correct the
+rationale; do not weaken the relation.
+
+**Fail-safe sentence for §143b.3-4.** Nothing here marks a market measured,
+changes any M-A/M-B/M-C or `maker_min_*` threshold, opens or enables any order
+path, or loosens any gate; every item strictly reduces the set of runs that may
+write — a holder that lost its lease writes nothing, a rotation advances only
+after a successful publish, and a reordering is reverted to the original file
+order.

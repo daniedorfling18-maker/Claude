@@ -7269,12 +7269,28 @@ eleventh, §143.8(b) the twelfth):
   `scheduled_paper_cycle.max_websocket_observation_age_seconds: 1800`
 - `src/polymarket_predictive_engine/runtime_lock.py` — §143.8(b)'s
   collision-resistant owner identity ONLY (`owner_process_token` /
-  `acquisition_token` payload fields and the unlink authorisation that reads
-  them). No other change to this file is in scope for WO-143. **Shared surface:**
-  `runtime_lock` backs every lane, so the identity fields are additive to the
-  payload and a payload lacking them fails closed (no unlink), which is today's
-  behaviour. WO-143b independently edits the same file for the heartbeat; the
-  two changes are reconciled in §143b.3, not left to merge order.
+  `acquisition_token` payload fields, the unlink authorisation that reads them,
+  and §143b.3(ii)'s re-expression of
+  `_same_pid_lock_predates_current_process` against `owner_process_token`). No
+  other change to this file is in scope for WO-143.
+
+  **Shared surface — the behaviour change is real and is stated, because an
+  earlier draft of this bullet claimed there was none (corrected 2026-08-02).**
+  That draft said "a payload lacking them fails closed (no unlink), which is
+  today's behaviour." **That is false.** `release_runtime_lock`
+  (`runtime_lock.py:186-195` on `main`) tests
+  `current.get("pid") not in {None, lock.payload.get("pid")}`; a payload lacking
+  the field yields `None`, which **is** in the set, so the guard does not fire
+  and the lock **is unlinked** today. Requiring a token match therefore changes
+  behaviour on **every lane** `runtime_lock` backs: a lock whose payload was
+  corrupted or rewritten by a foreign writer now **survives until its stale
+  window** instead of being unlinked. That is the safe direction, and the cost
+  is bounded — **worst case one stale window of delayed reclaim per affected
+  lane**, after which ordinary stale reclaim proceeds. No lane can be wedged
+  beyond that.
+
+  WO-143b independently edits the same file for the heartbeat; the two changes
+  are reconciled in §143b.3, not left to merge order.
 
 Do NOT touch `docker-compose.vps-paper.yml` (the scheduler service already
 loads `env_file: .env`, so `OPS_PAPER_CYCLE_*` overrides reach the container;
@@ -7345,6 +7361,7 @@ exact vocabulary and no other value:
 
 | receipt `status` | predicate | exit |
 |---|---|---|
+| `blocked_inputs` (**pre-gate — added by §143.9(a) 2026-08-02; evaluated FIRST and short-circuiting**) | the websocket observation fails §143.9's freshness predicate. **Evaluated BEFORE `run_paper_cycle` is invoked, so no `report` exists and no later row is evaluated.** Without this row the pre-gate path would compute `overlay_refreshed == False` (before == after) and route to `blocked_overlay_disabled` — the wrong status | 1 |
 | `ran` | `"predictions" in report` and `report["status"] == "ran"` and overlay_refreshed | 0 |
 | `blocked_readiness` | `"predictions" in report` and `report["status"] == "blocked"` and overlay_refreshed | 0 |
 | `blocked_overlay_disabled` | `"predictions" in report` and not overlay_refreshed | 1 |
@@ -7382,8 +7399,10 @@ here marks a market measured, changes any M-A/M-B/M-C or maker threshold,
 opens any order path, or changes what the live loop does per cycle; the
 scheduled job is additive evidence accrual, paper-only, and a failed or
 skipped scheduled cycle degrades only the taker alpha lane's evidence
-freshness — loudly: a missing, stale, or malformed input leaves the cycle
-report without a `predictions` key and exits nonzero, a held
+freshness — loudly: a missing, stale, or malformed input is detected before the
+cycle is invoked, so no cycle runs, no signal file is written, and the receipt
+records `blocked_inputs` with `cycle_completed: false` and a null `predictions`
+and exits nonzero, a held
 `prediction_cycle` lock exits 75 after a bounded 300-second wait, a disabled
 alpha overlay exits 1 rather than reporting success, and in every failure
 case the scheduler's `last_success_utc` is not refreshed so
@@ -7651,7 +7670,11 @@ artifact. Today those two literals are set only inside the
 `skipped_existing_prediction_cycle` branch; every other path that writes the
 artifact — the success path, the `trading_mode` block, and the
 feature/model-load block — omits them. Add both to the initial `report` dict
-at construction so every writing path carries them, leaving the lock-skip
+at construction **as the DEFAULT, overwritten to `true` on the full-scope path
+once `paper_trade` has actually returned** (amended in place 2026-08-02 by
+§143.8(a); the construction-time value is **no longer final** for
+`paper_trading_invoked`, while `live_trading_invoked` remains final at `false`
+on every path), leaving the lock-skip
 branch's explicit re-statement in place.
 
 **Registered exception to §143.1 (added 2026-08-01 after review).** That dict is
@@ -7764,10 +7787,15 @@ runs classified successful, fewer signals published, a bounded timeout where
 one could be disabled, and telemetry that claims less than it does today
 rather than more.
 
-**Tests (enumerated, additive to §143.2's set).** (1) the artifact written on
-the success path contains literal `paper_trading_invoked=false` and
-`live_trading_invoked=false`, and so does the artifact written on each
-blocked path; (2) an absent `websocket_market_features.csv` yields
+**Tests (enumerated, additive to §143.2's set).** (1) **NARROWED IN PLACE
+2026-08-02 by §143.8(a) — this test previously covered the full-scope success
+path and asserting `false` there is now WRONG.** As narrowed: the artifact
+written on the **`scoring_only`** success path contains literal
+`paper_trading_invoked=false` and `live_trading_invoked=false`, and so does the
+artifact written on each blocked path. **The full-scope success path asserts
+`paper_trading_invoked: true` and is §143.8(a)'s test (1), not this one.**
+Leaving the original wording standing would have put two registered tests in
+direct contradiction — the condition A5 exists to catch; (2) an absent `websocket_market_features.csv` yields
 `blocked_inputs` at exit 1 and does NOT refresh `last_success_utc`; (3) an
 empty-but-present websocket file yields the same; (4) a websocket file older
 than the registered ceiling yields the same even when it parses and scores;
@@ -7999,6 +8027,37 @@ ownership-verified re-stamp — hold the critical section for a further 120s:
 `1800 + 2400 + 120 = 4320s`. **Every ceiling that must be able to OBSERVE a
 stuck shadow pass is sized against 4320s, not 1920s.** This is a correction to
 the arithmetic in this registration, not a change to any registered constant.
+
+**The affected ceilings are ENUMERATED, not asserted over (added 2026-08-02 —
+the first version stated the consequence without naming a single ceiling, which
+is an unfalsifiable claim).** A ceiling is in scope only if its producer can be
+blocked by a `shadow_cohort` lock hold. The producers that acquire it are
+exactly the callers of `update_shadow_cohort_evidence`:
+`src/polymarket_predictive_engine/paper_cycle.py`,
+`src/polymarket_predictive_engine/longshot_bias.py`,
+`scripts/run_polymarket_local_live_loop.py`,
+`scripts/run_polymarket_live_paper_loop.py`,
+`scripts/run_alpha_candidate_shadow_evidence.py`,
+`scripts/run_promoted_rule_shadow_scan.py`.
+
+Against `REGISTERED_JOB_FRESHNESS_MAX_SECONDS`
+(`degraded_state_watchdog.py:56-67`) plus §143.5's addition:
+
+| entry | ceiling | in scope? |
+|---|---|---|
+| `paper_cycle` (§143.5) | 18000s | **yes** — 18000 > 4320 ✓ |
+| `trade_prints` | 1200s | **no** — collector; does not call `update_shadow_cohort_evidence` |
+| `executor_ops_monitor` | 900s | **no** — read-only monitor |
+| `degraded_state_watchdog` | 900s | **no** — read-only monitor |
+| `maker_safety_refresh` | 3600s | **no** — maker attribution; no shadow-cohort write path |
+| all remaining entries | ≥ 7h | **yes where applicable** — all exceed 4320s |
+
+**Result: no registered ceiling in scope sits below 4320s.** The four entries
+below 4320s are all out of scope because none of them acquires the
+`shadow_cohort` lock. The live loop's own cadence is not a
+`REGISTERED_JOB_FRESHNESS_MAX_SECONDS` entry and is governed separately.
+**Day-after obligation:** if a future WO adds a producer to the caller list
+above, this table is re-derived before that WO is admitted.
 
 **Registered ordering, validated in full by test (10) — FOUR relations:**
 
@@ -8244,8 +8303,8 @@ single-file Scope paragraph in the parent WO:
 - `tests/polymarket_predictive_engine/test_longshot_bias.py` (F4)
 - `src/polymarket_predictive_engine/config.py` — §143b.2(c)'s load-time ordering
   validator lives HERE, not in `shadow_cohort.py`. **Import direction, stated so
-  the builder does not have to discover it:** `shadow_cohort.py:14` already does
-  `from .config import EngineConfig`, so a validator defined in `shadow_cohort`
+  the builder does not have to discover it:** `shadow_cohort.py` already does
+  `from .config import EngineConfig` (`:19` on `29f6498a`, `:14` on `main` — **tree-qualified 2026-08-02; an earlier draft cited `:14` unqualified, which is wrong on the very branch the builder is on**), so a validator defined in `shadow_cohort`
   and called from `config` would be a circular import. The validator is pure
   arithmetic over registered config literals and needs nothing from
   `shadow_cohort`; it is defined in `config.py`, invoked from `load_config` /
@@ -8982,7 +9041,8 @@ before that date predate this log and are not retroactively reopened. Seeded 202
 | WO-150 | F | Opus spec, Sonnet build, Opus review + delta re-verify | ~230k | 0 | 1 — a corrupt `maker_live_test` block regressed to the PERMISSIVE branch, where `main` had raised | 0 | pending deploy |
 | WO-146 | F | Opus spec, Sonnet build, Opus review + delta re-verify | ~360k | 0 | 2 fixed (`AttributeError` escaping the shell fallback; a test comment misstating what `main` produces), 3 recorded (§146.5, unreachable `isfinite` guards, a dead test branch) | 0 | pending deploy |
 | WO-145.1 registration | D | Opus draft, Opus registration gate **x6** | ~700k reviewer | **7 → 6 → 2 → 0 blockers**, then 3 delta rounds | not yet built | — | pending |
-| §143.8 / 143.9 / 143b.2 / 143b.3 / 143b.4 registration round (PR #421) | D | Opus draft, Opus registration gate (independent) | ~137k reviewer | **14 (6 blocking)** — verdict NOT ADMISSIBLE, corrected in place before merge | not yet built | — | pending |
+| §143.8 / 143.9 / 143b.2 / 143b.3 / 143b.4 registration round (PR #421), gate 1 | D | Opus draft, Opus registration gate (independent) | ~137k reviewer | **14 (6 blocking)** — verdict NOT ADMISSIBLE | not yet built | — | pending |
+| same round, gate 2 (on the corrections) | D | Opus correction, Opus registration gate (independent) | ~171k reviewer | **10 (4 blocking)** — verdict NOT ADMISSIBLE. **3 of 4 blockers were INTRODUCED OR LEFT STANDING BY THE CORRECTION ROUND ITSELF** | not yet built | — | pending |
 
 **Reading of the 2026-08-02 rows — the tiering held, the review shape did not.**
 Three class-F/M builds went Sonnet-built and Opus-reviewed and produced **zero
@@ -9035,17 +9095,78 @@ A4 and A7 are satisfied by a *statement* of reconciliation. That is the gap.
 **Register at the next `ENGINEERING_STANDARDS.md` amendment — a third proposed
 rule, alongside §143.8(a)'s A5 widening and §143.9's gate-unit rule:**
 
-> **A-new (performed-not-declared).** Where an amendment states that a parent
-> WO's Scope paragraph, touched-file list, file count, test list, or stated
-> basis changes, the **diff must contain that edit**. An amendment whose diff is
-> a pure append while its text claims to amend text above the append point fails
-> admission. Machine-checkable: `git diff` on the register must show a hunk
-> outside the appended region for every such claim.
+> **A-new (performed-not-declared).** Where an amendment states that ANY text
+> outside its own appended block changes — a parent WO's Scope paragraph,
+> touched-file list, file count, test list, stated basis, **classification
+> table, or verbatim fail-safe string** — the **diff must contain that edit**.
+> An amendment whose diff is a pure append while its text claims to amend text
+> above the append point fails admission.
+>
+> **Verification is per-claim, not per-diff.** Enumerate every such claim in the
+> amendment, and for each one show the hunk that performs it, identified by the
+> section it lands in. "The diff contains hunks outside the appended region" is
+> **not** sufficient — see below.
 
-This rule is derived from three findings in one review, which is the derivation
-standard A1-A9 were held to. **The three proposed rules are registered here as
-proposals only — `docs/ENGINEERING_STANDARDS.md` is not edited by this PR**, and
-S8 remains canonical until it is.
+**Scope and verification both widened 2026-08-02, because the first version of
+this rule failed on this very PR.** Three corrections:
+
+1. **The enumeration was too narrow.** It listed "Scope paragraph, touched-file
+   list, file count, test list, or stated basis" — and the next review found two
+   unperformed reconciliations against a **classification table** and a
+   **verbatim fail-safe docstring** (§143.2), neither of which the list reached.
+2. **The machine check was satisfied vacuously.** "`git diff` must show a hunk
+   outside the appended region for every such claim" cannot map claim → hunk. The
+   corrected round had **13** such hunks and still left **three** declared
+   reconciliations unperformed (§143.2's table, §143.2's docstring, §143.7(a)'s
+   test (1)), passing the check as stated. The check is now per-claim and
+   requires naming the landing section, which a reviewer can verify by diffing
+   that section against `origin/main` — the method the second gate actually used.
+3. **The derivation claim was overstated.** This rule was said to be "derived
+   from three findings". It reaches only two of them: F4's third item was that
+   §143b.2(c) carried **no touched-file statement at all**, and a rule keyed on
+   what an amendment *states* is structurally incapable of catching what it
+   *omits*. That gap is real and is **not** closed here; closing it needs a
+   separate rule requiring every item that changes code to carry a touched-file
+   statement, which A10 arguably already implies and evidently does not enforce.
+
+**Recorded plainly: proposing this rule did not make its author follow it.** The
+same diff that first registered A-new violated it three times. That is the
+strongest available evidence that the checklist's value comes from the
+independent reviewer applying it, not from the author having written it down —
+which is Part 0's structural rule, re-derived the expensive way.
+
+**The second gate's sharpest finding was not a missing reconciliation, and it is
+recorded here because it is the one with the worst counterfactual.** The
+correction round's §143b.3(iii) reordered the ledger publish to fills-first, on
+an asymmetry argument that was **inverted**: `ledger_anchor` verifies an
+append_only ledger by a **prefix** digest (`_sha256_prefix`, `:380-392`), so it
+is append-tolerant and deletion-intolerant. A missing fill row is invisible to
+it and repairable by a later append; a duplicate row is permanent and cannot be
+removed without breaking the anchor. The reorder would have converted a
+repairable understatement into an **unrepairable overstatement of realised
+shadow P&L**, propagating to `roi` and `monthly_run_rate` — a promotion-relevant
+surface — via a crash path.
+
+Two lessons, both cheap to state and evidently not cheap to learn:
+
+1. **An argument about a mechanism must be checked against what the mechanism
+   actually computes.** "Chain gap versus stale snapshot" is a reasonable-sounding
+   abstraction that the prefix digest does not implement. The author reasoned
+   from the *name* `append_only` rather than from `_sha256_prefix`.
+2. **Any change whose crash path moves a P&L, ROI, or run-rate surface must
+   state the DIRECTION of the resulting bias, and the optimistic direction is
+   disqualifying.** No registered rule required that, and none of A1-A10 asks
+   for it. **Proposed as a fourth rule** alongside the three above: *a clause
+   that changes ordering, retry, or recovery behaviour on a path that can write
+   an evidence or P&L ledger states which direction a partial result biases the
+   resulting numbers; a change that can bias them optimistically is rejected
+   regardless of how the failure is reported.*
+
+**All FOUR proposed rules — the A5 widening (§143.8(a)), the gate-unit rule
+(§143.9), A-new above, and the bias-direction rule — are registered here as
+proposals only —
+`docs/ENGINEERING_STANDARDS.md` is not edited by this PR**, and S8 remains
+canonical until it is.
 
 ## WO-146 — The DR archive build trigger IS its own RPO ceiling — `done` (2026-08-02, PR #426; registered 2026-08-01; `disaster_recovery` tighten-only settings block + a registered watchdog-read artifact, routed owner-merge after line-audit; build cadence 24.0h → 20.0h, no ceiling changes — the line audit confirmed `compliant` bit-identical to `main` across a 13-point age sweep, so only the DUE decision moves; two audit findings fixed in the build (an `AttributeError` escaping the shell fallback, and a test comment that misstated what `main` produces), three recorded — see §146.5; **DEPLOY PENDING** — the daily `disaster_recovery_not_recoverable` incident keeps firing on the VPS until a deploy carries this revision, because the deployed build cadence is still 24.0h)
 
@@ -13098,7 +13219,8 @@ first drafted this.** A4 requires an amendment to reconcile its parent's text.
 Three specific reconciliations, all of which a builder would otherwise have to
 discover:
 
-1. **§143.7(a)'s instruction is amended, not merely supplemented.** It reads
+1. **§143.7(a)'s instruction is amended in place, not merely supplemented — and
+   the edit is PERFORMED in §143.7(a) itself, in this same diff.** It read
    "add both to the initial `report` dict at construction so every writing path
    carries them". It now reads: *"...as the DEFAULT, overwritten to `true` on the
    full-scope path once `paper_trade` has actually returned."* **The
@@ -13118,7 +13240,10 @@ discover:
    put two registered tests in direct contradiction — the exact condition A5
    exists to prevent. §143.7(a) test (1) is hereby narrowed to the
    `scoring_only` and blocked paths; the full-scope success assertion is test
-   (1) of §143.8(a) below.
+   (1) of §143.8(a) below. **That narrowing is PERFORMED at §143.7(a)'s test
+   list in this same diff** — the first version of this clause declared it and
+   left the contradicting text standing, which is the A-new self-violation
+   recorded at §143.9(a).
 
 **Tests.** (1) a full-scope cycle that reaches `paper_trade` writes
 `forward_paper_cycle.json` with `paper_trading_invoked: true` — **this replaces
@@ -13192,9 +13317,29 @@ and concurrency questions, and is **not** registered here.
 is authorised by — `owner_process_token` for the §143.6 clearer,
 `acquisition_token` for release and for the §143b.3 beat. A missing, empty, or
 unparseable token means **no unlink** — the lock is left alone and the caller
-backs off, which is the existing fail-closed behaviour. **Two empty strings do
-not match:** an empty value on either side is treated as absent, never as an
-equal comparison.
+backs off. **Two empty strings do not match:** an empty value on either side is
+treated as absent, never as an equal comparison.
+
+**Carve-out, stated because the sentence above is universally quantified and a
+literal reading would break stale reclaim.** `acquire_runtime_lock`'s
+stale-reclaim `path.unlink()` (`:359` on `29f6498a`, `:160` on `main`) unlinks a
+**foreign** lock **by design** — that is what reclaim after
+`stale_after_seconds` *is*, and it is the mechanism that prevents a permanent
+wedge. It is **not** gated on a token match and must not be. The token
+authorisation above binds exactly three callers: §143.6's lock-clearer,
+`release_runtime_lock`, and §143b.3's beat/re-stamp. Gating the stale-reclaim
+unlink on a token match would leave any crashed holder's lock unreclaimable
+forever; existing tests
+(`tests/polymarket_predictive_engine/test_runtime_lock.py:55-72`, `:124-151`)
+would fail, and the correct response to that failure is to restore the
+carve-out, not to weaken the tests.
+
+**Existing fixture that must change.**
+`tests/polymarket_predictive_engine/test_local_live_loop.py:907-930` writes a
+lock payload with no `owner_process_token` and asserts
+`cleared_same_process_orphan`. Under this item that payload no longer authorises
+a clear. The fixture is updated to stamp the current process's
+`owner_process_token`; that file is already in WO-143's twelve-file list.
 
 **Release authorisation is tightened to require BOTH fields to match.** A holder
 whose `acquisition_token` has been superseded must not unlink, even if its
@@ -13299,28 +13444,35 @@ the pre-run stamp, read before the gate, or `null` if unreadable;
 own RSS and remains meaningful); `exit_code: 1`;
 `paper_trading_invoked: false`; `live_trading_invoked: false`.
 
-**§143.2's classification table gains a pre-gate row, evaluated FIRST.** The
-table keys `blocked_inputs` on `"predictions" not in report`; with no `report`
-at all that predicate is undefined, and `overlay_refreshed` would compute
-`False` (before == after), which under the registered table routes toward
-`blocked_overlay_disabled` — the wrong status. The new row is:
+**§143.2's classification table gains a pre-gate row, evaluated FIRST — and the
+edit is PERFORMED in §143.2 itself, in this same diff.** The table keyed
+`blocked_inputs` on `"predictions" not in report`; with no `report` at all that
+predicate is undefined, and `overlay_refreshed` would compute `False`
+(before == after), which under the old table routed toward
+`blocked_overlay_disabled` — the wrong status. The new row now stands as the
+first row of §143.2's own table, marked short-circuiting, so a builder reading
+§143.2 (the section that owns the receipt contract) gets the same answer as one
+reading §143.9.
 
-| receipt `status` | predicate | exit |
-|---|---|---|
-| `blocked_inputs` (pre-gate) | the websocket observation fails the freshness predicate; **evaluated before `run_paper_cycle` is invoked, so no `report` exists** | 1 |
-
-Classification **short-circuits** on this row: no later row is evaluated, and
-`blocked_overlay_disabled` is therefore unreachable on the pre-gate path.
-
-**§143.2's verbatim fail-safe docstring is amended, not left standing.** It
-currently reads *"a missing, stale, or malformed input leaves the cycle report
-without a `predictions` key and exits nonzero."* Under §143.9(a) a stale input
-leaves **no cycle report at all**, so the registered verbatim string becomes
-false. The amended clause reads: *"a missing, stale, or malformed input is
+**§143.2's verbatim fail-safe docstring is amended in place, not left
+standing.** It read *"a missing, stale, or malformed input leaves the cycle
+report without a `predictions` key and exits nonzero."* Under §143.9(a) a stale
+input leaves **no cycle report at all**, so the registered verbatim string
+became false. §143.2 now reads *"a missing, stale, or malformed input is
 detected before the cycle is invoked, so no cycle runs, no signal file is
 written, and the receipt records `blocked_inputs` with `cycle_completed: false`
 and a null `predictions` and exits nonzero."* The rest of §143.2's fail-safe
-sentence is unchanged and remains verbatim and contiguous.
+sentence is unchanged and remains verbatim and contiguous. **The build's module
+docstring must be updated to match** — the string is registered as verbatim, so
+this is a required build change, not a documentation nicety.
+
+**Why this is called out: the first version of this item DECLARED both edits and
+performed neither** (caught 2026-08-02 by the second independent registration
+gate, which diffed §143.2 against `origin/main` and found it byte-identical).
+That is a self-violation of the A-new rule proposed by this very PR, in the same
+diff that proposes it. Recorded rather than quietly fixed, because the
+calibration value is in the fact that stating the rule did not make me follow
+it.
 
 **Tests.** (1) with a stale observation, `run_paper_cycle` is **never called**
 (assert via monkeypatched sentinel), status `blocked_inputs`, exit 1; (2) the
@@ -13352,12 +13504,15 @@ midpoint, executable price, market id, or token id."* Three of those four are
 false, verified against `features_v2.py`:
 
 - **Ids are never checked for emptiness.** A row with an empty `token_id` and an
-  empty market id is KEPT (`:241` derives `market_id` and falls back to the
+  empty market id is KEPT (`:242` derives `market_id` and falls back to the
   token value on the websocket path; neither is a discard criterion).
 - **`executable_buy_price` is derived, never required** — `:269` is
   `ask if ask is not None else midpoint`, so a row with no bid/ask still yields
   one.
-- Only two things discard a row, and only one thing discards a whole file.
+- Only two things discard a row. **Three** things discard a whole file: an
+  unbindable market/token/timestamp role (`:205-206`), an empty file
+  (`:153-154`), and a forbidden leakage column (`:156`) — the last of which
+  RAISES rather than returning, and is handled explicitly below.
 
 A builder implementing the four named fields would therefore build a **stricter**
 filter than `build_features_v2` and then fail this item's own test (8). **Two
@@ -13373,7 +13528,7 @@ timestamp role cannot be bound. On the websocket path the timestamp candidates
 are, in order: `collected_at_utc`, `snapshot_timestamp`, `timestamp`,
 `collected_at`.
 
-*Row level* (`:210-221`). Given those bindings, a row is discarded iff either:
+*Row level* (`:210-222`). Given those bindings, a row is discarded iff either:
 (i) `parse_timestamp(row[ts_col])` is falsy — **on the bound column, not on
 whichever column happens to be populated in that row**; or (ii) no midpoint can
 be derived, where derivation is `safe_float(row[price_col])`, else `(bid+ask)/2`
@@ -13401,7 +13556,31 @@ guarantee anyway, because it compares behaviour rather than asserting identity.
 **Fail-closed.** If no row survives, the age is `None` → `blocked_inputs`. Never
 "fresh because a timestamp existed". If the file's timestamp/market/token role
 cannot be bound at all, that is also `None` → `blocked_inputs`, matching
-`features_v2`'s zero-row return.
+`features_v2`'s zero-row return. An **empty** file (`:153-154`,
+`if not rows: return []`) is likewise `None` → `blocked_inputs`.
+
+**The leakage-column path RAISES and must be handled explicitly (added
+2026-08-02; the first version of this clause covered only the "cannot be bound"
+return and would have left an unhandled exception in the pre-gate).**
+`_normalise_rows_from_file` calls `reject_leakage_columns(cols)` at `:156`,
+which **raises `ValueError`** (`:36-39`) rather than returning `[]`. A CSV
+carrying a forbidden column therefore crashes the freshness helper instead of
+blocking the cycle — an unhandled exception in a gate whose entire purpose is to
+fail closed. **Required:** the helper catches `ValueError` from the shared
+predicate and classifies it as `None` → `blocked_inputs`, exactly as it treats
+an unbindable file. It must **not** treat a leakage-column file as fresh, and it
+must not propagate the exception out of the pre-gate.
+
+**Test.** (11) a CSV carrying a forbidden leakage column classifies
+`blocked_inputs` at exit 1, with no traceback escaping the pre-gate, and
+`trade_signals.csv` byte-identical.
+
+**Citation precision.** `find_first_column`
+(`src/polymarket_predictive_engine/utils.py:360-370`) is not an exact-name
+match — it carries a **substring fallback** at `:365-369`. The differential test
+(8) is what pins the shared predicate to the real function; the prose above
+describes the exact-name candidates only, and the test governs where they
+differ.
 
 **Tests.** (5) a CSV with one recent unusable row and older valid rows classifies
 `blocked_inputs`, not fresh — the row-set-divergence case; (6) a CSV whose only
@@ -13473,7 +13652,14 @@ derive from rows older than the ceiling.
 All three re-verified against the code. **All three are gaps in §143b.1's F1
 text — this orchestrator's registered design — not build defects.**
 
-#### (a) The heartbeat design creates a stale-writer window. It needs a FENCING TOKEN.
+#### (a) The heartbeat design creates a stale-writer window. It needs an OWNERSHIP-VALIDATED ACQUISITION TOKEN.
+
+*(Heading corrected 2026-08-02: this originally read "It needs a FENCING TOKEN".
+§143.8(b) registers that "fencing" is a misnomer for this mechanism — `uuid4`
+has no order, so no later holder can reject an earlier one's writes — and the
+register was told to stop using the word for it. Leaving the word in this
+section's heading and day-after check while striking it elsewhere is the kind
+of half-applied correction A5 exists to catch.)*
 
 Verified: `heartbeat.note_progress("settlement_position")` fires at
 `shadow_cohort.py:636`, immediately **before** the potentially unbounded
@@ -13529,8 +13715,17 @@ sufficient, for the reasons given there. What survives from this item is its
 **policy**: losing the lease means publishing nothing, returning
 `skipped_lock_lost_during_settlement`, and never writing a partial result.
 §143b.3 registers how that policy is enforced. **Where the two differ, §143b.3
-governs.** This item's tests are renumbered (1)-(5) → **(a1)-(a5)** so they
-cannot collide with §143b.3's (1)-(4).
+governs.** This item's tests are renumbered (1)-(5) → **(a1)-(a5)**.
+
+**Renumbering extended 2026-08-02.** The first pass moved only §143b.2(a) and
+described §143b.3's range as "(1)-(4)" — already stale, since §143b.3's list had
+grown to (1)-(8). §143b.2(b)/(c)'s surviving (6)-(8) therefore collided with
+§143b.3 **and** with §143b.1's own (7)-(8), and were orphaned after a (1)-(5)
+that no longer existed. A renumbering that creates a fresh collision of the same
+class is not a fix. **Every test in WO-143b now carries a section-scoped
+prefix:** §143b.2(a) `(a1)-(a5)`, §143b.2(b) `(b1)`, §143b.2(c) `(c1)-(c2)`,
+§143b.3 `(h1)-(h8b)`, §143b.4(c) `(d1)-(d3)`. §143b.1 keeps its bare `(1)-(11)`,
+which no longer collides with anything.
 
 **Tests.** (a1) with the lock reclaimed by a foreign writer mid-settlement, the
 original worker publishes NOTHING and returns
@@ -13561,7 +13756,7 @@ but the registration never said that choosing a sidecar creates a new artifact
 subject to L133-135. **A permission that authorises a new file must state the
 artifact obligations that come with it.**
 
-**Tests.** (6) the checkpoint artifact contains literal
+**Tests.** (b1) the checkpoint artifact contains literal
 `paper_trading_invoked: false` and `live_trading_invoked: false` on every path
 that writes it.
 
@@ -13580,9 +13775,13 @@ implementation was never told to use.
 validation, so `config-check` fails closed on a violating configuration before
 any deployment starts. The hot-path check may remain as a defence in depth.
 
-**Tests.** (7) `config-check` exits nonzero on a configuration violating any of
-the four registered relations, naming the relation violated; (8) it exits zero
+**Tests.** (c1) `config-check` exits nonzero on a configuration violating any of
+the four registered relations, naming the relation violated; (c2) it exits zero
 on the registered defaults.
+
+*(These were `(7)`-`(8)`, and §143b.2(b)'s was `(6)`. See the renumbering note
+under §143b.2(a) for why every WO-143b test now carries a section-scoped
+prefix.)*
 
 **Fail-safe sentence for §143b.2.** Nothing here marks a market measured,
 changes any M-A/M-B/M-C or `maker_min_*` threshold, opens or enables any order
@@ -13592,7 +13791,7 @@ check earlier — all three strictly tightening, and (a) strictly reduces the se
 of runs that can publish.
 
 **Day-after check.** No `shadow_fills.csv` row is ever written by a process that
-does not hold the current fencing token; `shadow_settlement_checkpoints.json`
+does not hold the current `acquisition_token`; `shadow_settlement_checkpoints.json`
 carries both invocation literals; and a deliberately invalid timing
 configuration fails `config-check` rather than the first live tick.
 
@@ -13614,12 +13813,12 @@ remedy convention at its `b3ecf0b` note.**
 | symbol | on `29f6498a` | on `main` |
 |---|---|---|
 | `_rewrite_lock_payload` | `:135` | — (range is inside `acquire_runtime_lock`) |
-| `_beating_allowed` | `:219` | does not exist |
-| `_write_beat` | `:277` | does not exist |
+| `_beating_allowed` | `:219-241` | does not exist |
+| `_write_beat` | `:277-295` | does not exist |
 | `acquire_runtime_lock` | **`:321`** (was cited `:144-173` — that is `main`) | `:122`, body spans `:144-173` |
 | `release_runtime_lock` | **`:385`** (was cited `:186-195` — that is `main`) | `:186`, spans `:186-195` |
 
-`_write_beat` (`runtime_lock.py:277-296`)
+`_write_beat` (`runtime_lock.py:277-295`)
 does `payload = dict(self._lock.payload)` and `os.replace`s it over the lock
 path via `_rewrite_lock_payload` (`:135-160`). **It never re-reads what is on
 disk and never checks that this holder still owns the lock.** Then:
@@ -13682,23 +13881,64 @@ payload at beat time** — an operator deleted the lock, a previous release
 crashed — is also a mismatch: refuse the beat, mark dead, skip the publish. The
 fail-closed branch is registered rather than left obvious.
 
-**(ii) The check is a re-stamp, not a bare read, and it happens ONCE
-immediately before the critical section.** A bare check-then-act is unsound
-here: `os.replace` is atomic but is not a compare-and-swap, so nothing fuses
-"verify token" with "publish", and in this item's own scenario the beat has
-already stopped — meaning the lock's observed age at check time is **unbounded**
-and no registered constant limits the reclaim window. The sound construction is
-an **ownership-verified re-stamp**: re-read the payload, verify both tokens,
-and in the *same* `os.replace` write a fresh `last_beat_utc`. That re-establishes
-`observed_age = 0` at section entry, after which relation 3
-(`heartbeat_cap + critical_section_max < stale_after`) gives the section a
-margin that is actually derived rather than assumed. If verification fails,
+**(ii) The check is a re-stamp, not a bare read; it happens ONCE immediately
+before the critical section; and it is a DISTINCT write path that the heartbeat
+cap does not gate.** A bare check-then-act is unsound here: `os.replace` is
+atomic but is not a compare-and-swap, so nothing fuses "verify token" with
+"publish", and in this item's own scenario the beat has already stopped —
+meaning the lock's observed age at check time is **unbounded** and no registered
+constant limits the reclaim window. The sound construction is an
+**ownership-verified re-stamp**: re-read the payload, verify both tokens, and in
+the *same* `os.replace` write a fresh `heartbeat_at_utc`. If verification fails,
 publish nothing and return `skipped_lock_lost_during_settlement`.
+
+**The re-stamp must NOT be routed through `maybe_beat` / `_beating_allowed`, and
+an earlier draft of this item did not say so — which made it a no-op in the only
+case it exists for (corrected 2026-08-02, second independent registration
+gate).** `_beating_allowed` (`runtime_lock.py:219-241` on `29f6498a`) returns
+`False` past `heartbeat_cap_seconds` when **not** already inside the critical
+section:
+
+```
+elapsed > cap and not self._in_critical_section()  ->  _cap_stopped = True; return False
+```
+
+The re-stamp is by definition taken *before* entering the section, and the
+wedged holder this item describes is by definition past the cap. So a re-stamp
+implemented through the beat path is refused exactly when it is needed, the
+observed age stays unbounded, and (ii)'s margin is not established. **Register
+it as its own method** — an ownership-verified stamp that is permitted once per
+publish regardless of the cap, and that does not clear `_cap_stopped` or
+otherwise re-enable ordinary beating. It is not a heartbeat; it is a
+publish-admission step that happens to write the same field.
+
+**A second reclaim path is not closed by the re-stamp, and must be closed
+separately.** `acquire_runtime_lock`'s reclaim is an `elif` chain: when the age
+branch fails, control reaches `_same_pid_lock_predates_current_process`
+(`runtime_lock.py:66-86` on `main`), which compares the *contender's* process
+start against the lock's **`acquired_at_utc`** — a field `_write_beat`
+deliberately never re-stamps. A namespaced-PID collision, which §143.8(b)
+establishes as ordinary rather than exotic, therefore reclaims mid-section no
+matter how fresh `heartbeat_at_utc` is. **Required:** that predicate is
+re-expressed against §143.8(b)'s `owner_process_token` instead of
+`pid` + `acquired_at_utc`. A payload whose `owner_process_token` differs from
+this process's is **not** a same-process orphan and must not be reclaimed by
+this path; it falls through to the ordinary stale-age path. A genuine
+same-process orphan carries the *same* `owner_process_token` and is still
+reclaimed, so no wedge is introduced. A payload missing the token fails closed
+(not reclaimed by this path). This is strictly narrowing, and it is the reason
+§143.8(b)'s identity field exists.
+
+**Only after both are closed** does relation 3
+(`heartbeat_cap + critical_section_max < stale_after`) give the section a margin
+that is derived rather than assumed.
 
 **(iii) The publish is indivisible, and the two `os.replace` calls are
 REORDERED.** As built, the section is
 `os.replace(positions)` → `_progress("positions_published")` →
-`os.replace(fills)` (`shadow_cohort.py:1391-1397` on `29f6498a`). Two defects:
+`os.replace(fills)` (`shadow_cohort.py:1391-1398` on `29f6498a` — the range includes
+`_progress("fills_published")` at `:1398`, which is also inside the section).
+Two defects:
 
 - **No beat may occur between the two replaces.** The `_progress` call between
   them can detect ownership loss *after* `shadow_positions.csv` has already been
@@ -13709,47 +13949,86 @@ REORDERED.** As built, the section is
   contains **exactly the two `os.replace` calls and nothing else** — no
   `_progress`, no beat, no branch that can raise between them. Once the section
   is entered, no beat result may abort a started publish.
-- **Order them fills-first, positions-second.** The two torn states are **not
-  symmetric**, and the code's own comment says why: `shadow_positions.csv` is
-  snapshot-enrolled ("rewrite is fine"), `shadow_fills.csv` is
-  append_only-enrolled. Publishing positions first leaves, on a crash between
-  them, a snapshot recording `SELL_SHADOW` closures with **no corresponding fill
-  rows** — a gap in an anchor-enrolled append-only chain, which is the WO-115
-  re-genesis harm class and does not self-heal. Publishing fills first leaves a
-  complete chain and a stale snapshot, and the snapshot is fully rewritten by
-  the next pass by design.
+- **KEEP the existing order: positions first, fills second.** An earlier version
+  of this section required the opposite, on the reasoning that a snapshot
+  recording `SELL_SHADOW` closures with no corresponding fill rows is "a gap in
+  an anchor-enrolled append-only chain … the WO-115 re-genesis harm class".
+  **That reasoning was inverted and is withdrawn (2026-08-02, second
+  independent registration gate).** It reasoned about "chain gap versus stale
+  snapshot" in the abstract without checking what the anchor actually digests.
+
+  `ledger_anchor.py` verifies an append_only ledger by
+  `_sha256_prefix(path, byte_length) != expected_prefix` (`:648-651`), and
+  `_sha256_prefix` (`:380-392`) reads **exactly the first `byte_length` bytes**
+  and raises `EOFError` if the file is shorter. **The anchor is therefore
+  append-tolerant and deletion-intolerant**, which reverses the asymmetry:
+
+  | tear | `shadow_fills.csv` state | anchor verifies? | repairable? |
+  |---|---|---|---|
+  | positions-first (as built) | byte-identical — rows never appended | **yes** | **yes** — the missing rows are added by a later append, which leaves the anchored prefix untouched |
+  | fills-first (the withdrawn proposal) | duplicate `SELL_SHADOW` rows appended by the next pass | yes, initially | **no** — removing a duplicate changes bytes inside the anchored prefix, or shortens the file below `byte_length`, and `verify_ledger_anchor` records `status: "broken"` |
+
+  A missing fill row is **not** a gap the prefix digest can see, and it is
+  correctable. A duplicate row is permanent. The withdrawn proposal would have
+  converted a repairable state into an unrepairable one.
+
+  **It would also have installed an optimistic bias, which is the more serious
+  objection.** A duplicate `SELL_SHADOW` row is counted into
+  `shadow_sell_proceeds_usdc`, which feeds `pnl`, then `roi`, then
+  `monthly_run_rate` — a promotion-relevant evidence surface. The reorder would
+  have swapped an *understatement* of realised shadow P&L for a permanent
+  *overstatement*. **No change to this system may make a P&L or ROI surface read
+  more favourably as a side effect of a crash path.** Positions-first errs
+  toward understatement, which is the correct direction.
 
 If the second `os.replace` raises, the pass returns
-`partial_publish_fills_only`, **does not persist the settlement checkpoint**
+`partial_publish_positions_only`, **does not persist the settlement checkpoint**
 (§143b.4(b) already requires checkpoint-after-publish), and the artifact records
 the status so the state is observable rather than silent.
 
-**Named follow-on — WO-143b-c, record, do NOT build here.** Fills-first ordering
-converts an unrecoverable chain gap into a **duplicate-append risk**: if the
-process dies after the fills replace, the next pass reads the un-updated
-positions snapshot, re-settles the same positions, and may append a second fill
-row for a closure already recorded. Making that path idempotent requires a
-dedup key on an anchor-enrolled ledger's schema, which is a separate
-registered-surface question. It is registered here as an open item so the
-trade-off is recorded rather than discovered later: **this section replaces a
-silent unrecoverable state with a loud recoverable one, and does not claim to
-have eliminated the torn window.**
+**The residual is a MISSING fill row, and it is bounded.** If the process is
+killed between the two replaces (SIGKILL/OOM — the registered accepted worst
+case), `shadow_positions.csv` records closures whose fill rows were never
+appended. The next pass reads the updated snapshot, sees those positions as
+already closed, and does **not** re-settle them, so the rows stay missing until
+repaired. That is an **understatement** of realised shadow P&L on an
+anchor-clean ledger, repairable by append. It is registered as named follow-on
+**WO-143b-c** — a reconciliation pass that detects positions closed in the
+snapshot with no matching fill row and appends the missing rows — and is **not
+built here**. Recording it plainly: this section reduces the torn window to two
+adjacent `os.replace` calls and makes the torn state loud when the second one
+raises; it does **not** eliminate the SIGKILL window, and does not claim to.
 
-**Tests.** (1) a beat issued after a foreign reclaim leaves the lock file
-**byte-identical**; (2) the original holder's release does **not** unlink a lock
-it no longer owns; (3) the ledger publish is skipped on that path and
-`shadow_fills.csv` is byte-identical; (4) an uncontended beat still updates
-normally; (5) an absent or unparseable on-disk payload at beat time marks the
+**Tests** (section-scoped `h*` numbering, corrected 2026-08-02 so they cannot collide with §143b.1's `(1)-(11)` or §143b.2's tests)**.** (h1) a beat issued after a foreign reclaim leaves the lock file
+**byte-identical**; (h2) the original holder's release does **not** unlink a lock
+it no longer owns; (h3) the ledger publish is skipped on that path and
+`shadow_fills.csv` is byte-identical; (h4) an uncontended beat still updates
+normally; (h5) an absent or unparseable on-disk payload at beat time marks the
 heartbeat dead and skips the publish, and both ledgers are byte-identical;
-(6) the re-stamp lands — after a successful pre-section verification the on-disk
-`last_beat_utc` has advanced and both tokens are unchanged; (7) the critical
-section contains exactly two `os.replace` calls and no progress or beat call
-between them, asserted structurally (instrument the heartbeat and assert zero
-beats recorded between the two replaces, not by reading the source);
-(8) **ordering** — with the second `os.replace` forced to raise, the
-append-only `shadow_fills.csv` carries the new rows, `shadow_positions.csv` is
-byte-identical to its pre-run state, the status is `partial_publish_fills_only`,
-and the settlement checkpoint is **not** advanced.
+(h6) the re-stamp lands — after a successful pre-section verification the on-disk
+**`heartbeat_at_utc`** has advanced and both tokens are unchanged (**field name
+corrected 2026-08-02: an earlier draft said `last_beat_utc`, which exists
+nowhere; the payload field written at `runtime_lock.py:282`, read at `:59` and
+registered by §143b.1 is `heartbeat_at_utc`**); (h6b) the re-stamp lands **past
+`heartbeat_cap_seconds`**, which is the only case that matters — see (ii);
+(h7) the critical section contains **at most two** `os.replace` calls and **no
+progress or beat call between them**, asserted structurally (instrument the
+heartbeat and assert zero beats recorded between the two replaces, not by
+reading the source). **"At most", not "exactly": the fills replace is guarded by
+`if new_fill_rows:` (`shadow_cohort.py:1396` on `29f6498a`), so a pass with
+nothing to append has exactly one — which §143b.1 registers deliberately, since
+an append_only ledger with nothing to append keeps its exact bytes and inode.
+An "exactly two" assertion would fail on the common path**; (h7b) a pass with no
+new fill rows enters and leaves the section with one `os.replace` and
+`shadow_fills.csv` byte-identical, including its inode;
+(h8) **ordering** — the registered order is **positions first, fills second, as
+already built**. With the *fills* replace forced to raise, `shadow_positions.csv`
+carries the new snapshot, the append-only `shadow_fills.csv` is
+**byte-identical** to its pre-run state, `verify_ledger_anchor` still reports
+`status: "ok"` over it, the status is `partial_publish_positions_only`, and the
+settlement checkpoint is **not** advanced; (h8b) appending the missing rows
+afterwards leaves `verify_ledger_anchor` reporting `status: "ok"` — the
+assertion that proves the residual is repairable rather than a chain break.
 
 ### 143b.4 — Three further corrections from the same audit
 
@@ -13801,10 +14080,10 @@ time, the checkpoint file is **left exactly as it is** — not truncated, not
 rewritten empty. An unreadable snapshot must not be able to erase the rotation
 state and restart the starvation the sidecar exists to prevent.
 
-**Tests.** (c1) after a pass in which a position has left the snapshot, its
-entry is absent from `shadow_settlement_checkpoints.json`; (c2) entry count
+**Tests.** (d1) after a pass in which a position has left the snapshot, its
+entry is absent from `shadow_settlement_checkpoints.json`; (d2) entry count
 never exceeds the row count of the concurrent `shadow_positions.csv`;
-(c3) with `shadow_positions.csv` unreadable, the checkpoint file is
+(d3) with `shadow_positions.csv` unreadable, the checkpoint file is
 byte-identical to its pre-run state.
 
 ### Adjudications and corrections to my own registered text
@@ -13882,19 +14161,27 @@ file beyond it:
 changes any M-A/M-B/M-C or `maker_min_*` threshold, opens or enables any order
 path, or loosens any gate; every item strictly reduces the set of runs that may
 write — a holder that lost its lease writes nothing, a rotation advances only
-after a successful publish, a reordering is reverted to the original file order,
-and the publish order is changed so that the one state a crash can leave is a
-stale snapshot rather than a gap in an anchor-enrolled append-only chain.
-**One risk is added rather than removed and is stated plainly:** fills-first
-ordering makes a duplicate fill append possible where a chain gap was possible
-before. That is registered as named follow-on WO-143b-c, is not built here, and
-is not claimed to be closed.
+after a successful publish, a settlement reordering is reverted to the original
+file order, and the ledger publish order is left **unchanged** (positions first,
+fills second), which is the order that errs toward understating realised shadow
+P&L rather than overstating it.
+
+**No new failure mode is added (corrected 2026-08-02).** An earlier version of
+this sentence conceded that "one risk is added rather than removed" — a
+fills-first reorder that made a duplicate fill append possible. **That reorder
+is withdrawn**; the reasoning behind it was inverted, because `ledger_anchor`
+verifies an append_only ledger by a prefix digest and is therefore
+append-tolerant and deletion-intolerant. A fail-safe sentence that concedes a
+new failure mode does not satisfy A10, and this one no longer does. The residual
+SIGKILL window leaves **missing** fill rows — anchor-clean, understating, and
+repairable by append — and closing it is named follow-on WO-143b-c, not built
+here.
 
 **Day-after check for §143b.3-4.** After deploy: (1) no `shadow_fills.csv` row
 is written by a process whose `acquisition_token` does not match the on-disk
 lock — observable as zero occurrences of `skipped_lock_lost_during_settlement`
 accompanied by any fill-row growth in the same pass; (2) no
-`partial_publish_fills_only` status appears; if one does, the settlement
+`partial_publish_positions_only` status appears; if one does, the settlement
 checkpoint did **not** advance for that pass, which is the assertion that the
 torn state is loud rather than silent; (3) `shadow_settlement_checkpoints.json`
 carries both invocation literals and its entry count never exceeds the

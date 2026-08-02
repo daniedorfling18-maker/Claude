@@ -13053,3 +13053,95 @@ a held lock may be unlinked, so both are strictly tightening.
 `paper_trading_invoked: true` on cycles whose broker block records filled or
 rejected orders, and `false` on every scoring-only and blocked cycle; and no
 `prediction_cycle` lock is unlinked by a process that did not create it.
+
+### 143.9 — Two P1 corrections from Codex review of `9cf4c21` (registered 2026-08-02)
+
+Both re-verified against the code before registration. **Both are defects in
+§143.7(b) — this orchestrator's registered text — not in the build.** The
+builder implemented §143.7(b) exactly as written; the writing was wrong.
+
+#### (a) The freshness gate runs AFTER signals are published
+
+Verified: `run_paper_cycle(cfg, source=source, scope="scoring_only")` is called
+at `scheduled_paper_cycle.py:250`; the freshness evaluation is at `:300-304` —
+**fifty lines later.** `run_paper_cycle` reaches `generate_signals`, which writes
+`trade_signals.csv` (`strategy.py:513`). So a nonempty-but-stale websocket feed
+that still yields predictions and passes readiness **publishes stale signals to
+the live container's paper broker**, and the wrapper's subsequent
+`blocked_inputs` at exit 1 cannot retract fills already triggered from that file.
+
+**This is structurally identical to §143.7(c), which this same amendment got
+right.** (c) reads: *"Detect the disabled-or-unrefreshed overlay BEFORE
+`generate_signals` is called, and publish no approved-signal file on that
+path."* I applied that reasoning to the overlay gate and then, in the same
+amendment, introduced a freshness gate and placed it after the cycle. §143.7(b)
+says "validate the websocket observation age **before classifying
+completion**" — and classification happens after the work. **The word "before"
+was attached to the wrong event.**
+
+**Corrected requirement.** Evaluate websocket observation age **before invoking
+`run_paper_cycle`**. On a stale, absent, unparseable, non-finite or
+future-dated-beyond-tolerance observation the cycle is **not invoked at all**:
+the receipt records `blocked_inputs` at exit 1, `cycle_completed: false`,
+`predictions: null`, and no signal file is written or replaced. A gate that runs
+after the publication it is meant to prevent is not a gate.
+
+**Tests.** (1) with a stale observation, `run_paper_cycle` is **never called**
+(assert via monkeypatched sentinel), status `blocked_inputs`, exit 1; (2) the
+pre-existing `trade_signals.csv` is **byte-identical** on disk after that run —
+this is the assertion that actually proves the harm is prevented; (3) same for
+absent, unparseable, non-finite and future-dated-beyond-tolerance observations;
+(4) a fresh observation still invokes the cycle exactly as today.
+
+#### (b) Freshness must be computed from rows that can actually produce predictions
+
+The helper (`scheduled_paper_cycle.py:176-198`) iterates raw CSV rows, keeps the
+freshest parseable timestamp, and **never checks whether the row carries a
+usable midpoint, executable price, market id, or token id.** `build_features_v2`
+discards rows lacking those. So a CSV holding one recent-but-unusable row beside
+older valid rows reads as **fresh** while every prediction comes from the stale
+rows — the run exits 0 and republishes stale signals indefinitely through a
+degraded feed. The freshness metric and the prediction population are computed
+over different row sets, which makes the gate measure something other than what
+it guards.
+
+**Corrected requirement.** Compute the age from rows that survive the same
+usability predicate `build_features_v2` applies — a row missing any field
+required to produce a prediction does not count toward freshness. If **no** row
+qualifies, the age is `None` → `blocked_inputs`, never "fresh because a
+timestamp existed".
+
+**Tests.** (5) a CSV with one recent unusable row and older valid rows classifies
+`blocked_inputs`, not fresh — the row-set-divergence case; (6) a CSV whose only
+recent row is usable classifies fresh; (7) a CSV with no usable rows at all
+classifies `blocked_inputs`; (8) the usability predicate is asserted to match
+`build_features_v2`'s, so the two cannot drift apart silently.
+
+#### What this says about the checklist, recorded rather than absorbed
+
+This is the **fourth** round of P1s on WO-143 and the third traceable to
+under-specified registered text rather than to the build. The pattern across
+§143.7(a), §143.8, and now §143.9 is the same shape: a clause states a
+requirement correctly but attaches it to the wrong event, the wrong scope, or
+the wrong row set. **A6 already exists for this** — "a trigger condition is
+stated in terms of what is observable at the site that must act" — and it did
+not catch any of the three, because all three were about *ordering and
+population*, not observability.
+
+**Register at the next `ENGINEERING_STANDARDS.md` amendment, alongside the A5
+widening from §143.8:** a new rule requiring that a clause introducing a GATE
+must state (i) the exact call site it precedes, and (ii) the population it is
+computed over, where both are wrong-by-default if unstated. Neither §143.7(b)
+nor §143.7(a) stated either, and both were implemented exactly as written.
+
+**Fail-safe sentence for §143.9.** Nothing here marks a market measured, changes
+any M-A/M-B/M-C or `maker_min_*` threshold, opens or enables any order path, or
+loosens any gate; item (a) moves a gate earlier so it prevents rather than
+reports, and item (b) narrows the row set that can satisfy it — both strictly
+tightening, and both reduce the number of runs that can publish signals.
+
+**Day-after check.** `scheduled_paper_cycle.json` records `blocked_inputs` with
+`cycle_completed: false` on any run whose websocket observation is stale,
+absent, or unusable; `trade_signals.csv`'s modification time does not advance on
+any such run; and no run reports a fresh observation while its predictions
+derive from rows older than the ceiling.

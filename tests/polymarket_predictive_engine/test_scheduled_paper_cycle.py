@@ -85,7 +85,48 @@ def _config(
     return load_config(config_path)
 
 
+def _fresh_stamp(seconds_ago: float = 0.0) -> str:
+    return (datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _seed_fresh_websocket_observation(cfg, *, seconds_ago: float = 30.0) -> None:
+    """Current-observation substrate for WO-143.7(b)'s freshness check.
+
+    That check is UNCONDITIONAL -- it does not care which `source` the cycle
+    ran -- so any fixture that expects a scheduled run to reach a completed
+    classification must carry a current websocket observation, exactly as the
+    deployed host does.
+
+    The market/token ids here are deliberately DISJOINT from
+    `_seed_raw_snapshot_fixture`'s, so this file satisfies the freshness gate
+    without being matched by `_enrich_with_latest_websocket_quotes` and
+    perturbing what a raw_snapshot-sourced cycle scores.
+    """
+
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            {
+                "collected_at_utc": _fresh_stamp(seconds_ago),
+                "market_id": "market-freshness-probe",
+                "asset_id": "token-freshness-probe",
+                "market_slug": "synthetic-freshness-probe",
+                "question": "Is the websocket feed currently observing?",
+                "category": "worldcup",
+                "best_bid": "0.50",
+                "best_ask": "0.52",
+                "midpoint": "0.51",
+                "top_bid_size": "100",
+                "top_ask_size": "100",
+            }
+        ],
+    )
+
+
 def _seed_raw_snapshot_fixture(cfg) -> None:
+    # The scheduled wrapper validates websocket observation freshness on every
+    # source, so a raw-snapshot fixture still needs a live feed behind it.
+    _seed_fresh_websocket_observation(cfg)
     raw_path = cfg.data_root / "outputs" / "polymarket_fixed" / "worldcup" / "ml" / "raw_market_snapshots.csv"
     write_csv(
         raw_path,
@@ -530,10 +571,6 @@ def test_existing_paper_cycle_cli_command_is_unchanged(tmp_path):
 # --- 143.7: review-round amendment ------------------------------------------
 
 
-def _fresh_stamp(seconds_ago: float = 0.0) -> str:
-    return (datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def _websocket_cfg(tmp_path: Path, *, collected_at_utc: str, **kwargs):
     cfg = _config(tmp_path, **kwargs)
     _seed_websocket_fixture(cfg, collected_at_utc=collected_at_utc)
@@ -826,3 +863,101 @@ def test_143_7f_full_scope_still_reports_the_real_forward_count(tmp_path):
 
     assert report["shadow_cohort"].get("status") != "skipped_scoring_only"
     assert isinstance(report["longshot_bias"]["shadow_candidates_forwarded"], int)
+
+
+def test_143_7b_freshness_check_is_unconditional_across_every_source(tmp_path):
+    # PINS THE FIX: an earlier draft ran the freshness check only when
+    # source == "websocket" and defaulted the verdict to True otherwise -- a
+    # freshness gate defaulting to FRESH. The deployed scheduler hardcodes
+    # --paper-source websocket (run_vps_ops_scheduler.sh:682), so that hole
+    # was unreachable but not closed: any other source classified `ran` at
+    # exit 0 having validated nothing. A non-websocket source must be held to
+    # the SAME observation contract.
+    for source in ("raw_snapshot", "websocket", "historical", "all"):
+        # Absent websocket observation.
+        absent = _config(tmp_path / f"absent-{source}")
+        _seed_calibration_model(absent)
+        _seed_labels(absent)
+        raw_path = (
+            absent.data_root / "outputs" / "polymarket_fixed" / "worldcup" / "ml" / "raw_market_snapshots.csv"
+        )
+        write_csv(
+            raw_path,
+            [
+                {
+                    "snapshot_timestamp": "2026-06-25T10:00:00Z",
+                    "market_id": "market-forward-1",
+                    "market_slug": "synthetic-forward-market",
+                    "token_id": "token-forward-yes",
+                    "question": "Will the synthetic event happen?",
+                    "category": "worldcup",
+                    "best_bid": 0.35,
+                    "best_ask": 0.40,
+                    "top_bid_size": 1000,
+                    "top_ask_size": 1000,
+                    "bid_depth_1pct": 1000,
+                    "ask_depth_1pct": 1000,
+                    "bid_depth_5pct": 1000,
+                    "ask_depth_5pct": 1000,
+                    "websocket_quote_age_seconds": 30,
+                    "midpoint": 0.375,
+                    "liquidity": 1000,
+                    "close_time": "2026-12-31T00:00:00Z",
+                }
+            ],
+        )
+        assert not (absent.output_root / "polymarket_training" / "websocket_market_features.csv").exists()
+
+        receipt = run_scheduled_paper_cycle(absent, source=source)
+
+        assert receipt["status"] == "blocked_inputs", source
+        assert receipt["exit_code"] == 1, source
+        assert receipt["cycle_completed"] is False, source
+
+        # Present but stale beyond the registered ceiling.
+        stale = _config(tmp_path / f"stale-{source}")
+        _seed_raw_snapshot_fixture(stale)
+        _seed_calibration_model(stale)
+        _seed_fresh_websocket_observation(
+            stale,
+            seconds_ago=scheduled_paper_cycle.MAX_WEBSOCKET_OBSERVATION_AGE_SECONDS + 600,
+        )
+
+        receipt = run_scheduled_paper_cycle(stale, source=source)
+
+        assert receipt["status"] == "blocked_inputs", source
+        assert receipt["exit_code"] == 1, source
+        assert receipt["cycle_completed"] is False, source
+
+
+def test_143_7b_future_dated_observation_is_unmeasurable_not_maximally_fresh(tmp_path):
+    # A timestamp corrupted to the future (or a clock-skewed collector row)
+    # produced a negative age that clamped to 0.0 -- maximally fresh, forever,
+    # and unreachable by any ceiling because the corrupt row is always
+    # "newer" than every honest one. Beyond the registered skew tolerance it
+    # is unmeasurable, so the cycle blocks.
+    tolerance = scheduled_paper_cycle.FUTURE_OBSERVATION_TOLERANCE_SECONDS
+    assert tolerance == 60.0
+
+    # Inside the tolerance: a benignly skewed clock still measures.
+    skewed = _config(tmp_path / "skewed")
+    _seed_websocket_fixture(skewed, collected_at_utc=_fresh_stamp(-(tolerance / 2)))
+    age = scheduled_paper_cycle._websocket_observation_age_seconds(skewed)
+    assert age is not None
+    assert age == pytest.approx(0.0, abs=1e-12)
+
+    # Beyond the tolerance: unmeasurable, never fresh.
+    for seconds_ahead in (tolerance + 120, 86_400, 365 * 24 * 3600):
+        future = _config(tmp_path / f"future-{int(seconds_ahead)}")
+        _seed_websocket_fixture(future, collected_at_utc=_fresh_stamp(-seconds_ahead))
+        assert scheduled_paper_cycle._websocket_observation_age_seconds(future) is None, seconds_ahead
+
+    # End to end: a far-future observation blocks the cycle rather than
+    # reporting a successful run.
+    cfg = _websocket_cfg(tmp_path / "future-cycle", collected_at_utc="2099-01-01T00:00:00Z")
+
+    receipt = run_scheduled_paper_cycle(cfg, source="websocket")
+
+    assert receipt["status"] == "blocked_inputs"
+    assert receipt["exit_code"] == 1
+    assert receipt["cycle_completed"] is False

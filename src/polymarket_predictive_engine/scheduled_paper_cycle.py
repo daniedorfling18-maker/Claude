@@ -54,6 +54,23 @@ LOCK_WAIT_SLEEP_SECONDS = 10.0
 # freshness, and is unset in config.
 MAX_WEBSOCKET_OBSERVATION_AGE_SECONDS = 1800.0
 
+# WO-143.7 fix round: how far into the future an observation timestamp may sit
+# before it is treated as UNMEASURABLE rather than as fresh. Without this, a
+# row corrupted to 2099 (or written by a clock-skewed collector) produces a
+# negative age, clamps to 0.0, and reads as maximally fresh forever -- a
+# permanent fail-open that no ceiling can catch, because the corrupt row is
+# always "newer" than every honest one.
+#
+# Literal basis (A1): 60 seconds is the repository's already-registered
+# future-timestamp allowance for exactly this concept --
+# `h1_future_timestamp_tolerance_seconds: 60`
+# (polymarket_predictive_config.example.yaml:261, WO-93's tighten-only H1
+# prerequisite block). Reusing that number keeps one clock-skew allowance
+# across the repo instead of inventing a second, looser one. It is a fixed
+# module constant rather than a config key: widening it is precisely the
+# fail-open this closes, so there is no tighten-only direction to expose.
+FUTURE_OBSERVATION_TOLERANCE_SECONDS = 60.0
+
 _RECEIPT_RELATIVE = Path("polymarket_model_governance") / "scheduled_paper_cycle.json"
 _LIVE_SUMMARY_RELATIVE = Path("polymarket_model_governance") / "mispricing_alpha_live_summary.json"
 _WEBSOCKET_FEATURES_RELATIVE = Path("polymarket_training") / "websocket_market_features.csv"
@@ -136,7 +153,9 @@ def _websocket_observation_age_seconds(cfg: EngineConfig) -> float | None:
     enumerates: an absent file, an empty file, a malformed file (whose
     garbage-keyed `csv.DictReader` rows carry none of the timestamp
     columns), rows whose timestamps are unparseable, and rows whose
-    timestamps are non-finite.
+    timestamps are non-finite -- plus rows dated further into the future
+    than `FUTURE_OBSERVATION_TOLERANCE_SECONDS`, which would otherwise clamp
+    to an age of 0.0 and read as maximally fresh forever.
     """
 
     rows = read_csv_rows(cfg.output_root / _WEBSOCKET_FEATURES_RELATIVE)
@@ -170,6 +189,11 @@ def _websocket_observation_age_seconds(cfg: EngineConfig) -> float | None:
         return None
     age = (datetime.now(timezone.utc) - freshest).total_seconds()
     if not math.isfinite(age):
+        return None
+    # A future-dated observation would otherwise clamp to 0.0 below and read
+    # as maximally fresh forever. Beyond the registered clock-skew tolerance
+    # it is unmeasurable, not fresh, so the caller blocks on it.
+    if age < -FUTURE_OBSERVATION_TOLERANCE_SECONDS:
         return None
     return max(0.0, age)
 
@@ -262,17 +286,22 @@ def run_scheduled_paper_cycle(cfg: EngineConfig, *, source: str = "websocket") -
             # malformed, unparseable, non-finite -- and None is treated as
             # blocked, never fresh (fail-closed, WO-121/129).
             #
-            # Scoped to `source == "websocket"`, the deployed job's only
-            # source and the only source for which this file is an input at
-            # all; a `raw_snapshot`-sourced cycle never reads it, and the
-            # registered §143.2 test set exercises exactly that path.
-            websocket_observation_fresh = True
-            if source == "websocket":
-                websocket_age = _websocket_observation_age_seconds(cfg)
-                websocket_observation_fresh = (
-                    websocket_age is not None
-                    and websocket_age <= _websocket_observation_max_age_seconds(cfg)
-                )
+            # UNCONDITIONAL, for every `source`. An earlier draft ran this
+            # check only when `source == "websocket"` and defaulted the
+            # verdict to True otherwise -- a freshness gate that defaults to
+            # FRESH, i.e. the very fail-open shape this item exists to close,
+            # merely relocated behind a CLI flag. §143.7(b) carries no source
+            # qualifier, and the deployed scheduler hardcoding
+            # `--paper-source websocket` (run_vps_ops_scheduler.sh:682) makes
+            # the hole unreachable TODAY but not closed: any caller passing a
+            # different source would classify `ran` at exit 0 and refresh
+            # `last_success_utc` having validated nothing. "The deployed
+            # default happens to be safe" is not a gate.
+            websocket_age = _websocket_observation_age_seconds(cfg)
+            websocket_observation_fresh = (
+                websocket_age is not None
+                and websocket_age <= _websocket_observation_max_age_seconds(cfg)
+            )
             cycle_completed = has_predictions and websocket_observation_fresh
             if has_predictions and websocket_observation_fresh and cycle_status == "ran" and overlay_refreshed:
                 status = "ran"

@@ -8559,7 +8559,7 @@ actionable.
 **Why check 1 cannot be a step inside the gated job** (this concerns CHECK 1
 only — check 2 *is* a step inside the gated job, deliberately, and the reasoning
 below is why the two cannot be the same step; heading corrected 2026-08-02 after
-a gate found the previous wording read as an instruction against check 2):** `environment:` is a *job-level*
+a gate found the previous wording read as an instruction against check 2).* `environment:` is a *job-level*
 property and its protection rules gate the job's **start**. The reviewer
 notification fires before any step of that job executes, so a guard step could
 not suppress it — every superseded run would page the owner, which is the exact
@@ -8691,14 +8691,32 @@ presence: no step may precede it in that job. **This test was absent from the
 first version of the check-2 design, and a gate demonstrated that a workflow
 omitting check 2 entirely passed every other registered test with a green
 suite** — reproducing the exact structural defect check 2 was added to fix,
-undetectably; (4d) that step emits the registered literal
+undetectably; (4d) that step emits the message
 `superseded: approved <github.sha>, main is now <tip>; approve the newer run`,
-pinned as a string so the day-after check cannot fail on a correct build;
+where **`<github.sha>` and `<tip>` are SUBSTITUTED, not literal**. The test
+pins the three invariant fragments — `superseded: approved `, `, main is now `,
+`; approve the newer run` — **and asserts each placeholder position holds an
+interpolation rather than the literal angle-bracket text**. *(Corrected
+2026-08-02 after a gate demonstrated both failure directions: a test pinning the
+whole line as a string FAILS on a correct build, which is the very defect this
+clause claims to prevent and the same one already corrected once for
+`divergence_started_at_utc`; and a build that echoes `<github.sha>` verbatim
+PASSES every other registered test while emitting a message containing no SHAs
+at all.)*;
 (4e) that step's failure branch is `exit 1` — **not** `exit 0`, and not a
 `continue-on-error` step, so a superseded run reads `failure` and never
 `success`; (4f) check 2's own tip resolution has the same A2 branches as check
 1's: a missing, empty, or unparseable tip **fails** the job rather than
-proceeding to deploy; (5c) an invocation with
+proceeding to deploy. **(4f) is executed offline**, by extracting the step's
+`run:` block and shimming `git` on `PATH` — no Actions harness is required;
+(4g) **check 2's comparison is exercised behaviourally on the same harness**:
+with the resolved tip **differing** from `github.sha` the step exits **nonzero**,
+and with it **equal** the step exits **zero**. *(Added 2026-08-02: (4c)-(4f) are
+text assertions plus one unresolvable-tip case, and a gate showed that a check 2
+whose comparison is wrapped `( ... ) || true` — or whose polarity is inverted —
+passes all of them. The harm is bounded by (a1)'s pinning, since the VPS guard
+refuses a stale SHA before touching the host, but the registered `superseded:`
+message would be lost and only the day-after check would notice.)*; (5c) an invocation with
 `PM_DEPLOY_TARGET_SHA` unset or empty is **rejected** — the registered pinning
 must not be satisfiable by the script's tip-defaulting fallback at
 `scripts/deploy_vps_paper_manual.sh:99`; (5d) the remote process actually
@@ -8715,8 +8733,46 @@ the run **fails** and does not deploy — the fail-closed branch;
 **Fail-safe sentence for §145.1.** Nothing here marks a market measured, changes
 any M-A/M-B/M-C or `maker_min_*` threshold, opens or enables any order path, or
 upgrades any attestation, and the `environment:` approval gate itself is
-unchanged — every deploy still requires a human approval and none can proceed
-without one.
+unchanged.
+
+**(a3) The approval gate must be ENFORCED AT RUNTIME, not assumed from
+configuration (added 2026-08-02, fourth gate).** An earlier version of this
+sentence asserted "every deploy still requires a human approval and none can
+proceed without one". **No registered artifact can establish that.** Enumerated
+test 2 asserts only that the workflow *declares* `environment:`; whether that
+environment carries a required-reviewer protection rule lives in GitHub
+repository settings, which no test in this repo can read and no reviewer here
+can inspect.
+
+Under WO-145's dispatch-only design that gap was tolerable — an unconfigured
+environment still had a human in the loop by construction, because the owner
+started the run. **§145.1 removes that human.** With `push` and no `paths:`
+filter, an environment lacking its protection rule means **every merge to `main`
+deploys the VPS unattended**, and this section's fail-safe sentence would be
+false. That is the single largest blast-radius change in this amendment and it
+was previously left to a post-hoc day-after check, which by construction only
+fires *after* the first unattended deploy.
+
+**Required:** the deploy job's SSH step is preceded by a step that queries
+`/repos/{owner}/{repo}/actions/runs/{run_id}/approvals` and **fails the job when
+the approval list is empty**, naming the missing protection rule. This converts
+an unpinnable repository setting into a runtime-enforced precondition. It is
+belt-and-braces when the environment IS configured — the query simply returns
+the approver — and it is the only thing standing between an unconfigured
+environment and an unattended production deploy.
+
+**Fail-closed, per A2:** an approvals query that errors, times out, returns
+non-JSON, or returns an empty list **fails the job**. It never proceeds on
+doubt, because the doubt in question is "did a human approve this".
+
+**Test (2b):** with the approvals response stubbed empty, the deploy job fails
+and no SSH step runs; with one approver present it proceeds; with the query
+erroring it fails. Executable offline against the step's `run:` block with the
+API call shimmed, the same harness (4f) and (4g) already require.
+
+**Owner precondition, stated because it is not mine to do:** the `environment`
+must carry a required-reviewer protection rule **before** WO-145's build merges.
+(a3) enforces it at runtime; it does not create it.
 
 **But the set of deploys a human must approve is NOT identical, and an earlier
 version of this sentence claimed it was (corrected 2026-08-02, second gate).**

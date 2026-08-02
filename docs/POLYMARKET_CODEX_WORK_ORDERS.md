@@ -8783,11 +8783,25 @@ non-JSON, returns an empty list, or returns entries none of which is `approved`
 **fails the job**. It never proceeds on doubt, because the doubt in question is
 "did a human approve this".
 
-**The (a3) tests are (2c)-(2e), and they live in the enumerated list below** —
+**The (a3) tests are (2c)-(2f), and they live in the enumerated list ABOVE** —
 *numbering corrected 2026-08-02: a first draft called this "test (2b)", which
 collides with WO-145's own parent test 2 and appeared only in this prose, so a
 builder enumerating from the registered list would have missed it entirely. It
-belongs in `tests/test_deploy_vps_paper_dispatch_workflow.py` with the rest.*
+belongs in `tests/test_deploy_vps_paper_dispatch_workflow.py` with the rest.
+Two further slips in that correction, caught by the same gate and fixed here:
+the roll-up read "(2c)-(2e)" and omitted **(2f)**, which is registered in the
+same insertion and is unambiguously an (a3) test since it constrains the
+approvals query URL; and it said the list was "below" when it is 108 lines
+above. Noted for what it is — a correction that needed correcting twice is the
+duplicate-set failure mode this PR has now hit in five separate rounds.*
+
+*Naming caveat, recorded rather than renumbered a fourth time:* under §145.1's
+own suffix convention — (4b) extends (4), (5b)-(5d) extend (5) — the label
+`(2c)-(2f)` reads as an extension of §145.1's test (2), which is "`push` is
+restricted to `main`", not the approval gate. The parent number is topically
+wrong. **No functional consequence** — each label is defined exactly once and
+collides with nothing — and a fourth renumbering has its own track record in
+this PR, so the label stands and the mismatch is recorded instead.
 
 **Owner precondition, stated because it is not mine to do:** the `environment`
 must carry a required-reviewer protection rule **before** WO-145's build merges.

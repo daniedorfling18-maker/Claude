@@ -9430,6 +9430,97 @@ effective interval is ~12h, 24.0h is the better-matched literal.
 (3) **Priority: parked behind WO-149** per the drafter's recommendation and the
 funnel finding.
 
+
+### 147.4 — Every `maker_fill_replay.py` citation in this WO is stale; corrected, with the rule that stops it recurring (added 2026-08-03, pre-dispatch; WO-147 was NOT safely dispatchable)
+
+**Cause.** WO-147 was drafted 2026-08-01 and its citations were accurate then —
+verified by re-reading `maker_fill_replay.py` at `33ab8f7^1`, where every one
+resolves exactly. **WO-149 merged as PR #422 on 2026-08-02**, taking that file
+from 1754 to 1922 lines. The shift is **not uniform**: `+5` above roughly line
+490, `+62`/`+63` around 730-750, and `+76` by 957-968. A builder applying the
+registered numbers would therefore edit the wrong function, and would do so
+*more* wrongly the deeper into the file it went.
+
+**The corrected table.** Each row was resolved by matching the construct, not by
+adding an offset, and the `+5` rows were additionally confirmed byte-identical
+against `33ab8f7^1`:
+
+| as registered | construct | correct on `c26cd7f` |
+|---|---|---|
+| `:129-133` | `_read_delisted_markers` docstring ("conservative direction is to collect") | `:134-138` |
+| `:421-433` | `_portfolio` | `:426-438` |
+| `:436-484` | `_recent_book_markets` | `:441-489` |
+| `:483` | `watchlist.append` | `:488` |
+| `:487-571` | `_candidate_seed_markets` | `:492-576` |
+| `:510-530` | the seed skip loop (`for condition_id, row in candidates.items():`) | `:515-535` |
+| `:580-585` | "a second implementation would drift" comment | `:585-590` |
+| `:728` | `persistent = _recent_book_markets(` call | `:790` |
+| `:733` | `persistent_cap = max(0, ...)` | `:796` |
+| `:751` | seed `cap=max(0, int(settings.get("max_candidate_markets", 0)))` | `:814` |
+| `:862` | `_write_gzip_csv(path, combined, OFFICIAL_BOOK_FIELDS)` | `:925` |
+| `:957`, `:968` | the two `snapshot_official_books(cfg)` calls | `:1033`, `:1044` |
+
+**`maker_carry_study.py` is unaffected.** That file was not touched by WO-146,
+WO-149 or WO-150, and all twelve of this WO's citations into it — `:582-605`,
+`:842`, `:858`, `:859`, `:844-846`, `:903`, `:850`, `:2311-2313`, `:2488`,
+`:399-400`, `:1710-1718`, `:1666-1667` — resolve exactly. They are **not** to be
+edited.
+
+**Three self-referential citations into this register are also stale**, from
+unrelated later edits, and are corrected here rather than left for the same
+reason: `:5514-5516` (WO-116's `coverage_ratio` binding) is now `:5526`; WO-131's
+heading is `:6028`, not `:6017`; WO-141's heading is `:6655`, not `:6644` — and
+WO-141's heading text was rewritten when it went `done`, so the phrase this WO
+quotes from it no longer exists verbatim. The **substance** each of the three
+supports is unchanged; only the pointers moved.
+
+**The rule that stops this recurring, and it is not "renumber more often".**
+**Anchor text governs; line numbers are advisory.** A builder that finds a cited
+line disagreeing with the construct named beside it follows the construct,
+records the drift, and continues — it does not guess and it does not stop, unless
+the construct itself cannot be found, which is a genuine escalation. Line numbers
+are retained because they make review faster, not because they are authoritative.
+This is the same rule §148.6 adopts, for the same cause.
+
+**The material non-finding, recorded because its absence is what makes this WO
+still buildable.** Unlike WO-148 — whose premises WO-149 falsified outright —
+WO-147's logic is **structurally unreachable** under `scope="portfolio"`. Its new
+expired-market filter applies only to the persistent and candidate-seed tranches,
+and under that scope both are forced to `[]` at `maker_fill_replay.py:769-770`
+*before* either function runs. The `_portfolio` tranche, which both scopes share,
+is explicitly out of scope in this WO and stays untouched. The new diagnostic keys
+land on `official_book_snapshot.json`, which the portfolio scope never writes.
+**So this is citation drift only, with no behavioural interaction — WO-147 is
+dispatchable once this amendment merges.**
+
+**Scope, touched files, tests, fail-safe sentence and Day-after check are
+unchanged by this amendment.** It corrects pointers and adds no requirement; the
+four files at `:9156-9160` and the eighteen enumerated tests at `:9242-9268`
+stand exactly as registered.
+
+**The same drift affects three other queued work orders and is named here so it
+is not rediscovered one wasted builder at a time.** None is dispatchable today,
+so none is corrected in this amendment, but each must be re-verified before it
+is:
+
+- **WO-143** — `cli.py:613-614` (the `refresh-governance` contention-exit
+  precedent) is now `:627-628`, and `run_vps_ops_scheduler.sh:620-645`
+  (`run_trade_prints`) is now `:639-664`; both moved because of WO-149. Two
+  further citations into `mispricing_alpha.py` (`:542-543`, `:363`) were wrong
+  **when drafted** — that file has not changed since — and §143.7 of this same
+  register already cites the correct line for one of them.
+- **WO-143b** — the config citations "line 1311 / 1312" are now `:1327` / `:1328`
+  (WO-146 `+6` and WO-150 `+10`, both landing earlier in the file). Its own
+  self-correction for `test_shadow_cohort.py` fixed one of a pair and left the
+  twin: `:162` is now `:153`.
+- **WO-151** — the base text's `run_vps_ops_scheduler.sh:796-814` is now
+  `:841-860` and `:799-810` is now `:844-855`. Its A10 gap (no touched-file
+  list, no enumerated tests) was closed when **§151.1 merged with PR #427 on
+  2026-08-03**, and §151.1's own scheduler citations (`:841-856`, `:635`) were
+  derived *after* WO-149's merge and resolve against the current tree — so
+  WO-151 is dispatchable now, with §151.1's numbers authoritative over the base
+  text's under the anchor-text-governs rule.
+
 ## WO-148 — Make seed-to-eligible conversion measurable: a tier-assignment event ledger — `queued` (registered 2026-08-01; measurement-only sidecar; changes no selection behaviour; enrolment deliberately deferred, see 148.4 → OWNER MERGE after line-audit)
 
 **Provenance.** An analyst could not compute the seed-to-eligible conversion rate

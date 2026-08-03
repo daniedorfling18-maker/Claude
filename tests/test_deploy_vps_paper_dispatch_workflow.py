@@ -12,7 +12,9 @@ green run.
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
 import textwrap
 from pathlib import Path
@@ -86,6 +88,36 @@ def _fake_git(bin_dir: Path, *, tip: str | None, fail: bool = False) -> None:
     path.chmod(0o755)
 
 
+def _harness_path(bin_dir: Path | None = None) -> str:
+    """PATH for a step under test: the shim directory first, then the real one.
+
+    This used to be the literal "/usr/bin:/bin". The required PR gate runs the
+    suite inside `python:3.11-slim`, where python3 exists ONLY at
+    /usr/local/bin/python3 - so every step that parses JSON with `python3` found
+    no interpreter, and because those steps redirect stderr they degraded into
+    their own failure branches ("undetermined", "no approved entry") instead of
+    erroring. Inheriting PATH asserts the same precondition production has -
+    python3 resolvable on PATH - rather than a filesystem layout.
+
+    The `which` check is deliberately a raised error, not an assertion. On the
+    positive tests a missing interpreter looks like a logic failure; on the
+    NEGATIVE ones (2c, 2e, and 2d's rejected half, which assert only
+    `returncode != 0`) it looks like a PASS, and would pass against any approval
+    logic at all. That is the same non-discriminating-negative defect a line
+    audit already caught once in this file - see the comment in test 2d.
+    """
+    inherited = os.environ.get("PATH") or os.defpath
+    path = f"{bin_dir}{os.pathsep}{inherited}" if bin_dir is not None else inherited
+    if shutil.which("python3", path=path) is None:
+        raise RuntimeError(
+            "test harness precondition failed: no python3 on the constructed "
+            f"PATH ({path!r}). The steps under test parse JSON with python3 and "
+            "swallow its stderr, so continuing here would silently convert an "
+            "environment problem into a wrong-reason pass or failure."
+        )
+    return path
+
+
 def _run_shell(
     script: str,
     env: dict[str, str],
@@ -93,7 +125,7 @@ def _run_shell(
     bin_dir: Path,
     github_output: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    full_env = {"PATH": f"{bin_dir}:/usr/bin:/bin"}
+    full_env = {"PATH": _harness_path(bin_dir)}
     full_env.update(env)
     if github_output is not None:
         full_env["GITHUB_OUTPUT"] = str(github_output)
@@ -583,7 +615,7 @@ def test_wo145_5_tmux_sentinel_wrapper_propagates_the_real_exit_code(tmp_path: P
     run_id = f"pytest-{tmp_path.name}-{exit_code}"
     subprocess.run(["tmux", "kill-session", "-t", f"pm-deploy-{run_id}"], capture_output=True)
     env = {
-        "PATH": "/usr/bin:/bin",
+        "PATH": _harness_path(),
         "HOME": str(Path.home()),
         "STUB_EXIT_CODE": str(exit_code),
         "PM_VPS_REPO_DIR": str(tmp_path / "repo"),
@@ -748,7 +780,7 @@ def test_wo145_5_missing_sentinel_fails_closed(tmp_path: Path) -> None:
     run_id = f"pytest-missing-{tmp_path.name}"
     subprocess.run(["tmux", "kill-session", "-t", f"pm-deploy-{run_id}"], capture_output=True)
     env = {
-        "PATH": "/usr/bin:/bin",
+        "PATH": _harness_path(),
         "HOME": str(Path.home()),
         "PM_VPS_REPO_DIR": str(tmp_path / "repo"),
         "GITHUB_RUN_ID": run_id,

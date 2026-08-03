@@ -11141,3 +11141,152 @@ construction, not merely of `_incumbent_hold`'s output. **Failure
 signature:** `not_in_candidate_scan` appearing for a condition_id that was
 a prior member means the union step did not wire through correctly, and the
 WO is REVERTED, not tuned.
+## WO-153 — The deploy-control surface is not a protected control path — `queued` (registered 2026-08-03 from the WO-145 build audit's finding O5; **merge-control surface** — `scripts/merge_independently_reviewed_pr.py` is itself in `PROTECTED_CONTROL_PATHS` → OWNER MERGE after line-audit; **not blocked by #428** — see "Ordering" below, where an earlier draft's claim that it was is retracted)
+
+**Provenance.** The WO-145 build audit checked whether the seven files it
+touched are recognised as control paths by `_protected_control_path`
+(`scripts/merge_independently_reviewed_pr.py:96`) and found that
+**`_protected_control_path` returns `False` for all seven**. The auditor agreed
+this is a follow-on rather than a blocker for #428, and specified that the
+registration should add **both** the workflow and its test file.
+
+`PROTECTED_CONTROL_PATHS` (`:34-47`) enumerates the **merge**-control surface —
+`required-pr-gate.yml`, `independent-pr-merge.yml`, the merge script itself, the
+packaging and pytest-configuration files that can subvert `python -m pytest`. It
+predates the existence of any deploy-control surface. WO-145 creates one:
+`.github/workflows/deploy_vps_paper_dispatch.yml` carries check 2 (the
+post-approval supersession re-check), the runtime approvals gate, and the
+`PM_DEPLOY_TARGET_SHA` pin that makes the approved SHA and the deployed SHA the
+same SHA.
+
+**The failure this closes.** A future PR that deletes check 2, or the "Enforce
+runtime approval" step, or the `PM_DEPLOY_TARGET_SHA` assignment inside the SSH
+command string, changes what a deploy approval *means* — and today that PR
+reports `trusted_merge_control_unchanged: true` and
+`protected_control_changes: []`. The deletion is invisible to the very mechanism
+built to notice control-surface edits. The same argument covers the test file:
+deleting the tests that prove check 2 fails closed is equivalent to deleting
+check 2, one merge later.
+
+### Ordering — an earlier draft of this WO said it was BLOCKED until #428 merges. That was wrong, and the correction runs the other way.
+
+`_protected_control_path` (`scripts/merge_independently_reviewed_pr.py:96-119`)
+is a **pure string predicate**. It compares a normalised path against a set; it
+never stats the filesystem and never asks whether the file exists. Registering
+the two entries before the file lands is therefore not merely harmless, it is
+**strictly more protective**: it is the only ordering under which **PR #428 — the
+one PR that creates the deploy-control surface — is itself covered by the
+protection it creates.** Under the reverse ordering that PR is the single
+permanent exception to it.
+
+The one consequence to state rather than let someone discover: a non-empty
+`protected_control_changes` appends the blocker
+`pull_request_changes_trusted_merge_control` (`:360-362`). That blocker binds the
+`/independent-merge` path only. That path is **already** deadlocked for an
+unrelated reason — `:340-347` requires an approving reviewer who is neither the
+PR author nor the repository owner, and in a single-owner repository with agent
+authors that set is always empty — and #427/#428 are owner merges, which do not
+run this script at all. **So this ordering blocks nothing that is not already
+blocked.**
+
+### Scope (a) — add the deploy-control surface to the registry
+
+Add exactly two entries to `PROTECTED_CONTROL_PATHS`:
+
+```
+".github/workflows/deploy_vps_paper_dispatch.yml"
+"tests/test_deploy_vps_paper_dispatch_workflow.py"
+```
+
+Nothing else in that set, in `PROTECTED_PYTHON_ENTRYPOINTS`, in
+`TRUSTED_REVIEW_ASSOCIATIONS`, in `CONTROL_REVIEW_STATES`, or in the body of
+`_protected_control_path` changes. This is **strictly tightening**: the predicate
+returns `True` for strictly more paths and `False` for none it previously
+accepted, so the merge gate can only become more conservative.
+
+**A2.** `_protected_control_path` already normalises `\\` to `/`, strips leading
+`./` and `/`, and compares the normalised string against the set; the two new
+entries are ordinary normalised relative paths and reach the existing
+`normalized in PROTECTED_CONTROL_PATHS` branch with no new parsing. No new
+comparison is introduced, so there is no new missing/empty/unparseable case.
+
+**A9 — callers of the changed value.** `PROTECTED_CONTROL_PATHS` is read at
+exactly one site, `_protected_control_path:115`, which is called at exactly one
+site, `:360`, whose result feeds `protected_control_changes` (`:404`) and
+`trusted_merge_control_unchanged` (`:386`). Both are report fields on the merge
+attestation. **Widening the set cannot cause a merge**; it can only add paths to
+a list that makes the gate refuse. The effect is therefore dormant on every PR
+that does not touch these two files, and on those it is strictly restrictive.
+
+**Touch ONLY these files — this clause governs scope (a) only, since scope (b)
+builds nothing** (`git diff --stat` must show exactly these two):
+
+- `scripts/merge_independently_reviewed_pr.py` — the `PROTECTED_CONTROL_PATHS`
+  literal only.
+- `tests/test_required_pr_gate.py` — **new assertions only.** The protected
+  merge-control parametrisation at `:837-859` and the workflow inventory test at
+  `:259` are **not** to be modified; a build that needs to edit either has
+  changed behaviour it was told not to change, and must stop and escalate.
+
+**Tests (enumerated).** (1) `_protected_control_path` returns `True` for
+`.github/workflows/deploy_vps_paper_dispatch.yml` and for
+`tests/test_deploy_vps_paper_dispatch_workflow.py`; (2) it returns `True` for
+each of the same two paths in the forms `./<path>` and `/<path>` and with
+backslash separators, exercising the existing normaliser; (3) a simulated PR
+touching only the dispatch workflow reports
+`trusted_merge_control_unchanged: false` and lists that path in
+`protected_control_changes`; (4) the same for the test file alone; (5) every
+path in `PROTECTED_CONTROL_PATHS` **before** this change still returns `True` —
+the tightening-only claim, asserted rather than argued; (6) a path outside the
+set — `src/polymarket_predictive_engine/cli.py` — still returns `False`, so the
+widening did not become a prefix match.
+
+**Fail-safe sentence.** This changes no gate threshold, no eligibility rule, no
+M-A/M-B/M-C predicate, and no order, signer, or credential surface; it can only
+cause the merge gate to refuse a PR it would previously have accepted, never the
+reverse, and a failure of the added entries degrades to the pre-WO-153 behaviour
+of not flagging those two files.
+
+**Operational cost, stated rather than left to be discovered.** Once this merges,
+routine edits to `tests/test_deploy_vps_paper_dispatch_workflow.py` — including
+ordinary test maintenance — are flagged as protected-control changes. That is the
+intended tightening and it is the correct trade, because deleting the tests that
+prove check 2 fails closed is equivalent to deleting check 2 one merge later. But
+it is a real friction cost on a file that will need edits, and it is recorded
+here so that nobody later reads the flag as a malfunction and removes the entry.
+
+**Day-after check.** The next PR that touches
+`.github/workflows/deploy_vps_paper_dispatch.yml` — including any follow-on to
+WO-145 — reports it under `protected_control_changes` in the merge attestation,
+and a PR touching neither file reports `protected_control_changes: []` exactly as
+before.
+
+### Scope (b) — the control (i) permission conflict, recorded as an OWNER decision, not built
+
+WO-145's registered control (i) tests whether an eligible independent reviewer
+exists. **WO-145's text names no endpoint** — the endpoint is a fact about the
+implementation rather than about the registration, and is recorded here as such:
+the existing gate queries `repos/{repo}/collaborators?affiliation=all&per_page=100`
+(`scripts/audit_github_merge_gate.py:454`) and #428's workflow step queries the
+same collection — the premise on which
+Path B's permanent loosening was registered. The query needs
+`administration: read`. The workflow declares
+`permissions: {actions: read, contents: read}` per WO-145's least-privilege
+registration, and an explicit `permissions:` block sets every unlisted scope to
+`none`, **so the call 403s on every run and control (i) takes its UNDETERMINED
+branch every time.** The #428 build makes that loud — a `::warning::` stating the
+premise is UNVERIFIED for that run — rather than letting it read as a green
+notice, which is the correct fail direction and is why this is a registration
+question and not a build defect.
+
+**It cannot be resolved by an agent.** WO-145 registers least-privilege, and the
+clause that would have allowed widening the permission block was struck during
+the registration gate. Widening it now to make control (i) answer would reverse
+a registered decision; leaving it means the control never answers. The two
+admissible resolutions are (i) the owner adds `administration: read` and the
+least-privilege clause is amended to record the exception and its basis, or
+(ii) the registration accepts that control (i) is permanently undetermined under
+its own permission grant and says so in the WO text, so no future reader mistakes
+the warning for a transient failure. **Nothing is built under scope (b) until the
+owner picks one**; this section exists so the conflict is on the record rather
+than living in a warning string on the VPS.

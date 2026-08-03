@@ -9825,7 +9825,7 @@ dispatchable:
   citations (`:841-856`, `:635`) were derived *after* WO-149's merge and
   resolve against the current tree.
 
-## WO-148 — Make seed-to-eligible conversion measurable: a tier-assignment event ledger — `queued` (registered 2026-08-01; measurement-only sidecar; changes no selection behaviour; enrolment deliberately deferred, see 148.4 → OWNER MERGE after line-audit)
+## WO-148 — Make seed-to-eligible conversion measurable: a tier-assignment event ledger — `queued` (registered 2026-08-01; measurement-only sidecar; changes no selection behaviour; enrolment deliberately deferred, see 148.4 → OWNER MERGE after line-audit; **first dispatch 2026-08-03 ESCALATED without building** — 148.5's own re-verify-and-stop instruction fired, because WO-149's merge added a fourth, scheduled caller under `scope="portfolio"` that the registered caller set predates; **not dispatchable again until §148.6 merges**)
 
 **Provenance.** An analyst could not compute the seed-to-eligible conversion rate
 at all. Verified cause: tier assignment is recomputed from scratch every
@@ -10067,6 +10067,153 @@ broken — 3.91 runs/day with ~39% of due checks skipped. A market that moves
 seed → eligible → seed BETWEEN two runs leaves no event, so **the conversion
 metric this WO enables is a LOWER BOUND on transitions, not a count.** It
 becomes a count only to the extent WO-151 gives the study a real cadence.
+
+
+### 148.6 — The sole-writer premise was falsified by WO-149's merge; the ledger write is scoped to the full-watchlist collector (added 2026-08-03; WO-148 was NOT buildable as written)
+
+**How this was found — the WO's own self-check fired.** 148.5 ends: *"the
+builder must re-verify this caller set with its own grep and STOP and report if
+it disagrees."* The dispatched builder did, disagreed, and stopped without
+writing a line of code. That instruction earned its place; it is retained
+verbatim and this amendment is the answer to it, not a replacement for it.
+
+**What changed underneath the registration.** WO-148 was drafted 2026-08-01
+against a tree in which `snapshot_official_books` had three callers and was
+scheduled by nothing. **WO-149 merged as PR #422 on 2026-08-02** — after this WO
+was registered and before it was dispatched — adding a fourth caller and putting
+it on a 300-second schedule. 148.5's interleaving paragraph is therefore now
+false in both of its load-bearing claims. Corrected caller set, re-verified
+against `c26cd7f`:
+
+| call site | scope | scheduled? |
+|---|---|---|
+| `maker_fill_replay.py:1033` (in `collect_maker_replay_data`) | `watchlist` | yes, `run_trade_prints`, 900s |
+| `maker_fill_replay.py:1044` (in `collect_maker_replay_data`) | `watchlist` | yes, same job |
+| `cli.py:432` (`snapshot-official-books`) | `watchlist` | no |
+| **`cli.py:445` (`snapshot-official-books-pulse`)** | **`portfolio`** | **yes — `run_book_pulse`, `run_vps_ops_scheduler.sh:870`, enabled by default (`:55`), 300s (`:53`)** |
+
+**Why this is not cosmetic — implemented as registered, the ledger would
+manufacture exactly the noise it exists to remove.** Under `scope="portfolio"`,
+`persistent` and `seeds` are set to `[]` **by construction** at
+`maker_fill_replay.py:769-770`, because the pulse deliberately does not compute
+the persistent (WO-104) or candidate-seed (WO-116) tranches at all. They are not
+empty because those tranches emptied. The registered write site sits **after**
+that branch closes and is reached under both scopes. So every 300-second pulse
+cycle would diff a watchlist containing only the portfolio against a state file
+containing all three tranches, and emit a spurious `tier: "absent"` departure row
+for **every** persistent and seed market — followed by a spurious re-arrival on
+the next 900-second full-watchlist cycle, forever.
+
+That directly contradicts 148.3(6) (*"re-running with no tier change emits zero
+rows"*) and trips this WO's own Day-after check (2), which states that a
+`tier_events_written` equal to the watchlist size on every cycle means the diff
+is not working and **the WO is REVERTED, not tuned**. It also inverts the stated
+Purpose: a re-entrant market would be indistinguishable from an organic graduate,
+which is the precise confusion the ledger was registered to end.
+
+**The binding correction.** The tier-event ledger is written **only** when
+`snapshot_official_books` runs under `scope="watchlist"`. Under
+`scope="portfolio"` the collector appends no events, writes no state file, and
+records `tier_events_status: "skipped_portfolio_scope"` — a **fifth** member of
+that key's domain, added here, alongside the three 148.5 registers. The other five
+summary keys are emitted with their zero values (`tier_events_written: 0`,
+`tier_events_resync: false`, `tier_events_malformed_rows: 0`,
+`tier_event_burst: false`, `tier_precedence_conflicts: 0`) so the key set on
+`official_book_snapshot.json` is scope-invariant and no consumer sees a
+disappearing key.
+
+**A2.** The scope is not re-derived at the write site: it is the same
+`portfolio_scope` boolean the function has already computed and already branches
+on at `:764`. There is no new parse, no new input, and therefore no new
+missing/empty/unparseable case. If that boolean is ever absent or non-boolean the
+build is wrong in a way this amendment cannot patch — so the registered
+requirement is that the ledger write is guarded by the **same** expression the
+tranche computation is guarded by, not by a recomputation of it. A recomputed or
+re-parsed scope at the write site is a build defect.
+
+**Why scoping out, rather than accepting the noise.** The pulse holds no tier
+information: it does not compute two of the three tranches. A writer with no
+information cannot contribute a transition, and the only honest thing it can
+record is that it did not look. This matches 148.4's framing of the ledger as a
+full-watchlist artifact, and it matches WO-149.1(4)'s already-registered
+precedent, where the pulse **reads** the WO-131 delisted marker but never
+**writes** it, for the same reason: a 3x-faster observer must not drive a
+slower-cadence ledger.
+
+**A4/A7 — reconciliation of the parent WO, stated exhaustively.** This
+amendment's duplicate set is five places and no more:
+
+1. **148.5's "Interleaving (S2)" paragraph** — its caller list and its
+   "scheduled by nothing" claim are **superseded by the table above**. The
+   sentence instructing the builder to re-verify and stop stands unchanged.
+2. **The "Write site" paragraph** — the anchor text
+   (`summary["candidate_seed_markets"] = len(seeds)`, before the batch POST)
+   still resolves uniquely and is unchanged; its **line numbers `:772` and `:780`
+   are stale** and are corrected to `:835` and `:845`. The write site additionally
+   acquires the scope guard above. Line numbers in this WO are advisory and the
+   anchor text governs; a builder that finds them disagreeing follows the anchor
+   text and reports the drift, as this builder did.
+3. **The "Cadence" growth estimate** (~40 rows/day, structural worst case 150
+   rows/cycle x 96) — **unchanged and now correct**. It was computed against the
+   full-watchlist cadence, which is the only cadence that now writes; the pulse's
+   96 extra cycles/day contribute zero rows.
+4. **Day-after check (2)** — unchanged, and only satisfiable under this
+   correction.
+5. **148.3(2)'s `exclude` citations** — `:728` and `:749-750` are stale from
+   the same WO-149 drift and are corrected to `:791` and `:810-812`. The claim
+   they support (multi-membership impossible by construction) is re-verified and
+   **unchanged**. Corrected here rather than left behind, because an amendment
+   that fixes some stale anchors and not their duplicates is the exact failure
+   this repository spent four gate rounds on in WO-145.1.
+
+**The touched-file list does not change.** It remains exactly the two files the
+parent WO registers, `src/polymarket_predictive_engine/maker_fill_replay.py` and
+`tests/polymarket_predictive_engine/test_maker_fill_replay.py`. This amendment
+adds a guard inside a function already in scope; it reaches no new module.
+`cli.py` and `scripts/run_vps_ops_scheduler.sh` are **read for verification and
+must not be edited** — the corrected caller set is a fact about them, not a change
+to them.
+
+**Additional tests (enumerated), appended to 148.5's list.** 148.5 already
+enumerates **sixteen** tests, (1)-(16), so these are numbered from (17) and none
+of the existing numbers move:
+
+17. `snapshot_official_books(cfg, scope="portfolio")` with a non-empty portfolio
+    and a state file containing populated persistent and seed tranches appends
+    **zero** rows, and the events file is **byte-identical** before and after.
+    This is the case that fails against the unamended spec and is the reason this
+    amendment exists.
+18. The same call records `tier_events_status == "skipped_portfolio_scope"` and
+    the five zero-valued keys, so the key set on `official_book_snapshot.json` is
+    identical under both scopes — asserted by comparing the two key sets, not by
+    listing them.
+19. No state file is written under portfolio scope: a pre-existing
+    `maker_watchlist_tier_state.json` is byte-identical after the call, and an
+    absent one is still absent.
+20. Interleaving, in the real order the scheduler produces: watchlist cycle
+    (genesis rows) → portfolio pulse (zero rows) → portfolio pulse (zero rows) →
+    watchlist cycle with **no** tier change (zero rows). Total rows equal the
+    genesis count. This is the sequence that produces the spurious
+    departure/re-arrival churn against the unamended spec.
+21. `scope="watchlist"` behaviour is unchanged by this amendment: every test in
+    148.5's list (1)-(16) passes with the guard in place, asserted by running
+    them rather than by argument.
+
+**Fail-safe sentence for §148.6.** This amendment strictly **reduces** the set of
+conditions under which anything is written — it can only cause fewer rows to be
+appended, never more, and never changes which markets are collected or polled
+under either scope. It marks no market measured, moves no gate, threshold,
+eligibility rule, or `maker_min_*` value, opens or enables no order path, and a
+failure of the guard degrades to the pre-amendment behaviour of writing on both
+scopes, which is loud (`tier_events_written` equal to the watchlist size every
+cycle) and is already registered as grounds to revert rather than tune.
+
+**Day-after check addition.** On a live VPS day, `tier_events_written` is `0` on
+every `book_pulse` cycle and `tier_events_status` reads
+`skipped_portfolio_scope` there, while `official_book_snapshot.json` from the
+900-second collector carries a `tier_events_status` of `ok`. If any pulse cycle
+reports a nonzero `tier_events_written`, the guard is not in place and the WO is
+reverted.
 
 ## WO-149 — The replay join has no contemporaneous book state for 23% of prints, so every maker economic number is unvalidated model output — `done` (2026-08-02, PR #422; registered 2026-08-01; new scheduler job + registered watchdog freshness entry + a keyword-only scope on the sole official-book collector, routed owner-merge after two independent line-audits covering disjoint halves; **`max_book_state_lag_seconds` stays 1800 — no tolerance is loosened**; one lint fix round for an `F821` the offline suite could not see, because `from __future__ import annotations` makes the annotation unevaluated; **DEPLOY PENDING, and this is the binding one for the campaign** — `run_book_pulse` never fires on the VPS, so no `official_book_pulse.json` is produced and `M-B`'s `mb1_tier0_coverage_sufficient` stays `false`. Merging this WO did not move M-B; deploying it is what will)
 

@@ -10209,3 +10209,436 @@ historical per-run `maker_carry_candidates.csv` exists — only the current
 snapshot — so predicate-level "why did X leave" is answerable for the latest
 departure only. WO-148's tier-event ledger is the closest existing remedy;
 a per-run candidate archive would be its complement and is not proposed here.
+
+## WO-152 — A starvation incident that cannot name what starved it — `queued` (registered 2026-08-03 from measured VPS telemetry; scheduler status surface + watchdog incident record; adds no gate, moves no ceiling, changes no job's interval, timeout, or ordering → OWNER MERGE after line-audit)
+
+**Provenance — measured, not inferred.** Two watchdog incidents fired overnight
+2026-08-02 and again the night before, in the same order, ~15 minutes apart:
+
+```
+22:27:37Z scheduler_completion_freshness  trade_prints  age 1387.6s > 1200s
+22:42:22Z operating_state_slo_breach      row: scheduler_overrun_cycles
+```
+
+`ops_scheduler/status.json` at 2026-08-03T03:27:53Z explains the first one:
+
+| job | interval | timeout | registered freshness ceiling | last measured duration |
+|---|---|---|---|---|
+| `trade_prints` | 900s | 300s | **1200s** | 117.2s |
+| `training_harvest` | 86400s | 1800s | 90000s | **762.1s** |
+
+The ops scheduler is a serial loop (`scripts/run_vps_ops_scheduler.sh`,
+`TICK_SECONDS=300`). `trade_prints` therefore has `1200 - 900 = `**`300s`** of
+total slack for scheduler drag, and the nightly harvest held the loop for
+**762.1s** — 2.5x that slack, under a timeout allowance of 1800s, which is 6x it.
+`trade_prints` missed a cycle, its completion age crossed 1200s, and
+`scheduler_overrun_cycles` breached on the next operating-state run.
+`training_harvest_anchor_tail` stamps the same 762.1s window; it is one pass, two
+rows. Both alerts are TRUE, and nothing is broken inside either job.
+
+**The defect this WO fixes is not the contention. It is that nothing can name
+it, and the reason is structural.** `stamp_status`
+(`scripts/run_vps_ops_scheduler.sh:130`) writes a job's record **only when the
+job finishes**: `started_at_utc` and `duration_seconds` are both arguments to the
+completion stamp. So while a job holds the loop, `status.json` still describes
+that job's *previous* run. At 22:27:37Z — the moment the watchdog raised the
+incident — `training_harvest` had started at 22:22:21Z and would not stamp until
+22:35:03Z, so the artifact the watchdog was reading **contained no evidence that
+`training_harvest` was running at all.**
+
+That is why the 22:27Z episode took a hand-correlation of three artifacts across
+two branches, done after the fact. And it is why **the second daily episode
+cannot be attributed even in principle**: the same pair also fires at ~03:40Z
+(2026-08-01T03:55:33Z, 2026-08-02T03:38:17Z), and `status.json` retains only each
+job's most recent completed run, so by the time the artifact reaches
+`origin/vps-telemetry` the holder's record is overwritten. **One of the two daily
+episodes is permanently unexplainable today**, and no behavioural remedy can be
+specified against evidence that does not exist. This WO creates the evidence.
+
+**Explicitly NOT in this WO**, so the duplicate set stays enumerable by
+inspection: no freshness ceiling moves; no interval, timeout, or job ordering
+changes; no job's invocation, exit-code handling, or skip classification changes;
+the serial loop stays serial (WO-149's `book_pulse` mutual exclusivity with
+`trade_prints` depends on it); and **no behavioural remedy for the contention
+itself is specified here.** Those belong to §152.1 below, which is registered as
+a follow-on and is **not part of this build**.
+
+### Scope (a) — the scheduler records that a job is in flight
+
+Add one shell function, `mark_in_flight <job_name>`, and call it immediately
+before each job's work begins. It performs a read-modify-write of
+`ops_scheduler/status.json` that sets **only**
+`jobs[<job_name>]["in_flight_since_utc"]` to the current UTC ISO-8601 stamp,
+preserving every other key on that job's record and every other job's record,
+using the same temp-file-plus-`os.replace` atomic write `stamp_status` already
+uses (registered by WO-120 at `:200-204`, and the reason it is non-negotiable:
+a torn write to this file wipes all job history and silently disarms both
+scheduler watchdog registrations).
+
+**`stamp_status` is NOT modified.** It already rebuilds `jobs[job_name]` as a
+fresh dict, carrying forward only the counter fields it reads through `count()`,
+so the completion stamp drops `in_flight_since_utc` as a side effect of what it
+already does. Clearing the marker therefore requires no new code and cannot
+diverge from the completion path. A build that finds itself editing
+`stamp_status` has misread this and must stop and escalate.
+
+Call sites: exactly the jobs already registered in
+`REGISTERED_JOB_FRESHNESS_MAX_SECONDS`, each marked at the point its own
+`*_STARTED_AT` stamp is taken — the line that already establishes "the work
+starts now". A job that returns early on a skip path (for example
+`run_book_pulse`'s `BOOK_PULSE_ENABLED=0` branch, which stamps and returns before
+`BOOK_PULSE_STARTED_AT` is set) is **not** marked, because it never held the
+loop.
+
+### Scope (b) — the watchdog attributes a stale window to the job that held the loop
+
+When `_evaluate_scheduler_freshness`
+(`src/polymarket_predictive_engine/degraded_state_watchdog.py:592`) finds a job
+stale, it reports which other registered jobs held the serial loop during that
+job's stale window, from the payload it has already read.
+
+For each job `J` already determined `stale`, the stale window is
+`[W_start, W_end]`, where `W_start` is the `success_at` the evaluator has already
+resolved (or, on the unobserved path, the `first_unobserved` stamp it has already
+resolved) and `W_end` is the `observed_at` it has already resolved. **Both are
+existing local values; neither is recomputed.**
+
+For every **other** key `K` in `REGISTERED_JOB_FRESHNESS_MAX_SECONDS`, `K`'s
+occupancy interval is whichever of these applies:
+
+- **completed run** — `started_at_utc` present and `duration_seconds` a finite
+  non-negative number: `[started, started + duration]`.
+- **in flight** — `in_flight_since_utc` present: `[in_flight_since, W_end]`, i.e.
+  still running as of this observation. This is the branch that answers the
+  22:27Z case, and the one that cannot exist without scope (a).
+- If **both** are present, the in-flight marker wins and the completed run is
+  ignored: a marker survives only until the next completion stamp, so its
+  presence means the current run has not finished.
+
+Overlap with `J`'s window is
+`max(0, min(W_end, K_end) - max(W_start, K_start))` seconds.
+
+- Every `K` whose overlap is **`>= 1.0` second** is reported as
+  `{"job": K, "overlap_seconds": <3dp>, "source": "in_flight"|"completed", "started_at_utc": ..., "duration_seconds": ...}`.
+- **`1.0` second, basis:** `duration_seconds` is stamped to 3 decimal places
+  (`run_vps_ops_scheduler.sh:175`) and the loop tick is `TICK_SECONDS=300`, so an
+  overlap under one second is stamp rounding and clock skew between two
+  independently written records, never occupancy. It is 1000x the stamp
+  resolution and 1/300th of the tick.
+- `attributed_to` is the reported `K` with the **greatest** `overlap_seconds`.
+  **Ties break on ascending job name**, so the field is deterministic for a given
+  payload, and the tie is recorded as `occupancy_tie: true` rather than hidden —
+  two jobs cannot both have held a serial loop, so a tie means the premise needs
+  looking at.
+- The reported list is sorted by descending `overlap_seconds`, then ascending job
+  name, for the same determinism reason.
+
+### A1/A2 — every input, its literal, and the fail-closed branch
+
+**The in-flight staleness bound is `2100` seconds.** Basis: the largest
+registered job timeout is `OPS_TRAINING_HARVEST_TIMEOUT_SECONDS`
+(`run_vps_ops_scheduler.sh:27`, default `1800`), and the loop tick is
+`TICK_SECONDS=300` (`:22`), so `1800 + 300 = 2100s` is the longest a legitimately
+in-flight job can go un-stamped. A marker older than that means the scheduler
+died between marking and stamping; it is recorded as `in_flight_stale` in
+`occupancy_unmeasurable` and **contributes no occupancy**, because a crashed
+scheduler is not a job holding the loop. It is never treated as an infinitely
+long run, which would attribute every subsequent incident to the same job
+forever.
+
+Fail-closed for every other input. `started_at_utc` or `in_flight_since_utc`
+missing, empty, or unparseable; `duration_seconds` missing, `None`, non-numeric,
+non-finite (`nan`/`inf`), or negative; the job key absent from `jobs` — in
+**every** case `K` is not silently dropped. It is recorded in
+`occupancy_unmeasurable: [K, ...]` and excluded from the computation. `nan` is
+rejected by an explicit `math.isfinite` check, **not** by a comparison:
+`nan >= 1.0` is `False`, so a comparison alone would drop a corrupt duration into
+the same branch as a genuinely non-overlapping job.
+
+If **no** candidate is measurable, `attributed_to` is `null` and the reason
+string appends *"no attributable occupancy: the holding job could not be
+measured"* — never *"no contention"*, which would assert a fact the evaluator
+does not have.
+
+### The fail-safe that governs the whole WO
+
+**Attribution is strictly additive to an incident and can never prevent,
+suppress, downgrade, delay, or de-duplicate one.** The `stale` decision, the
+`age_seconds` arithmetic, the `maximum` comparison, the incident id, the episode
+anchor, and the `count`/`maximum` fields are all computed before any of this runs
+and stay **byte-identical** to `main`. If the attribution computation raises for
+any reason, the incident is still emitted, with `attributed_to: null` and
+`occupancy_error` carrying the exception class name. A watchdog that cannot
+explain an incident must still raise it.
+
+On the scheduler side the marker is **write-only telemetry**: no job's execution,
+scheduling decision, exit code, skip classification, or timeout depends on it,
+and a `mark_in_flight` that fails must not abort or skip the job it was about to
+mark — it logs and proceeds, because losing an attribution field is strictly
+better than losing a job run.
+
+Nothing here marks a market measured, changes any M-A/M-B/M-C predicate or
+`maker_min_*` threshold, opens or enables any order path, touches a credential or
+signer surface, or loosens any gate, ceiling, or eligibility rule.
+
+### A9 — every caller of every changed unit
+
+`_evaluate_scheduler_freshness` has exactly three call sites, all enumerated by
+`grep -rn "_evaluate_scheduler_freshness" --include=*.py src/ scripts/ tests/`,
+which returns these plus the definition at `degraded_state_watchdog.py:592`:
+
+- `src/polymarket_predictive_engine/degraded_state_watchdog.py:1492` — the
+  production evaluator tuple.
+- `tests/polymarket_predictive_engine/test_wo92_clock_boundaries.py:126` and
+  `:132` — the WO-92 clock-boundary tests, which assert on the `inside`/`outside`
+  evaluation and the returned incidents. Both must keep passing **unmodified**;
+  if either needs an edit, the change is not additive and the build stops and
+  escalates.
+
+`stamp_status` is unchanged, so its call sites are not in scope. `mark_in_flight`
+is new, so it has no pre-existing callers; its call sites are exactly the ones
+scope (a) adds, and the build must assert that the set of marked jobs equals
+`REGISTERED_JOB_FRESHNESS_MAX_SECONDS`' keys minus those with no work path.
+
+**A3.** This WO registers no "scan all callers/files" rule; the enumerations
+above are fixed lists, not scans.
+
+### Touch ONLY these files (`git diff --stat` must show exactly these four)
+
+- `scripts/run_vps_ops_scheduler.sh` — `mark_in_flight` and its call sites only.
+  `stamp_status`, every interval and timeout literal, `TICK_SECONDS`, the job
+  ordering, and `wait_with_safety_pulses` stay byte-identical.
+- `src/polymarket_predictive_engine/degraded_state_watchdog.py` — the body of
+  `_evaluate_scheduler_freshness` only, plus module-private helpers. Every other
+  evaluator, `REGISTERED_JOB_FRESHNESS_MAX_SECONDS`, the registration block at
+  `:252-261`, and `_incident` itself stay byte-identical.
+- `tests/test_polymarket_vps_docker.py`
+- `tests/polymarket_predictive_engine/test_degraded_state_watchdog.py`
+
+**Do NOT touch** `REGISTERED_JOB_FRESHNESS_MAX_SECONDS` (any entry, in either
+direction), `PUSH_STATUS_MAX_SECONDS`, `_evaluate_operating_state_slo`, any
+interval or timeout literal, or
+`tests/polymarket_predictive_engine/test_wo92_clock_boundaries.py`.
+
+### Tests (enumerated)
+
+Scheduler side, in the established pattern that sources the script and calls the
+function directly (`test_polymarket_vps_docker.py:1072-1083`):
+
+1. `mark_in_flight trade_prints` on an existing `status.json` sets
+   `in_flight_since_utc` on that job and leaves **every other key on that job and
+   every other job's record byte-identical**.
+2. `mark_in_flight` followed by `stamp_status` for the same job leaves **no**
+   `in_flight_since_utc` key — the marker is cleared by the existing completion
+   path, with no change to `stamp_status`.
+3. `mark_in_flight` on a missing or empty `status.json` produces valid JSON and
+   leaves no temp file, matching the WO-120 guarantee asserted for
+   `stamp_status`.
+4. Every job in `REGISTERED_JOB_FRESHNESS_MAX_SECONDS` that has a work path is
+   marked in the script, asserted against the registered key set rather than a
+   hand-copied list, so a future job cannot be added without its marker.
+5. `run_book_pulse` with `OPS_BOOK_PULSE_ENABLED=0` does **not** mark: it never
+   held the loop.
+
+Watchdog side:
+
+6. The measured 2026-08-02 case as a fixture, **in its in-flight form** —
+   `trade_prints` stale with `last_success_utc` 22:04:29.384575Z observed at
+   22:27:37Z, and `training_harvest` carrying `in_flight_since_utc` 22:22:21Z and
+   no completed record covering that window. `attributed_to ==
+   "training_harvest"`, `source == "in_flight"`, `overlap_seconds == 316.0`.
+   **This is the case that fails on `main` and is the reason the WO exists.**
+7. The same window with `training_harvest` instead carrying a *completed* record
+   started 22:22:21Z for 762.127s: same attribution, `source == "completed"`.
+8. Both present: the in-flight marker wins, `source == "in_flight"`, and the
+   completed record is not double-counted.
+9. An `in_flight_since_utc` older than `2100`s: the job appears in
+   `occupancy_unmeasurable` as `in_flight_stale`, contributes no overlap, and is
+   **not** attributed. Asserted at `2099`s (usable) and `2101`s (stale), both
+   sides of the boundary.
+10. Two overlapping holders: both reported, sorted by descending overlap,
+    `attributed_to` is the larger. Exact tie: lexicographically smaller name and
+    `occupancy_tie is True`.
+11. Overlap of exactly `1.0`s is reported, `0.999`s is not — both sides asserted.
+    A run ending before `W_start` and one starting after `W_end` both give
+    overlap `0` and `attributed_to is None`.
+12. A2 sweep, parametrised over `started_at_utc` and `in_flight_since_utc` in
+    `{absent, "", "not-a-date"}` and `duration_seconds` in `{absent, None, "abc",
+    nan, inf, -1.0}`: every combination puts the candidate in
+    `occupancy_unmeasurable`, never in the reported list, and never raises.
+13. All candidates unmeasurable: `attributed_to is None`, the reason string
+    contains *"no attributable occupancy"* and does **not** contain *"no
+    contention"*.
+14. **The fail-safe, proven by differential execution.** Over a 12-point sweep of
+    ages spanning each registered ceiling (below, exactly at, above), the emitted
+    incident set — ids, `entity`, `degraded_state`, `count`, `maximum`,
+    `episode_start`, and the `stale`/`fresh` state on every evaluation row — is
+    **identical** to `main`'s for the same fixtures. Only new keys appear.
+15. Attribution raising does not suppress the incident: with the helper
+    monkeypatched to raise, the incident is still emitted, `attributed_to is
+    None`, `occupancy_error == "RuntimeError"`.
+16. Two jobs stale in one window with one holder — the predicted post-deploy
+    `book_pulse` + `trade_prints` signature — both name the same `attributed_to`.
+17. The early return on an empty `jobs` mapping is unchanged: state `unobserved`,
+    no incidents, and none of the new keys fabricated.
+18. `test_wo92_clock_boundaries.py` passes **unmodified**, asserted by the
+    build's `git diff --stat` not listing it.
+
+### Day-after check
+
+At the next `training_harvest` window (~22:20Z), the
+`scheduler_completion_freshness` incident for `trade_prints` carries
+`attributed_to: "training_harvest"` with `source: "in_flight"` and an
+`overlap_seconds` consistent with that run's stamped duration. **And the check
+this WO exists for:** at the ~03:40Z episode the incident carries either a named
+`attributed_to` — settling the second daily episode that hand-correlation could
+not reach — or `attributed_to: null` with a populated `occupancy_unmeasurable`,
+which says the holder is not among the registered jobs and points the follow-on
+somewhere new. Both outcomes are informative; the current state, where the
+question cannot be asked at all, is not.
+
+### 152.1 — Follow-on, NOT part of this build: the contention is structural and will get worse on the next deploy
+
+Registered now so it is not rediscovered, and deliberately separated so WO-152's
+build stays small enough that its own duplicate set is enumerable by inspection.
+
+WO-149's `run_book_pulse` is merged and joins the same serial loop, mutually
+exclusive with `trade_prints`, at `interval 300s` with a **900s** registered
+ceiling (`degraded_state_watchdog.py:68`) — a drag budget of `900 - 300 = 600s`.
+Its registered headroom argument budgets for *"two consecutive missed pulses at
+the measured 1.16-1.18x scheduler drag (2 x ~354s = ~708s) with ~192s headroom"*.
+That budget assumes ordinary per-tick drag. **A 762.1s single-job occupancy
+exceeds it outright**, so the prediction on record is that deploying WO-149 adds
+a nightly `book_pulse` freshness incident alongside the existing pair, at the
+same ~22:20Z window. Recorded as a falsifiable prediction, with WO-152's
+attribution as the instrument that confirms or refutes it.
+
+The structural statement, for whoever builds the remedy: for a job in a serial
+loop, `drag_budget = ceiling - interval`, and the loop can honour every
+registered ceiling only if the largest single-job occupancy is below the smallest
+drag budget among the jobs it can delay. Today that is `762.1s` against
+`trade_prints`'s `300s` and, after deploy, `book_pulse`'s `600s`. **The remedy
+must not be to raise a ceiling** — the incidents report truth, and raising a
+ceiling to silence a true alert is a gate loosening. Candidate directions, none
+registered here: bound a long job's per-pass occupancy; give the harvest its own
+loop with a lock preserving the registered mutual exclusivity; or publish the
+intervals and timeouts into `status.json` so the incompatibility is computable
+offline and visible at deploy rather than nightly. Each needs its own WO, its own
+A1-A10 pass, and evidence from WO-152's attribution — including for the ~03:40Z
+episode, which no one can currently explain.
+
+## WO-153 — The deploy-control surface is not a protected control path — `queued` (registered 2026-08-03 from the WO-145 build audit's finding O5; **merge-control surface** — `scripts/merge_independently_reviewed_pr.py` is itself in `PROTECTED_CONTROL_PATHS` → OWNER MERGE after line-audit; **BLOCKED until #428 merges**, because scope (a) names a file that does not exist on `main` until then)
+
+**Provenance.** The WO-145 build audit checked whether the seven files it
+touched are recognised as control paths by `_protected_control_path`
+(`scripts/merge_independently_reviewed_pr.py:96`) and found that
+**`_protected_control_path` returns `False` for all seven**. The auditor agreed
+this is a follow-on rather than a blocker for #428, and specified that the
+registration should add **both** the workflow and its test file.
+
+`PROTECTED_CONTROL_PATHS` (`:34-47`) enumerates the **merge**-control surface —
+`required-pr-gate.yml`, `independent-pr-merge.yml`, the merge script itself, the
+packaging and pytest-configuration files that can subvert `python -m pytest`. It
+predates the existence of any deploy-control surface. WO-145 creates one:
+`.github/workflows/deploy_vps_paper_dispatch.yml` carries check 2 (the
+post-approval supersession re-check), the runtime approvals gate, and the
+`PM_DEPLOY_TARGET_SHA` pin that makes the approved SHA and the deployed SHA the
+same SHA.
+
+**The failure this closes.** A future PR that deletes check 2, or the "Enforce
+runtime approval" step, or the `PM_DEPLOY_TARGET_SHA` assignment inside the SSH
+command string, changes what a deploy approval *means* — and today that PR
+reports `trusted_merge_control_unchanged: true` and
+`protected_control_changes: []`. The deletion is invisible to the very mechanism
+built to notice control-surface edits. The same argument covers the test file:
+deleting the tests that prove check 2 fails closed is equivalent to deleting
+check 2, one merge later.
+
+### Scope (a) — add the deploy-control surface to the registry
+
+Add exactly two entries to `PROTECTED_CONTROL_PATHS`:
+
+```
+".github/workflows/deploy_vps_paper_dispatch.yml"
+"tests/test_deploy_vps_paper_dispatch_workflow.py"
+```
+
+Nothing else in that set, in `PROTECTED_PYTHON_ENTRYPOINTS`, in
+`TRUSTED_REVIEW_ASSOCIATIONS`, in `CONTROL_REVIEW_STATES`, or in the body of
+`_protected_control_path` changes. This is **strictly tightening**: the predicate
+returns `True` for strictly more paths and `False` for none it previously
+accepted, so the merge gate can only become more conservative.
+
+**A2.** `_protected_control_path` already normalises `\\` to `/`, strips leading
+`./` and `/`, and compares the normalised string against the set; the two new
+entries are ordinary normalised relative paths and reach the existing
+`normalized in PROTECTED_CONTROL_PATHS` branch with no new parsing. No new
+comparison is introduced, so there is no new missing/empty/unparseable case.
+
+**A9 — callers of the changed value.** `PROTECTED_CONTROL_PATHS` is read at
+exactly one site, `_protected_control_path:115`, which is called at exactly one
+site, `:360`, whose result feeds `protected_control_changes` (`:404`) and
+`trusted_merge_control_unchanged` (`:386`). Both are report fields on the merge
+attestation. **Widening the set cannot cause a merge**; it can only add paths to
+a list that makes the gate refuse. The effect is therefore dormant on every PR
+that does not touch these two files, and on those it is strictly restrictive.
+
+**Touch ONLY these files** (`git diff --stat` must show exactly these two):
+
+- `scripts/merge_independently_reviewed_pr.py` — the `PROTECTED_CONTROL_PATHS`
+  literal only.
+- `tests/test_required_pr_gate.py` — **new assertions only.** The protected
+  merge-control parametrisation at `:837-859` and the workflow inventory test at
+  `:259` are **not** to be modified; a build that needs to edit either has
+  changed behaviour it was told not to change, and must stop and escalate.
+
+**Tests (enumerated).** (1) `_protected_control_path` returns `True` for
+`.github/workflows/deploy_vps_paper_dispatch.yml` and for
+`tests/test_deploy_vps_paper_dispatch_workflow.py`; (2) it returns `True` for
+each of the same two paths in the forms `./<path>` and `/<path>` and with
+backslash separators, exercising the existing normaliser; (3) a simulated PR
+touching only the dispatch workflow reports
+`trusted_merge_control_unchanged: false` and lists that path in
+`protected_control_changes`; (4) the same for the test file alone; (5) every
+path in `PROTECTED_CONTROL_PATHS` **before** this change still returns `True` —
+the tightening-only claim, asserted rather than argued; (6) a path outside the
+set — `src/polymarket_predictive_engine/cli.py` — still returns `False`, so the
+widening did not become a prefix match.
+
+**Fail-safe sentence.** This changes no gate threshold, no eligibility rule, no
+M-A/M-B/M-C predicate, and no order, signer, or credential surface; it can only
+cause the merge gate to refuse a PR it would previously have accepted, never the
+reverse, and a failure of the added entries degrades to the pre-WO-153 behaviour
+of not flagging those two files.
+
+**Day-after check.** The next PR that touches
+`.github/workflows/deploy_vps_paper_dispatch.yml` — including any follow-on to
+WO-145 — reports it under `protected_control_changes` in the merge attestation,
+and a PR touching neither file reports `protected_control_changes: []` exactly as
+before.
+
+### Scope (b) — the control (i) permission conflict, recorded as an OWNER decision, not built
+
+WO-145's registered control (i) queries `GET /repos/{owner}/{repo}/collaborators`
+to test whether an eligible independent reviewer exists — the premise on which
+Path B's permanent loosening was registered. The query needs
+`administration: read`. The workflow declares
+`permissions: {actions: read, contents: read}` per WO-145's least-privilege
+registration, and an explicit `permissions:` block sets every unlisted scope to
+`none`, **so the call 403s on every run and control (i) takes its UNDETERMINED
+branch every time.** The #428 build makes that loud — a `::warning::` stating the
+premise is UNVERIFIED for that run — rather than letting it read as a green
+notice, which is the correct fail direction and is why this is a registration
+question and not a build defect.
+
+**It cannot be resolved by an agent.** WO-145 registers least-privilege, and the
+clause that would have allowed widening the permission block was struck during
+the registration gate. Widening it now to make control (i) answer would reverse
+a registered decision; leaving it means the control never answers. The two
+admissible resolutions are (i) the owner adds `administration: read` and the
+least-privilege clause is amended to record the exception and its basis, or
+(ii) the registration accepts that control (i) is permanently undetermined under
+its own permission grant and says so in the WO text, so no future reader mistakes
+the warning for a transient failure. **Nothing is built under scope (b) until the
+owner picks one**; this section exists so the conflict is on the record rather
+than living in a warning string on the VPS.

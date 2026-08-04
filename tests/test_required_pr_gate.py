@@ -263,6 +263,7 @@ def test_workflow_inventory_has_only_registered_triggers() -> None:
         "check_superbru_fixtures.yml": {"workflow_dispatch"},
         "ci.yml": {"workflow_dispatch"},
         "deploy-polymarket-vps-paper.yml": {"workflow_dispatch"},
+        "deploy_vps_paper_dispatch.yml": {"push", "workflow_dispatch"},
         "polymarket-vps-governance-refresh.yml": {"workflow_dispatch"},
         "polymarket-vps-proof-health.yml": {"workflow_dispatch"},
         "refresh-locked-superbru-card.yml": {"workflow_dispatch"},

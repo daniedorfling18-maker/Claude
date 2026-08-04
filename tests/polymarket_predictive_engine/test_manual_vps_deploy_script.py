@@ -334,12 +334,88 @@ def test_wo133_deploy_record_reports_the_unprovable_step_as_unproven(tmp_path: P
     )
     assert record["attestation_verified"] is False
     assert record["deployed_sha"] == "deadbeef"
-    assert record["authorised_by"] == "owner"
-    assert "GitHub API credentials" in record["attestation_unverifiable_reason"]
+    # WO-145: authorised_by was a hardcoded owner-authorization CLAIM stamped on
+    # every deploy. It is replaced by trigger_mechanism, which records the
+    # MECHANISM rather than a claimed identity; a bare invocation with no
+    # PM_DEPLOY_TRIGGER_MECHANISM set defaults to "vps_shell" and carries no
+    # actor fields at all.
+    assert "authorised_by" not in record
+    assert record["trigger_mechanism"] == "vps_shell"
+    assert "trigger_actor" not in record
+    assert "approval_actor" not in record
+    assert "no eligible independent reviewer can exist" in record["attestation_unverifiable_reason"]
     assert record["paper_trading_invoked"] is False
     assert record["live_trading_invoked"] is False
     # The recorded order is the order main() actually runs.
     assert record["guard_order"] == [name for name in _guard_order() if name != "write_deploy_record"]
+
+
+def test_wo145_deploy_record_carries_trigger_mechanism_and_actors_on_workflow_paths(tmp_path: Path) -> None:
+    # WO-145 / §145.1(b): trigger_mechanism gains push (and already carried
+    # workflow_dispatch); on both workflow-triggered mechanisms the record also
+    # carries the real GitHub actor and the environment-approval actor - facts
+    # about who did what, never the literal owner-authorization claim this WO
+    # exists to remove.
+    script = f"""
+    set -e
+    PM_MANUAL_DEPLOY_LIBRARY_ONLY=1 . {SCRIPT}
+    REPO_DIR={tmp_path}
+    PM_OUTPUT_ROOT={tmp_path}/outputs
+    PM_DEPLOY_TRIGGER_MECHANISM=push
+    PM_DEPLOY_TRIGGER_ACTOR=some-actor
+    PM_DEPLOY_APPROVAL_ACTOR=some-approver
+    write_deploy_record deadbeef
+    """
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+    record = json.loads(
+        (tmp_path / "outputs" / "performance" / "vps_manual_deploy.json").read_text(encoding="utf-8")
+    )
+    assert record["trigger_mechanism"] == "push"
+    assert record["trigger_actor"] == "some-actor"
+    assert record["approval_actor"] == "some-approver"
+    assert "authorised_by" not in record
+
+
+def test_wo145_deploy_record_rejects_an_invalid_trigger_mechanism(tmp_path: Path) -> None:
+    script = f"""
+    set -e
+    PM_MANUAL_DEPLOY_LIBRARY_ONLY=1 . {SCRIPT}
+    REPO_DIR={tmp_path}
+    PM_OUTPUT_ROOT={tmp_path}/outputs
+    PM_DEPLOY_TRIGGER_MECHANISM=laptop_shell
+    write_deploy_record deadbeef
+    """
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "must be one of workflow_dispatch, push, vps_shell" in result.stderr
+
+
+def test_wo145_target_sha_is_rejected_when_unset_or_empty(tmp_path: Path) -> None:
+    # §145.1(a1b): the :99 tip-defaulting fallback is deleted. An unset or empty
+    # PM_DEPLOY_TARGET_SHA must be REJECTED, not silently retargeted to whatever
+    # origin/main happens to be at that moment - that comparison could never
+    # fail, which is byte-for-byte the (5c) defect this deletion exists to close.
+    repo = tmp_path / "repo"
+    (repo / "scripts").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    base = f"""
+    set -e
+    PM_MANUAL_DEPLOY_LIBRARY_ONLY=1 . {SCRIPT}
+    REPO_DIR={repo}
+    git() {{ case "$*" in *"rev-parse origin/main"*) echo aaaaaaa;; *fetch*) return 0;; esac; }}
+    """
+    for unset_form in ("", "PM_DEPLOY_TARGET_SHA=", "PM_DEPLOY_TARGET_SHA='' "):
+        script = base + f"\n{unset_form}\nassert_target_is_origin_main\n"
+        result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+        assert result.returncode != 0, unset_form
+        assert "PM_DEPLOY_TARGET_SHA is not set" in result.stderr, unset_form
+
+    # A genuinely set value against the same stub still behaves as before.
+    script = base + "\nPM_DEPLOY_TARGET_SHA=aaaaaaa assert_target_is_origin_main\n"
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_wo133_guards_are_read_from_the_target_revision_not_the_old_checkout() -> None:

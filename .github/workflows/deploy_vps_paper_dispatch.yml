@@ -1,0 +1,349 @@
+name: Deploy VPS Paper (Dispatch)
+
+# WO-145 / §145.1 — trigger the VPS deploy from GitHub Actions instead of a
+# laptop shell, and auto-trigger it on merge to `main` so the owner no longer
+# has to remember to start it. The `environment:` required-reviewer gate is
+# unchanged: the deploy still stops there and waits for a human. This workflow
+# runs `scripts/deploy_vps_paper_manual.sh` (Path B) over SSH on the VPS; it
+# does not run the independent-review verifier and does not upgrade
+# `attestation_verified`, which stays `false`. No live order path; paper/
+# dry-run only.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: deploy-polymarket-vps-paper
+  cancel-in-progress: false
+
+jobs:
+  # Check 1 (§145.1(a)) — un-gated, so it always completes before the approval
+  # wait begins. When this run is already behind origin/main's tip, the deploy
+  # job below is SKIPPED via `if:` and therefore never starts, so no approval
+  # request is ever emitted for a run that was superseded before pickup.
+  guard:
+    name: Guard - resolve origin/main before pickup
+    runs-on: [self-hosted, Linux, ARM64, polymarket-ci]
+    timeout-minutes: 5
+    outputs:
+      superseded: ${{ steps.resolve.outputs.superseded }}
+    steps:
+      - name: Resolve current origin/main tip
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tip="$(git ls-remote "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" refs/heads/main | cut -f1)" || tip=""
+          if ! printf '%s' "$tip" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::could not resolve a parseable origin/main tip before pickup: '$tip'"
+            echo "superseded=true" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          if [ "$GITHUB_SHA" != "$tip" ]; then
+            echo "::notice::this run ($GITHUB_SHA) is behind origin/main tip ($tip); the deploy job will be skipped and no approval request will be emitted"
+            echo "superseded=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "superseded=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # WO-145 registered control (i), which replaces the deleted sunset:
+      # "the workflow still runs the existing eligibility query and emits a
+      # WARNING whenever an eligible independent reviewer does exist - not as a
+      # lapse trigger, but so a change in the collaborator set is never
+      # silently ignored." Path B is permanent BECAUSE no eligible reviewer can
+      # exist (merge_independently_reviewed_pr.py:340-347 excludes both the PR
+      # author and the repository owner). If that ever stops being true, Path A
+      # becomes satisfiable again and this permanent loosening should be
+      # revisited - so the condition is surfaced on every deploy rather than
+      # assumed to hold forever.
+      #
+      # This step NEVER fails the run. It is observability, not a gate: a
+      # transient API error must not block a deploy, and the presence of an
+      # eligible reviewer is information for the owner, not a fault.
+      - name: Warn if an eligible independent reviewer now exists (registered control i)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER_LOGIN: ${{ github.repository_owner }}
+        run: |
+          set -uo pipefail
+          # THREE states, and the third one is the point. An earlier version had
+          # only two - "eligible reviewer found" and "premise holds" - and
+          # reported the reassuring second state whenever the query failed OR
+          # returned an unexpected shape. That is the SILENT IGNORE this control
+          # exists to prevent, wearing the mask of a passing check.
+          #
+          # Known and expected today: GET /collaborators requires
+          # `administration: read`. This workflow declares
+          # `permissions: {actions: read, contents: read}` per WO-145's
+          # least-privilege registration, and an explicit permissions block sets
+          # every unlisted scope to none - so this call is expected to 403 and
+          # take the UNDETERMINED branch on every run until the permission
+          # question is registered and resolved. That is why undetermined is a
+          # ::warning:: and not a ::notice::: an operator must be able to see
+          # that control (i) is not currently answering, rather than read a
+          # green notice that implies it is.
+          state="undetermined"
+          eligible=""
+          if body="$(curl -fsS --max-time 30 \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/collaborators?per_page=100" 2>/dev/null)"; then
+            parsed="$(printf '%s' "$body" | OWNER_LOGIN="$OWNER_LOGIN" python3 -c "
+          import json, os, sys
+          owner = os.environ.get('OWNER_LOGIN', '').casefold()
+          try:
+              rows = json.load(sys.stdin)
+          except Exception:
+              print('UNDETERMINED'); sys.exit(0)
+          if not isinstance(rows, list) or any(not isinstance(r, dict) for r in rows):
+              print('UNDETERMINED'); sys.exit(0)
+          names = []
+          for row in rows:
+              login = str(row.get('login') or '')
+              if not login or login.casefold() == owner:
+                  continue
+              if str(row.get('type') or '').casefold() == 'bot' or login.endswith('[bot]'):
+                  continue
+              perms = row.get('permissions')
+              if not isinstance(perms, dict):
+                  print('UNDETERMINED'); sys.exit(0)
+              if perms.get('push') or perms.get('maintain') or perms.get('admin'):
+                  names.append(login)
+          print('OK:' + ','.join(sorted(names)))
+          " 2>/dev/null)" || parsed="UNDETERMINED"
+            case "$parsed" in
+              OK:*) state="determined"; eligible="${parsed#OK:}" ;;
+              *)    state="undetermined" ;;
+            esac
+          fi
+          if [ "$state" != "determined" ]; then
+            echo "::warning::WO-145 control (i) could NOT run this deploy - the eligibility query did not return a usable answer. This is EXPECTED under the registered least-privilege permissions block (GET /collaborators needs administration:read, which this workflow deliberately does not carry) and is registered as an open question. Treat the Path B permanence premise as UNVERIFIED for this run, not as confirmed."
+          elif [ -n "$eligible" ]; then
+            echo "::warning::an eligible independent reviewer now exists (${eligible}). Path A may be satisfiable again; WO-145's permanent Path B loosening was registered on the premise that it is not, and should be revisited. This is a NOTICE, not a gate - the deploy continues."
+          else
+            echo "::notice::eligibility query answered: no eligible independent reviewer exists; the WO-145 premise still holds"
+          fi
+
+  # Check 2 lives inside this job, as its FIRST step (§145.1(a)). The
+  # `environment:` gate below is what a human approves; check 2 re-resolves
+  # origin/main immediately after that approval and fails, rather than
+  # deploying, if a later merge superseded this run during the wait.
+  deploy:
+    name: Deploy VPS paper stack over SSH (Path B, guarded)
+    needs: [guard]
+    if: needs.guard.outputs.superseded == 'false'
+    environment: vps-paper-deploy
+    runs-on: [self-hosted, Linux, ARM64, polymarket-ci]
+    timeout-minutes: 70
+
+    steps:
+      # --- Check 2: MUST be the first step. No step may precede it. ---------
+      - name: Check 2 - re-resolve origin/main after approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tip="$(git ls-remote "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" refs/heads/main | cut -f1)" || tip=""
+          if ! printf '%s' "$tip" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::could not resolve a parseable origin/main tip after approval: '$tip'"
+            exit 1
+          fi
+          if [ "$GITHUB_SHA" != "$tip" ]; then
+            echo "::error::superseded: approved $GITHUB_SHA, main is now $tip; approve the newer run"
+            exit 1
+          fi
+
+      - name: Validate deploy secrets
+        env:
+          PM_VPS_HOST: ${{ secrets.PM_VPS_HOST }}
+          PM_VPS_USER: ${{ secrets.PM_VPS_USER }}
+          PM_VPS_SSH_PRIVATE_KEY: ${{ secrets.PM_VPS_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in PM_VPS_HOST PM_VPS_USER PM_VPS_SSH_PRIVATE_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Repository secret ${name} is required for VPS deployment."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      # (a3) — runtime-enforced approval. This is belt-and-braces when the
+      # `environment:` above carries its required-reviewer rule (the query
+      # simply returns the approver), and it is the only thing standing
+      # between an unconfigured environment and an unattended production
+      # deploy on every push to main.
+      - name: Enforce runtime approval
+        id: approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPROVALS_URL: https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/approvals
+        run: |
+          set -euo pipefail
+          response="$(curl --silent --show-error --fail --max-time 30 \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "$APPROVALS_URL")" || {
+            echo "::error::the approvals query errored, timed out, or returned a non-2xx status for $APPROVALS_URL"
+            exit 1
+          }
+          approver="$(python3 - <<'PY' "$response"
+          import json
+          import sys
+
+          try:
+              entries = json.loads(sys.argv[1])
+          except (ValueError, IndexError):
+              sys.exit(1)
+          if not isinstance(entries, list):
+              sys.exit(1)
+          approved = [e for e in entries if isinstance(e, dict) and e.get("state") == "approved"]
+          if not approved:
+              sys.exit(1)
+          user = approved[-1].get("user") or {}
+          print(user.get("login", ""))
+          PY
+          )" || {
+            echo "::error::no entry in the approvals response has state=approved; the environment's required-reviewer protection rule may be missing, or this run was rejected rather than approved"
+            exit 1
+          }
+          echo "approver=${approver}" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare SSH
+        env:
+          PM_VPS_HOST: ${{ secrets.PM_VPS_HOST }}
+          PM_VPS_PORT: ${{ secrets.PM_VPS_PORT || '22' }}
+          PM_VPS_SSH_PRIVATE_KEY: ${{ secrets.PM_VPS_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$RUNNER_TEMP/ssh"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          raw_key = os.environ.get("PM_VPS_SSH_PRIVATE_KEY", "")
+          # GitHub's UI/API can preserve multiline secrets, but operators sometimes
+          # paste literal "\n" sequences. Normalise that into an OpenSSH key file.
+          if "\\n" in raw_key and "\n" not in raw_key:
+              raw_key = raw_key.replace("\\n", "\n")
+          raw_key = raw_key.replace("\r\n", "\n").replace("\r", "\n").strip() + "\n"
+          Path(os.environ["RUNNER_TEMP"], "ssh", "vps_key").write_text(raw_key, encoding="utf-8")
+          PY
+          chmod 600 "$RUNNER_TEMP/ssh/vps_key"
+          if ! ssh-keygen -y -f "$RUNNER_TEMP/ssh/vps_key" >/dev/null 2>&1; then
+            echo "::error::PM_VPS_SSH_PRIVATE_KEY is present but is not a loadable private key. Store the full private key file, not the .pub public key or a PuTTY .ppk file."
+            exit 1
+          fi
+          ssh-keygen -y -f "$RUNNER_TEMP/ssh/vps_key" > "$RUNNER_TEMP/ssh/vps_key.pub"
+          ssh-keyscan -p "$PM_VPS_PORT" -H "$PM_VPS_HOST" > "$RUNNER_TEMP/ssh/known_hosts"
+          chmod 600 "$RUNNER_TEMP/ssh/known_hosts"
+
+      # PM_DEPLOY_TARGET_SHA is the single most important line below: workflow
+      # `env:` does not cross the `ssh` boundary on its own, so the pin has to
+      # be part of the command string sent to the host, not merely declared
+      # above. Without it the VPS script would retarget to whatever origin/main
+      # is when the SSH connection lands, which - under an unattended approval
+      # wait - can be a different commit than the one just approved.
+      #
+      # The tmux wrapper exists because `tmux new-session -d` returns 0
+      # immediately: without capturing the real exit code, a failed deploy
+      # would report a green workflow run.
+      - name: Deploy over SSH (Path B guarded script)
+        env:
+          PM_VPS_HOST: ${{ secrets.PM_VPS_HOST }}
+          PM_VPS_PORT: ${{ secrets.PM_VPS_PORT || '22' }}
+          PM_VPS_USER: ${{ secrets.PM_VPS_USER }}
+          PM_VPS_REPO_DIR: ${{ secrets.PM_VPS_REPO_DIR || '~/Claude' }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          APPROVAL_ACTOR: ${{ steps.approval.outputs.approver }}
+        run: |
+          set -euo pipefail
+          case "$GITHUB_EVENT_NAME" in
+            push) trigger_mechanism=push ;;
+            workflow_dispatch) trigger_mechanism=workflow_dispatch ;;
+            *)
+              echo "::error::unexpected event_name for the dispatch workflow: $GITHUB_EVENT_NAME"
+              exit 1
+              ;;
+          esac
+          ssh \
+            -i "$RUNNER_TEMP/ssh/vps_key" \
+            -o BatchMode=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/ssh/known_hosts" \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            -o TCPKeepAlive=yes \
+            -o ConnectTimeout=30 \
+            -p "$PM_VPS_PORT" \
+            "$PM_VPS_USER@$PM_VPS_HOST" \
+            "PM_VPS_REPO_DIR='$PM_VPS_REPO_DIR' PM_DEPLOY_TARGET_SHA='$GITHUB_SHA' PM_DEPLOY_TRIGGER_MECHANISM='$trigger_mechanism' PM_DEPLOY_TRIGGER_ACTOR='$GITHUB_ACTOR' PM_DEPLOY_APPROVAL_ACTOR='$APPROVAL_ACTOR' GITHUB_RUN_ID='$GITHUB_RUN_ID' bash -s" <<'REMOTE'
+          set -euo pipefail
+          REPO_DIR="${PM_VPS_REPO_DIR/#\~/$HOME}"
+          cd "$REPO_DIR"
+
+          # Sentinel-plus-poll: `tmux new-session -d` returns 0 the instant
+          # the pane is created, before the deploy script inside it has run at
+          # all. Running detached also means a dropped SSH connection does not
+          # abort a half-recreated container - the tmux server keeps the pane
+          # alive independently of this ssh session. The pane writes its own
+          # exit code to SENTINEL; this shell polls the session and then re-exits
+          # with the code the deploy script actually returned. See the poll
+          # block below for why `tmux wait-for` is NOT used.
+          SESSION="pm-deploy-${GITHUB_RUN_ID}"
+          SENTINEL="/tmp/pm_deploy_dispatch_exit.${GITHUB_RUN_ID}"
+          rm -f "$SENTINEL"
+          # A re-run of the same run_id (GitHub's "re-run failed jobs") would
+          # otherwise collide with a stale session from a prior attempt that
+          # never cleaned up; `new-session -d -s` fails closed on a duplicate
+          # name rather than silently reusing it, so clear it first.
+          tmux kill-session -t "$SESSION" 2>/dev/null || true
+          tmux new-session -d -s "$SESSION" \
+            "cd '$REPO_DIR' && PM_DEPLOY_TARGET_SHA='$PM_DEPLOY_TARGET_SHA' PM_DEPLOY_TRIGGER_MECHANISM='$PM_DEPLOY_TRIGGER_MECHANISM' PM_DEPLOY_TRIGGER_ACTOR='$PM_DEPLOY_TRIGGER_ACTOR' PM_DEPLOY_APPROVAL_ACTOR='$PM_DEPLOY_APPROVAL_ACTOR' bash '$REPO_DIR/scripts/deploy_vps_paper_manual.sh'; echo \$? > '$SENTINEL'"
+          # SENTINEL-PLUS-POLL, not `tmux wait-for`. WO-145 registers either, and
+          # wait-for is the one that breaks: the pane signals the channel and
+          # then the session ends; if that was the last session the tmux SERVER
+          # exits and discards the latched signal, so a subsequent
+          # `tmux wait-for` starts a fresh server with nothing latched and
+          # blocks until the 70-minute job timeout. The exposure is worst on the
+          # FASTEST path - a successful deploy - which is the one that must not
+          # hang. Observed as a real intermittent failure of the exit-code-0
+          # case under load.
+          #
+          # Polling has no such dependency: the session's existence is the
+          # liveness signal and the sentinel is the result. A poll every 5s is
+          # nothing against a deploy bounded at 70 minutes.
+          while tmux has-session -t "$SESSION" 2>/dev/null; do
+            sleep 5
+          done
+          # The session is gone, so the pane's final `echo $? > SENTINEL` has
+          # run - but allow a brief window for the write to land before giving
+          # up, and fail CLOSED if it never appears (a killed pane, a full disk).
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            [ -f "$SENTINEL" ] && break
+            sleep 1
+          done
+          if [ ! -f "$SENTINEL" ]; then
+            echo "::error::the deploy pane exited without writing its exit code to $SENTINEL; treating as FAILED - the deploy state on the host is unknown and must be checked before retrying"
+            exit 1
+          fi
+          exit_code="$(cat "$SENTINEL")"
+          rm -f "$SENTINEL"
+          # Guard the value itself: `exit` truncates modulo 256, so a corrupt
+          # sentinel containing e.g. 256 would turn a failed deploy green.
+          if ! printf '%s' "$exit_code" | grep -Eq '^[0-9]{1,3}$' || [ "$exit_code" -gt 255 ]; then
+            echo "::error::sentinel held an unusable exit code: '$exit_code'; treating as FAILED"
+            exit 1
+          fi
+          exit "$exit_code"
+          REMOTE

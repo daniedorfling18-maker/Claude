@@ -11191,12 +11191,19 @@ blocked.**
 
 ### Scope (a) — add the deploy-control surface to the registry
 
-Add exactly three entries to `PROTECTED_CONTROL_PATHS`:
+Add exactly ten entries to `PROTECTED_CONTROL_PATHS`:
 
 ```
 ".github/workflows/deploy_vps_paper_dispatch.yml"
 "scripts/deploy_vps_paper_manual.sh"
 "tests/test_deploy_vps_paper_dispatch_workflow.py"
+"scripts/preflight_vps_capacity.py"
+"scripts/validate_dashboard_private_transport.py"
+"scripts/update_vps_checkout_preserving_runtime.py"
+"scripts/rollback_vps_paper_deploy.py"
+"scripts/write_vps_telemetry_manifest.py"
+"scripts/check_polymarket_vps_paper.sh"
+"docker-compose.vps-paper.yml"
 ```
 
 The script entry was added on external review, which was right: the workflow
@@ -11206,6 +11213,26 @@ gate actually live. Protecting the workflow and its tests while leaving the
 script out would let a later PR weaken any of those controls without touching
 either protected path — the exact invisibility this WO exists to close.
 
+The same argument runs one layer deeper, and a second round of external review
+caught it: `scripts/deploy_vps_paper_manual.sh` does not itself run the
+capacity, transport, checkout, rollback, or telemetry checks against the
+outgoing checkout — `stage_target_scripts` (`:53-69`) stages
+`preflight_vps_capacity.py`, `validate_dashboard_private_transport.py`,
+`update_vps_checkout_preserving_runtime.py`, `rollback_vps_paper_deploy.py`,
+`write_vps_telemetry_manifest.py`, and `check_polymarket_vps_paper.sh` out of
+the target SHA, plus the compose file named by `COMPOSE_FILE` (default
+`docker-compose.vps-paper.yml`, `:26`), and it is those six staged scripts and
+the staged compose file that actually run as the gates. Protecting the wrapper
+while leaving what it stages unprotected would let a later PR gut any one of
+those gates — hollow out the capacity check, weaken the transport validator,
+point the rollback script at nothing — without touching a single registered
+path, which is the same invisibility this WO exists to close, one call frame
+down. The closure rule this WO applies is therefore **protected = the wrapper
++ everything it stages as gates**, not the wrapper alone — which is why the
+set below is ten entries: the original workflow/script/test-file triad, plus
+the six scripts `stage_target_scripts` stages and the compose file it stages
+alongside them.
+
 Nothing else in that set, in `PROTECTED_PYTHON_ENTRYPOINTS`, in
 `TRUSTED_REVIEW_ASSOCIATIONS`, in `CONTROL_REVIEW_STATES`, or in the body of
 `_protected_control_path` changes. This is **strictly tightening**: the predicate
@@ -11213,7 +11240,7 @@ returns `True` for strictly more paths and `False` for none it previously
 accepted, so the merge gate can only become more conservative.
 
 **A2.** `_protected_control_path` already normalises `\\` to `/`, strips leading
-`./` and `/`, and compares the normalised string against the set; the three new
+`./` and `/`, and compares the normalised string against the set; the ten new
 entries are ordinary normalised relative paths and reach the existing
 `normalized in PROTECTED_CONTROL_PATHS` branch with no new parsing. No new
 comparison is introduced, so there is no new missing/empty/unparseable case.
@@ -11237,10 +11264,18 @@ builds nothing** (`git diff --stat` must show exactly these two):
   changed behaviour it was told not to change, and must stop and escalate.
 
 **Tests (enumerated).** (1) `_protected_control_path` returns `True` for each
-of `.github/workflows/deploy_vps_paper_dispatch.yml`,
-`scripts/deploy_vps_paper_manual.sh`, and
-`tests/test_deploy_vps_paper_dispatch_workflow.py`; (2) it returns `True` for
-each of the same three paths in the forms `./<path>` and `/<path>` and with
+of the ten registered paths —
+`.github/workflows/deploy_vps_paper_dispatch.yml`,
+`scripts/deploy_vps_paper_manual.sh`,
+`tests/test_deploy_vps_paper_dispatch_workflow.py`,
+`scripts/preflight_vps_capacity.py`,
+`scripts/validate_dashboard_private_transport.py`,
+`scripts/update_vps_checkout_preserving_runtime.py`,
+`scripts/rollback_vps_paper_deploy.py`,
+`scripts/write_vps_telemetry_manifest.py`,
+`scripts/check_polymarket_vps_paper.sh`, and
+`docker-compose.vps-paper.yml`; (2) it returns `True` for
+each of the same ten paths in the forms `./<path>` and `/<path>` and with
 backslash separators, exercising the existing normaliser; (3) a simulated PR
 touching only the dispatch workflow reports
 `trusted_merge_control_unchanged: false` and lists that path in
@@ -11249,13 +11284,21 @@ deploy script alone; (5) every
 path in `PROTECTED_CONTROL_PATHS` **before** this change still returns `True` —
 the tightening-only claim, asserted rather than argued; (6) a path outside the
 set — `src/polymarket_predictive_engine/cli.py` — still returns `False`, so the
-widening did not become a prefix match.
+widening did not become a prefix match; (7) a closure test, added on external
+review, that does not merely re-enumerate the six staged scripts by hand but
+parses `scripts/deploy_vps_paper_manual.sh`'s own text — the `for helper in
+...` list inside `stage_target_scripts` and the `git … show
+"$target_sha:$COMPOSE_FILE"` line's `COMPOSE_FILE` default — and asserts that
+every path that parse produces is a member of `PROTECTED_CONTROL_PATHS`; this
+is the one test in the set that fails on its own if a future PR adds an
+eighth staged helper without registering it, rather than depending on someone
+noticing that this WO's hand-enumerated list is now incomplete.
 
 **Fail-safe sentence.** This changes no gate threshold, no eligibility rule, no
 M-A/M-B/M-C predicate, and no order, signer, or credential surface; it can only
 cause the merge gate to refuse a PR it would previously have accepted, never the
 reverse, and a failure of the added entries degrades to the pre-WO-153 behaviour
-of not flagging those three files.
+of not flagging those ten files.
 
 **Operational cost, stated rather than left to be discovered.** Once this merges,
 routine edits to `tests/test_deploy_vps_paper_dispatch_workflow.py` — including
@@ -11270,14 +11313,22 @@ attestation is produced only by the `/independent-merge` path, which is
 deadlocked and is not how owner-routed PRs merge; and on detecting a protected
 path that script fails its step, so no attestation artifact is published for
 exactly the PRs this control flags. The check is therefore **local and
-direct**, not attestation-based: on the day after merge, (a) the six enumerated
-tests pass on `main`, and (b) a read-only invocation of
-`_protected_control_path` from a Python one-liner returns `True` for all three
-registered paths and `False` for `src/polymarket_predictive_engine/cli.py`.
-If the `/independent-merge` path is ever un-deadlocked, its refusal on a PR
-touching any of the three paths (blocker
-`pull_request_changes_trusted_merge_control`) becomes the runtime evidence —
-recorded here as future signal, not claimed as this check's mechanism.
+direct**, not attestation-based — and, on a further round of external review,
+the mechanism below is revised again: an earlier draft proposed a read-only
+`_protected_control_path` invocation from a Python one-liner as part (b) of
+this check. That form is dropped. **S6** requires a day-after check the owner
+can carry out by reading a result, not by running code, and typing a
+one-liner into a shell to get that result fails that bar regardless of how
+harmless the call is. The retained check: on the day after merge, the next
+PR's required ARM64 gate — the self-hosted Actions run that is already the
+sole verification of record for every PR in this repository — is green, and
+that run's test session includes all seven enumerated tests above, so the
+`True`-for-ten/`False`-for-the-one-outside-path evidence is read off a CI
+status the owner already checks, not reconstructed by hand. If the
+`/independent-merge` path is ever un-deadlocked, its refusal on a PR touching
+any of the ten paths (blocker `pull_request_changes_trusted_merge_control`)
+becomes the runtime evidence — recorded here as future signal, not claimed as
+this check's mechanism.
 
 ### Scope (b) — the control (i) permission conflict, recorded as an OWNER decision, not built
 

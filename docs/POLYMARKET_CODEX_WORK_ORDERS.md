@@ -10205,7 +10205,7 @@ for the wrong reason — because the bound moved, not because recovery improved.
 WO-146 is the fix; WO-150 is a separate correction of what the bound describes.
 Both should land.
 
-## WO-151 — The maker study has no cadence of its own: two trigger paths, one gated behind a 43.75%-failing harvest — `queued` (registered 2026-08-02; scheduler + harvest-step surface → OWNER MERGE after line-audit; observability and scheduling only, no gate/threshold/eligibility change)
+## WO-151 — The maker study has no cadence of its own: two trigger paths, one gated behind a 43.75%-failing harvest — `queued` (registered 2026-08-02; scheduler + harvest-step surface → OWNER MERGE after line-audit; observability and scheduling only, no gate/threshold/eligibility change; registered-ancestry: b6b9b88 ancestor-of 18a0fec PASS — first dispatch, respin head 27e401e same ancestry)
 
 **Provenance — measured, 2026-08-02.** M-A banks a day only if the day's LAST
 run holds target, so *when* the study runs is load-bearing for the campaign. It
@@ -10266,9 +10266,13 @@ visible rather than inferred from a stale stamp.
 
 **A1/A2 obligations for the builder.** Any interval, window, or age bound
 introduced carries a literal and a stated basis; every comparison states what a
-missing, empty, unparseable, or non-finite stamp does, and the answer is the
-fail-closed branch — a study that cannot establish its own trigger records
-`"unknown"` and does not claim a cadence it did not have.
+missing, empty, unparseable, or non-finite stamp does. A due-stamp read through
+the shared `seconds_since_stamp` convention follows WO-120's registered
+fail-**open** reading — missing or corrupt reads as immediately due, so the job
+fires rather than being permanently starved by one corrupt cadence stamp
+(ratified at §151.2, performed inline here and at §151.1) — while a study that
+cannot establish its own trigger still records `"unknown"` and does not claim a
+cadence it did not have.
 
 **Fail-safe sentence.** *(The job-stamp half of the clause below is SUPERSEDED
 by §151.2, added 2026-08-04 — see that section for the adjudication. The
@@ -10291,7 +10295,7 @@ enumerated tests**, so it failed A10 and could not be built. It was caught
 before a builder was dispatched against it, which is the check working; it is
 recorded here rather than quietly fixed.
 
-**Touch ONLY these files** (`git diff --stat` must show exactly these five):
+**Touch ONLY these files** (`git diff --stat` must show exactly these six):
 
 - `src/polymarket_predictive_engine/maker_carry_study.py` — scope (a) the
   `study_trigger` field on `maker_carry_study.json` and on each
@@ -10309,6 +10313,12 @@ recorded here rather than quietly fixed.
   status stamp at `:635`.
 - `tests/polymarket_predictive_engine/test_maker_carry_study.py`
 - `tests/polymarket_predictive_engine/test_training_harvest.py`
+- `tests/test_polymarket_vps_docker.py` — added 2026-08-04 (§432 round-1, review-driven
+  scope expansion). The pinned `stamp_status` detail-string literal at `:621` must be
+  updated to match the accurate standalone-cadence prose written into
+  `scripts/run_vps_ops_scheduler.sh:635` (replacing the stale *"...11-13h offset guard"*
+  wording left over from the removed offset guard). The scheduler detail string and this
+  test's pinned literal change together, in the same build, or neither does.
 
 **Do NOT touch** `maker_min_book_history_hours` (48.0), `maker_min_book_snapshots`
 (100), `target_net_usd_per_day` (3.33), `max_trusted_reward_share` (0.05),
@@ -10330,9 +10340,14 @@ whatever corpus exists; it does not require a harvest to have just succeeded.
 measurable.
 
 **A2 for every new comparison.** A missing, empty, unparseable, or non-finite
-`maker_study_intraday` stamp leaves the job **un-fired** and records the window
-state; it never reads as "due". A run whose trigger cannot be established
-records `study_trigger: "unknown"` and never guesses.
+`maker_study_intraday` stamp reads as **due** — the shared `seconds_since_stamp`
+reader's registered WO-120 convention (a missing stamp reads `999999999`s old, a
+corrupt or empty stamp reads epoch `0`, both `>= interval`) applies to this
+stamp exactly as it does to every other stamp in the file, so the job fires
+rather than being starved forever by one corrupt due-stamp (ratified at
+§151.2) — and the window state is recorded on every path rather than assumed
+silently. A run whose trigger cannot be established records
+`study_trigger: "unknown"` and never guesses.
 
 **Tests (enumerated).** (1) a study run invoked by the dedicated job records
 `study_trigger: "intraday_job"`; (2) invoked as harvest step 10, it records
@@ -10346,8 +10361,9 @@ test failure, not a new domain member; (6) the field appears on **both**
 the reader tolerates the legacy header; (8) with the harvest stamp absent,
 unparseable, non-finite, and 200000s old, the dedicated job still fires once its
 own interval has elapsed — the decoupling, and the test that proves starvation
-is closed; (9) with the `maker_study_intraday` stamp absent or unparseable the
-job does **not** fire and the window state is recorded (A2 fail-closed);
+is closed; (9) with the `maker_study_intraday` stamp absent or unparseable the job
+**fires** — WO-120's fail-open convention applied to the job's own due-stamp,
+ratified at §151.2 — and the window state is recorded (A2 fail-open);
 (10) `skipped_cycles_total` and the window state appear in the artifact and match
 the scheduler's own counter; (11) the observed harvest age is recorded in the
 artifact on every path; (12) byte-identity — a study run over a fixed fixture
@@ -10457,13 +10473,22 @@ verified. The parent fail-safe sentence's clause *"A missing … or job stamp
 leaves the dedicated job un-fired"* is SUPERSEDED for the job's own due-stamp;
 the harvest stamp's handling per test (8) is unchanged. That sentence is
 edited inline, in this same commit, within WO-151's own preamble above.
+**§432 round-1 (2026-08-04):** describing a supersession is not
+re-registration — §151.1's A2 paragraph and test (9)'s own text, and the
+parent A1/A2 obligation sentence above, are likewise edited inline (not merely
+narrated as superseded) in this same commit, within WO-151's own preamble and
+§151.1. This section stands as the historical record of why the direction
+changed; the live text now states the ratified direction directly.
 
 **Precedent.** Same class as §145.2: the registered string now matches the
 registered decision, recorded rather than silently fixed.
 
-**Recorded, not blocking.** `run_maker_study_intraday`'s `stamp_status` detail
-string (`scripts/run_vps_ops_scheduler.sh:635`) still reads *"...11-13h offset
-guard"* — stale prose left over from the removed offset guard, now pinned as a
-literal by `tests/test_polymarket_vps_docker.py:621`, a file outside §151.1's
-touched-file list. It needs its own small follow-up WO touching the detail
-string and that docker test together; none is registered here.
+**Folded into §151.1's touched-file list, not deferred (§432 round-1,
+2026-08-04).** `run_maker_study_intraday`'s `stamp_status` detail string
+(`scripts/run_vps_ops_scheduler.sh:635`) still reads *"...11-13h offset
+guard"* — stale prose left over from the removed offset guard, pinned as a
+literal by `tests/test_polymarket_vps_docker.py:621`. Rather than leave this to
+a follow-up WO, §151.1's touched-file list is extended to six files (adding
+that test file): the detail string and the pinned docker-test literal are
+updated together, in the same build, or neither is. Recorded as a scope
+expansion of this same WO, review-driven.

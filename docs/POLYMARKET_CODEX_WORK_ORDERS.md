@@ -9825,7 +9825,7 @@ dispatchable:
   citations (`:841-856`, `:635`) were derived *after* WO-149's merge and
   resolve against the current tree.
 
-## WO-148 — Make seed-to-eligible conversion measurable: a tier-assignment event ledger — `queued` (registered 2026-08-01; measurement-only sidecar; changes no selection behaviour; enrolment deliberately deferred, see 148.4 → OWNER MERGE after line-audit; **first dispatch 2026-08-03 ESCALATED without building** — 148.5's own re-verify-and-stop instruction fired, because WO-149's merge added a fourth, scheduled caller under `scope="portfolio"` that the registered caller set predates; **not dispatchable again until §148.6 merges**)
+## WO-148 — Make seed-to-eligible conversion measurable: a tier-assignment event ledger — `queued` (registered 2026-08-01; measurement-only sidecar; changes no selection behaviour; enrolment deliberately deferred, see 148.4 → OWNER MERGE after line-audit; **first dispatch 2026-08-03 ESCALATED without building** — `registered-ancestry: c26cd7f ancestor-of c26cd7f PASS` recorded at dispatch (the build branch was cut at the then-`origin/main` tip and carries zero commits); 148.5's own re-verify-and-stop instruction fired, because WO-149's merge added a fourth, scheduled caller under `scope="portfolio"` that the registered caller set predates; **not dispatchable again until §148.6 merges**)
 
 **Provenance.** An analyst could not compute the seed-to-eligible conversion rate
 at all. Verified cause: tier assignment is recomputed from scratch every
@@ -10114,13 +10114,24 @@ which is the precise confusion the ledger was registered to end.
 **The binding correction.** The tier-event ledger is written **only** when
 `snapshot_official_books` runs under `scope="watchlist"`. Under
 `scope="portfolio"` the collector appends no events, writes no state file, and
-records `tier_events_status: "skipped_portfolio_scope"` — a **fifth** member of
-that key's domain, added here, alongside the three 148.5 registers. The other five
+records `tier_events_status: "skipped_portfolio_scope"`. 148.5 registers three
+domain members; this adds the **fourth**, and the complete revised closed domain
+is `{"ok","read_failed","write_failed","skipped_portfolio_scope"}` — any other
+value is a build defect, not a new member. The other five
 summary keys are emitted with their zero values (`tier_events_written: 0`,
 `tier_events_resync: false`, `tier_events_malformed_rows: 0`,
-`tier_event_burst: false`, `tier_precedence_conflicts: 0`) so the key set on
-`official_book_snapshot.json` is scope-invariant and no consumer sees a
-disappearing key.
+`tier_event_burst: false`, `tier_precedence_conflicts: 0`) so the **summary key
+set is scope-invariant**. The keys land on whichever artifact the scope selects
+— `official_book_pulse.json` under portfolio scope, `official_book_snapshot.json`
+under watchlist scope (`maker_fill_replay.py:744`; the pulse never writes the
+snapshot file, which the collection-window ledger consumes — WO-149's isolation,
+not to be violated to satisfy an invariance test) — and the invariance is
+asserted by comparing the two artifacts' key sets, not by requiring one file to
+carry both scopes. **Every return path carries the six keys**: they are
+initialized in the summary dict at construction (with the five zero values, and
+`tier_events_status` set per scope), so the `no_portfolio` early return
+(`maker_fill_replay.py:818-832`), which exits before the write-site anchor,
+cannot omit them.
 
 **A2.** The scope is not re-derived at the write site: it is the same
 `portfolio_scope` boolean the function has already computed and already branches
@@ -10141,7 +10152,7 @@ precedent, where the pulse **reads** the WO-131 delisted marker but never
 slower-cadence ledger.
 
 **A4/A7 — reconciliation of the parent WO, stated exhaustively.** This
-amendment's duplicate set is five places and no more:
+amendment's duplicate set is six places and no more:
 
 1. **148.5's "Interleaving (S2)" paragraph** — its caller list and its
    "scheduled by nothing" claim are **superseded by the table above**. The
@@ -10155,8 +10166,9 @@ amendment's duplicate set is five places and no more:
    text and reports the drift, as this builder did.
 3. **The "Cadence" growth estimate** (~40 rows/day, structural worst case 150
    rows/cycle x 96) — **unchanged and now correct**. It was computed against the
-   full-watchlist cadence, which is the only cadence that now writes; the pulse's
-   96 extra cycles/day contribute zero rows.
+   full-watchlist cadence (96 cycles/day at 900s), which is the only cadence that
+   now writes; the pulse's own **288 cycles/day** (86400/300) all contribute zero
+   rows under this amendment's guard.
 4. **Day-after check (2)** — unchanged, and only satisfiable under this
    correction.
 5. **148.3(2)'s `exclude` citations** — `:728` and `:749-750` are stale from
@@ -10165,6 +10177,13 @@ amendment's duplicate set is five places and no more:
    **unchanged**. Corrected here rather than left behind, because an amendment
    that fixes some stale anchors and not their duplicates is the exact failure
    this repository spent four gate rounds on in WO-145.1.
+6. **148.5's test (16)** — its registered caller set ("`snapshot_official_books(`
+   is called from exactly `:957`, `:968`, and `cli.py:431`") is **superseded**:
+   the correct expectation is the four call sites in the table above —
+   `maker_fill_replay.py:1033`, `:1044`, `cli.py:432`, and `cli.py:445` — with
+   the anchor-text rule governing if those numbers drift again. Without this
+   supersession, test (21) below would require a test that the corrected caller
+   table makes unsatisfiable.
 
 **The touched-file list does not change.** It remains exactly the two files the
 parent WO registers, `src/polymarket_predictive_engine/maker_fill_replay.py` and
@@ -10179,10 +10198,14 @@ enumerates **sixteen** tests, (1)-(16), so these are numbered from (17) and none
 of the existing numbers move:
 
 17. `snapshot_official_books(cfg, scope="portfolio")` with a non-empty portfolio
-    and a state file containing populated persistent and seed tranches appends
-    **zero** rows, and the events file is **byte-identical** before and after.
-    This is the case that fails against the unamended spec and is the reason this
-    amendment exists.
+    and prior persistent/seed membership **seeded as rows in
+    `maker_watchlist_tier_events.csv`** (148.3 derives `last_tier` from the
+    events CSV's last row per condition id — the state file carries only
+    aggregate counts, so seeding the state file alone cannot create the prior
+    membership this test needs; the state file is seeded fresh only to keep the
+    run out of resync) appends **zero** rows, and the events file is
+    **byte-identical** before and after. This is the case that fails against the
+    unamended spec and is the reason this amendment exists.
 18. The same call records `tier_events_status == "skipped_portfolio_scope"` and
     the five zero-valued keys, so the key set on `official_book_snapshot.json` is
     identical under both scopes — asserted by comparing the two key sets, not by
@@ -10196,8 +10219,15 @@ of the existing numbers move:
     genesis count. This is the sequence that produces the spurious
     departure/re-arrival churn against the unamended spec.
 21. `scope="watchlist"` behaviour is unchanged by this amendment: every test in
-    148.5's list (1)-(16) passes with the guard in place, asserted by running
+    148.5's list (1)-(16), with (16) as superseded by reconciliation item 6,
+    passes with the guard in place, asserted by running
     them rather than by argument.
+22. `snapshot_official_books(cfg, scope="portfolio")` with an **empty**
+    portfolio takes the `no_portfolio` early return and the summary still
+    carries all six tier-event keys with `tier_events_status ==
+    "skipped_portfolio_scope"` — the path the write-site anchor never reaches,
+    which without construction-time initialization would silently drop the keys
+    and break the scope-invariant contract.
 
 **Fail-safe sentence for §148.6.** This amendment strictly **reduces** the set of
 conditions under which anything is written — it can only cause fewer rows to be
@@ -10208,12 +10238,15 @@ failure of the guard degrades to the pre-amendment behaviour of writing on both
 scopes, which is loud (`tier_events_written` equal to the watchlist size every
 cycle) and is already registered as grounds to revert rather than tune.
 
-**Day-after check addition.** On a live VPS day, `tier_events_written` is `0` on
-every `book_pulse` cycle and `tier_events_status` reads
-`skipped_portfolio_scope` there, while `official_book_snapshot.json` from the
-900-second collector carries a `tier_events_status` of `ok`. If any pulse cycle
-reports a nonzero `tier_events_written`, the guard is not in place and the WO is
-reverted.
+**Day-after check addition — durable, not snapshot-based.** The loud signature
+of a missing guard is **in the events CSV, which is append-only and survives**:
+any two rows for the same `condition_id` whose `event_utc` values are less than
+900 seconds apart mean a sub-watchlist-cadence writer ran the diff, the guard is
+not in place, and the WO is reverted. (`official_book_pulse.json` is overwritten
+every pulse, so its latest `tier_events_written: 0` proves nothing about earlier
+cycles — a transient nonzero would be gone by read time; the CSV cannot forget.)
+Secondary, same-day: `tier_events_status` reads `skipped_portfolio_scope` on the
+pulse artifact and `ok` on the snapshot artifact from the 900-second collector.
 
 ## WO-149 — The replay join has no contemporaneous book state for 23% of prints, so every maker economic number is unvalidated model output — `done` (2026-08-02, PR #422; registered 2026-08-01; new scheduler job + registered watchdog freshness entry + a keyword-only scope on the sole official-book collector, routed owner-merge after two independent line-audits covering disjoint halves; **`max_book_state_lag_seconds` stays 1800 — no tolerance is loosened**; one lint fix round for an `F821` the offline suite could not see, because `from __future__ import annotations` makes the annotation unevaluated; **DEPLOY PENDING, and this is the binding one for the campaign** — `run_book_pulse` never fires on the VPS, so no `official_book_pulse.json` is produced and `M-B`'s `mb1_tier0_coverage_sufficient` stays `false`. Merging this WO did not move M-B; deploying it is what will)
 

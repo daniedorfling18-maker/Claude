@@ -11191,12 +11191,20 @@ blocked.**
 
 ### Scope (a) — add the deploy-control surface to the registry
 
-Add exactly two entries to `PROTECTED_CONTROL_PATHS`:
+Add exactly three entries to `PROTECTED_CONTROL_PATHS`:
 
 ```
 ".github/workflows/deploy_vps_paper_dispatch.yml"
+"scripts/deploy_vps_paper_manual.sh"
 "tests/test_deploy_vps_paper_dispatch_workflow.py"
 ```
+
+The script entry was added on external review, which was right: the workflow
+*delegates* to `scripts/deploy_vps_paper_manual.sh`, where the target-SHA
+refusal, checkout and marker checks, rollback arming, acceptance, and health
+gate actually live. Protecting the workflow and its tests while leaving the
+script out would let a later PR weaken any of those controls without touching
+either protected path — the exact invisibility this WO exists to close.
 
 Nothing else in that set, in `PROTECTED_PYTHON_ENTRYPOINTS`, in
 `TRUSTED_REVIEW_ASSOCIATIONS`, in `CONTROL_REVIEW_STATES`, or in the body of
@@ -11205,7 +11213,7 @@ returns `True` for strictly more paths and `False` for none it previously
 accepted, so the merge gate can only become more conservative.
 
 **A2.** `_protected_control_path` already normalises `\\` to `/`, strips leading
-`./` and `/`, and compares the normalised string against the set; the two new
+`./` and `/`, and compares the normalised string against the set; the three new
 entries are ordinary normalised relative paths and reach the existing
 `normalized in PROTECTED_CONTROL_PATHS` branch with no new parsing. No new
 comparison is introduced, so there is no new missing/empty/unparseable case.
@@ -11228,14 +11236,16 @@ builds nothing** (`git diff --stat` must show exactly these two):
   `:259` are **not** to be modified; a build that needs to edit either has
   changed behaviour it was told not to change, and must stop and escalate.
 
-**Tests (enumerated).** (1) `_protected_control_path` returns `True` for
-`.github/workflows/deploy_vps_paper_dispatch.yml` and for
+**Tests (enumerated).** (1) `_protected_control_path` returns `True` for each
+of `.github/workflows/deploy_vps_paper_dispatch.yml`,
+`scripts/deploy_vps_paper_manual.sh`, and
 `tests/test_deploy_vps_paper_dispatch_workflow.py`; (2) it returns `True` for
-each of the same two paths in the forms `./<path>` and `/<path>` and with
+each of the same three paths in the forms `./<path>` and `/<path>` and with
 backslash separators, exercising the existing normaliser; (3) a simulated PR
 touching only the dispatch workflow reports
 `trusted_merge_control_unchanged: false` and lists that path in
-`protected_control_changes`; (4) the same for the test file alone; (5) every
+`protected_control_changes`; (4) the same for the test file alone and for the
+deploy script alone; (5) every
 path in `PROTECTED_CONTROL_PATHS` **before** this change still returns `True` —
 the tightening-only claim, asserted rather than argued; (6) a path outside the
 set — `src/polymarket_predictive_engine/cli.py` — still returns `False`, so the
@@ -11245,7 +11255,7 @@ widening did not become a prefix match.
 M-A/M-B/M-C predicate, and no order, signer, or credential surface; it can only
 cause the merge gate to refuse a PR it would previously have accepted, never the
 reverse, and a failure of the added entries degrades to the pre-WO-153 behaviour
-of not flagging those two files.
+of not flagging those three files.
 
 **Operational cost, stated rather than left to be discovered.** Once this merges,
 routine edits to `tests/test_deploy_vps_paper_dispatch_workflow.py` — including
@@ -11255,11 +11265,19 @@ prove check 2 fails closed is equivalent to deleting check 2 one merge later. Bu
 it is a real friction cost on a file that will need edits, and it is recorded
 here so that nobody later reads the flag as a malfunction and removes the entry.
 
-**Day-after check.** The next PR that touches
-`.github/workflows/deploy_vps_paper_dispatch.yml` — including any follow-on to
-WO-145 — reports it under `protected_control_changes` in the merge attestation,
-and a PR touching neither file reports `protected_control_changes: []` exactly as
-before.
+**Day-after check — stated in terms that are actually observable.** The merge
+attestation is produced only by the `/independent-merge` path, which is
+deadlocked and is not how owner-routed PRs merge; and on detecting a protected
+path that script fails its step, so no attestation artifact is published for
+exactly the PRs this control flags. The check is therefore **local and
+direct**, not attestation-based: on the day after merge, (a) the six enumerated
+tests pass on `main`, and (b) a read-only invocation of
+`_protected_control_path` from a Python one-liner returns `True` for all three
+registered paths and `False` for `src/polymarket_predictive_engine/cli.py`.
+If the `/independent-merge` path is ever un-deadlocked, its refusal on a PR
+touching any of the three paths (blocker
+`pull_request_changes_trusted_merge_control`) becomes the runtime evidence —
+recorded here as future signal, not claimed as this check's mechanism.
 
 ### Scope (b) — the control (i) permission conflict, recorded as an OWNER decision, not built
 
@@ -11283,8 +11301,12 @@ question and not a build defect.
 clause that would have allowed widening the permission block was struck during
 the registration gate. Widening it now to make control (i) answer would reverse
 a registered decision; leaving it means the control never answers. The two
-admissible resolutions are (i) the owner adds `administration: read` and the
-least-privilege clause is amended to record the exception and its basis, or
+admissible resolutions are (i) the owner provisions a credential that can
+actually carry repository-administration read — `administration` is **not** a
+valid key in a workflow `permissions:` block (`GITHUB_TOKEN` scopes do not
+include it), so this means a fine-grained PAT or a GitHub App installation
+token stored as a repository secret — and the least-privilege clause is amended
+to record the exception, its basis, and the new secret's existence, or
 (ii) the registration accepts that control (i) is permanently undetermined under
 its own permission grant and says so in the WO text, so no future reader mistakes
 the warning for a transient failure. **Nothing is built under scope (b) until the

@@ -9319,7 +9319,7 @@ the **seed** tranche (in the existing skip loop at `:515-535`, incrementing
 `maker_replay_collection_windows.csv`, whose `covered` flag drives
 `coverage_ratio`; dropping a portfolio market on the strength of a possibly-stale
 study file would blank a measurement denominator. WO-116's registration binds
-here (`docs/POLYMARKET_CODEX_WORK_ORDERS.md:5514-5516`). Count it instead:
+here (`docs/POLYMARKET_CODEX_WORK_ORDERS.md:5526`). Count it instead:
 `portfolio_observed_not_excluded`.
 
 **A2 — every branch, and every one fails OPEN toward collecting**, which is the
@@ -9349,15 +9349,26 @@ Two keys on `official_book_snapshot.json` (snapshot, not anchor-enrolled):
 the literal matches the existing `excluded_stale_examples` cap at
 `maker_carry_study.py:850`).
 
-**Fail-safe sentence.** An expired-market exclusion fires only on positively
-parsed evidence that the venue close time, title date, or UMA resolution status
-is past; a missing, empty, unparseable, or non-finite `end_date_utc`, a missing
-`question` or `uma_resolution_status`, and a missing, malformed, or
-more-than-48-hour-old `maker_carry_study.json` all leave the market ON the
-watchlist and increment a visible counter, because for a collector the
-conservative direction is to keep collecting; the portfolio tranche is never
-excluded, only counted; and no gate, sizing, eligibility, or order surface reads
-this artifact.
+**Fail-safe sentence — precedence rule added on external review, which caught
+a real contradiction with test 10 below.** An expired-market exclusion fires
+only on positively parsed evidence that the venue close time, title date, or
+UMA resolution status is past, and that evidence can come from either the
+current row or the persisted stale map; **the stale map's positive evidence
+takes precedence over a missing current-row field, and the missing-fields-keep
+behaviour applies only when the stale map carries no entry for that condition
+id.** So: a missing, empty, unparseable, or non-finite `end_date_utc`, a
+missing `question` or `uma_resolution_status`, and a missing, malformed, or
+more-than-48-hour-old `maker_carry_study.json` leave the market ON the
+watchlist and increment a visible counter **when the stale map has no entry
+for it** — because for a collector the conservative direction is to keep
+collecting. When the stale map DOES carry an entry for that condition id — the
+persistent-market-absent-from-the-candidates-CSV case in test 10, where the
+current row's fields are themselves missing — that entry is positive evidence
+from the study's own run and overrides the current-row absence, so the market
+IS excluded. Absence of current-row evidence is therefore a keep only in the
+absence of contrary stale-map evidence, never a keep regardless of it; the
+portfolio tranche is never excluded, only counted; and no gate, sizing,
+eligibility, or order surface reads this artifact.
 
 **Cadence.** No new job or CLI command. `snapshot_official_books` already runs
 every cycle via `collect_maker_replay_data` (`:1033`, `:1044`) on the existing
@@ -9375,8 +9386,11 @@ byte-identical. In `test_maker_fill_replay.py` (**S4: at least one Gamma
 now-2h` → excluded, `persistent == 1`, absent from `market_polls`. (6)
 `now+2h` → kept, counter 0. (7) `""` → kept, `close_time_unparseable == 1`.
 (8) `"not-a-date"` → same. (9) `"nan"` → same. (10) **persistent market ABSENT
-from the candidates CSV but present in `excluded_stale_condition_ids` → excluded;
-this is the 61-market case and the only path that catches it.** (11) study JSON
+from the candidates CSV (so its own current-row fields are themselves missing)
+but present in `excluded_stale_condition_ids` → excluded — the stale map's
+positive evidence overrides the current-row absence per the fail-safe
+sentence's precedence rule, not an exception to it; this is the 61-market case
+and the only path that catches it.** (11) study JSON
 missing → `"unavailable"`, watchlist equals pre-change baseline. (12) map a list
 not a dict → `"malformed"`. (13) study `generated_at_utc` at `now-47.9h` →
 `"ok"` and source B applies; advance the run clock to `now-48.1h` →
@@ -9388,8 +9402,12 @@ collection-windows row count unchanged. (16) examples capped at 10, sorted, on a
 15-exclusion fixture. (17) byte-identity: the four `MAKER_POLICY_DEFAULTS`
 thresholds above. (18) static (A3): `_candidate_staleness_reasons` called from
 exactly two sites, scan rooted `Path(__file__).resolve().parents[2]` over
-`ROOT/"src"`, `"scripts"`, `"tests"`, `".github"`, excluding `ROOT/".claude"`,
-asserting `visited_files > 0`.
+`ROOT/"src"` and `"scripts"` **only** — corrected on external review after an
+exhaustive scan over `"src"`, `"scripts"`, `"tests"`, `".github"` failed the
+exactly-two assertion, because test files themselves call
+`_candidate_staleness_reasons` to exercise it. Restricting the scan to the two
+production roots is the fix, not raising the count: `"tests"` and `".github"`
+are excluded, along with `ROOT/".claude"`, asserting `visited_files > 0`.
 
 **Honest consequence, stated rather than discovered later.** The three tranche
 budgets are independent (`persistent_cap` at `:796`, seed `cap` at `:814`), so
@@ -9404,17 +9422,28 @@ fields only; no gate, threshold, eligibility rule, screen, sizing rule, funding
 value, or config value moves in either direction. Tighten-only in the collection
 sense: fewer markets may be polled, never more, and only on positively parsed
 evidence of pastness. **Routing note:** the register previously contradicted
-itself on collection-only WOs (WO-131 at `:6017` "non-frozen → orchestrator
-merge" vs WO-141 at `:6644` "collection-only → owner merge"). **Orchestrator
+itself on collection-only WOs (WO-131 at `:6028` "non-frozen → orchestrator
+merge" vs WO-141 at `:6655` "collection-only → owner merge"). **Orchestrator
 resolution: all four of WO-146 through WO-149 route to OWNER MERGE.** The
 stricter reading is adopted deliberately — this session's review rounds found
 defects in the orchestrator's own registered text at every round, so orchestrator
 self-merge is not the safe default here.
 
-**Day-after check.** After one collector cycle (<= 15 min): (1)
-`excluded_stale_condition_ids` non-empty with key count `min(excluded_stale,
-200)`. (2) `watchlist_excluded_expired.stale_map_status == "ok"`. (3) **record
-the numbers** — `persistent`, `seed`, `portfolio_observed_not_excluded`,
+**Day-after check — the `stale_map_status` clause is re-gated on the study's
+own cadence on external review, not the collector's.** The stale map this
+check reads is produced by `maker_carry_study.py`, on the
+`OPS_MAKER_STUDY_INTRADAY_INTERVAL_SECONDS` default 86400s cadence, not by
+`snapshot_official_books`'s 900s collector cycle; asserting
+`stale_map_status == "ok"` after a single <=15-minute collector cycle would
+fail on any deploy landing between study runs, for no defect. After one
+collector cycle (<= 15 min): (1) `excluded_stale_condition_ids` non-empty with
+key count `min(excluded_stale, 200)`. (2) `watchlist_excluded_expired.
+stale_map_status == "ok"`, gated on **one post-deploy `maker_carry_study` run
+having completed** — until that run happens (worst case 86400s out),
+`stale_map_status == "unavailable"` is the documented and expected state, not
+a build failure; re-check after the first post-deploy study run before
+treating anything other than `"ok"` as a regression. (3) **record the
+numbers** — `persistent`, `seed`, `portfolio_observed_not_excluded`,
 `close_time_unparseable`. **A result of `persistent: 0` is a valid and
 informative outcome** meaning the tranche is clean today and this WO bought
 observability rather than hygiene; it is not a build failure. (4)
@@ -9477,15 +9506,34 @@ WO-141's heading text was rewritten when it went `done`, so the phrase this WO
 quotes from it no longer exists verbatim. The **substance** each of the three
 supports is unchanged; only the pointers moved.
 
-**The rule that stops this recurring, and it is not "renumber more often".**
-**Anchor text governs; line numbers are advisory.** A builder that finds a cited
-line disagreeing with the construct named beside it follows the construct,
-records the drift, and continues — it does not guess and it does not stop, unless
-the construct itself cannot be found, which is a genuine escalation. Line numbers
-are retained because they make review faster, not because they are authoritative.
-This is the same rule proposed for WO-148 in its pending §148.6 amendment
-(PR #431, registered separately; the two amendments share a cause, not a
-dependency — each stands on its own if the other has not merged).
+**The rule that stops this recurring, and it is not "renumber more often" —
+refined on external review, because the first draft conflated two different
+kinds of drift under one action.** **Anchor text governs; line numbers are
+advisory** — but which action that licenses depends on which kind of drift a
+builder finds, and the two kinds do not get the same response:
+
+- **Positional drift** — the named construct exists exactly as described, just
+  at a different line number, because unrelated edits elsewhere shifted the
+  file (every row in the table above is this kind). Here, and only here,
+  follow-the-anchor applies as originally stated: the builder follows the
+  construct, records the drift, and continues — it does not guess and it does
+  not stop.
+- **Semantic drift** — the named construct still exists, but what it *does* has
+  changed: a default moved, a branch was added, a caller's shape changed, or
+  the premise the citing text relied on no longer holds even though the
+  construct's address and name are otherwise intact. Here follow-and-continue is
+  the wrong response, because silently re-pointing the citation to the current
+  line would carry forward a claim the construct no longer supports. A builder
+  that finds semantic drift instead **REVALIDATES** the citing text's claim
+  against the construct's current behaviour and **ESCALATES** rather than
+  patching in a new line number over what may now be a false statement.
+
+In both cases, a construct that cannot be found at all is a genuine escalation
+regardless of kind. Line numbers are retained because they make review faster,
+not because they are authoritative. This is the same rule proposed for WO-148
+in its pending §148.6 amendment (PR #431, registered separately; the two
+amendments share a cause, not a dependency — each stands on its own if the
+other has not merged).
 
 **The material non-finding, recorded because its absence is what makes this WO
 still buildable.** Unlike WO-148 — whose premises WO-149 falsified outright —
@@ -9498,13 +9546,29 @@ land on `official_book_snapshot.json`, which the portfolio scope never writes.
 **So this is citation drift only, with no behavioural interaction — WO-147 is
 dispatchable once this amendment merges.**
 
-**Scope, touched files, tests, fail-safe sentence and Day-after check are
-unchanged by this amendment.** It corrects pointers and adds no requirement; the
-four files under this WO's own **"Touch ONLY these files"** list and the
-eighteen tests under its **"Tests (enumerated)"** heading stand exactly as
-registered. (Located by heading, not line — this amendment's first draft cited
-register line numbers for them and those numbers had already drifted by the time
-the PR was reviewed, which is this amendment's own lesson applied to itself.)
+**Scope and touched files are unchanged by this amendment; the tests,
+fail-safe sentence, and Day-after check are NOT — a second round of external
+review of this same PR found three defects in this amendment's own first
+draft, and they are corrected the same way as the citation drift above:
+PERFORMED in the parent WO-147 text by this same commit, not merely declared
+here (S8 A4).** The four files under this WO's own **"Touch ONLY these
+files"** list stand exactly as registered; this amendment adds none. What is
+not unchanged: **test 18** as first drafted asserted an exhaustive-scan count
+that fails on the real tree, because test files themselves call
+`_candidate_staleness_reasons`, so its scan roots are now restricted to the
+two production roots, `src/` and `scripts/`; the **fail-safe sentence** as
+first drafted flatly contradicted **test 10**, and both now carry the same
+precedence rule — stale-map positive evidence overrides a missing
+current-row field, and missing-fields-keep applies only when the stale map
+carries no entry for that condition id; and the **Day-after check**'s
+`stale_map_status == "ok"` assertion is now gated on one completed
+post-deploy `maker_carry_study` run (worst case 86400s out) rather than on
+the 15-minute collector cycle, with the documented `"unavailable"` state
+accepted as expected until then. The eighteen tests under **"Tests
+(enumerated)"** are still eighteen in number and stand by heading, not line —
+this amendment's first draft cited register line numbers for them and those
+numbers had already drifted by the time the PR was reviewed, which is this
+amendment's own lesson applied to itself.
 
 **The same drift affects three other queued work orders and is named here so it
 is not rediscovered one wasted builder at a time.** None of the three is

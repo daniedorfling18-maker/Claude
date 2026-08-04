@@ -9292,13 +9292,27 @@ At `:2311-2313` add exactly two keys: `excluded_stale_condition_ids`
 (`dict[str, list[str]]`, sorted by condition id ascending, capped at the first
 **200**) and `excluded_stale_condition_ids_truncated` (bool).
 
-**Basis for 200:** the study scans at most `universe_pages: 5` x
-`page_size: 100` = 500 markets per run (`:399-400`), so 200 bounds the field at
-40% of the maximum scanned universe while covering the observed 62 with 3.2x
-headroom; worst case is under 20 KB against the 300 KB telemetry file cap
-(`push_vps_telemetry.sh:28`). `maker_carry_study.json` is verified **not** in
-`ledger_anchor.DEFAULT_LEDGER_REGISTRY`, so adding keys carries no anchor risk.
-`maker_carry_history.csv` and `maker_carry_portfolio_members.csv` byte-identical.
+**Basis for 200 — recomputed against the deployed config, not the code
+default, on further review.** `_settings`'s code default is `universe_pages: 5`
+(`:399-400`), which is what the first derivation used, but the shipped
+`polymarket_predictive_config.example.yaml` overrides it to `universe_pages: 8`
+(within the `maker_carry_study:` block, `:102-108`, literal at `:107`), and the
+scan loop consumes the configured value, not the default — `settings["universe_pages"]`
+and `settings["page_size"]` at `:810-819`. So the worst-case scanned universe on
+a deployed instance is `8 x 100 = 800` markets, not 500, and 200 bounds the
+field at **25%** of the maximum scanned universe, not 40%. **200 stays
+adequate as a burst-detection cap at the lower percentage**, because the cap's
+job is headroom against the *observed* stale count, not a fixed share of the
+scanned universe: at the observed 62 it is still 3.2x headroom, unchanged by
+which config is deployed, and the field's worst-case byte size — still under
+20 KB against the 300 KB telemetry file cap (`push_vps_telemetry.sh:28`) — does
+not move with the percentage either. The 40%→25% correction changes the
+*framing* of the basis, not its adequacy, and no threshold is raised: this is
+a diagnostic cap for operator observability of staleness bursts, not a
+selection, eligibility, or sizing gate. `maker_carry_study.json` is verified
+**not** in `ledger_anchor.DEFAULT_LEDGER_REGISTRY`, so adding keys carries no
+anchor risk. `maker_carry_history.csv` and `maker_carry_portfolio_members.csv`
+byte-identical.
 
 ### 147.2 — Collector side: one shared predicate, two tranches
 
@@ -9343,25 +9357,33 @@ exclusion is the stronger evidence).
 
 Two keys on `official_book_snapshot.json` (snapshot, not anchor-enrolled):
 `watchlist_excluded_expired` (dict with exactly `persistent`, `seed`,
-`portfolio_observed_not_excluded`, `close_time_unparseable`, `stale_map_status`
+`portfolio_observed_not_excluded`, `close_time_unparseable`,
+`kept_missing_fields`, `stale_map_status`
 ∈ `{"ok","unavailable","malformed","stale_ignored"}`) and
 `watchlist_excluded_expired_examples` (at most **10**, sorted by condition id —
 the literal matches the existing `excluded_stale_examples` cap at
 `maker_carry_study.py:850`).
 
 **Fail-safe sentence — precedence rule added on external review, which caught
-a real contradiction with test 10 below.** An expired-market exclusion fires
+a real contradiction with test 10 below; reconciled on a further review to name
+the counter each keep-path actually increments, after `kept_missing_fields` was
+added to the schema above because the missing-`question`/`uma_resolution_status`
+keep path had no counter at all.** An expired-market exclusion fires
 only on positively parsed evidence that the venue close time, title date, or
 UMA resolution status is past, and that evidence can come from either the
 current row or the persisted stale map; **the stale map's positive evidence
 takes precedence over a missing current-row field, and the missing-fields-keep
 behaviour applies only when the stale map carries no entry for that condition
-id.** So: a missing, empty, unparseable, or non-finite `end_date_utc`, a
-missing `question` or `uma_resolution_status`, and a missing, malformed, or
-more-than-48-hour-old `maker_carry_study.json` leave the market ON the
-watchlist and increment a visible counter **when the stale map has no entry
-for it** — because for a collector the conservative direction is to keep
-collecting. When the stale map DOES carry an entry for that condition id — the
+id.** So, each **only when the stale map has no entry for that condition id** —
+because for a collector the conservative direction is to keep collecting: a
+missing, empty, unparseable, or non-finite `end_date_utc` leaves the market ON
+the watchlist and increments `close_time_unparseable`; a missing `question` or
+missing `uma_resolution_status` leaves the market ON the watchlist and
+increments `kept_missing_fields`; and a missing, malformed, or
+more-than-48-hour-old `maker_carry_study.json` leaves the market ON the
+watchlist under the corresponding `stale_map_status` literal, which is a
+status field rather than a per-market counter. When the stale map DOES carry
+an entry for that condition id — the
 persistent-market-absent-from-the-candidates-CSV case in test 10, where the
 current row's fields are themselves missing — that entry is positive evidence
 from the study's own run and overrides the current-row absence, so the market
@@ -9408,6 +9430,13 @@ exactly-two assertion, because test files themselves call
 `_candidate_staleness_reasons` to exercise it. Restricting the scan to the two
 production roots is the fix, not raising the count: `"tests"` and `".github"`
 are excluded, along with `ROOT/".claude"`, asserting `visited_files > 0`.
+(19) **added on further review, closing the missing-fields counter gap:** a
+persistent market with `question` missing and no stale-map entry for its
+condition id → kept, `kept_missing_fields == 1`, `close_time_unparseable == 0`;
+a second persistent market with `uma_resolution_status` missing, likewise no
+stale-map entry → kept, `kept_missing_fields == 2` cumulative — distinct from,
+and not conflated with, the `close_time_unparseable` counter exercised by
+tests 7-9.
 
 **Honest consequence, stated rather than discovered later.** The three tranche
 budgets are independent (`persistent_cap` at `:796`, seed `cap` at `:814`), so
@@ -9499,10 +9528,13 @@ were additionally confirmed byte-identical against `33ab8f7^1`:
 | `:957`, `:968` | the two `snapshot_official_books(cfg)` calls | `:1033`, `:1044` |
 
 **`maker_carry_study.py` is unaffected.** That file was not touched by WO-146,
-WO-149 or WO-150, and all twelve of this WO's citations into it — `:582-605`,
+WO-149 or WO-150, and all eleven of this WO's citations into it — `:582-605`,
 `:842`, `:858`, `:859`, `:844-846`, `:903`, `:850`, `:2311-2313`, `:2488`,
-`:399-400`, `:1710-1718`, `:1666-1667` — resolve exactly. They are **not** to be
-edited.
+`:399-400`, `:1710-1718` — resolve exactly (`:1666-1667` was recorded here on
+the prior round of review, but that line range does not belong to any of this
+WO's citations — it is WO-151's cite into this same file — so it is removed
+here rather than corrected in place; recount twelve→eleven). They are **not**
+to be edited.
 
 **Three self-referential citations into this register are also stale**, from
 unrelated later edits, and are corrected here rather than left for the same
@@ -9577,12 +9609,14 @@ and deploy acceptance fails closed on either producer's nonzero exit, on
 both deploy paths, so a successful deploy already guarantees a freshly
 completed study run and that wait-allowance had the direction backwards.
 The assertion is now `stale_map_status == "ok"` required immediately after
-deploy acceptance, with the wait-allowance deleted. The eighteen tests
-under **"Tests (enumerated)"** are still eighteen in number and stand by
+deploy acceptance, with the wait-allowance deleted. The tests under
+**"Tests (enumerated)"** numbered eighteen after this amendment and stand by
 heading, not line —
 this amendment's first draft cited register line numbers for them and those
 numbers had already drifted by the time the PR was reviewed, which is this
-amendment's own lesson applied to itself.
+amendment's own lesson applied to itself. A nineteenth test was added on a
+later round of review to exercise the `kept_missing_fields` counter (§147.3);
+the same heading-not-line convention holds for it.
 
 **The same drift affects three other queued work orders and is named here so it
 is not rediscovered one wasted builder at a time.** None of the three is

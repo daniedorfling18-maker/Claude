@@ -2166,9 +2166,11 @@ def _maker_study_intraday_skipped_cycles_total(cfg: EngineConfig) -> int | None:
     entry = jobs.get("maker_study_intraday")
     if not isinstance(entry, dict):
         return None
+    if "skipped_cycles_total" not in entry:
+        return None
     try:
-        return int(entry.get("skipped_cycles_total", 0) or 0)
-    except (TypeError, ValueError):
+        return int(entry["skipped_cycles_total"])
+    except (TypeError, ValueError, OverflowError):
         return None
 
 

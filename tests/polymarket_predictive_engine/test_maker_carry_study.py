@@ -1709,6 +1709,8 @@ def test_wo137_diff_write_failure_does_not_change_subject_ledgers(tmp_path, monk
     assert summary["ledger_commit"]["status"] == "committed"
     assert summary["composition_diff_status"] == "write_failed"
     assert len(read_csv_rows(out_root / "maker_carry_history.csv")) == history_before + 1
+    # WO-111 remains append-only: the existing bytes are an identical prefix.
+    assert (out_root / "maker_carry_portfolio_members.csv").read_bytes().startswith(members_before)
 
 
 # ---------------------------------------------------------------------------
@@ -1960,6 +1962,36 @@ def test_harvest_age_and_window_state_and_skipped_cycles_match_scheduler_status(
     assert disabled_summary["maker_study_intraday_skipped_cycles_total"] == 7
     assert disabled_summary["training_harvest_window_state"] in {"before_window", "after_window", "inside_window", "unknown"}
     assert disabled_summary["training_harvest_age_seconds"] is not None
+
+
+def test_skipped_cycles_total_infinite_counter_does_not_raise_and_reads_as_none(tmp_path, monkeypatch) -> None:
+    """A status.json carrying Infinity for the scheduler's own counter must
+    not crash the study - int(float("inf")) raises OverflowError, which is
+    a malformed-read case like any other and must read as None, never
+    propagate."""
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+    _write_scheduler_status(cfg, maker_study_intraday_skipped_cycles_total=float("inf"))
+
+    summary = run_maker_carry_study(cfg)
+
+    assert summary["maker_study_intraday_skipped_cycles_total"] is None
+
+
+def test_skipped_cycles_total_absent_key_reads_as_none_not_fabricated_zero(tmp_path, monkeypatch) -> None:
+    """When the maker_study_intraday job entry exists but carries no
+    skipped_cycles_total key at all, the docstring promises None - never a
+    fabricated zero."""
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+    write_json(
+        cfg.output_root / "ops_scheduler" / "status.json",
+        {"jobs": {"maker_study_intraday": {}}},
+    )
+
+    summary = run_maker_carry_study(cfg)
+
+    assert summary["maker_study_intraday_skipped_cycles_total"] is None
 
 
 def test_maker_carry_study_json_artifact_shape_is_consumed_identically_with_or_without_study_trigger(

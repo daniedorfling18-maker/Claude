@@ -9254,13 +9254,13 @@ resourced as if it were.**
 
 What survives verification is narrower and still worth building: **one of the
 three collection tranches applies no staleness check at all.** `_portfolio`
-(`maker_fill_replay.py:421-433`) inherits the study's filter. Seed
-(`:487-571`) inherits it as of the last study run (up to 24h stale against a
-900s collector). **Persistent (`_recent_book_markets`, `:436-484`) has no
+(`maker_fill_replay.py:426-438`) inherits the study's filter. Seed
+(`:492-576`) inherits it as of the last study run (up to 24h stale against a
+900s collector). **Persistent (`_recent_book_markets`, `:441-489`) has no
 close-time, title-date, or resolution check of any kind** — membership is
 `books_dir.glob("*.csv.gz")` filtered only by mtime against
 `regime_days: 14` — and the caller rewrites that same file on every successful
-poll (`:862`), refreshing its mtime. **The recency criterion is refreshed by the
+poll (`:925`), refreshing its mtime. **The recency criterion is refreshed by the
 act of using it**, so a market that keeps returning a book payload keeps its slot
 indefinitely regardless of whether its venue close time has passed. **How many
 persistent-tranche markets are currently expired is unmeasured; no artifact
@@ -9305,15 +9305,15 @@ headroom; worst case is under 20 KB against the 300 KB telemetry file cap
 Add exactly one helper `_watchlist_expired_reasons(row, stale_map, *, as_of)`
 which calls `maker_carry_study._candidate_staleness_reasons` **verbatim**,
 imported inside the function — the precedent registered at
-`maker_fill_replay.py:580-585` ("a second implementation would drift from the
+`maker_fill_replay.py:585-590` ("a second implementation would drift from the
 rule it is meant to describe"). Do not reimplement date parsing. Adapter:
 `end_date_utc` → `endDateIso`, `question` → `question`,
 `uma_resolution_status` → `umaResolutionStatus` (all in `CANDIDATE_FIELDS`).
 `as_of` is `parse_timestamp(generated_at) or datetime.now(timezone.utc)` — the
 run's own clock per S1, never the max of observed data timestamps.
 
-Applied to the **persistent** tranche (before `watchlist.append` at `:483`) and
-the **seed** tranche (in the existing skip loop at `:510-530`, incrementing
+Applied to the **persistent** tranche (before `watchlist.append` at `:488`) and
+the **seed** tranche (in the existing skip loop at `:515-535`, incrementing
 `excluded["expired"]` so it surfaces through `candidate_seed_exclusions`).
 **Explicitly NOT applied to the portfolio tranche** — `_portfolio` feeds
 `maker_replay_collection_windows.csv`, whose `covered` flag drives
@@ -9323,7 +9323,7 @@ here (`docs/POLYMARKET_CODEX_WORK_ORDERS.md:5514-5516`). Count it instead:
 `portfolio_observed_not_excluded`.
 
 **A2 — every branch, and every one fails OPEN toward collecting**, which is the
-registered conservative direction for a collector (`maker_fill_replay.py:129-133`:
+registered conservative direction for a collector (`maker_fill_replay.py:134-138`:
 "For a collector the conservative direction is to collect"). Exclusion fires only
 on positively parsed evidence of pastness. `end_date_utc` missing/empty/
 unparseable/non-finite → `normalize_external_timestamp` returns `None`
@@ -9360,7 +9360,7 @@ excluded, only counted; and no gate, sizing, eligibility, or order surface reads
 this artifact.
 
 **Cadence.** No new job or CLI command. `snapshot_official_books` already runs
-every cycle via `collect_maker_replay_data` (`:957`, `:968`) on the existing
+every cycle via `collect_maker_replay_data` (`:1033`, `:1044`) on the existing
 900s `run_trade_prints` cadence.
 
 **Tests (enumerated).** In `test_maker_carry_study.py`: (1) 3 stale + 2 clean →
@@ -9392,7 +9392,7 @@ exactly two sites, scan rooted `Path(__file__).resolve().parents[2]` over
 asserting `visited_files > 0`.
 
 **Honest consequence, stated rather than discovered later.** The three tranche
-budgets are independent (`persistent_cap` at `:733`, seed `cap` at `:751`), so
+budgets are independent (`persistent_cap` at `:796`, seed `cap` at `:814`), so
 freeing a persistent slot **reduces the number of markets polled**; it does not
 reallocate that slot to seeding. This WO lowers API and disk spend and removes
 noise from `seasoning_runway`; it does **not** increase seeding breadth. Any
@@ -9424,7 +9424,7 @@ contains no id listed in `excluded_stale_condition_ids`. (6)
 
 **Open questions.** (1) Should the persistent exclusion also require absence from
 the current portfolio as belt-and-braces? `_recent_book_markets` already receives
-`exclude={portfolio ids}` at `:728`, but that guarantee lives in the caller.
+`exclude={portfolio ids}` at `:790`, but that guarantee lives in the caller.
 (2) Is 48.0h right if the study effectively runs twice daily? If the deployed
 effective interval is ~12h, 24.0h is the better-matched literal.
 (3) **Priority: parked behind WO-149** per the drafter's recommendation and the
@@ -9441,9 +9441,12 @@ from 1754 to 1922 lines. The shift is **not uniform**: `+5` above roughly line
 registered numbers would therefore edit the wrong function, and would do so
 *more* wrongly the deeper into the file it went.
 
-**The corrected table.** Each row was resolved by matching the construct, not by
-adding an offset, and the `+5` rows were additionally confirmed byte-identical
-against `33ab8f7^1`:
+**The corrected table — and the corrections are PERFORMED in the parent text
+above by this same commit, not merely declared here** (S8 A4 / the A-new
+performed-not-declared rule from #421: an amendment that states corrections and
+leaves the parent carrying the stale values fails admission). Each row was
+resolved by matching the construct, not by adding an offset, and the `+5` rows
+were additionally confirmed byte-identical against `33ab8f7^1`:
 
 | as registered | construct | correct on `c26cd7f` |
 |---|---|---|
@@ -9480,7 +9483,9 @@ line disagreeing with the construct named beside it follows the construct,
 records the drift, and continues — it does not guess and it does not stop, unless
 the construct itself cannot be found, which is a genuine escalation. Line numbers
 are retained because they make review faster, not because they are authoritative.
-This is the same rule §148.6 adopts, for the same cause.
+This is the same rule proposed for WO-148 in its pending §148.6 amendment
+(PR #431, registered separately; the two amendments share a cause, not a
+dependency — each stands on its own if the other has not merged).
 
 **The material non-finding, recorded because its absence is what makes this WO
 still buildable.** Unlike WO-148 — whose premises WO-149 falsified outright —
@@ -9495,13 +9500,17 @@ dispatchable once this amendment merges.**
 
 **Scope, touched files, tests, fail-safe sentence and Day-after check are
 unchanged by this amendment.** It corrects pointers and adds no requirement; the
-four files at `:9156-9160` and the eighteen enumerated tests at `:9242-9268`
-stand exactly as registered.
+four files under this WO's own **"Touch ONLY these files"** list and the
+eighteen tests under its **"Tests (enumerated)"** heading stand exactly as
+registered. (Located by heading, not line — this amendment's first draft cited
+register line numbers for them and those numbers had already drifted by the time
+the PR was reviewed, which is this amendment's own lesson applied to itself.)
 
 **The same drift affects three other queued work orders and is named here so it
-is not rediscovered one wasted builder at a time.** None is dispatchable today,
-so none is corrected in this amendment, but each must be re-verified before it
-is:
+is not rediscovered one wasted builder at a time.** None of the three is
+corrected by this amendment — each carries the factual drift note below, and
+each work order's own section (not this one) governs whether and when it is
+dispatchable:
 
 - **WO-143** — `cli.py:613-614` (the `refresh-governance` contention-exit
   precedent) is now `:627-628`, and `run_vps_ops_scheduler.sh:620-645`
@@ -9514,12 +9523,11 @@ is:
   self-correction for `test_shadow_cohort.py` fixed one of a pair and left the
   twin: `:162` is now `:153`.
 - **WO-151** — the base text's `run_vps_ops_scheduler.sh:796-814` is now
-  `:841-860` and `:799-810` is now `:844-855`. Its A10 gap (no touched-file
-  list, no enumerated tests) was closed when **§151.1 merged with PR #427 on
-  2026-08-03**, and §151.1's own scheduler citations (`:841-856`, `:635`) were
-  derived *after* WO-149's merge and resolve against the current tree — so
-  WO-151 is dispatchable now, with §151.1's numbers authoritative over the base
-  text's under the anchor-text-governs rule.
+  `:841-860` and `:799-810` is now `:844-855`. Two facts recorded without
+  ruling on that WO's dispatch status here (its own section governs): its A10
+  gap was closed when §151.1 merged with PR #427, and §151.1's own scheduler
+  citations (`:841-856`, `:635`) were derived *after* WO-149's merge and
+  resolve against the current tree.
 
 ## WO-148 — Make seed-to-eligible conversion measurable: a tier-assignment event ledger — `queued` (registered 2026-08-01; measurement-only sidecar; changes no selection behaviour; enrolment deliberately deferred, see 148.4 → OWNER MERGE after line-audit)
 

@@ -9429,21 +9429,27 @@ stricter reading is adopted deliberately — this session's review rounds found
 defects in the orchestrator's own registered text at every round, so orchestrator
 self-merge is not the safe default here.
 
-**Day-after check — the `stale_map_status` clause is re-gated on the study's
-own cadence on external review, not the collector's.** The stale map this
-check reads is produced by `maker_carry_study.py`, on the
-`OPS_MAKER_STUDY_INTRADAY_INTERVAL_SECONDS` default 86400s cadence, not by
-`snapshot_official_books`'s 900s collector cycle; asserting
-`stale_map_status == "ok"` after a single <=15-minute collector cycle would
-fail on any deploy landing between study runs, for no defect. After one
-collector cycle (<= 15 min): (1) `excluded_stale_condition_ids` non-empty with
-key count `min(excluded_stale, 200)`. (2) `watchlist_excluded_expired.
-stale_map_status == "ok"`, gated on **one post-deploy `maker_carry_study` run
-having completed** — until that run happens (worst case 86400s out),
-`stale_map_status == "unavailable"` is the documented and expected state, not
-a build failure; re-check after the first post-deploy study run before
-treating anything other than `"ok"` as a regression. (3) **record the
-numbers** — `persistent`, `seed`, `portfolio_observed_not_excluded`,
+**Day-after check — the `stale_map_status` clause is re-gated a second time on
+a further round of external review, this time in the opposite direction from
+the first.** The stale map this check reads is produced by
+`maker_carry_study.py`, on the `OPS_MAKER_STUDY_INTRADAY_INTERVAL_SECONDS`
+default 86400s cadence, not by `snapshot_official_books`'s 900s collector
+cycle — but `scripts/run_vps_deploy_acceptance.sh:81-83` always runs
+`maker-carry-study` before `collect-maker-replay-data`, on both deploy paths,
+and deploy acceptance fails closed on either producer's nonzero exit. A
+deploy that completes therefore already guarantees a freshly completed
+`maker_carry_study` run, so the round-2 wait-allowance — gating the assertion
+on the study's organic cadence and accepting `"unavailable"` as documented
+and expected until it elapsed — had the direction backwards: after a
+successful deploy, `"unavailable"` can only be a regression, never the
+expected state. That allowance is deleted. After one collector cycle (<= 15
+min): (1) `excluded_stale_condition_ids` non-empty with key count
+`min(excluded_stale, 200)`. (2) `watchlist_excluded_expired.
+stale_map_status == "ok"` is **required immediately after deploy
+acceptance** — no wait, no documented-unavailable exception; anything other
+than `"ok"` at that point is a regression to investigate, not an expected
+transient. (3) **record the numbers** — `persistent`, `seed`,
+`portfolio_observed_not_excluded`,
 `close_time_unparseable`. **A result of `persistent: 0` is a valid and
 informative outcome** meaning the tranche is clean today and this WO bought
 observability rather than hygiene; it is not a build failure. (4)
@@ -9561,11 +9567,19 @@ first drafted flatly contradicted **test 10**, and both now carry the same
 precedence rule — stale-map positive evidence overrides a missing
 current-row field, and missing-fields-keep applies only when the stale map
 carries no entry for that condition id; and the **Day-after check**'s
-`stale_map_status == "ok"` assertion is now gated on one completed
-post-deploy `maker_carry_study` run (worst case 86400s out) rather than on
-the 15-minute collector cycle, with the documented `"unavailable"` state
-accepted as expected until then. The eighteen tests under **"Tests
-(enumerated)"** are still eighteen in number and stand by heading, not line —
+`stale_map_status == "ok"` assertion — gated in this amendment's first draft
+on one completed post-deploy `maker_carry_study` run (worst case 86400s out)
+rather than on the 15-minute collector cycle, with the documented
+`"unavailable"` state accepted as expected until then — is corrected again
+on a further round of external review: `scripts/run_vps_deploy_acceptance.
+sh:81-83` always runs `maker-carry-study` before `collect-maker-replay-data`
+and deploy acceptance fails closed on either producer's nonzero exit, on
+both deploy paths, so a successful deploy already guarantees a freshly
+completed study run and that wait-allowance had the direction backwards.
+The assertion is now `stale_map_status == "ok"` required immediately after
+deploy acceptance, with the wait-allowance deleted. The eighteen tests
+under **"Tests (enumerated)"** are still eighteen in number and stand by
+heading, not line —
 this amendment's first draft cited register line numbers for them and those
 numbers had already drifted by the time the PR was reviewed, which is this
 amendment's own lesson applied to itself.

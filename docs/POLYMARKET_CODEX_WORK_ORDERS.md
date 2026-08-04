@@ -10270,9 +10270,14 @@ missing, empty, unparseable, or non-finite stamp does, and the answer is the
 fail-closed branch — a study that cannot establish its own trigger records
 `"unknown"` and does not claim a cadence it did not have.
 
-**Fail-safe sentence.** A missing, empty, unparseable, or non-finite harvest or
-job stamp leaves the dedicated job un-fired and records the window state rather
-than assuming the window is open; a study run whose trigger cannot be
+**Fail-safe sentence.** *(The job-stamp half of the clause below is SUPERSEDED
+by §151.2, added 2026-08-04 — see that section for the adjudication. The
+harvest-stamp half, per test (8), is unchanged.)* A missing, empty,
+unparseable, or non-finite harvest stamp never blocks the decoupled dedicated
+job from firing, per test (8); a missing, empty, unparseable, or non-finite
+job due-stamp (`maker_study_intraday`) reads as due and the job fires, per
+§151.2's WO-120 fail-open ratification; either path records the window state
+rather than assuming it silently; a study run whose trigger cannot be
 established records `study_trigger: "unknown"` rather than guessing; nothing here
 changes what the study computes, which markets it measures, or any gate,
 threshold, or eligibility rule; and a failure of this work order's machinery
@@ -10405,3 +10410,60 @@ historical per-run `maker_carry_candidates.csv` exists — only the current
 snapshot — so predicate-level "why did X leave" is answerable for the latest
 departure only. WO-148's tier-event ledger is the closest existing remedy;
 a per-run candidate archive would be its complement and is not proposed here.
+
+### 151.2 — Test (9)'s fail-direction was wrong; the builder's inversion is ratified (added 2026-08-04 from the WO-151 build escalation and its independent line audit)
+
+**The contradiction, as adjudicated.** §151.1's A2 paragraph — *"A missing,
+empty, unparseable, or non-finite `maker_study_intraday` stamp leaves the job
+**un-fired** and records the window state; it never reads as 'due'"* — and
+test (9) — *"with the `maker_study_intraday` stamp absent or unparseable the
+job does **not** fire and the window state is recorded (A2 fail-closed)"* —
+registered a fail-**closed** direction for the job's own due-stamp. Verified
+against the tree, that direction contradicts three things: (i) **test (8)'s
+opposite fail-direction for the harvest stamp in the same enumerated list** —
+*"with the harvest stamp absent, unparseable, non-finite, and 200000s old, the
+dedicated job still fires once its own interval has elapsed"*, i.e. fail-open;
+(ii) **the §151.1 decoupling literal's sole surviving condition** — the window
+condition becomes *"the `maker_study_intraday` stamp is at least
+`MAKER_STUDY_INTRADAY_INTERVAL` old"* alone, the offset guard removed as a
+precondition. That single comparison is evaluated by the shared
+`seconds_since_stamp` reader (`scripts/run_vps_ops_scheduler.sh:208-222`),
+whose registered WO-120 convention treats a missing stamp as `999999999`
+seconds old and a corrupt/empty stamp as epoch `0` — both of which satisfy the
+`>= interval` test, i.e. both read as **immediately due**. That is exactly the
+fail-open outcome test (9) forbade, produced by the one condition §151.1 left
+standing; and (iii) **the parent WO's fail-safe sentence**, which paired
+"harvest or job stamp" under a single "leaves the dedicated job un-fired"
+clause even though test (8) already required the harvest half of that same
+clause to be false. A literal test (9) would require `maker_study_intraday`'s
+own call to `seconds_since_stamp` to behave oppositely to every other call in
+the file — `governance_refresh`, `clv_snapshot`, `locked_card_refresh`,
+`trade_prints`, `book_pulse`, `ledger_anchor`, `maker_safety_refresh` — which
+is exactly the uniform convention WO-120 exists to guarantee.
+
+**The starvation argument.** The only writer of the `maker_study_intraday`
+stamp is `touch_stamp maker_study_intraday` (`scripts/run_vps_ops_scheduler.sh:856`),
+inside the job's own fire branch — there is no independent repair path. Under
+a literal test (9), one corrupt stamp file permanently disables the job: it
+can never again read as due, so it can never fire, so it can never rewrite its
+own stamp. That is precisely the stall class WO-120 was registered to close.
+Firing a read-only study on a corrupt cadence stamp risks at worst one extra
+run; it moves no gate, threshold, or eligibility rule.
+
+**RATIFY.** Test (9) is re-registered with the WO-120 fail-open direction —
+missing or corrupt `maker_study_intraday` due-stamp reads as due, and the job
+fires — matching what the builder built and what the independent line audit
+verified. The parent fail-safe sentence's clause *"A missing … or job stamp
+leaves the dedicated job un-fired"* is SUPERSEDED for the job's own due-stamp;
+the harvest stamp's handling per test (8) is unchanged. That sentence is
+edited inline, in this same commit, within WO-151's own preamble above.
+
+**Precedent.** Same class as §145.2: the registered string now matches the
+registered decision, recorded rather than silently fixed.
+
+**Recorded, not blocking.** `run_maker_study_intraday`'s `stamp_status` detail
+string (`scripts/run_vps_ops_scheduler.sh:635`) still reads *"...11-13h offset
+guard"* — stale prose left over from the removed offset guard, now pinned as a
+literal by `tests/test_polymarket_vps_docker.py:621`, a file outside §151.1's
+touched-file list. It needs its own small follow-up WO touching the detail
+string and that docker test together; none is registered here.

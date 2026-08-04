@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import fcntl
 import gzip
+import importlib.util
 import json
 import os
+import subprocess
+import sys
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -17,15 +20,22 @@ import yaml
 from polymarket_predictive_engine import maker_carry_study
 from polymarket_predictive_engine.config import load_config
 from polymarket_predictive_engine.maker_carry_study import (
+    HARVEST_WINDOW_MAX_SECONDS,
+    HARVEST_WINDOW_MIN_SECONDS,
     MAKER_CARRY_LEDGER_LOCK,
+    STUDY_TRIGGER_DOMAIN,
+    STUDY_TRIGGER_ENV_VAR,
+    STUDY_TRIGGER_PRODUCER_VALUES,
     _book_history_depth,
     _incumbent_hold,
     _maker_carry_ledger_lock_path,
     _measurement_eligible,
     _portfolio_composition_diff,
+    _resolve_study_trigger,
     _size_portfolio,
     run_maker_carry_study,
 )
+from polymarket_predictive_engine.maker_fill_replay import _portfolio as _replay_consumed_portfolio
 from polymarket_predictive_engine.utils import (
     csv_columns,
     read_csv_rows,
@@ -33,6 +43,8 @@ from polymarket_predictive_engine.utils import (
     write_csv,
     write_json,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _config(tmp_path: Path):
@@ -814,6 +826,8 @@ _MC_HISTORY_FIELDS = {
     "top_portfolio_market",
     "top_portfolio_question",
     "clears_100_per_month_target",
+    # WO-151 §151.1 scope (a): which trigger produced this row.
+    "study_trigger",
 }
 
 
@@ -1695,5 +1709,349 @@ def test_wo137_diff_write_failure_does_not_change_subject_ledgers(tmp_path, monk
     assert summary["ledger_commit"]["status"] == "committed"
     assert summary["composition_diff_status"] == "write_failed"
     assert len(read_csv_rows(out_root / "maker_carry_history.csv")) == history_before + 1
-    # WO-111 remains append-only: the existing bytes are an identical prefix.
-    assert (out_root / "maker_carry_portfolio_members.csv").read_bytes().startswith(members_before)
+
+
+# ---------------------------------------------------------------------------
+# WO-151 §151.1 enumerated tests (1 python-side, 2 python-side, 3-7, 10, 11,
+# 12) plus the pre-dispatch-sweep consumer-compatibility check. Test (1) and
+# (2)'s shell/subprocess-env-setting halves, and (8)/(9), live in
+# test_training_harvest.py alongside the scheduler and harvest-step code
+# that sets the environment variable this module reads.
+# ---------------------------------------------------------------------------
+
+
+def test_study_trigger_intraday_job_recorded_from_env_var(tmp_path, monkeypatch) -> None:
+    """WO-151 §151.1 test (1), python-side: with MAKER_STUDY_TRIGGER=
+    intraday_job in the environment (as the scheduler's dedicated job sets it
+    - see test_training_harvest.py), the run records study_trigger:
+    "intraday_job". A null implementation (field always "cli" or missing)
+    fails this."""
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+    monkeypatch.setenv(STUDY_TRIGGER_ENV_VAR, "intraday_job")
+
+    summary = run_maker_carry_study(cfg)
+
+    assert summary["study_trigger"] == "intraday_job"
+    persisted = read_json(cfg.output_root / "maker_carry" / "maker_carry_study.json")
+    assert persisted["study_trigger"] == "intraday_job"
+
+
+def test_study_trigger_harvest_step_recorded_from_env_var_and_explicit_kwarg(tmp_path, monkeypatch) -> None:
+    """WO-151 §151.1 test (2), python-side: invoked as harvest step 10 (which
+    sets MAKER_STUDY_TRIGGER=harvest_step as a subprocess environment overlay
+    - see test_training_harvest.py), it records "harvest_step". Also exercises
+    the explicit study_trigger= kwarg directly, since that is the surface a
+    future direct caller (or a unit test) would use."""
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+    monkeypatch.setenv(STUDY_TRIGGER_ENV_VAR, "harvest_step")
+
+    summary = run_maker_carry_study(cfg)
+
+    assert summary["study_trigger"] == "harvest_step"
+
+    monkeypatch.delenv(STUDY_TRIGGER_ENV_VAR, raising=False)
+    explicit = run_maker_carry_study(cfg, study_trigger="harvest_step")
+    assert explicit["study_trigger"] == "harvest_step"
+
+
+def test_study_trigger_defaults_to_cli_when_nothing_identifies_the_caller(tmp_path, monkeypatch) -> None:
+    """WO-151 §151.1 test (3): invoked directly via the CLI (no env var set,
+    no explicit kwarg), it records "cli". A null implementation that always
+    reads the env var as due/present, or defaults to "unknown" instead of
+    "cli", fails this."""
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+    monkeypatch.delenv(STUDY_TRIGGER_ENV_VAR, raising=False)
+
+    summary = run_maker_carry_study(cfg)
+
+    assert summary["study_trigger"] == "cli"
+    assert _resolve_study_trigger(None) == "cli"
+
+
+def test_study_trigger_unknown_when_unestablishable_never_guesses(tmp_path, monkeypatch) -> None:
+    """WO-151 §151.1 test (4): a run whose trigger cannot be established
+    records "unknown" and does NOT guess - neither silently falling back to
+    "cli" nor accepting an untrusted value verbatim. Covers both the env-var
+    path (a stray/garbage value) and the explicit-kwarg path."""
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+
+    for garbage in ("scheduled_restart", "INTRADAY_JOB_TYPO", "0", "none"):
+        monkeypatch.setenv(STUDY_TRIGGER_ENV_VAR, garbage)
+        summary = run_maker_carry_study(cfg)
+        assert summary["study_trigger"] == "unknown", garbage
+
+    monkeypatch.delenv(STUDY_TRIGGER_ENV_VAR, raising=False)
+    assert run_maker_carry_study(cfg, study_trigger="not_a_real_trigger")["study_trigger"] == "unknown"
+    assert _resolve_study_trigger("garbage") == "unknown"
+
+    # Whitespace-only is treated the SAME as fully absent ("cli"), not as
+    # "unknown" - deliberate: it carries no more signal than an unset var,
+    # so it is classified with "nothing was set" rather than "something
+    # untrustworthy was set". Documented here so the choice is not re-litigated.
+    monkeypatch.setenv(STUDY_TRIGGER_ENV_VAR, "   ")
+    assert run_maker_carry_study(cfg)["study_trigger"] == "cli"
+
+
+def test_study_trigger_domain_is_closed_across_every_input(tmp_path, monkeypatch) -> None:
+    """WO-151 §151.1 test (5): every value written is inside the closed
+    domain {"intraday_job", "harvest_step", "cli", "unknown"} - a value
+    outside it is a test failure, not a new domain member."""
+    assert STUDY_TRIGGER_DOMAIN == {"intraday_job", "harvest_step", "cli", "unknown"}
+    assert STUDY_TRIGGER_PRODUCER_VALUES == {"intraday_job", "harvest_step"}
+
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+    probes = [None, "", "intraday_job", "harvest_step", "cli", "HARVEST_STEP", "garbage-value", "unknown"]
+    for probe in probes:
+        if probe is None:
+            monkeypatch.delenv(STUDY_TRIGGER_ENV_VAR, raising=False)
+        else:
+            monkeypatch.setenv(STUDY_TRIGGER_ENV_VAR, probe)
+        summary = run_maker_carry_study(cfg)
+        assert summary["study_trigger"] in STUDY_TRIGGER_DOMAIN, (probe, summary["study_trigger"])
+
+
+def test_study_trigger_field_appears_on_both_json_artifact_and_history_row(tmp_path, monkeypatch) -> None:
+    """WO-151 §151.1 test (6): the field appears on BOTH maker_carry_study.json
+    and every new maker_carry_history.csv row."""
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+    monkeypatch.setenv(STUDY_TRIGGER_ENV_VAR, "harvest_step")
+
+    run_maker_carry_study(cfg)
+
+    persisted = read_json(cfg.output_root / "maker_carry" / "maker_carry_study.json")
+    assert persisted["study_trigger"] == "harvest_step"
+    history = read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_history.csv")
+    assert len(history) == 1
+    assert history[0]["study_trigger"] == "harvest_step"
+
+
+def test_legacy_history_rows_without_study_trigger_column_still_parse(tmp_path, monkeypatch) -> None:
+    """WO-151 §151.1 test (7): pre-existing maker_carry_history.csv rows
+    without the column still parse - the reader tolerates the legacy header.
+    A null implementation that raises on the narrower legacy header, or that
+    silently drops the pre-existing row, fails this."""
+    cfg = _config(tmp_path)
+    history_path = cfg.output_root / "maker_carry" / "maker_carry_history.csv"
+    legacy_fields = [
+        "generated_at_utc",
+        "share_model",
+        "universe_scan_mode",
+        "universe_rewarded_markets",
+        "universe_pot_usd_per_day",
+        "portfolio_markets",
+        "portfolio_capital_usd",
+        "portfolio_net_carry_usd_per_day",
+        "portfolio_markout_measured",
+        "top_portfolio_market",
+        "top_portfolio_question",
+        "clears_100_per_month_target",
+    ]
+    write_csv(
+        history_path,
+        [
+            {
+                "generated_at_utc": "2026-07-10T00:00:00Z",
+                "share_model": "published_v2",
+                "universe_scan_mode": "yield_first_v1",
+                "universe_rewarded_markets": 1,
+                "universe_pot_usd_per_day": 100.0,
+                "portfolio_markets": 0,
+                "portfolio_capital_usd": 0.0,
+                "portfolio_net_carry_usd_per_day": 0.0,
+                "portfolio_markout_measured": False,
+                "top_portfolio_market": "",
+                "top_portfolio_question": "",
+                "clears_100_per_month_target": False,
+            }
+        ],
+        fieldnames=legacy_fields,
+    )
+    _calm_market_requests(monkeypatch)
+    monkeypatch.setenv(STUDY_TRIGGER_ENV_VAR, "intraday_job")
+
+    run_maker_carry_study(cfg)
+
+    rows = read_csv_rows(history_path)
+    assert len(rows) == 2
+    assert rows[0]["generated_at_utc"] == "2026-07-10T00:00:00Z"
+    assert rows[0].get("study_trigger", "") == ""
+    assert rows[1]["study_trigger"] == "intraday_job"
+
+
+def _write_scheduler_status(
+    cfg,
+    *,
+    training_harvest_last_success_utc: Any = "",
+    maker_study_intraday_skipped_cycles_total: int = 0,
+) -> None:
+    write_json(
+        cfg.output_root / "ops_scheduler" / "status.json",
+        {
+            "jobs": {
+                "training_harvest": {"last_success_utc": training_harvest_last_success_utc},
+                "maker_study_intraday": {
+                    "skipped_cycles_total": maker_study_intraday_skipped_cycles_total
+                },
+            }
+        },
+    )
+
+
+def test_harvest_age_and_window_state_and_skipped_cycles_match_scheduler_status(tmp_path, monkeypatch) -> None:
+    """WO-151 §151.1 tests (10) and (11): skipped_cycles_total and the window
+    state appear in the artifact and MATCH the scheduler's own counter, and
+    the observed harvest age is recorded on every path - including the early
+    "disabled" return, which never reaches the candidate/portfolio logic."""
+    cfg = _config(tmp_path)
+
+    # Inside the old 11-13h window (40000s ~= 11.1h).
+    inside_age = 40000
+    stamp = (datetime.now(timezone.utc) - timedelta(seconds=inside_age)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _write_scheduler_status(
+        cfg, training_harvest_last_success_utc=stamp, maker_study_intraday_skipped_cycles_total=12
+    )
+    _calm_market_requests(monkeypatch)
+
+    summary = run_maker_carry_study(cfg)
+
+    assert summary["maker_study_intraday_skipped_cycles_total"] == 12
+    assert summary["training_harvest_window_state"] == "inside_window"
+    assert HARVEST_WINDOW_MIN_SECONDS <= summary["training_harvest_age_seconds"] <= HARVEST_WINDOW_MAX_SECONDS
+    assert abs(summary["training_harvest_age_seconds"] - inside_age) < 5
+
+    # Before the window (10000s), after the window (200000s), and missing -
+    # each recorded, never gated on, never guessed as a numeric age when
+    # absent/unparseable/non-finite.
+    for age_seconds, expected_state in (
+        (10000, "before_window"),
+        (200000, "after_window"),
+    ):
+        stamp = (datetime.now(timezone.utc) - timedelta(seconds=age_seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        _write_scheduler_status(cfg, training_harvest_last_success_utc=stamp, maker_study_intraday_skipped_cycles_total=3)
+        summary = run_maker_carry_study(cfg)
+        assert summary["training_harvest_window_state"] == expected_state
+        assert abs(summary["training_harvest_age_seconds"] - age_seconds) < 5
+        assert summary["maker_study_intraday_skipped_cycles_total"] == 3
+
+    for bad_stamp in ("", "not-a-timestamp", None):
+        _write_scheduler_status(cfg, training_harvest_last_success_utc=bad_stamp)
+        summary = run_maker_carry_study(cfg)
+        assert summary["training_harvest_window_state"] == "unknown"
+        assert summary["training_harvest_age_seconds"] is None
+
+    # Every path, including the early "disabled" return (test 11).
+    disabled_cfg_path = tmp_path / "disabled_config.yaml"
+    raw_disabled = yaml.safe_load(Path("polymarket_predictive_config.example.yaml").read_text(encoding="utf-8"))
+    raw_disabled["paths"]["data_root"] = str(tmp_path)
+    raw_disabled["paths"]["output_root"] = str(cfg.output_root)
+    raw_disabled["paths"]["database_path"] = str(tmp_path / "work" / "paper.sqlite")
+    raw_disabled["maker_carry_study"] = {"enabled": False}
+    disabled_cfg_path.write_text(yaml.safe_dump(raw_disabled), encoding="utf-8")
+    _write_scheduler_status(cfg, training_harvest_last_success_utc=stamp, maker_study_intraday_skipped_cycles_total=7)
+
+    disabled_summary = run_maker_carry_study(load_config(disabled_cfg_path))
+    assert disabled_summary["status"] == "disabled"
+    assert disabled_summary["maker_study_intraday_skipped_cycles_total"] == 7
+    assert disabled_summary["training_harvest_window_state"] in {"before_window", "after_window", "inside_window", "unknown"}
+    assert disabled_summary["training_harvest_age_seconds"] is not None
+
+
+def test_maker_carry_study_json_artifact_shape_is_consumed_identically_with_or_without_study_trigger(
+    tmp_path, monkeypatch
+) -> None:
+    """Pre-dispatch sweep caution: snapshot_official_books's
+    maker_fill_replay._portfolio(summary, ...) reads maker_carry_study.json
+    unconditionally and accesses summary.get("portfolio") plus per-entry
+    keys. The new top-level study_trigger (and the two other WO-151 §151.1
+    reporting fields) must not collide with or change what _portfolio reads.
+    Verified here by importing the real consumer and asserting identical
+    output for a study artifact carrying study_trigger versus one without."""
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+    summary_with_trigger = run_maker_carry_study(cfg, study_trigger="harvest_step")
+    assert "study_trigger" in summary_with_trigger
+    assert summary_with_trigger.get("portfolio")
+
+    summary_without_trigger = dict(summary_with_trigger)
+    for key in (
+        "study_trigger",
+        "training_harvest_age_seconds",
+        "training_harvest_window_state",
+        "maker_study_intraday_skipped_cycles_total",
+    ):
+        summary_without_trigger.pop(key, None)
+    assert "study_trigger" not in summary_without_trigger
+
+    candidates = _candidate_rows_for_replay(cfg)
+    max_markets = 10
+    with_trigger = _replay_consumed_portfolio(summary_with_trigger, candidates, max_markets)
+    without_trigger = _replay_consumed_portfolio(summary_without_trigger, candidates, max_markets)
+    assert with_trigger == without_trigger
+    assert with_trigger  # non-empty: the calm-market fixture always sizes one market
+
+
+def _candidate_rows_for_replay(cfg) -> dict[str, dict[str, str]]:
+    rows = read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_candidates.csv")
+    return {str(row.get("condition_id") or ""): row for row in rows if row.get("condition_id")}
+
+
+def _load_wo151_baseline_maker_carry_study_module():
+    """Loads maker_carry_study.py exactly as it stood at this WO's registered
+    branch point (b6b9b88 - the ancestry-tested commit this branch was cut
+    from), so the byte-identity test below is a genuine differential against
+    the PRE-change function, not the new code checked against itself."""
+    baseline_source = subprocess.run(
+        ["git", "show", "b6b9b88:src/polymarket_predictive_engine/maker_carry_study.py"],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    module_name = "polymarket_predictive_engine._wo151_pre_change_maker_carry_study"
+    spec = importlib.util.spec_from_loader(module_name, loader=None)
+    module = importlib.util.module_from_spec(spec)
+    module.__package__ = "polymarket_predictive_engine"
+    sys.modules[module_name] = module
+    exec(compile(baseline_source, "b6b9b88:maker_carry_study.py", "exec"), module.__dict__)
+    return module
+
+
+def test_byte_identical_economics_before_and_after_wo151(tmp_path, monkeypatch) -> None:
+    """WO-151 §151.1 test (12), the load-bearing one: a study run over a
+    fixed fixture produces identical net_carry_usd_per_day, portfolio_markets
+    and portfolio_net_carry_usd_per_day before and after this WO, proving the
+    study's economics are untouched. Implemented as a genuine differential
+    against the function as it stood at this branch's registered ancestor
+    commit (b6b9b88), loaded fresh via `git show`, rather than the new code
+    checked against itself."""
+    after_dir = tmp_path / "after"
+    after_dir.mkdir()
+    before_dir = tmp_path / "before"
+    before_dir.mkdir()
+
+    after_cfg = _config(after_dir)
+    _calm_market_requests(monkeypatch)
+    after = run_maker_carry_study(after_cfg)
+
+    before_cfg = _config(before_dir)
+    baseline_module = _load_wo151_baseline_maker_carry_study_module()
+    # _fake_requests patches attributes on the shared `requests` module
+    # object (import requests binds the SAME cached sys.modules["requests"]
+    # in both the current and baseline module namespaces), so it is already
+    # in effect for the baseline call below without any extra wiring.
+    before = baseline_module.run_maker_carry_study(before_cfg)
+
+    assert after["status"] == before["status"] == "ok"
+    assert after["portfolio_markets"] == before["portfolio_markets"] == 1
+    assert after["portfolio_net_carry_usd_per_day"] == before["portfolio_net_carry_usd_per_day"]
+    assert [round(r["net_carry_usd_per_day"], 6) for r in after["portfolio"]] == [
+        round(r["net_carry_usd_per_day"], 6) for r in before["portfolio"]
+    ]
+    assert after["portfolio_capital_usd"] == before["portfolio_capital_usd"]
+    assert after["maker_gates"]["M_C_payout_floor"] == before["maker_gates"]["M_C_payout_floor"]

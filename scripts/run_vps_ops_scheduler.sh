@@ -620,11 +620,19 @@ run_maker_study_intraday() {
   # WO-53: a second maker-carry snapshot ~12h after the daily harvest samples
   # intraday competition without fast-forwarding M-A, because M-A counts
   # distinct UTC days in maker_carry_study.py.
+  # WO-151 §151.1: training_harvest_age is reporting/logging only now (the
+  # study itself independently reads and records this same value from
+  # status.json, on every trigger path - see maker_carry_study.py). Nothing
+  # here gates on it.
   TRAINING_AGE="$(seconds_since_success_stamp training_harvest)"
   log "maker_study_intraday: starting (training_harvest_age=${TRAINING_AGE}s)"
   (
     set -e
-    timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli maker-carry-study --config "$CONFIG_PATH"
+    # WO-151 §151.1: identifies this invocation as the "intraday_job"
+    # study_trigger producer. cli.py's argument surface is untouched - the
+    # signal travels as an inherited subprocess environment variable, read
+    # directly by maker_carry_study.py.
+    MAKER_STUDY_TRIGGER=intraday_job timeout "$HARVEST_TIMEOUT" python -m polymarket_predictive_engine.cli maker-carry-study --config "$CONFIG_PATH"
     python -m polymarket_predictive_engine.cli reward-epoch-sample --config "$CONFIG_PATH"
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli collect-maker-replay-data --config "$CONFIG_PATH"
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli maker-fill-replay --config "$CONFIG_PATH"
@@ -632,6 +640,12 @@ run_maker_study_intraday() {
   JOB_PID=$!
   wait_with_safety_pulses "$JOB_PID" maker_study_intraday
   CODE=$?
+  # WO-151 §151.1 drift note (recorded, not "fixed"): this detail string's
+  # "11-13h offset guard" tail is now stale prose - the guard it names was
+  # REMOVED as a precondition below - but it is left byte-identical because
+  # (a) it is a free-text, never-parsed "detail" field (stamp_status above
+  # never branches on it) and (b) tests/test_polymarket_vps_docker.py (out of
+  # this WO's exactly-five-file touched list) asserts this literal substring.
   stamp_status maker_study_intraday "$CODE" "intraday maker-carry-study; training_harvest_age=${TRAINING_AGE}s; 11-13h offset guard"
   log "maker_study_intraday: exit $CODE"
 }
@@ -839,24 +853,32 @@ while :; do
     JOB_SCHEDULE_SKIP_KIND=""
   fi
   if [ "$(seconds_since_stamp maker_study_intraday)" -ge "$MAKER_STUDY_INTRADAY_INTERVAL" ]; then
-    TRAINING_AGE="$(seconds_since_success_stamp training_harvest)"
-    if [ "$TRAINING_AGE" -ge "$MAKER_STUDY_INTRADAY_OFFSET_MIN" ] && [ "$TRAINING_AGE" -le "$MAKER_STUDY_INTRADAY_OFFSET_MAX" ]; then
-      # WO-117 measurement correctness: this job may only FIRE inside the
-      # registered 11-13h harvest-age window, and that window's daily
-      # recurrence drifts by more than TICK_SECONDS (harvest runtime plus loop
-      # slack), so judging lateness against the bare 24h interval stamped
-      # every legitimate on-window run "overrun" (10 consecutive by
-      # 2026-07-25, the sole source of the scheduler_overrun_cycles breach).
-      # Allow one window width (OFFSET_MAX - OFFSET_MIN) of gate-induced
-      # drift before calling a run overrun; a run later than that genuinely
-      # missed a window and still stamps overrun. The SLO target itself is
-      # untouched and still fires on real starvation.
-      MAKER_STUDY_WINDOW_TOLERANCE=$((MAKER_STUDY_INTRADAY_OFFSET_MAX - MAKER_STUDY_INTRADAY_OFFSET_MIN))
-      JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind maker_study_intraday $((MAKER_STUDY_INTRADAY_INTERVAL + MAKER_STUDY_WINDOW_TOLERANCE)))"
-      touch_stamp maker_study_intraday
-      run_maker_study_intraday
-      JOB_SCHEDULE_SKIP_KIND=""
-    fi
+    # WO-151 §151.1 (2026-08-02): the 11-13h post-harvest offset guard that
+    # used to wrap this block as a PRECONDITION is REMOVED here, not widened -
+    # the training harvest fails 43.75% of its cycles (measured: runs_total
+    # 32, failed_cycles_total 14), so requiring a fresh harvest SUCCESS before
+    # this job could fire was a starvation source, not a freshness guarantee
+    # (WO-151's "harvest-window availability trap"). The job now fires solely
+    # off its own MAKER_STUDY_INTRADAY_INTERVAL cadence (interval literal
+    # unchanged, still 86400s by default). The observed harvest age and where
+    # it would have fallen relative to the old window are computed and
+    # recorded by maker_carry_study.py itself, in its own artifact, on every
+    # trigger path - so the relationship stays measurable without gating on
+    # it. Nothing here changes what the study computes.
+    #
+    # WO-117 measurement correctness (rationale unchanged, retained here): the
+    # bare 24h interval alone stamped every legitimate on-window run "overrun"
+    # (10 consecutive by 2026-07-25), because this job's firing time under the
+    # old window drifted by more than TICK_SECONDS. That tolerance is kept
+    # unchanged even though the gate it was compensating for is gone -
+    # dropping both together would relabel runs "overrun" purely because the
+    # slack allowance disappeared, not because anything got slower. The SLO
+    # target itself is untouched and still fires on real starvation.
+    MAKER_STUDY_WINDOW_TOLERANCE=$((MAKER_STUDY_INTRADAY_OFFSET_MAX - MAKER_STUDY_INTRADAY_OFFSET_MIN))
+    JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind maker_study_intraday $((MAKER_STUDY_INTRADAY_INTERVAL + MAKER_STUDY_WINDOW_TOLERANCE)))"
+    touch_stamp maker_study_intraday
+    run_maker_study_intraday
+    JOB_SCHEDULE_SKIP_KIND=""
   fi
   if [ "$(seconds_since_stamp trade_prints)" -ge "$PRINTS_INTERVAL" ]; then
     JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind trade_prints "$PRINTS_INTERVAL")"

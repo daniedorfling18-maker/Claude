@@ -12,7 +12,7 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -32,6 +32,16 @@ REGISTERED_MAX_DEADLINE_SECONDS = 6 * 60 * 60
 DEFAULT_STEP_TIMEOUT_SECONDS = 30 * 60
 DEFAULT_PRINT_STEP_TIMEOUT_SECONDS = 5 * 60
 
+# WO-151 §151.1: the embedded maker_carry_study step (below) must identify
+# itself as the "harvest_step" producer so maker_carry_study.py can record
+# study_trigger honestly. cli.py's argument surface is out of scope for this
+# WO, so the signal travels as a per-step subprocess environment overlay
+# instead of a new CLI flag - see HarvestStep.env and _run_command below.
+# The literal value must exactly match maker_carry_study.STUDY_TRIGGER_ENV_VAR
+# / one of its STUDY_TRIGGER_PRODUCER_VALUES.
+MAKER_STUDY_TRIGGER_ENV_VAR = "MAKER_STUDY_TRIGGER"
+MAKER_STUDY_TRIGGER_HARVEST_STEP_VALUE = "harvest_step"
+
 
 @dataclass(frozen=True)
 class HarvestStep:
@@ -39,6 +49,10 @@ class HarvestStep:
     command: tuple[str, ...]
     timeout_kind: str = "harvest"
     mandatory_tail: bool = False
+    # Per-step subprocess environment overlay, merged OVER the parent process
+    # environment (never replacing it). Empty for every step except the
+    # embedded maker_carry_study step (WO-151 §151.1).
+    env: tuple[tuple[str, str], ...] = ()
 
 
 def _engine_command(name: str, config_path: str) -> tuple[str, ...]:
@@ -72,7 +86,13 @@ def _steps(config_path: str) -> list[HarvestStep]:
         HarvestStep("reconstructed_clv_study", _engine_command("reconstructed-clv-study", config_path)),
         HarvestStep("drift_scan", _engine_command("drift-scan", config_path)),
         HarvestStep("collect_wallet_intel", _engine_command("collect-wallet-intel", config_path)),
-        HarvestStep("maker_carry_study", _engine_command("maker-carry-study", config_path)),
+        HarvestStep(
+            "maker_carry_study",
+            _engine_command("maker-carry-study", config_path),
+            # WO-151 §151.1: identifies this invocation as the "harvest_step"
+            # study_trigger producer without touching cli.py's argument surface.
+            env=((MAKER_STUDY_TRIGGER_ENV_VAR, MAKER_STUDY_TRIGGER_HARVEST_STEP_VALUE),),
+        ),
         HarvestStep("reward_epoch_sample", _engine_command("reward-epoch-sample", config_path)),
         HarvestStep(
             "collect_maker_replay_data",
@@ -140,9 +160,19 @@ def _settings() -> dict[str, int]:
     }
 
 
-def _run_command(command: Sequence[str], timeout_seconds: int) -> int:
+def _run_command(
+    command: Sequence[str],
+    timeout_seconds: int,
+    env: Mapping[str, str] | None = None,
+) -> int:
+    # WO-151 §151.1: env is an OVERLAY merged over the parent process's own
+    # environment, never a replacement - every step keeps every ambient
+    # variable it always had (config paths, PATH, etc.). None (the default
+    # for every step except maker_carry_study) reproduces the exact prior
+    # subprocess.run call: no env= kwarg, full inheritance.
+    run_env = {**os.environ, **env} if env else None
     try:
-        completed = subprocess.run(list(command), check=False, timeout=timeout_seconds)
+        completed = subprocess.run(list(command), check=False, timeout=timeout_seconds, env=run_env)
     except subprocess.TimeoutExpired:
         return 124
     return int(completed.returncode)
@@ -158,7 +188,7 @@ def run_training_harvest(
     cfg: EngineConfig,
     *,
     config_path: str,
-    runner: Callable[[Sequence[str], int], int] | None = None,
+    runner: Callable[[Sequence[str], int, Mapping[str, str] | None], int] | None = None,
     clock: Callable[[], float] | None = None,
     timestamp: Callable[[], str] | None = None,
 ) -> dict[str, Any]:
@@ -222,8 +252,9 @@ def run_training_harvest(
 
         row["started_at_utc"] = timestamp_fn()
         step_started = monotonic()
+        step_env = dict(step.env) if step.env else None
         try:
-            exit_code = int(execute(step.command, timeout_seconds))
+            exit_code = int(execute(step.command, timeout_seconds, step_env))
             error_type = None
         except Exception as exc:  # recorded fail-loud; mandatory tail must still run
             exit_code = 1

@@ -2077,8 +2077,107 @@ def _force_maker_gates_pending_uncommitted(summary: dict[str, Any]) -> None:
     gates["maker_verdict"] = "insufficient_evidence"
 
 
-def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
+# WO-151 §151.1 (2026-08-02): the study has no cadence of its own - it has two
+# unsynchronised triggers (the dedicated scheduler job and the embedded
+# training_harvest step) and a third accidental one (scheduler restarts).
+# Record which trigger produced each run on a CLOSED domain so "unknown" is
+# the only fail-closed answer when the producer cannot be established - never
+# guessed. cli.py is out of scope for this WO, so the two subprocess-invoked
+# producers identify themselves via an environment variable (inherited by the
+# `python -m polymarket_predictive_engine.cli maker-carry-study` subprocess
+# either producer launches); a bare invocation that sets neither is "cli".
+STUDY_TRIGGER_ENV_VAR = "MAKER_STUDY_TRIGGER"
+STUDY_TRIGGER_PRODUCER_VALUES = frozenset({"intraday_job", "harvest_step"})
+STUDY_TRIGGER_DOMAIN = frozenset({"intraday_job", "harvest_step", "cli", "unknown"})
+
+# WO-151 §151.1 basis: these mirror the scheduler's own (now non-gating, see
+# run_vps_ops_scheduler.sh) MAKER_STUDY_INTRADAY_OFFSET_MIN/MAX defaults, so
+# the artifact can classify where the observed training-harvest age falls
+# relative to the window that used to gate this job. Reporting only: nothing
+# here gates the study, the sizing loop, or any M-gate.
+HARVEST_WINDOW_MIN_SECONDS = 39600
+HARVEST_WINDOW_MAX_SECONDS = 46800
+
+
+def _resolve_study_trigger(explicit: str | None) -> str:
+    """WO-151 §151.1: never guess. An explicit caller-supplied value is
+    validated against the closed domain (anything else reads "unknown").
+    Otherwise the MAKER_STUDY_TRIGGER env var set by the two subprocess
+    producers is read: its absence means a bare CLI invocation ("cli"); any
+    other value is untrusted and reads "unknown" rather than being guessed.
+    """
+    if explicit is not None:
+        candidate = explicit.strip().lower()
+        return candidate if candidate in STUDY_TRIGGER_DOMAIN else "unknown"
+    raw = os.environ.get(STUDY_TRIGGER_ENV_VAR, "").strip().lower()
+    if not raw:
+        return "cli"
+    return raw if raw in STUDY_TRIGGER_PRODUCER_VALUES else "unknown"
+
+
+def _training_harvest_age_seconds(cfg: EngineConfig) -> float | None:
+    """Observed age (seconds) of training_harvest's last SUCCESSFUL run, read
+    directly from the scheduler's own status.json so every study trigger path
+    records it (WO-151 §151.1 test 11), not only the dedicated intraday job.
+    A missing, empty, unparseable, or non-finite stamp fails closed to None -
+    never guessed, never treated as fresh or as due; the study computes
+    nothing from this beyond the reporting fields below.
+    """
+    payload = read_json(cfg.output_root / "ops_scheduler" / "status.json", default={}) or {}
+    if not isinstance(payload, dict):
+        return None
+    jobs = payload.get("jobs")
+    if not isinstance(jobs, dict):
+        return None
+    entry = jobs.get("training_harvest")
+    if not isinstance(entry, dict):
+        return None
+    parsed = parse_timestamp(entry.get("last_success_utc"))
+    if parsed is None:
+        return None
+    age = (datetime.now(timezone.utc) - parsed).total_seconds()
+    return age if math.isfinite(age) else None
+
+
+def _harvest_window_state(age_seconds: float | None) -> str:
+    """Descriptive-only classification against the old (now non-gating)
+    11-13h window, so starvation stays visible without inferring it from a
+    stale stamp (WO-151 scope (c)). Never gates the study."""
+    if age_seconds is None or not math.isfinite(age_seconds):
+        return "unknown"
+    if age_seconds < HARVEST_WINDOW_MIN_SECONDS:
+        return "before_window"
+    if age_seconds > HARVEST_WINDOW_MAX_SECONDS:
+        return "after_window"
+    return "inside_window"
+
+
+def _maker_study_intraday_skipped_cycles_total(cfg: EngineConfig) -> int | None:
+    """The scheduler's OWN skipped_cycles_total counter for the dedicated
+    intraday job, read verbatim so the artifact can never disagree with it
+    (WO-151 scope (c) / test 10). Missing or malformed status reads None -
+    never guessed, never fabricated as zero."""
+    payload = read_json(cfg.output_root / "ops_scheduler" / "status.json", default={}) or {}
+    if not isinstance(payload, dict):
+        return None
+    jobs = payload.get("jobs")
+    if not isinstance(jobs, dict):
+        return None
+    entry = jobs.get("maker_study_intraday")
+    if not isinstance(entry, dict):
+        return None
+    try:
+        return int(entry.get("skipped_cycles_total", 0) or 0)
+    except (TypeError, ValueError):
+        return None
+
+
+def run_maker_carry_study(cfg: EngineConfig, *, study_trigger: str | None = None) -> dict[str, Any]:
     settings = _settings(cfg)
+    trigger = _resolve_study_trigger(study_trigger)
+    harvest_age_seconds = _training_harvest_age_seconds(cfg)
+    harvest_window_state = _harvest_window_state(harvest_age_seconds)
+    intraday_skipped_cycles_total = _maker_study_intraday_skipped_cycles_total(cfg)
     out_root = cfg.output_root / "maker_carry"
     summary_path = out_root / "maker_carry_study.json"
     summary: dict[str, Any] = {
@@ -2087,6 +2186,14 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         "work_order": "WO-36",
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
+        # WO-151 §151.1 scope (a)/(c): recorded on EVERY path, including the
+        # early "disabled" return below, so the field is never absent.
+        "study_trigger": trigger,
+        "training_harvest_age_seconds": (
+            round(harvest_age_seconds, 3) if harvest_age_seconds is not None else None
+        ),
+        "training_harvest_window_state": harvest_window_state,
+        "maker_study_intraday_skipped_cycles_total": intraday_skipped_cycles_total,
     }
     if str(settings.get("enabled", True)).strip().lower() in {"0", "false", "no"}:
         write_json(summary_path, summary)
@@ -2402,6 +2509,12 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         "top_portfolio_market",
         "top_portfolio_question",
         "clears_100_per_month_target",
+        # WO-151 §151.1 scope (a): which trigger produced this row. write_csv's
+        # existing legacy-schema upgrade path (see MAKER_CARRY_LEDGER_LOCK
+        # comment above) already rewrites older narrower on-disk headers to
+        # the current fieldnames, so pre-existing rows without this column
+        # simply read back with an empty value - no reader change needed.
+        "study_trigger",
     ]
     history_row = {field: summary.get(field) for field in history_fields}
     # WO-111 (rev.2, anchor-safe): persist per-day portfolio membership + each

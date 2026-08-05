@@ -10044,8 +10044,20 @@ full-watchlist collector only. Under `scope="portfolio"` (the `run_book_pulse`
 pulse, 300s) the collector appends no event and writes no state file —
 `tier_events_status` reads `skipped_portfolio_scope` and the other five summary
 keys are emitted at their zero values, so the key set stays scope-invariant
-across both artifacts. This is a further tightening of what this WO writes,
-not a new selection behaviour, and does not change the OWNER MERGE routing.
+across both artifacts. **§148.6 also discloses a second, opposite-direction
+correction under `scope="watchlist"`:** a genuinely empty watchlist backed by a
+successfully-read `maker_carry_study.json` now runs the diff instead of taking
+the unamended `no_portfolio` shortcut, and so can WRITE MORE departure rows
+than the unamended spec — up to the entire prior watchlist, in the
+mass-departure case — rather than fewer. That expansion is confined to what
+this WO's own append-only measurement sidecar RECORDS about a state that
+already changed (markets that already left the watchlist); it does not touch
+which markets are collected, polled, or eligible, and it moves no gate,
+threshold, or `maker_min_*` value. Net of both corrections: a further
+tightening on the portfolio-scope side, and a correctness expansion — bounded
+to rows describing departures that already happened — on the watchlist-scope
+side. Neither is a new selection behaviour, and neither changes the OWNER
+MERGE routing.
 
 **Day-after check.** (1) `tier_events_status == "ok"`, `tier_events_written >= 1`
 on the first cycle (genesis), `malformed_rows == 0`, `burst false`,
@@ -10122,11 +10134,13 @@ which is the precise confusion the ledger was registered to end.
 `snapshot_official_books` runs under `scope="watchlist"`. Under
 `scope="portfolio"` the collector appends no events, writes no state file, and
 records `tier_events_status: "skipped_portfolio_scope"`. 148.5 registers three
-domain members; this section adds two more, not one — `skipped_portfolio_scope`
-here, and `skipped_unreadable_inputs` below for the distinct empty-watchlist
-correction under `scope="watchlist"` — so the complete revised closed domain,
-**five members**, is
-`{"ok","read_failed","write_failed","skipped_portfolio_scope","skipped_unreadable_inputs"}`
+domain members; this section adds three more, not one or two —
+`skipped_portfolio_scope` here, `skipped_unreadable_inputs` below for the
+distinct empty-watchlist correction under `scope="watchlist"`, and
+`skipped_disabled` below for the `enabled=False` early return that precedes
+both scope-based checks — so the complete revised closed domain, **six
+members**, is
+`{"ok","read_failed","write_failed","skipped_portfolio_scope","skipped_unreadable_inputs","skipped_disabled"}`
 — any other value is a build defect, not a new member. The other five
 summary keys are emitted with their zero values (`tier_events_written: 0`,
 `tier_events_resync: false`, `tier_events_malformed_rows: 0`,
@@ -10138,13 +10152,18 @@ snapshot file, which the collection-window ledger consumes — WO-149's isolatio
 not to be violated to satisfy an invariance test) — and the invariance is
 asserted by comparing the two artifacts' key sets, not by requiring one file to
 carry both scopes. **Every return path carries the six keys**: they are
-initialized in the summary dict at construction (with the five zero values, and
-`tier_events_status` set per scope or per the empty-watchlist rule below), so
-the `no_portfolio` early return (`maker_fill_replay.py:818-832`) — which, under
-`scope="portfolio"`, always exits before the write-site anchor and always
-carries `skipped_portfolio_scope` — cannot omit them. **Under
-`scope="watchlist"`, that early return no longer universally skips the write
-site; see the second correction below.**
+initialized in the summary dict at construction, with the five zero values and
+`tier_events_status` set by whichever rule governs that particular return
+path — the disabled-collector rule in the third correction below takes
+priority over the other two because it exits earliest, before either scope's
+logic runs; the scope-based rule governs next; the empty-watchlist rule below
+governs last. So the `enabled=False` early return (`:756-758`) and the
+`no_portfolio` early return (`maker_fill_replay.py:818-832`) — which, under
+`scope="portfolio"`, always exits before the write-site anchor and carries
+`skipped_portfolio_scope` unless the disabled rule already fired first —
+cannot omit them. **Under `scope="watchlist"`, that `no_portfolio` early
+return no longer universally skips the write site; see the second correction
+below.**
 
 **A2.** The scope is not re-derived at the write site: it is the same
 `portfolio_scope` boolean the function has already computed and already branches
@@ -10173,32 +10192,89 @@ end: it exits before the write-site anchor, so a real mass departure — every
 previously-tracked condition id leaving the watchlist at once — is never
 diffed, the ledger silently keeps its stale tiers, and a market that later
 re-enters at the SAME tier it held before produces no arrival row either,
-because the ledger's `last_tier` was never advanced to `"absent"`. Whether that
-early return is safe to leave un-diffed depends on **why** the watchlist is
-empty, and the two reasons must not be conflated:
+because the ledger's `last_tier` was never advanced to `"absent"`.
 
-- **Readable summary, truly empty watchlist.** `maker_carry_study.json` was
-  read successfully — `read_json` returned an actual parsed dict, not its
-  failure default — and `portfolio + persistent + seeds` is still empty. This
-  is truth, not an artifact of a read failure: **mass absent departures ARE
-  truth here.** The ledger write proceeds even though the watchlist itself is
-  empty, diffing every previously-tracked condition id against
-  `current_tier = {}` and emitting a departure row for each one that was not
-  already `"absent"`. `tier_events_status = "ok"`; a departure count equal to
-  the entire prior watchlist is a valid, expected outcome, not a defect.
-- **Absent, unreadable, or unparseable summary.** `read_json(out_root /
-  "maker_carry_study.json", default=...)` fell back to its failure default
-  rather than returning a parsed dict — the file is missing, unreadable, or
-  malformed. Because `_portfolio` (`:426-438`) derives the portfolio tranche
-  from this same summary, the resulting emptiness may be an artifact of that
-  read failure rather than a real mass departure, and diffing it as truth
-  would manufacture false departures every time the study file glitches. The
-  ledger write is skipped entirely under this condition — no rows appended, no
-  state file written, the same no-op shape as the portfolio-scope skip but for
-  a distinct cause — with the fifth domain member,
-  `tier_events_status = "skipped_unreadable_inputs"`. The two conditions above
-  cannot co-occur, because this rule applies only under `scope="watchlist"`,
-  where the portfolio-scope skip never fires.
+**The governing question is checked first, and independently of the
+resulting watchlist's size — corrected on a further round of external review,
+because the first draft nested the read-outcome check inside the
+empty-watchlist case and so missed the case where the read fails but
+persistent or seed markets keep the watchlist non-empty regardless.**
+`_portfolio` (`:426-438`) derives the portfolio tranche from
+`read_json(out_root / "maker_carry_study.json", default=...)`; `persistent`
+and `seeds` do not depend on that same read. So a read failure that collapses
+only the portfolio tranche to empty, while persistent or seed markets remain,
+never reaches the `no_portfolio` early return at all — the watchlist is
+non-empty — and an unamended diff would run normally, treating the vanished
+portfolio tranche as a real mass departure for every market that was in it,
+when the true cause is a glitched read, not a genuine exit: **false
+departures for prior portfolio members**, the exact failure this correction
+exists to close. Fixed as follows, checked in this order:
+
+1. **Absent, unreadable, or unparseable summary — checked first, regardless of
+   the resulting watchlist's size.** `read_json(out_root /
+   "maker_carry_study.json", default=...)` fell back to its failure default
+   rather than returning a parsed dict — the file is missing, unreadable, or
+   malformed. The ledger write is skipped entirely under this condition — no
+   rows appended, no state file written, the same no-op shape as the
+   portfolio-scope skip but for a distinct cause — with the fifth domain
+   member, `tier_events_status = "skipped_unreadable_inputs"`, **whether or
+   not `portfolio + persistent + seeds` is empty as a result.** A nonempty
+   watchlist built from a failed read is exactly the case a check gated on
+   emptiness alone would miss, because diffing it would silently manufacture
+   false departures for every market that was in the portfolio tranche
+   before the read glitched, not only in the all-empty case.
+2. **Readable summary, genuinely empty watchlist.** Only once the read is
+   confirmed to have succeeded — `read_json` returned an actual parsed dict,
+   not its failure default — does emptiness get evaluated: if `portfolio +
+   persistent + seeds` is still empty, this is truth, not an artifact of a
+   read failure: **mass absent departures ARE truth here.** The ledger write
+   proceeds even though the watchlist itself is empty, diffing every
+   previously-tracked condition id against `current_tier = {}` and emitting a
+   departure row for each one that was not already `"absent"`.
+   `tier_events_status = "ok"`; a departure count equal to the entire prior
+   watchlist is a valid, expected outcome, not a defect.
+
+The two conditions cannot co-occur: checking (1) first and unconditionally on
+the read outcome means a failed read always takes the skip regardless of
+watchlist size, and (2) is reached only once (1) has ruled out a read
+failure; and, as throughout this section, neither applies under
+`scope="portfolio"`, where the portfolio-scope skip fires first.
+
+**A third, distinct binding correction — the `enabled=False` early return
+precedes both scope-based checks above and needs its own domain member.**
+`maker_fill_replay.py:756-758` — the `enabled` check (`if
+str(settings.get("enabled", True)).strip().lower() in {"0", "false", "no"}:`),
+whose body writes `summary_path` and returns — fires before
+`maker_carry_study.json` is even read (that read sits one line later, at
+`:759`) and before the
+`portfolio_scope` branch at `:764` computes anything. It is reached
+identically under both scopes, and reached FIRST: a disabled config
+short-circuits past the portfolio-scope tagging that already ran immediately
+above it at `:753-755` (`summary["scope"] = "portfolio"`, `summary["work_order"]
+= "WO-149"`) without ever reaching the point where either rule above would
+assign `tier_events_status`. Labelling this exit with an existing member is
+wrong either way: `skipped_portfolio_scope` implies the pulse ran and was
+correctly routed away from the watchlist write, when in fact nothing ran under
+EITHER scope; `skipped_unreadable_inputs` implies a `maker_carry_study.json`
+read was attempted and failed, when in fact no read is ever attempted here.
+Reporting `"ok"` would be worse than either: it claims a successful
+zero-transition cycle over a collector that never executed at all. The
+registered fix is a sixth domain member, `tier_events_status =
+"skipped_disabled"`, assigned at `:756-758` itself, before either scope's
+`write_json` call, so it takes priority regardless of `scope`: a disabled
+config under `scope="portfolio"` reports `skipped_disabled`, not
+`skipped_portfolio_scope`, and a disabled config under `scope="watchlist"`
+reports `skipped_disabled`, not `"ok"`. The other five summary keys keep
+their zero values under this exit, preserving the scope-invariant key set the
+same way the other two skip members do.
+
+This correction changes no row count under any config: `enabled=False`
+already means zero network calls and zero watchlist computation in every
+version of this WO, so nothing is added to or withheld from either artifact by
+registering it — its only effect is which of the closed domain's strings
+correctly names an already-inert cycle. A failure of this guard therefore
+degrades to a mislabelled status on a cycle that already wrote no rows and
+touched no state file, never to a spurious or missing row.
 
 **A4/A7 — reconciliation of the parent WO, stated exhaustively.** This
 amendment's duplicate set is six places and no more:
@@ -10257,9 +10333,11 @@ of the existing numbers move:
     **byte-identical** before and after. This is the case that fails against the
     unamended spec and is the reason this amendment exists.
 18. The same call records `tier_events_status == "skipped_portfolio_scope"` and
-    the five zero-valued keys, so the key set on `official_book_snapshot.json` is
-    identical under both scopes — asserted by comparing the two key sets, not by
-    listing them.
+    the five zero-valued keys on `official_book_pulse.json` — the artifact
+    `scope="portfolio"` actually writes (`:744`), never
+    `official_book_snapshot.json` — and that key set is identical to
+    `official_book_snapshot.json`'s key set under `scope="watchlist"`, asserted
+    by comparing the two artifacts' key sets, not by listing them.
 19. No state file is written under portfolio scope: a pre-existing
     `maker_watchlist_tier_state.json` is byte-identical after the call, and an
     absent one is still absent.
@@ -10296,9 +10374,20 @@ of the existing numbers move:
     consequence — the ledger write is skipped, **zero** rows appended, any
     pre-existing state file byte-identical, `tier_events_status ==
     "skipped_unreadable_inputs"`.
+25. `snapshot_official_books(cfg, scope="watchlist")` with `enabled` set to a
+    falsy string (`"false"`, `"0"`, `"no"`) never reaches
+    `maker_carry_study.json` — mocked to raise if read, to prove the read stage
+    is never entered — appends **zero** rows, writes no state file, and
+    `tier_events_status == "skipped_disabled"` on `official_book_snapshot.json`,
+    not `"ok"`.
+26. The same disabled config under `scope="portfolio"` records
+    `tier_events_status == "skipped_disabled"` on `official_book_pulse.json`,
+    not `"skipped_portfolio_scope"` — the priority case, since a disabled
+    collector under portfolio scope could otherwise be mislabelled as an
+    intentionally-routed pulse rather than a fully inert cycle.
 
-**Fail-safe sentence for §148.6.** This section's two corrections pull in
-opposite directions, and neither is covered by a single blanket claim; each is
+**Fail-safe sentence for §148.6.** This section's three corrections pull in
+different directions, and none is covered by a single blanket claim; each is
 safe for its own, separately stated reason. The portfolio-scope guard strictly
 **reduces** the set of conditions under which anything is written — it can
 only cause fewer rows to be appended under `scope="portfolio"`, never more,
@@ -10313,10 +10402,16 @@ positively observed from a summary `read_json` actually parsed, never a guess
 made because the watchlist happened to be empty; a failure of THIS guard
 (treating unreadable-summary emptiness as truth) degrades toward manufacturing
 false departures, which is exactly why it is gated on the summary read having
-succeeded and not on emptiness alone. Neither correction marks a market
-measured, moves a gate, threshold, eligibility rule, or `maker_min_*` value,
-opens or enables an order path, or changes which markets are collected or
-polled under either scope.
+succeeded and not on emptiness alone. The third correction — the
+`skipped_disabled` label at the `enabled=False` early return — is neutral on
+row count in every direction: that early return already wrote zero rows and
+touched no state file before this correction and does so after it too; the
+correction only replaces a mislabelled or ambiguous status string with an
+accurate one, so a failure of it can degrade a label, never manufacture or
+drop a row. None of the three corrections marks a market measured, moves a
+gate, threshold, eligibility rule, or `maker_min_*` value, opens or enables an
+order path, or changes which markets are collected or polled under either
+scope.
 
 **Day-after check addition — durable, not snapshot-based; the trigger is
 corrected on external review, which caught a false-positive class in the first
@@ -10337,24 +10432,47 @@ seconds of a `run_trade_prints` cycle, or of each other, is a real and
 legitimate possibility, and the proximity-only trigger would revert a
 correctly-guarded build on a coincidence of timing.
 
-**The corrected trigger is repetition, not proximity:** a broken guard
-produces a spurious departure on every ~300-second pulse cycle followed by a
-spurious re-arrival on the next full-watchlist cycle, over and over, which the
-occasional off-grid legitimate callers above cannot reproduce even when one of
-them happens to land close to a scheduled cycle. The registered signature is
-therefore **the same `condition_id` accumulating four or more rows in any
-rolling 3600-second (1.0h) window** — the repeated flip-flop pattern a broken
-guard actually produces, distinguishable from a one-off timing coincidence
-among legitimate callers.
+**The repetition trigger drafted next — "the same `condition_id`
+accumulating four or more rows in any rolling 3600-second (1.0h) window" — is
+itself corrected on a further round of external review, which caught a
+second, frequency-based false-positive class it introduced.** Normal seed-cap
+oscillation at the `run_trade_prints` cadence (900s) can legitimately flip the
+same `condition_id` in and out of the seed tier several times inside one
+hour — a market riding the ranking boundary produces the same
+departure/arrival/departure/arrival row shape a broken guard would, at a rate
+a pure row-count rule cannot tell apart from a defect. Frequency is the wrong
+axis: what distinguishes a broken guard's rows from legitimate oscillation's
+rows is not how often they occur but **whether a legitimate watchlist-scope
+producer actually ran to generate them.**
 
-**The secondary, same-day check is unaffected by this correction and stays
-definitive whenever it catches anything:** `tier_events_status` reading
-anything other than `skipped_portfolio_scope` on the pulse artifact, or a
-nonzero `tier_events_written` ever observed on it, remains conclusive proof of
-a missing guard on its own — this signal was never proximity-based and the
-false-positive class above does not reach it. On a clean day it reads
-`skipped_portfolio_scope` on the pulse artifact and `ok` on the snapshot
-artifact.
+**The registered signature is therefore two-part, and only part (b) replaces
+the frequency rule — part (a) already stood on the same-day check above and is
+restated here as the whole rule's first half:**
+
+- **(a) Pulse-artifact check, definitive when caught, unchanged.** The pulse
+  artifact (`official_book_pulse.json`) reporting a `tier_events_status` other
+  than `skipped_portfolio_scope`, or any nonzero `tier_events_written` ever
+  observed on it, remains **conclusive proof of a missing guard on its own** —
+  this signal was never proximity- or frequency-based, and neither
+  false-positive class above reaches it. On a clean day it reads
+  `skipped_portfolio_scope` on the pulse artifact and `ok` on the snapshot
+  artifact.
+- **(b) Durable CSV-side signature: producer identity, not row frequency.**
+  Any events-CSV row whose `event_utc` falls in a window where
+  `outputs/ops_scheduler/status.json` shows **no watchlist-scope producer ran
+  in the preceding 900 seconds** is the signature — where "watchlist-scope
+  producer" means one of the four legitimate producer classes already named
+  above: `run_trade_prints` (`trade_prints` in `status.json`), the
+  `training_harvest` step (`training_harvest.py:77-81`), the
+  `maker_study_intraday` scheduler block (`run_vps_ops_scheduler.sh:629`), or a
+  deploy-acceptance run. **This requires joining the events CSV to scheduler
+  status history and is an OWNER-run forensic query, not an automated gate** —
+  nothing in this WO computes it, alerts on it, or blocks anything on it.
+  **Seed-cap oscillation at watchlist cadence is legitimate under this
+  signature and is explicitly NOT a revert trigger:** every row it produces
+  falls inside the 900-second window following the `run_trade_prints` cycle
+  that computed it, so the join finds a producer and the row is cleared,
+  regardless of how many rows the same `condition_id` accumulates in an hour.
 
 **Watchlist-cadence framing, corrected to name every legitimate producer.**
 The full-watchlist collector under `scope="watchlist"` is not driven by
@@ -10362,8 +10480,9 @@ The full-watchlist collector under `scope="watchlist"` is not driven by
 `run_trade_prints` (86400s / 900s), plus roughly **2 times/day** from the
 `training_harvest` + `maker_study_intraday` pair named above, plus occasional
 deploy-acceptance invocations — all legitimate writers of the same ledger under
-the same scope, none of them a second implementation, and none of them
-scheduled tightly enough to produce the four-rows-in-an-hour signature above.
+the same scope, none of them a second implementation, and each one a producer
+the status-history join in (b) above can find within 900 seconds of any row
+it generates.
 
 ## WO-149 — The replay join has no contemporaneous book state for 23% of prints, so every maker economic number is unvalidated model output — `done` (2026-08-02, PR #422; registered 2026-08-01; new scheduler job + registered watchdog freshness entry + a keyword-only scope on the sole official-book collector, routed owner-merge after two independent line-audits covering disjoint halves; **`max_book_state_lag_seconds` stays 1800 — no tolerance is loosened**; one lint fix round for an `F821` the offline suite could not see, because `from __future__ import annotations` makes the annotation unevaluated; **DEPLOY PENDING, and this is the binding one for the campaign** — `run_book_pulse` never fires on the VPS, so no `official_book_pulse.json` is produced and `M-B`'s `mb1_tier0_coverage_sufficient` stays `false`. Merging this WO did not move M-B; deploying it is what will)
 

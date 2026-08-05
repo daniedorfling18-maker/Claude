@@ -104,6 +104,19 @@ review. They are tighten-only: a WO may demand more than this, never less.
    `src/polymarket_predictive_engine/utils.py:373-379` — and `nan > ceiling` is
    `False`, so a corrupt timestamp would have classified as *fresh*, the exact
    fail-open the clause existed to close.
+
+   **Scope clarification:** A2's object is measurement and health
+   comparisons — an unverifiable input must never read as healthy, fresh,
+   compliant, or measured. The one registered exception is a scheduler
+   liveness due-stamp: a stamp whose only writer is the job's own fire
+   branch, per the registered WO-120 `seconds_since_stamp` convention in
+   `scripts/run_vps_ops_scheduler.sh`. There, the fail-closed branch — never
+   fire — is permanent silent disablement of the very measurement A2 exists
+   to protect, so unreadable-means-immediately-due is the fail-safe direction
+   for that stamp class alone; any new liveness stamp adopting a different
+   convention must register its basis explicitly. *Derived from:* the
+   WO-151 §151.2 escalation and its independent line audit, plus external
+   review, 2026-08-05 — the same defect-derived pattern as A1-A9.
 3. **A3 — exhaustive scan roots.** Every "scan all callers/files" rule names its
    roots exhaustively, anchors them off `__file__` rather than the process CWD,
    and asserts a non-zero visit count. *Derived from:*

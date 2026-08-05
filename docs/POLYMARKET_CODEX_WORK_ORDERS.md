@@ -10515,10 +10515,13 @@ those; it ratifies a scheduling-liveness due-stamp reading as due.
 
 A clarifying note for `docs/ENGINEERING_STANDARDS.md` S8 A2 — "A2 binds
 measurement/health comparisons; scheduler liveness stamps follow the WO-120
-convention" — is **PROPOSED here but NOT edited into the standard by this
-PR**. Binding-standard text changes go through their own owner-merge PR (the
-governance path); this section registers the proposal without pre-empting
-that process.
+convention" — was **proposed here but not edited into the standard by this
+PR**; that binding-standard text change goes through its own owner-merge PR
+(the governance path), so this section registered the proposal without
+pre-empting that process. **That PR now exists: #434** (`claude/register-s8-a2-liveness-clarification`),
+appending the clarification to S8 A2 itself. **Merge order: #434 → #432 → #433**
+— the standard's own text change lands first, this section's ratification
+next, then the WO-151 build.
 
 **Folded into §151.1's touched-file list, not deferred (§432 round-1,
 2026-08-04).** `run_maker_study_intraday`'s `stamp_status` detail string
@@ -10549,3 +10552,21 @@ to pin the new standalone-interval `schedule_skip_kind` call form, and
 `MAKER_STUDY_WINDOW_TOLERANCE` is removed or repurposed to whatever the
 standalone-interval build actually needs. This is part of the same sixth-file
 scope above, not a seventh file.
+
+**The same sixth-file scope also covers `test_wo117_window_tolerance_boundary_semantics`
+(`tests/test_polymarket_vps_docker.py:984-1015`), missed by the same
+reconciliation.** This test pins the tolerance-widened boundary directly:
+`kind(90000, 86400) == "overrun"` (bare interval mislabels an on-window run),
+`kind(90000, 86400 + 7200) == ""` (interval + tolerance reads it correctly as
+on-schedule), and `kind(86400 + 7200 + 300 + 60, 86400 + 7200) == "overrun"`
+(genuine starvation past the widened bound still stamps). Once
+`MAKER_STUDY_WINDOW_TOLERANCE` is removed per the reconciliation above, there
+is no widened bound left for the middle two calls to exercise — the
+`effective_interval` argument `schedule_skip_kind` receives collapses to the
+bare interval alone. These three boundary assertions must be **replaced**,
+not left standing, with the standalone-interval build's own boundary
+expectations: on-schedule at and immediately after the bare interval, and
+`"overrun"` only once a tick past it — the two-region (bare-interval-overrun
+vs. widened-on-schedule) shape this test currently proves is retired along
+with the tolerance it measures. This is part of the same sixth-file scope
+above, not a seventh file.

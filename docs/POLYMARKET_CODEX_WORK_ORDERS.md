@@ -9234,7 +9234,7 @@ invisible at the deployed configuration and only binds if the ceiling is ever
 tightened.
 
 
-## WO-147 — Expired markets on the official-book watchlist: measure first, exclude on positive evidence — `queued` (registered 2026-08-01; collection-side hygiene and observability only; **RE-SCOPED at drafting — the original framing was disproved, see Provenance**; no gate, threshold, eligibility rule, or funding value changes → OWNER MERGE after line-audit)
+## WO-147 — Expired markets on the official-book watchlist: measure first, exclude on positive evidence — `queued` (registered 2026-08-01; collection-side hygiene and observability only; **RE-SCOPED at drafting — the original framing was disproved, see Provenance**; no gate, threshold, eligibility rule, or funding value changes — **exempting the two §147.1 input-validation ceilings (`universe_pages <= 8`, `page_size <= 100`), disclosed as registered, strictly-tightening validation clamps rather than eligibility or funding thresholds; see Scope, below** — → OWNER MERGE after line-audit)
 
 **Provenance — the framing that opened this WO was disproved and is corrected.**
 The orchestrator's brief framed `excluded_stale: 62` (`venue_close_time_past: 61`,
@@ -9254,13 +9254,13 @@ resourced as if it were.**
 
 What survives verification is narrower and still worth building: **one of the
 three collection tranches applies no staleness check at all.** `_portfolio`
-(`maker_fill_replay.py:421-433`) inherits the study's filter. Seed
-(`:487-571`) inherits it as of the last study run (up to 24h stale against a
-900s collector). **Persistent (`_recent_book_markets`, `:436-484`) has no
+(`maker_fill_replay.py:426-438`) inherits the study's filter. Seed
+(`:492-576`) inherits it as of the last study run (up to 24h stale against a
+900s collector). **Persistent (`_recent_book_markets`, `:441-489`) has no
 close-time, title-date, or resolution check of any kind** — membership is
 `books_dir.glob("*.csv.gz")` filtered only by mtime against
 `regime_days: 14` — and the caller rewrites that same file on every successful
-poll (`:862`), refreshing its mtime. **The recency criterion is refreshed by the
+poll (`:925`), refreshing its mtime. **The recency criterion is refreshed by the
 act of using it**, so a market that keeps returning a book payload keeps its slot
 indefinitely regardless of whether its venue close time has passed. **How many
 persistent-tranche markets are currently expired is unmeasured; no artifact
@@ -9276,6 +9276,12 @@ predicate rather than a second implementation. Does **NOT** build: any change to
 `delisted_skip_threshold`, `delisted_cooldown_hours`, the seed tier ordering,
 `maker_replay_collection_windows.csv` or `coverage_ratio` semantics, any watchdog
 registration, or any order/signer/credential surface. No new artifact.
+**The one exception to this list, added on a further round of review and
+disclosed rather than left for a reader to reconcile unaided: §147.1's two
+input-validation ceilings (`universe_pages <= 8`, `page_size <= 100`) are
+registered strictly-tightening validation clamps, not an eligibility or
+funding threshold from the list above — see Scope, below, for why that
+distinction holds.**
 
 **Touch ONLY these files** (`git diff --stat` must show exactly these four):
 - `src/polymarket_predictive_engine/maker_carry_study.py`
@@ -9292,38 +9298,117 @@ At `:2311-2313` add exactly two keys: `excluded_stale_condition_ids`
 (`dict[str, list[str]]`, sorted by condition id ascending, capped at the first
 **200**) and `excluded_stale_condition_ids_truncated` (bool).
 
-**Basis for 200:** the study scans at most `universe_pages: 5` x
-`page_size: 100` = 500 markets per run (`:399-400`), so 200 bounds the field at
-40% of the maximum scanned universe while covering the observed 62 with 3.2x
-headroom; worst case is under 20 KB against the 300 KB telemetry file cap
-(`push_vps_telemetry.sh:28`). `maker_carry_study.json` is verified **not** in
-`ledger_anchor.DEFAULT_LEDGER_REGISTRY`, so adding keys carries no anchor risk.
-`maker_carry_history.csv` and `maker_carry_portfolio_members.csv` byte-identical.
+**Basis for 200 — recomputed against the deployed config, not the code
+default, on further review.** `_settings`'s code default is `universe_pages: 5`
+(`:399-400`), which is what the first derivation used, but the shipped
+`polymarket_predictive_config.example.yaml` overrides it to `universe_pages: 8`
+(within the `maker_carry_study:` block, `:102-108`, literal at `:107`), and the
+scan loop consumes the configured value, not the default — `settings["universe_pages"]`
+and `settings["page_size"]` at `:810-819`. So the worst-case scanned universe on
+a deployed instance is `8 x 100 = 800` markets, not 500, and 200 bounds the
+field at **25%** of the maximum scanned universe, not 40%. **200 stays
+adequate as a burst-detection cap at the lower percentage**, because the cap's
+job is headroom against the *observed* stale count, not a fixed share of the
+scanned universe: at the observed 62 it is still 3.2x headroom, unchanged by
+which config is deployed, and the field's worst-case byte size — still under
+20 KB against the 300 KB telemetry file cap (`push_vps_telemetry.sh:28`) — does
+not move with the percentage either. The 40%→25% correction changes the
+*framing* of the basis, not its adequacy, and no threshold is raised: this is
+a diagnostic cap for operator observability of staleness bursts, not a
+selection, eligibility, or sizing gate. `maker_carry_study.json` is verified
+**not** in `ledger_anchor.DEFAULT_LEDGER_REGISTRY`, so adding keys carries no
+anchor risk. `maker_carry_history.csv` and `maker_carry_portfolio_members.csv`
+byte-identical.
+
+**Honesty gap on the 800 worst case, closed on a further round of review.**
+The `800` above is the DEPLOYED CONFIG's current `universe_pages: 8`, not an
+enforced ceiling: `_settings` (`:448-449`) merges the raw config's
+`universe_pages` verbatim — `merged.update({k: v for k, v in raw.items() if v
+is not None})` — with no upper bound of any kind, so a future config edit to,
+say, `universe_pages: 20` would silently raise the true worst-case scanned
+universe to `2000` markets while this WO's `200`-key cap and its 25%
+derivation sat unrevised and now false. **This amendment additionally
+registers a validated upper bound: `_settings` must reject a configured
+`universe_pages` above `8` with a hard configuration error, checked
+immediately after the raw-config merge at `:449` and before the value is
+used anywhere** — a strictly-tightening input clamp, narrowing what is today
+an unbounded positive integer down to `<= 8`, never widening it. Unlike the
+WO-129 evidence-gate minima a few lines below in this same function
+(`:453-461`), which silently raise a floor via `max()` because more evidence
+is always safe, a configured `universe_pages` above the ceiling gets a loud,
+rejected error rather than a silent downward clamp: silently shrinking the
+scanned universe would change collection breadth invisibly, and a deployment
+that genuinely wants more than `8` pages must make that a deliberate,
+reviewed change to this WO's basis, not a value this validation quietly
+overrides. With that clamp registered, `8 x 100 = 800` is the TRUE, enforced
+worst case, not merely today's observed value, and `200` stays sound at
+**25%** of that now-bounded ceiling.
+
+**A second, symmetric gap, found on a further round of review: `page_size` is
+merged exactly the same unbounded way, at the same `:449` line, and consumed
+exactly as unboundedly at `:810-819` (`"limit": int(settings["page_size"])`,
+`"offset": page * int(settings["page_size"])`).** The `universe_pages <= 8`
+clamp above bounds only one factor of the worst-case product; a configured
+`page_size` above the deployed `100` (`polymarket_predictive_config.example.
+yaml:108`, in the same `maker_carry_study:` block as `universe_pages`'s `:107`)
+would silently raise the true worst case past `800` while the clamp just
+registered, and this WO's `200`-key cap, sat unrevised and now false — the
+same honesty gap, one config key over. **This amendment registers a second
+validated upper bound, at the same site and under the same rule as the
+first: `_settings` must reject a configured `page_size` above `100` with a
+hard configuration error, checked immediately after the raw-config merge at
+`:449` and before the value is used anywhere** — strictly tightening,
+narrowing an unbounded positive integer down to `<= 100`, never widening it,
+and rejected loudly rather than silently truncated, exactly like the
+`universe_pages` clamp beside it. With both clamps registered, `8 x 100 =
+800` is now the TRUE, enforced worst case on BOTH factors, not merely one of
+them, and `200` stays sound at **25%** of that doubly-bounded ceiling. This
+adds one more validation branch, immediately alongside the first, to the
+same function in the same already-touched file — that file, and its test
+file, are already on this WO's **"Touch ONLY these files"** list, so the
+list does not change.
+
+**A2 — both new clamps, every branch (added on a further round of review,
+closing a gap the ceiling-only wording left open).** The two paragraphs
+above state the ceiling branch (`> 8`, `> 100`); every other configured
+value a builder could encounter at that same site takes the identical
+hard-error path, not a silent default: empty (`""`), unparseable (a
+non-numeric string), non-finite (`nan`, `inf`, `-inf` if the raw config
+value arrives as a float), zero, and negative all raise the same hard
+configuration error as a too-large value, checked at the same site
+(`:449`) before the value is used anywhere. **The one branch that must not
+exist is a silent `int()`/`max(0, ...)` coercion to `0` on any of these**
+— a `universe_pages` or `page_size` of `0` is not a smaller, safer scan, it
+is a scan that silently covers nothing and reports a clean watchlist
+indistinguishable from a genuinely clean one, which is a more dangerous
+failure than the too-large case these clamps were first registered to
+close. Fail-closed on every one of these inputs, never fail-open toward an
+empty scan.
 
 ### 147.2 — Collector side: one shared predicate, two tranches
 
 Add exactly one helper `_watchlist_expired_reasons(row, stale_map, *, as_of)`
 which calls `maker_carry_study._candidate_staleness_reasons` **verbatim**,
 imported inside the function — the precedent registered at
-`maker_fill_replay.py:580-585` ("a second implementation would drift from the
+`maker_fill_replay.py:585-590` ("a second implementation would drift from the
 rule it is meant to describe"). Do not reimplement date parsing. Adapter:
 `end_date_utc` → `endDateIso`, `question` → `question`,
 `uma_resolution_status` → `umaResolutionStatus` (all in `CANDIDATE_FIELDS`).
 `as_of` is `parse_timestamp(generated_at) or datetime.now(timezone.utc)` — the
 run's own clock per S1, never the max of observed data timestamps.
 
-Applied to the **persistent** tranche (before `watchlist.append` at `:483`) and
-the **seed** tranche (in the existing skip loop at `:510-530`, incrementing
+Applied to the **persistent** tranche (before `watchlist.append` at `:488`) and
+the **seed** tranche (in the existing skip loop at `:515-535`, incrementing
 `excluded["expired"]` so it surfaces through `candidate_seed_exclusions`).
 **Explicitly NOT applied to the portfolio tranche** — `_portfolio` feeds
 `maker_replay_collection_windows.csv`, whose `covered` flag drives
 `coverage_ratio`; dropping a portfolio market on the strength of a possibly-stale
 study file would blank a measurement denominator. WO-116's registration binds
-here (`docs/POLYMARKET_CODEX_WORK_ORDERS.md:5514-5516`). Count it instead:
+here (`docs/POLYMARKET_CODEX_WORK_ORDERS.md:5526`). Count it instead:
 `portfolio_observed_not_excluded`.
 
 **A2 — every branch, and every one fails OPEN toward collecting**, which is the
-registered conservative direction for a collector (`maker_fill_replay.py:129-133`:
+registered conservative direction for a collector (`maker_fill_replay.py:134-138`:
 "For a collector the conservative direction is to collect"). Exclusion fires only
 on positively parsed evidence of pastness. `end_date_utc` missing/empty/
 unparseable/non-finite → `normalize_external_timestamp` returns `None`
@@ -9336,31 +9421,58 @@ Missing `question` → `_title_dates("")` returns `[]` → kept. Missing
 entirely, `"stale_ignored"`. **Basis for 48.0h:** two times the registered study
 interval `OPS_MAKER_STUDY_INTRADAY_INTERVAL_SECONDS` default 86400s
 (`run_vps_ops_scheduler.sh:38`) — one missed study run tolerated, two is not
-evidence. In the map AND parsing clean → excluded (union; the study's own
-exclusion is the stronger evidence).
+evidence. **Corrected on a further round of review: this sentence's own
+"AND" wording contradicted §147.3's fail-safe precedence rule, below, and is
+fixed to match it, not left as a second, weaker rule for this predicate
+alone.** In the map → excluded on its own, whether or not the current row's
+own fields parse cleanly — the study's own exclusion is positive evidence
+that does not require the current row's parse to also succeed, per §147.3's
+fail-safe sentence. Out of the map but parsing shows pastness on the
+current row → excluded on that evidence alone too. The predicate returns
+the union of both reason sources; either one is independently sufficient,
+and neither is conditioned on the other.
 
 ### 147.3 — Diagnostics
 
 Two keys on `official_book_snapshot.json` (snapshot, not anchor-enrolled):
 `watchlist_excluded_expired` (dict with exactly `persistent`, `seed`,
-`portfolio_observed_not_excluded`, `close_time_unparseable`, `stale_map_status`
+`portfolio_observed_not_excluded`, `close_time_unparseable`,
+`kept_missing_fields`, `stale_map_status`
 ∈ `{"ok","unavailable","malformed","stale_ignored"}`) and
 `watchlist_excluded_expired_examples` (at most **10**, sorted by condition id —
 the literal matches the existing `excluded_stale_examples` cap at
 `maker_carry_study.py:850`).
 
-**Fail-safe sentence.** An expired-market exclusion fires only on positively
-parsed evidence that the venue close time, title date, or UMA resolution status
-is past; a missing, empty, unparseable, or non-finite `end_date_utc`, a missing
-`question` or `uma_resolution_status`, and a missing, malformed, or
-more-than-48-hour-old `maker_carry_study.json` all leave the market ON the
-watchlist and increment a visible counter, because for a collector the
-conservative direction is to keep collecting; the portfolio tranche is never
-excluded, only counted; and no gate, sizing, eligibility, or order surface reads
-this artifact.
+**Fail-safe sentence — precedence rule added on external review, which caught
+a real contradiction with test 10 below; reconciled on a further review to name
+the counter each keep-path actually increments, after `kept_missing_fields` was
+added to the schema above because the missing-`question`/`uma_resolution_status`
+keep path had no counter at all.** An expired-market exclusion fires
+only on positively parsed evidence that the venue close time, title date, or
+UMA resolution status is past, and that evidence can come from either the
+current row or the persisted stale map; **the stale map's positive evidence
+takes precedence over a missing current-row field, and the missing-fields-keep
+behaviour applies only when the stale map carries no entry for that condition
+id.** So, each **only when the stale map has no entry for that condition id** —
+because for a collector the conservative direction is to keep collecting: a
+missing, empty, unparseable, or non-finite `end_date_utc` leaves the market ON
+the watchlist and increments `close_time_unparseable`; a missing `question` or
+missing `uma_resolution_status` leaves the market ON the watchlist and
+increments `kept_missing_fields`; and a missing, malformed, or
+more-than-48-hour-old `maker_carry_study.json` leaves the market ON the
+watchlist under the corresponding `stale_map_status` literal, which is a
+status field rather than a per-market counter. When the stale map DOES carry
+an entry for that condition id — the
+persistent-market-absent-from-the-candidates-CSV case in test 10, where the
+current row's fields are themselves missing — that entry is positive evidence
+from the study's own run and overrides the current-row absence, so the market
+IS excluded. Absence of current-row evidence is therefore a keep only in the
+absence of contrary stale-map evidence, never a keep regardless of it; the
+portfolio tranche is never excluded, only counted; and no gate, sizing,
+eligibility, or order surface reads this artifact.
 
 **Cadence.** No new job or CLI command. `snapshot_official_books` already runs
-every cycle via `collect_maker_replay_data` (`:957`, `:968`) on the existing
+every cycle via `collect_maker_replay_data` (`:1033`, `:1044`) on the existing
 900s `run_trade_prints` cadence.
 
 **Tests (enumerated).** In `test_maker_carry_study.py`: (1) 3 stale + 2 clean →
@@ -9375,11 +9487,15 @@ byte-identical. In `test_maker_fill_replay.py` (**S4: at least one Gamma
 now-2h` → excluded, `persistent == 1`, absent from `market_polls`. (6)
 `now+2h` → kept, counter 0. (7) `""` → kept, `close_time_unparseable == 1`.
 (8) `"not-a-date"` → same. (9) `"nan"` → same. (10) **persistent market ABSENT
-from the candidates CSV but present in `excluded_stale_condition_ids` → excluded;
-this is the 61-market case and the only path that catches it.** (11) study JSON
+from the candidates CSV (so its own current-row fields are themselves missing)
+but present in `excluded_stale_condition_ids` → excluded — the stale map's
+positive evidence overrides the current-row absence per the fail-safe
+sentence's precedence rule, not an exception to it; this is the 61-market case
+and the only path that catches it.** (11) study JSON
 missing → `"unavailable"`, watchlist equals pre-change baseline. (12) map a list
 not a dict → `"malformed"`. (13) study `generated_at_utc` at `now-47.9h` →
-`"ok"` and source B applies; advance the run clock to `now-48.1h` →
+`"ok"` and stale-map evidence applies (an id present in
+`excluded_stale_condition_ids` is excluded); advance the run clock to `now-48.1h` →
 `"stale_ignored"` — the S1-mandated clock-advance pair. (14) seed tranche with
 one expired candidate → `candidate_seed_exclusions["expired"] == 1`, remaining
 tier ordering unchanged against a golden list. (15) portfolio tranche with an
@@ -9388,47 +9504,326 @@ collection-windows row count unchanged. (16) examples capped at 10, sorted, on a
 15-exclusion fixture. (17) byte-identity: the four `MAKER_POLICY_DEFAULTS`
 thresholds above. (18) static (A3): `_candidate_staleness_reasons` called from
 exactly two sites, scan rooted `Path(__file__).resolve().parents[2]` over
-`ROOT/"src"`, `"scripts"`, `"tests"`, `".github"`, excluding `ROOT/".claude"`,
-asserting `visited_files > 0`.
+`ROOT/"src"` and `"scripts"` **only** — corrected on external review after an
+exhaustive scan over `"src"`, `"scripts"`, `"tests"`, `".github"` failed the
+exactly-two assertion, because test files themselves call
+`_candidate_staleness_reasons` to exercise it. Restricting the scan to the two
+production roots is the fix, not raising the count: `"tests"` and `".github"`
+are excluded, along with `ROOT/".claude"`, asserting `visited_files > 0`.
+(19) **added on further review, closing the missing-fields counter gap:** a
+persistent market with `question` missing and no stale-map entry for its
+condition id → kept, `kept_missing_fields == 1`, `close_time_unparseable == 0`;
+a second persistent market with `uma_resolution_status` missing, likewise no
+stale-map entry → kept, `kept_missing_fields == 2` cumulative — distinct from,
+and not conflated with, the `close_time_unparseable` counter exercised by
+tests 7-9. (20) **added on further review, exercising the `universe_pages`
+upper-bound clamp (§147.1), in `test_maker_carry_study.py` alongside tests
+(1)-(4):** `_settings` with raw config `universe_pages: 9` raises a
+configuration error before any network call; `universe_pages: 8` (the
+deployed config's own value) is accepted unchanged; the code default `5` is
+unaffected. (21) **added on a further round of review, exercising the
+`page_size` upper-bound clamp (§147.1), in `test_maker_carry_study.py`
+alongside tests (1)-(4) and (20):** `_settings` with raw config
+`page_size: 101` raises a configuration error before any network call;
+`page_size: 100` (the deployed config's own value, and also the code
+default) is accepted unchanged. (22) **added on a further round of review,
+exercising the A2 edge-case branches for `universe_pages`, in
+`test_maker_carry_study.py` alongside tests (1)-(4), (20), and (21):**
+`_settings` with raw config `universe_pages` set to `""`, `"abc"`, `float("nan")`,
+`float("inf")`, `float("-inf")`, `0`, and `-1` each raise the same configuration error as `universe_pages: 9`
+— seven sub-cases, one assertion each — and none falls through to a silent
+`0`-page scan. (23) **added on the same round, the symmetric case for
+`page_size`:** `_settings` with raw config `page_size` set to `""`, `"abc"`,
+`float("nan")`, `float("inf")`, `float("-inf")`, `0`, and `-1` each raise the same configuration error as
+`page_size: 101`, with the same seven sub-cases and the same no-silent-zero
+guarantee.
 
-**Honest consequence, stated rather than discovered later.** The three tranche
-budgets are independent (`persistent_cap` at `:733`, seed `cap` at `:751`), so
-freeing a persistent slot **reduces the number of markets polled**; it does not
-reallocate that slot to seeding. This WO lowers API and disk spend and removes
-noise from `seasoning_runway`; it does **not** increase seeding breadth. Any
-reallocation would be a `max_candidate_markets` change and is deliberately not
-bundled.
+**Honest consequence — corrected on further review of the actual filter/cap
+ordering, which is filter-then-cap in both amended tranches, not cap-then-filter.**
+`_recent_book_markets` (`:441-489`) filters every mtime-sorted candidate
+through the new expiry check (147.2) as it builds its own unbounded internal
+list — the check sits before that function's own `watchlist.append` at
+`:488` — and only the CALLER slices the filtered result to `persistent_cap`
+afterward (`:790-797`). `_candidate_seed_markets` (`:492-576`) filters through
+the same expiry check inside its skip loop (`:515-535`) while building
+`ranked`, and only truncates to `cap` at the very end (`ranked[:cap]`,
+`:573`). Because filtering happens BEFORE the cap in both tranches, excluding
+an expired market frees its slot for the next-best-ranked non-expired
+candidate that was already waiting just past the cap line — **within the
+same tranche, this is backfill, not a guaranteed reduction.**
+`markets_polled` therefore does not necessarily drop: it drops only when a
+tranche's post-filter pool has fewer eligible candidates left than its cap to
+fill it, and holds steady whenever a replacement candidate is available. The
+three tranche BUDGETS remain independent of EACH OTHER (`persistent_cap` at
+`:796`, seed `cap` at `:814`) — a freed persistent slot never reallocates to
+seeding, and this WO still builds no `max_candidate_markets` change — but
+within a single tranche, backfill from that tranche's own ranking is exactly
+what the existing, unmodified filter-then-cap ordering already does, and
+describing it as a guaranteed poll-count reduction was the error. This WO's
+reliable, honest observable is the new diagnostic counters
+(`persistent`, `seed`, `portfolio_observed_not_excluded`,
+`close_time_unparseable`, `kept_missing_fields`) — not the aggregate `markets_polled` count, which
+this WO makes no claim about moving in either direction. Capping before
+filtering would change collection breadth (which candidates enter the
+pre-cap pool at all) and is deliberately out of scope for this
+citation-and-consequence correction: the fix here is to the WORDING, not to
+`_recent_book_markets` or `_candidate_seed_markets`'s existing order of
+operations.
 
 **Scope: OWNER MERGE after line-audit.** Collection breadth and two diagnostic
 fields only; no gate, threshold, eligibility rule, screen, sizing rule, funding
-value, or config value moves in either direction. Tighten-only in the collection
+value, or config value moves in either direction — **disclosed on a further
+round of review: this covers the two §147.1 input-validation clamps
+(`universe_pages <= 8`, `page_size <= 100`) as well, and is not contradicted by
+them.** Neither clamp moves any config value — the deployed `8` and `100` are
+exactly the deployed `8` and `100` before and after this WO — and neither
+silently accepts or silently truncates an out-of-range configuration; each
+only ever REJECTS one, loudly, with a hard configuration error, before the
+value is used anywhere. A clamp that only ever refuses a value it did not
+refuse before is a registered tightening of validation, not a config-value
+move, and is disclosed here rather than left for a reader to reconcile against
+this sentence unaided. Tighten-only in the collection
 sense: fewer markets may be polled, never more, and only on positively parsed
 evidence of pastness. **Routing note:** the register previously contradicted
-itself on collection-only WOs (WO-131 at `:6017` "non-frozen → orchestrator
-merge" vs WO-141 at `:6644` "collection-only → owner merge"). **Orchestrator
+itself on collection-only WOs (WO-131 at `:6028` "non-frozen → orchestrator
+merge" vs WO-141 at `:6655` "collection-only → owner merge"). **Orchestrator
 resolution: all four of WO-146 through WO-149 route to OWNER MERGE.** The
 stricter reading is adopted deliberately — this session's review rounds found
 defects in the orchestrator's own registered text at every round, so orchestrator
 self-merge is not the safe default here.
 
-**Day-after check.** After one collector cycle (<= 15 min): (1)
-`excluded_stale_condition_ids` non-empty with key count `min(excluded_stale,
-200)`. (2) `watchlist_excluded_expired.stale_map_status == "ok"`. (3) **record
-the numbers** — `persistent`, `seed`, `portfolio_observed_not_excluded`,
-`close_time_unparseable`. **A result of `persistent: 0` is a valid and
+**Day-after check — the `stale_map_status` clause is re-gated a second time on
+a further round of external review, this time in the opposite direction from
+the first.** The stale map this check reads is produced by
+`maker_carry_study.py`, on the `OPS_MAKER_STUDY_INTRADAY_INTERVAL_SECONDS`
+default 86400s cadence, not by `snapshot_official_books`'s 900s collector
+cycle — but `scripts/run_vps_deploy_acceptance.sh:81-83` always runs
+`maker-carry-study` before `collect-maker-replay-data`, on both deploy paths,
+and deploy acceptance fails closed on either producer's nonzero exit. A
+deploy that completes therefore already guarantees a freshly completed
+`maker_carry_study` run, so the round-2 wait-allowance — gating the assertion
+on the study's organic cadence and accepting `"unavailable"` as documented
+and expected until it elapsed — had the direction backwards: after a
+successful deploy, `"unavailable"` can only be a regression, never the
+expected state. That allowance is deleted. After one collector cycle (<= 15
+min): (1) **corrected on further review — non-empty is required only when
+`excluded_stale > 0`, not unconditionally:** `excluded_stale_condition_ids`
+key count — over distinct non-empty stale condition ids, since
+`maker_carry_study.py:843-847` adds a key only when the stale market's
+`conditionId` is non-empty while `excluded_stale` increments once per stale
+market regardless, so marker-count and id-count can legitimately differ
+(safe-noisy: a mismatch here can only produce a false-alarm check failure,
+never mask a missed exclusion) — equals `min(excluded_stale, 200)` exactly;
+when `excluded_stale == 0` (nothing stale in the current scan), `min(0, 200)
+== 0` and the map is legitimately EMPTY — that is a clean day, not a defect,
+and the check must not fail it. Non-empty is required only once
+`excluded_stale > 0`, and the
+exact key-count equality holds unconditionally either way. Additionally,
+`excluded_stale_condition_ids_truncated == (excluded_stale > 200)` holds,
+added on a further round of review to pin the boolean against the same
+threshold as the key-count equality above. (2)
+`watchlist_excluded_expired.
+stale_map_status == "ok"` is **required immediately after deploy
+acceptance** — no wait, no documented-unavailable exception; anything other
+than `"ok"` at that point is a regression to investigate, not an expected
+transient. (3) **record the numbers** — `persistent`, `seed`,
+`portfolio_observed_not_excluded`,
+`close_time_unparseable`, and **`kept_missing_fields`, added on a further
+round of review alongside the other four counters** (§147.3). **A result of `persistent: 0` is a valid and
 informative outcome** meaning the tranche is clean today and this WO bought
 observability rather than hygiene; it is not a build failure. (4)
-`markets_polled` drops by exactly `persistent + seed`. (5) `seasoning_runway`
+**corrected on further review of the actual filter/cap ordering:**
+`markets_polled` is NOT required to drop. Both amended tranches filter before
+they cap (`:790-797` for persistent, `:515-535` then `ranked[:cap]` at `:573`
+for seed — see the Honest consequence paragraph above), so excluding an
+expired market frees its slot for the next-best-ranked non-expired candidate
+already waiting past the cap line, and the tranche backfills from its own
+ranking whenever one is available. The reliable observable of this WO's
+effect is the diagnostic counters already recorded at (3) —
+`persistent`, `seed`, `portfolio_observed_not_excluded`,
+`close_time_unparseable`, `kept_missing_fields` — not the aggregate `markets_polled` count, which
+this WO registers no required direction for: it may drop (when a tranche's
+filtered pool has fewer eligible candidates left than its cap), hold steady
+(when backfill fills the freed slot), but never rise. (5) `seasoning_runway`
 contains no id listed in `excluded_stale_condition_ids`. (6)
 `maker_replay_collection_windows.csv` cadence per portfolio market unchanged.
 
 **Open questions.** (1) Should the persistent exclusion also require absence from
 the current portfolio as belt-and-braces? `_recent_book_markets` already receives
-`exclude={portfolio ids}` at `:728`, but that guarantee lives in the caller.
+`exclude={portfolio ids}` at `:790`, but that guarantee lives in the caller.
 (2) Is 48.0h right if the study effectively runs twice daily? If the deployed
 effective interval is ~12h, 24.0h is the better-matched literal.
 (3) **Priority: parked behind WO-149** per the drafter's recommendation and the
 funnel finding.
+
+
+### 147.4 — Every `maker_fill_replay.py` citation in this WO is stale; corrected, with the rule that stops it recurring (added 2026-08-03, pre-dispatch; WO-147 was NOT safely dispatchable)
+
+**Cause.** WO-147 was drafted 2026-08-01 and its citations were accurate then —
+verified by re-reading `maker_fill_replay.py` at `33ab8f7^1`, where every one
+resolves exactly. **WO-149 merged as PR #422 on 2026-08-02**, taking that file
+from 1754 to 1922 lines. The shift is **not uniform**: `+5` above roughly line
+490, `+62`/`+63` around 730-750, and `+76` by 957-968. A builder applying the
+registered numbers would therefore edit the wrong function, and would do so
+*more* wrongly the deeper into the file it went.
+
+**The corrected table — and the corrections are PERFORMED in the parent text
+above by this same commit, not merely declared here** (S8 A4 / the A-new
+performed-not-declared rule from #421: an amendment that states corrections and
+leaves the parent carrying the stale values fails admission). Each row was
+resolved by matching the construct, not by adding an offset, and the `+5` rows
+were additionally confirmed byte-identical against `33ab8f7^1`:
+
+| as registered | construct | correct on `c26cd7f` |
+|---|---|---|
+| `:129-133` | `_read_delisted_markers` docstring ("conservative direction is to collect") | `:134-138` |
+| `:421-433` | `_portfolio` | `:426-438` |
+| `:436-484` | `_recent_book_markets` | `:441-489` |
+| `:483` | `watchlist.append` | `:488` |
+| `:487-571` | `_candidate_seed_markets` | `:492-576` |
+| `:510-530` | the seed skip loop (`for condition_id, row in candidates.items():`) | `:515-535` |
+| `:580-585` | "a second implementation would drift" comment | `:585-590` |
+| `:728` | `persistent = _recent_book_markets(` call | `:790` |
+| `:733` | `persistent_cap = max(0, ...)` | `:796` |
+| `:751` | seed `cap=max(0, int(settings.get("max_candidate_markets", 0)))` | `:814` |
+| `:862` | `_write_gzip_csv(path, combined, OFFICIAL_BOOK_FIELDS)` | `:925` |
+| `:957`, `:968` | the two `snapshot_official_books(cfg)` calls | `:1033`, `:1044` |
+
+**`maker_carry_study.py` is unaffected.** That file was not touched by WO-146,
+WO-149 or WO-150, and all eleven of this WO's **original, pre-clamp**
+citations into it — `:582-605`, `:842`, `:858`, `:859`, `:844-846`, `:903`,
+`:850`, `:2311-2313`, `:2488`, `:399-400`, `:1710-1718` — resolve exactly
+(`:1666-1667` was recorded here on the prior round of review, but that line
+range does not belong to any of this WO's citations — it is WO-151's cite
+into this same file — so it is removed here rather than corrected in place;
+recount twelve→eleven). They are **not** to be edited. **Narrowed on a
+further round of review, closing a completeness gap this claim left open:**
+this eleven-range list is not the complete set of this WO's citations into
+`maker_carry_study.py` — §147.1's two input-validation clamps add three
+more, `:448-449`, `:453-461`, and `:810-819`, verified above where each is
+introduced. Those three are deliberately **excluded** from the "not to be
+edited" eleven: they are exactly the sites the clamps' own hard-error
+branches insert at and around, so a build implementing §147.1 is expected
+to touch them, unlike the original eleven, which the clamps do not touch
+and which stay locked.
+
+**Three self-referential citations into this register are also stale**, from
+unrelated later edits, and are corrected here rather than left for the same
+reason: `:5514-5516` (WO-116's `coverage_ratio` binding) is now `:5526`; WO-131's
+heading is `:6028`, not `:6017`; WO-141's heading is `:6655`, not `:6644` — and
+WO-141's heading text was rewritten when it went `done`, so the phrase this WO
+quotes from it no longer exists verbatim. The **substance** each of the three
+supports is unchanged; only the pointers moved.
+
+**The rule that stops this recurring, and it is not "renumber more often" —
+refined on external review, because the first draft conflated two different
+kinds of drift under one action.** **Anchor text governs; line numbers are
+advisory** — but which action that licenses depends on which kind of drift a
+builder finds, and the two kinds do not get the same response:
+
+- **Positional drift** — the named construct exists exactly as described, just
+  at a different line number, because unrelated edits elsewhere shifted the
+  file (every row in the table above is this kind). Here, and only here,
+  follow-the-anchor applies as originally stated: the builder follows the
+  construct, records the drift, and continues — it does not guess and it does
+  not stop.
+- **Semantic drift** — the named construct still exists, but what it *does* has
+  changed: a default moved, a branch was added, a caller's shape changed, or
+  the premise the citing text relied on no longer holds even though the
+  construct's address and name are otherwise intact. Here follow-and-continue is
+  the wrong response, because silently re-pointing the citation to the current
+  line would carry forward a claim the construct no longer supports. A builder
+  that finds semantic drift instead **REVALIDATES** the citing text's claim
+  against the construct's current behaviour and **ESCALATES** rather than
+  patching in a new line number over what may now be a false statement.
+
+In both cases, a construct that cannot be found at all is a genuine escalation
+regardless of kind. Line numbers are retained because they make review faster,
+not because they are authoritative. This is the same rule proposed for WO-148
+in its pending §148.6 amendment (PR #431, registered separately; the two
+amendments share a cause, not a dependency — each stands on its own if the
+other has not merged).
+
+**The material non-finding, recorded because its absence is what makes this WO
+still buildable.** Unlike WO-148 — whose premises WO-149 falsified outright —
+WO-147's logic is **structurally unreachable** under `scope="portfolio"`. Its new
+expired-market filter applies only to the persistent and candidate-seed tranches,
+and under that scope both are forced to `[]` at `maker_fill_replay.py:769-770`
+*before* either function runs. The `_portfolio` tranche, which both scopes share,
+is explicitly out of scope in this WO and stays untouched. The new diagnostic keys
+land on `official_book_snapshot.json`, which the portfolio scope never writes.
+**So this is citation drift only, with no behavioural interaction — WO-147 is
+dispatchable once this amendment merges.**
+
+**Scope and touched files are unchanged by this amendment; the tests,
+fail-safe sentence, and Day-after check are NOT — a second round of external
+review of this same PR found three defects in this amendment's own first
+draft, and they are corrected the same way as the citation drift above:
+PERFORMED in the parent WO-147 text by this same commit, not merely declared
+here (S8 A4).** The four files under this WO's own **"Touch ONLY these
+files"** list stand exactly as registered; this amendment adds none. What is
+not unchanged: **test 18** as first drafted asserted an exhaustive-scan count
+that fails on the real tree, because test files themselves call
+`_candidate_staleness_reasons`, so its scan roots are now restricted to the
+two production roots, `src/` and `scripts/`; the **fail-safe sentence** as
+first drafted flatly contradicted **test 10**, and both now carry the same
+precedence rule — stale-map positive evidence overrides a missing
+current-row field, and missing-fields-keep applies only when the stale map
+carries no entry for that condition id; and the **Day-after check**'s
+`stale_map_status == "ok"` assertion — gated in this amendment's first draft
+on one completed post-deploy `maker_carry_study` run (worst case 86400s out)
+rather than on the 15-minute collector cycle, with the documented
+`"unavailable"` state accepted as expected until then — is corrected again
+on a further round of external review: `scripts/run_vps_deploy_acceptance.
+sh:81-83` always runs `maker-carry-study` before `collect-maker-replay-data`
+and deploy acceptance fails closed on either producer's nonzero exit, on
+both deploy paths, so a successful deploy already guarantees a freshly
+completed study run and that wait-allowance had the direction backwards.
+The assertion is now `stale_map_status == "ok"` required immediately after
+deploy acceptance, with the wait-allowance deleted. The tests under
+**"Tests (enumerated)"** numbered eighteen after this amendment and stand by
+heading, not line —
+this amendment's first draft cited register line numbers for them and those
+numbers had already drifted by the time the PR was reviewed, which is this
+amendment's own lesson applied to itself. A nineteenth test was added on a
+later round of review to exercise the `kept_missing_fields` counter (§147.3);
+the same heading-not-line convention holds for it. A twentieth test was added
+on a further round of review to exercise the `universe_pages` upper-bound
+clamp (§147.1); the same heading-not-line convention holds for it too. A
+twenty-first test was added on yet a further round of review to exercise the
+symmetric `page_size` upper-bound clamp (§147.1) found on that same round; the
+parent's Scope paragraph is amended on this same round to disclose both
+clamps as registered, disclosed tightenings — the deployed values do not
+move, and an out-of-range configuration is rejected loudly, never silently
+accepted or silently truncated — rather than leaving a reader to reconcile
+them against the "no config value moves" sentence unaided. Twenty-second and
+twenty-third tests were added on a further round of review to exercise the
+A2 edge-case branches — empty, unparseable, non-finite, zero, and negative —
+for the `universe_pages` and `page_size` clamps respectively (§147.1); the
+same heading-not-line convention holds for them too.
+
+**The same drift affects three other queued work orders and is named here so it
+is not rediscovered one wasted builder at a time.** None of the three is
+corrected by this amendment — each carries the factual drift note below, and
+each work order's own section (not this one) governs whether and when it is
+dispatchable:
+
+- **WO-143** — `cli.py:613-614` (the `refresh-governance` contention-exit
+  precedent) is now `:627-628`, and `run_vps_ops_scheduler.sh:620-645`
+  (`run_trade_prints`) is now `:639-664`; both moved because of WO-149. Two
+  further citations into `mispricing_alpha.py` (`:542-543`, `:363`) were wrong
+  **when drafted** — that file has not changed since — and §143.7 of this same
+  register already cites the correct line for one of them.
+- **WO-143b** — the config citations "line 1311 / 1312" are now `:1327` / `:1328`
+  (WO-146 `+6` and WO-150 `+10`, both landing earlier in the file). Its own
+  self-correction for `test_shadow_cohort.py` fixed one of a pair and left the
+  twin: `:162` is now `:153`.
+- **WO-151** — the base text's `run_vps_ops_scheduler.sh:796-814` is now
+  `:841-860` and `:799-810` is now `:844-855`. Two facts recorded without
+  ruling on that WO's dispatch status here (its own section governs): its A10
+  gap was closed when §151.1 merged with PR #427, and §151.1's own scheduler
+  citations (`:841-856`, `:635`) were derived *after* WO-149's merge and
+  resolve against the current tree.
 
 ## WO-148 — Make seed-to-eligible conversion measurable: a tier-assignment event ledger — `queued` (registered 2026-08-01; measurement-only sidecar; changes no selection behaviour; enrolment deliberately deferred, see 148.4 → OWNER MERGE after line-audit)
 

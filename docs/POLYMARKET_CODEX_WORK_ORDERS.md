@@ -11498,68 +11498,111 @@ of the compose file), which sidesteps this mount problem entirely and is why
 it is registered separately rather than folded back into this WO's Touch
 ONLY list a second time.
 
-**The retained check, until §153.1 lands, is required-gate green.** The
-enumerated predicate tests (1)-(8) above run inside the self-hosted ARM64
-suite every PR must pass; the day after this WO merges, the owner confirms
-the next required-gate run on `main` is green, with retained Actions history
-as the record. This is the same mechanism an earlier round rejected on S6
-grounds — it makes the owner infer this registration's coverage from a
-general-purpose green CI run rather than reading a result that speaks to
-this registration directly — and that objection is not wrong, it is simply
-outweighed now: the alternative that would have cleared it outright proved
-unimplementable, and a deferred, correctly-scoped follow-on is preferable to
-either shipping the broken producer or leaving this WO's day-after check
-unstated. If the `/independent-merge` path is ever un-deadlocked, its
-refusal on a PR touching any of the twenty-eight paths (blocker
+**The retained check — corrected on a further round of review — is a direct
+read of the merged registry on `main`, not required-gate green.** An earlier
+round retained CI-green as the mechanism and argued the S6 objection to it
+was "outweighed" once the production-observable producer proved
+unimplementable; that reasoning is wrong, because required-gate green was
+never the only owner-observable option and the direct-read alternative was
+available the whole time. The day after this WO merges, the owner opens
+`scripts/merge_independently_reviewed_pr.py` on `main` at github.com and
+reads the `PROTECTED_CONTROL_PATHS` literal (`:34-...` at merge time)
+directly: **twenty-eight entries total** — the twelve pre-existing plus the
+**sixteen new** entries named in scope (a) above (the dispatch workflow,
+its script, its test file, the six staged scripts and the compose file
+`stage_target_scripts` stages, the three-file acceptance-verdict chain, and
+the three Path A entries). This clears **S6** outright rather than by
+trade-off: reading a committed file's literal contents on `main` is zero
+execution, and the result is durable — it does not depend on any workflow
+run's log-retention window the way an Actions-history check does — and it is
+a result that speaks to this registration directly rather than a
+general-purpose green run the owner must infer coverage from, which is
+exactly the gap the earlier round's own S6 objection identified and then
+talked itself out of closing. **Required-gate green on the next `main` run
+is demoted to a secondary signal**: it corroborates that tests (1)-(8) above
+still pass inside the self-hosted ARM64 suite, with retained Actions history
+as that record, but the owner's day-after check no longer depends on it. If
+the `/independent-merge` path is ever un-deadlocked, its refusal on a PR
+touching any of the twenty-eight paths (blocker
 `pull_request_changes_trusted_merge_control`) remains available as
-additional runtime evidence, not this check's mechanism.
+additional runtime evidence, not this check's mechanism. **§153.1 remains
+the production-telemetry follow-on outlined below; it is not a blocking
+prerequisite for this WO's own day-after check**, which the direct registry
+read on `main` already satisfies without it.
 
-### Scope (b) — the control (i) permission conflict, recorded as an OWNER decision, not built
+### Scope (b) — the control (i) permission question, closed on empirical evidence, not built
 
 WO-145's registered control (i) tests whether an eligible independent reviewer
 exists. **WO-145's text names no endpoint** — the endpoint is a fact about the
 implementation rather than about the registration, and is recorded here as such:
 the existing gate queries `repos/{repo}/collaborators?affiliation=all&per_page=100`
 (`scripts/audit_github_merge_gate.py:454`) and #428's workflow step queries the
-same collection — the premise on which
-Path B's permanent loosening was registered. **Corrected on a further round of
-review — the permission this endpoint actually needs is a different, and
-cheaper, grant than first registered here.** Per GitHub's documented
-requirements for `List repository collaborators`, the call needs the
-fine-grained token itself to carry **Metadata: read**, *and*, independently of
-the token's declared permissions, the calling principal — the PAT's user, or
-the GitHub App installation — must already hold write, maintain, or admin
-access to the repository; the endpoint is not gated by any `administration`
-permission at all. (`administration` is also, separately, not a valid key in a
-workflow `permissions:` block — `GITHUB_TOKEN` scopes do not include it —
-which this paragraph noted correctly even while misnaming the actual
-requirement above it.) The workflow declares
+same collection. Per GitHub's documented requirements for `List repository
+collaborators`, the call needs the fine-grained token itself to carry
+**Metadata: read**, *and*, independently of the token's declared permissions,
+the calling principal — the PAT's user, or the GitHub App installation — must
+already hold write, maintain, or admin access to the repository; the endpoint
+is not gated by any `administration` permission at all. (`administration` is
+also, separately, not a valid key in a workflow `permissions:` block —
+`GITHUB_TOKEN` scopes do not include it.) The workflow declares
 `permissions: {actions: read, contents: read}` per WO-145's least-privilege
-registration, and an explicit `permissions:` block sets every unlisted scope to
-`none`, **so the call still 403s on every run and control (i) still takes its
-UNDETERMINED branch every time** — `GITHUB_TOKEN` carries neither the Metadata
-grant nor a qualifying collaborator-level principal of its own. The #428 build
-makes that loud — a `::warning::` stating the
-premise is UNVERIFIED for that run — rather than letting it read as a green
-notice, which is the correct fail direction and is why this is a registration
-question and not a build defect.
+registration, and through round-6 this paragraph asserted that an explicit
+`permissions:` block setting every unlisted scope to `none` meant **the call
+still 403s on every run and control (i) still takes its UNDETERMINED branch
+every time**. **That premise is empirically false, and this round closes
+scope (b) on the evidence rather than carrying the theory forward again.**
 
-**It cannot be resolved by an agent.** WO-145 registers least-privilege, and the
-clause that would have allowed widening the permission block was struck during
-the registration gate. Widening it now to make control (i) answer would reverse
-a registered decision; leaving it means the control never answers. The two
-admissible resolutions are (i) the owner provisions a fine-grained PAT — or a
-GitHub App installation token — stored as a repository secret, scoped to
-**Metadata: read** and held by (or installed for) a principal that already has
-write, maintain, or admin access to this repository; that is a materially
-cheaper grant than the repository-administration credential an earlier draft
-of this paragraph called for, and the least-privilege clause is amended
-to record the exception, its basis, and the new secret's existence, or
-(ii) the registration accepts that control (i) is permanently undetermined under
-its own permission grant and says so in the WO text, so no future reader mistakes
-the warning for a transient failure. **Nothing is built under scope (b) until the
-owner picks one**; this section exists so the conflict is on the record rather
-than living in a warning string on the VPS.
+**Observed evidence.** Two production runs of this exact workflow were
+pulled directly from Actions: run `30906425088` (job `91982454489`, the
+`push` trigger that landed #428) and run `30909234661` (job `91991551580`,
+a subsequent `workflow_dispatch`), both executing
+`.github/workflows/deploy_vps_paper_dispatch.yml` at `main`'s `51da5e98`.
+Both jobs' logs open with the runner-reported grant:
+
+```
+##[group]GITHUB_TOKEN Permissions
+Actions: read
+Contents: read
+Metadata: read
+##[endgroup]
+```
+
+confirming `GITHUB_TOKEN` always carries an implicit **Metadata: read**
+grant that the workflow's `permissions:` block cannot revoke: a permissions
+block sets every scope it does not list to `none`, but `metadata` is not a
+scope the block governs at all, so it stays granted regardless of what the
+block lists. And in **both** runs, control (i)'s own step ends with:
+
+```
+##[notice]eligibility query answered: no eligible independent reviewer exists; the WO-145 premise still holds
+```
+
+— the `state="determined"`, `eligible=""` branch (the step's `else` arm),
+never the `state != "determined"` `::warning::` UNDETERMINED branch this
+paragraph predicted every run would take. `GET /collaborators` did not 403
+on either sampled run: **control (i) is observed DETERMINED, not
+undetermined-403**, under the least-privilege permission block exactly as
+registered. The endpoint identification and the least-privilege
+registration both stand; only the 403-every-run premise is refuted.
+
+**Resolution follows from the observed fact, not the withdrawn theory.** No
+owner action is required and nothing is built under scope (b): control (i)
+already answers under WO-145's registered least-privilege permissions, with
+no widened permission block, no new secret, and no amendment to the
+least-privilege clause. The two theory-derived "admissible resolutions" an
+earlier round proposed — provisioning a Metadata-scoped PAT or App
+installation token, or recording control (i) as permanently undetermined —
+are **withdrawn**: the first would grant access the two sampled runs show is
+unnecessary, and the second is now a false statement about observed
+behaviour. This section is retained, corrected rather than deleted, so a
+future reader who only remembers the withdrawn 403 theory finds the actual
+runs that overturned it. If a future change (a stricter `permissions:`
+block, or a change in how `GET /collaborators` treats the installation
+token) ever makes the sampled runs' `::notice::` branch stop firing, the
+step's existing three-state design (`determined` / `undetermined` /
+eligible-found) already surfaces that regression as a `::warning::` on the
+run where it happens, and the withdrawn resolutions above are the correct
+starting point for whoever registers the fix at that time.
 
 ### 153.1 — Follow-on stub (NOT dispatchable): production attestation of the protected-path registry
 

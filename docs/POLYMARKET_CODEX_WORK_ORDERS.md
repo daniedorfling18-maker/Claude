@@ -11263,12 +11263,12 @@ A third round of external review closed the remaining gap: the compose file
 just added to the registry is itself a dispatch table, and one entry in it —
 the `vps-deploy-acceptance` service's `command:` (`docker-compose.vps-paper.
 yml:254`) — is exactly what `run_deploy_acceptance` (`scripts/deploy_vps_
-paper_manual.sh:343-348`) runs to decide whether the deploy is accepted. That
+paper_manual.sh:352-358`) runs to decide whether the deploy is accepted. That
 command is `sh scripts/run_vps_deploy_acceptance.sh`, which runs `python -m
 polymarket_predictive_engine.cli deploy-acceptance`, implemented by
 `src/polymarket_predictive_engine/deploy_acceptance.py`. Protecting the
 compose file's text while leaving what its own gate command runs unprotected
-would leave the acceptance verdict itself — the thing `:348` fails the
+would leave the acceptance verdict itself — the thing `:357` fails the
 deploy on — outside every registered path, the same invisibility this WO
 exists to close, at the bottom of the call chain rather than partway down
 it. The line stops at direct verdict implementations, not at transitive
@@ -11394,7 +11394,7 @@ builds nothing** (`git diff --stat` must show exactly these four):
 - `scripts/merge_independently_reviewed_pr.py` — the `PROTECTED_CONTROL_PATHS`
   literal only.
 - `tests/test_required_pr_gate.py` — **new assertions only.** The protected
-  merge-control parametrisation at `:837-859` and the workflow inventory test at
+  merge-control parametrisation at `:838-860` and the workflow inventory test at
   `:259` are **not** to be modified; a build that needs to edit either has
   changed behaviour it was told not to change, and must stop and escalate.
 - `src/polymarket_predictive_engine/deploy_acceptance.py` — the `sys.path`/
@@ -11457,7 +11457,8 @@ that module's own `from .artifact_contracts import build_contract_registry,
 validate_contract_fixture` line to resolve `src/polymarket_predictive_
 engine/artifact_contracts.py`** — asserting that every path either parse
 produces is a member of `PROTECTED_CONTROL_PATHS`; this is the one test in
-the set that fails on its own if a future PR adds an eighth staged helper, or
+the set that fails on its own if a future PR adds a seventh helper (eighth
+staged file, counting the compose file), or
 swaps the acceptance chain for something else, without registering it,
 rather than depending on someone noticing that this WO's hand-enumerated
 list is now incomplete. (This test's parse does not reach the three Path A
@@ -11531,7 +11532,7 @@ acceptance.py`) imports `PROTECTED_CONTROL_PATHS` directly —
 `ROOT = Path(__file__).resolve().parents[2]`; if `ROOT / "scripts"` is not
 already on `sys.path`, insert it; then `from merge_independently_reviewed_pr
 import PROTECTED_CONTROL_PATHS` — the same self-contained resolution
-`scripts/render_polymarket_dashboard.py:8-10` already uses for `src`, needed
+`scripts/render_polymarket_dashboard.py:8-11` already uses for `src`, needed
 because `pytest.ini`'s `pythonpath = src` does not add `scripts` (verified),
 so a bare top-level import would raise `ModuleNotFoundError` under the
 offline sandbox suite even though it resolves inside the VPS container's
@@ -11587,9 +11588,12 @@ publish `protected_control_paths_count` and `staged_set_subset_ok` into its
 already-pushed `governance_refresh.json`, computed by the same parse test (7)
 above uses. **That design is not implementable and is not built.** The
 producer runs inside the `vps-ops-scheduler` container, whose `volumes:`
-mount only `./docs`, `./scripts`, and `./src` into the container, read-only
-(`docker-compose.vps-paper.yml:215-226`) — the repo-root `docker-compose.
-vps-paper.yml` file itself is never mounted in. Test (7)'s parse needs the
+block carries eleven mounts (`docker-compose.vps-paper.yml:215-226`); the
+operative fact is that the repo-root `docker-compose.vps-paper.yml` file
+itself is in neither list — it is not one of those eleven mounts, and it is
+not one of the paths `Dockerfile:13-16` copies into the image either
+(`pyproject.toml`, `README.md`, the example config, `src`, `scripts`,
+`inputs`). Test (7)'s parse needs the
 compose file's own text (to find the `vps-deploy-acceptance` service's
 `command:` line); a producer running inside that container has no path from
 which to read it, so it would either crash on every refresh or (if guarded)

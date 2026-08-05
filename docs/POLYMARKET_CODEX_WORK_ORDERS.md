@@ -10570,3 +10570,574 @@ expectations: on-schedule at and immediately after the bare interval, and
 vs. widened-on-schedule) shape this test currently proves is retired along
 with the tolerance it measures. This is part of the same sixth-file scope
 above, not a seventh file.
+
+## WO-154 — Current maker-carry portfolio members must always be MEASURED, not merely yield-ranked, by `_yield_first_shortlist` — `queued` (registered 2026-08-05; touches the maker-carry study's selection surface → OWNER MERGE after line-audit; measurement-coverage fix that nonetheless changes WHICH markets can occupy the sized portfolio versus today — owner must ratify this framing at registration, not only the code; v3 — the v1 draft's S8 admission gate returned NOT ADMISSIBLE with 5 blockers (B1-B5) and 6 non-blocking findings (N1-N6); the v2 redraft's second S8 admission pass returned NOT ADMISSIBLE on exactly two items (B-v2-A, B-v2-B) plus 3 non-blocking findings (N-v2-1..3); all fixed here per both gates' rulings)
+
+**Provenance.** A class-X trace (2026-08-05) found the maker-carry portfolio
+empty at 2026-08-04T23:02:13Z not because its member — the Hormuz-traffic
+market, $3.06/day net carry, `maker_carry_history.csv` rows 97-98
+(verified-from-mirror, `origin/vps-telemetry`, this session) — failed a
+predicate, but because it was never measured. `_yield_first_shortlist`
+(`maker_carry_study.py:1096-1193`) ranks the rewarded universe by expected
+gross reward at min size and passes only the top `max_book_candidates` (40,
+`polymarket_predictive_config.example.yaml:114`) into the expensive
+history/markout measurement loop. An incumbent portfolio member that ranks
+outside that top 40 is never measured this run and is evicted with
+disposition `not_in_candidate_scan` (`maker_carry_study.py:1665`, inside
+`_portfolio_composition_diff`, `maker_carry_study.py:1611-1684`) — a
+disposition that, by construction, means "we don't know if it still
+qualifies," not "it failed."
+
+**Two corrections to the triaging trace, recorded rather than silently
+folded in.** (1) The trace's claim that "the same mechanism evicted NVIDIA
+on 2026-08-01" does not match the register: WO-151's own recorded text
+states NVIDIA left via `not_in_rewarded_universe`
+(`docs/POLYMARKET_CODEX_WORK_ORDERS.md:10416-10417` — corrected from
+`10395-10396` in the 2026-08-05 rebase over main's §151.2 merge, which
+shifted WO-151's internal lines by +21; text at the cited lines is
+unchanged) — excluded upstream of all five predicates, in `_rewarded_universe`,
+which this WO does not touch.
+NVIDIA is not evidence for this WO and must not be cited as such at
+registration. (2) The trace's claim that the union "may exceed 40 only by
+the portfolio size, itself capped by `max_markets=25`" is not grounded:
+`max_markets` does not appear anywhere in `maker_carry_study.py`, and the
+only `max_markets: 25` in config lives under the unrelated
+`maker_fill_replay` block (`polymarket_predictive_config.example.yaml:175`,
+official-book collection breadth, WO-116), never read by `_size_portfolio`
+or `_yield_first_shortlist`. There is no configured ceiling on portfolio
+member count (A1 below).
+
+**Purpose.** Give `_yield_first_shortlist` full measurement coverage of the
+CURRENT portfolio, so a paying incumbent can never be evicted with
+`not_in_candidate_scan` while it is still present in the rewarded universe.
+This is a measurement-coverage fix, not an eligibility change: it does not
+touch, weaken, or strengthen any of the five `_size_portfolio` predicates,
+the $500 capital cap, the $1.00 payout floor, `maker_min_book_history_hours`
+(48), `maker_min_book_snapshots` (100), `maker_switch_margin_frac` (0.25),
+`maker_max_hold_days` (30), or the rewarded-universe pull. It builds no new
+gate, no new order surface, no new collector, and no new cadence — the
+study keeps the cadence WO-151 already gives it. **Disclosed effect the
+owner must ratify at registration:** because a previously scan-evicted
+incumbent is now measured instead of skipped, a market that would
+previously have silently lost its portfolio slot (unmeasured, hence unable
+to pass any predicate) can now be RETAINED if it still passes all five
+predicates. The set of markets that can benefit is bounded to the
+intersection of (still in this run's rewarded pull) ∩ (a member of either
+of the last two readings of `maker_carry_portfolio_members.csv` — see B3
+below) — no market that was not both currently rewarded AND a recent
+portfolio member can benefit — but within that intersection this is a real
+change in which markets can hold the sized portfolio, not a pure
+observability fix. It is NOT a tighten-only amendment and must be flagged
+FROZEN with this direction disclosed.
+
+### Touch ONLY these files (`git diff --stat` must show exactly these two)
+
+- `src/polymarket_predictive_engine/maker_carry_study.py`
+- `tests/polymarket_predictive_engine/test_maker_carry_study.py`
+
+**Explicitly untouched, and why (S8 B3 — corrected).**
+`_portfolio_composition_diff` (`maker_carry_study.py:1611-1684`) needs NO
+code change. Its existing branch order resolves to `measured_not_sized` /
+`excluded_stale:*` / `excluded_resolution_risk` / `excluded_thin_book` for
+anything present in `candidate_by_id`, and reaches `not_in_candidate_scan`
+only when a departed condition_id is in `rewarded_ids` but NOT in
+`measured_ids` (`:1664-1665`). The v1 draft claimed this becomes
+unreachable once `_incumbent_hold`'s output alone is unioned into
+`measurement_universe` — the S8 gate (B3) proved that FALSE with three
+executed fixtures where `_incumbent_hold`'s `incumbents` and the diff's own
+`prior` set (built from a DIFFERENT reader, `_latest_portfolio_members`, of
+the SAME file) disagree, leaving a genuine prior member unprotected. This
+redraft closes the gap by construction instead of by hoping the two readers
+agree: `protected_condition_ids` is the UNION of BOTH readers' outputs (see
+Change item 3), so `prior ⊆ protected_condition_ids` on every path — the
+diff's `prior` variable is literally one of the union's two inputs, not a
+third, independently-drifting set. Therefore, for any condition_id in
+`prior` that is also in `rewarded_ids` this run (i.e. present in `universe`,
+the same object as `rewarded_universe` at the diff call, `:2486`), the union
+step in `_yield_first_shortlist` is guaranteed to add it to
+`measurement_universe`, so the `not_in_candidate_scan` branch's own
+condition (`in rewarded_ids and not in measured_ids`) is false. No edit to
+`_portfolio_composition_diff` itself is needed for this to hold.
+`ledger_anchor.py` and the config example are NOT touched: no new artifact,
+no new schema, no new cadence.
+
+### Reads (do not write to these)
+
+- `outputs/maker_carry/maker_carry_portfolio_members.csv` — via TWO EXISTING
+  readers of the same file, both already used elsewhere in
+  `run_maker_carry_study`; this WO adds no new parser, it only threads their
+  already-computed return values one call earlier and combines them:
+  - `_incumbent_hold(out_root)` (`maker_carry_study.py:1551-1588`) →
+    `(incumbents: set[str], incumbent_hold_days: dict[str, int])`.
+  - `_latest_portfolio_members(out_root)` (`maker_carry_study.py:1591-1608`)
+    → `tuple[str, dict[str, bool]] | None`: `(generated_at_utc,
+    {condition_id: markout_measured})`. Already wrapped today (`:2206-2211`)
+    in a `try/except Exception` that sets `previous_portfolio = None` and
+    records `previous_portfolio_error`; this WO moves that block, unchanged,
+    to run earlier and reuses both variables at their existing use-sites.
+  - `protected_condition_ids = set(incumbents) | (set(previous_portfolio[1])
+    if previous_portfolio else set())` — the fail-closed UNION (S8 B3).
+
+### Writes
+
+- `outputs/maker_carry/maker_carry_study.json` — ADD exactly two new keys,
+  placed immediately after the existing `"yield_scan_fallback"` key
+  (`maker_carry_study.py:2317`): `"yield_scan_protected_members_considered"`
+  (int — `len(protected_condition_ids)` passed into
+  `_yield_first_shortlist` this run) and
+  `"yield_scan_protected_members_added"` (int — count of protected members
+  appended to the shortlist that were NOT already present via yield-rank
+  selection or the existing pot-rank backfill). This file is rewritten whole
+  every run via `write_json` and carries no `ledger_anchor.py` entry
+  (verified: no `maker_carry_study.json` glob anywhere in
+  `ledger_anchor.py`) — adding keys here is anchor-safe.
+- **Do NOT add either field to `maker_carry_history.csv`.** That file is
+  registered `snapshot` in `ledger_anchor.py:62`, and WO-111's own comment in
+  this module (`maker_carry_study.py:2407-2419`) deliberately rejected
+  adding any column to it, choosing a separate sidecar instead, "so its
+  ledger-anchor prefix never changes." This WO follows the same discipline:
+  no column change to `maker_carry_history.csv`, `maker_carry_candidates.csv`,
+  or `maker_carry_portfolio_members.csv`.
+
+### Change (exact)
+
+1. `_yield_first_shortlist` gains one new keyword-only parameter:
+   ```python
+   def _yield_first_shortlist(
+       settings: dict[str, Any],
+       universe: list[dict[str, Any]],
+       fractions: list[float],
+       protected_condition_ids: set[str] | frozenset[str] | None = None,
+   ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+   ```
+   Default `None` (treated as empty). The two existing call sites in
+   `tests/polymarket_predictive_engine/test_maker_carry_study.py:279` and
+   `:303` call this function with exactly 3 positional args and must keep
+   passing unmodified — the byte-identity regression proof for the default
+   (no-protection) path.
+
+2. **Restructure ALL FOUR return points through one shared helper (S8
+   B5/N6 — this is not optional style; a partial copy-paste of the union
+   step into only some returns is exactly the defect class B5 found).**
+   Immediately after normalizing `protected_condition_ids`, define a nested
+   closure that captures `universe`/`protected_condition_ids` and is the
+   ONLY place the union logic exists:
+   ```python
+   protected_condition_ids = protected_condition_ids or frozenset()
+
+   def _apply_protection(
+       selected: list[dict[str, Any]],
+       selected_keys: set[str],
+       diagnostics: dict[str, Any],
+   ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+       # Additive union, applied ONCE per call, after selected/selected_keys
+       # are final. Iterates the FULL universe (never scan_universe), the
+       # same condition_id-or-token_id fallback shape the existing backfill
+       # loop uses, PLUS a .strip() the backfill loop does not have (WO-154
+       # Change item 6 — this closure only; the shipped backfill loop is
+       # untouched). Does NOT count against max_book_candidates.
+       # yield_scan_selected_markets keeps its
+       # EXISTING meaning (computed by the caller BEFORE this call) - the
+       # protection count is reported ONLY via the two new keys below, never
+       # folded into the existing one, so it stays byte-identical when
+       # protected_condition_ids is empty.
+       protected_added = 0
+       for market in universe:
+           key = str(market.get("condition_id") or market.get("token_id") or "").strip()
+           if key and key in protected_condition_ids and key not in selected_keys:
+               row = dict(market)
+               # Not selected via yield rank this run (never scanned/scored,
+               # OR scored but ranked outside max_book_candidates) - record
+               # this honestly, never fabricate a rank or gross figure.
+               row["yield_rank"] = None
+               row["expected_gross_at_min_size"] = None
+               selected.append(row)
+               selected_keys.add(key)
+               protected_added += 1
+       diagnostics["yield_scan_protected_members_considered"] = len(protected_condition_ids)
+       diagnostics["yield_scan_protected_members_added"] = protected_added
+       return selected, diagnostics
+   ```
+   Then route every return through it:
+   - Empty-scan-universe early return (`:1104-1111`):
+     `return _apply_protection([], set(), {"universe_scan_mode": "yield_first_v1", "yield_scan_considered_markets": 0, "yield_scan_scored_markets": 0, "yield_scan_selected_markets": 0, "yield_scan_fallback": False})`.
+   - Book-fetch-exception fallback (`:1145-1154`) and no-scored fallback
+     (`:1156-1165`) — BOTH currently build `selected = [dict(row) for row in
+     universe[:max_candidates]]` with no companion key set; add one line
+     before each return: `selected_keys = {str(row.get("condition_id") or
+     row.get("token_id") or "") for row in selected}`, then
+     `return _apply_protection(selected, selected_keys, {... unchanged dict ...})`.
+   - Final `yield_first_v1` return (`:1187-1193`): `selected`/`selected_keys`
+     are already fully built by the existing top-N + backfill loops;
+     `return _apply_protection(selected, selected_keys, {... unchanged dict ...})`.
+
+3. **Move BOTH membership reads earlier and compute the union (S8 B3).** In
+   `run_maker_carry_study`, move the existing `_incumbent_hold(out_root)`
+   call (currently `:2203`) AND the existing `_latest_portfolio_members`
+   try/except block (currently `:2206-2211`) from their current position to
+   immediately after `universe, errors, stale_diagnostic =
+   _rewarded_universe(settings)` (`:2095`), before the `_yield_first_shortlist`
+   call (currently `:2100`):
+   ```python
+   universe, errors, stale_diagnostic = _rewarded_universe(settings)
+   incumbents, incumbent_hold_days = _incumbent_hold(out_root)
+   # WO-137 reads the latest membership evidence before this run appends its
+   # row. The append-only sidecar remains owned solely by the WO-111 writer.
+   previous_portfolio_error: Exception | None = None
+   try:
+       previous_portfolio = _latest_portfolio_members(out_root)
+   except Exception as exc:  # noqa: BLE001 - reporting must not take down the study
+       previous_portfolio = None
+       previous_portfolio_error = exc
+   protected_condition_ids = set(incumbents) | (
+       set(previous_portfolio[1]) if previous_portfolio else set()
+   )
+   ```
+   The existing WO-137 comment at the old `:2204-2205` position (documenting
+   the `_latest_portfolio_members` read, immediately above) travels with it
+   to the new position, unchanged (N-v2-3).
+   Pass `protected_condition_ids=protected_condition_ids` into
+   `_yield_first_shortlist`. DELETE the now-duplicate calls at the old
+   `:2203` / `:2206-2211` positions. Reuse the single earlier-computed
+   `incumbents`/`incumbent_hold_days` unchanged at the existing
+   `_size_portfolio(..., incumbents=incumbents,
+   incumbent_hold_days=incumbent_hold_days)` call (`:2216-2218`), and reuse
+   `previous_portfolio`/`previous_portfolio_error` unchanged at the existing
+   composition-diff block (`:2478-2482`, `if previous_portfolio_error is not
+   None: raise previous_portfolio_error` / `previous=previous_portfolio`).
+   Moving both reads earlier changes neither reader's output — both are pure
+   reads of an already-written CSV, and no write to
+   `maker_carry_portfolio_members.csv` happens before either read; the
+   append happens later, under flock, at `:2454-2468` (unaffected by this
+   move — confirmed both call sites have exactly one production caller each).
+
+4. **Fail-closed tightening inside `_incumbent_hold` (S8 B1).** Immediately
+   after the existing `try/except (ValueError, TypeError)` around
+   `json.loads` (`maker_carry_study.py:1564-1567`), add:
+   ```python
+   if not isinstance(members, list):
+       members = []
+   ```
+   before the `cids = {...}` comprehension (`:1568-1572`). Without this, a
+   `portfolio_members` cell that is VALID JSON but not a list (`"null"`,
+   `"123"`, `"true"`, `"1.5"`) parses successfully and then the un-guarded
+   `for member in members` raises an unhandled `TypeError`, aborting the
+   entire study run — confirmed by execution against all four scalar
+   fixtures. This mirrors the guard `_latest_portfolio_members` already has
+   (`:1600`, `not isinstance(members, list): continue`). This is a
+   fail-closed tightening of a read path inside a file already on this WO's
+   touched list — nothing is loosened; the file crashes less, not more.
+
+5. Add the two new `summary` keys as specified in "Writes" above.
+
+6. **`.strip()` the union closure's key derivation, and nowhere else (S8
+   v2 B-v2-B).** In `_apply_protection` (item 2's closure) only, change
+   `key = str(market.get("condition_id") or market.get("token_id") or "")`
+   to `key = str(market.get("condition_id") or market.get("token_id") or
+   "").strip()`. Basis: `_portfolio_composition_diff`'s `rewarded_ids` and
+   `measured_ids` derivations (`maker_carry_study.py:1646-1651`) are already
+   `.strip()`'d; the closure's key was not. A `condition_id` carrying
+   leading/trailing whitespace would then land in `measured_ids` under a
+   different string than the diff's `rewarded_ids`/`prior` comparisons use,
+   so the union step would silently fail to protect it and the
+   `not_in_candidate_scan` REVERT signature (Day-after check below) could
+   fire on correctly built, owner-merged code — exactly the failure mode
+   Change item 3's union guarantee exists to close. This is a fail-closed
+   tightening of the NEW closure introduced by this WO only: the
+   already-shipped backfill loop's un-stripped key derivation
+   (`maker_carry_study.py:1182`) is explicitly NOT touched by this item —
+   no established, unrelated code changes.
+
+**Docstring updates (part of item 3/4's diff, not a separate file).**
+`_incumbent_hold`'s existing docstring gains one sentence stating the
+corrected behavior (see Fail-safe sentence below, same wording).
+`_yield_first_shortlist` currently has NO docstring — add one describing
+the WO-56 prescreen plus the WO-154 `protected_condition_ids` addition and
+its own fail-safe clause (same wording as the Fail-safe sentence below).
+
+**A1 — literal thresholds, with basis.** `max_book_candidates` (40) is
+UNCHANGED. **Structural per-run bound (S8 N5):** `len(measurement_universe)
+<= max_book_candidates + len(protected_condition_ids)`, and since
+`candidates` gains at most one row per `measurement_universe` market,
+`len(candidates) <= len(measurement_universe) <=
+max_book_candidates + len(protected_condition_ids)`.
+`protected_condition_ids` is itself the UNION of `_incumbent_hold`'s and
+`_latest_portfolio_members`'s outputs (item 3) — bounded by the size of the
+last two portfolio-membership snapshots combined, never by a registered
+ceiling. **There is no registered ceiling on this count** — verified: no
+`max_markets` key exists in `maker_carry_study.py` or in the
+`maker_carry_study` config block; `_size_portfolio` enforces no count cap,
+only `capital_cap_usd` ($500, `polymarket_predictive_config.example.yaml:122`)
+divided by each admitted market's data-dependent `capital_usd`, and
+`min_daily_payout_usd` ($1.00, `:133`). State the true, unbounded-by-config
+shape in the module docstring, and record separately, as an empirical
+observation only (not a registered bound): WO-151's provenance note reports
+`maker_carry_history.csv`'s 90-row `portfolio_markets` distribution never
+exceeded 3 (`docs/POLYMARKET_CODEX_WORK_ORDERS.md:10385-10386` — corrected
+from `10364-10365` in the 2026-08-05 rebase over main's §151.2 merge, which
+shifted WO-151's internal lines by +21; text at the cited lines is
+unchanged). Do not invent a ceiling that isn't there (A8).
+
+**A2 — fail-closed for the new comparison, corrected (S8 B1).**
+`_incumbent_hold`'s existing per-row `json.loads` failure already yields
+`members = []` (`:1564-1567`) — but that `except` clause does NOT catch the
+class where `portfolio_members` is VALID JSON that is not a list: `json.loads`
+succeeds and the un-guarded set comprehension at `:1568-1572` then raises
+`TypeError`, aborting `run_maker_carry_study` entirely for that run — NOT
+"yielding an empty protected-member set" as the v1 draft incorrectly stated.
+Item 4 above adds the missing `isinstance(members, list)` guard, closing
+this. Separately: `utils.read_csv_rows` (`:98-109`) guarantees `[]` ONLY for
+a MISSING or ZERO-BYTE file; an existing-but-unreadable file (a permission
+error, a malformed row raising `csv.Error`) propagates exactly as it does
+today — the v1 draft's "never raises" claim was overbroad and is corrected
+here rather than carried forward; this WO does not change that behavior.
+When both readers' contributions to the union are empty (missing sidecar,
+zero-byte sidecar, or every latest row unparseable/non-list on both sides),
+`protected_condition_ids == set()`, the union step adds nothing on any of
+the four return points, and `_yield_first_shortlist`'s output is
+byte-identical to today's pure top-N/pot-rank behavior. **No fabricated
+member list is ever constructed.**
+
+**Known, pre-existing residual (not created by this WO, not fixed by it;
+referenced by the Day-after check below).** If a protected incumbent is
+added to `measurement_universe` but its own `_book_competition` call fails
+this run (e.g. a transient book-fetch error), it never reaches `candidates`,
+and `_portfolio_composition_diff` falls through to `disposition_unknown`
+rather than a specific predicate disposition — because it is in
+`measured_ids` (blocking `not_in_candidate_scan`) but absent from
+`candidate_by_id`. This exact gap already exists today for any member
+reached via the current top-N/backfill scan; this WO does not introduce it
+and does not close it. Confirmed reachable by execution against
+`_portfolio_composition_diff` directly.
+
+**Fail-safe sentence (S5 form, module docstring — corrected per S8 B1).**
+"A missing or zero-byte `maker_carry_portfolio_members.csv` yields
+`_incumbent_hold(out_root) == (set(), {})` and `_latest_portfolio_members
+(out_root) is None` (via `utils.read_csv_rows`, which guarantees `[]` ONLY
+for a missing/zero-byte file — an existing-but-unreadable file propagates,
+unchanged from before this WO, and is out of scope here). A latest row
+whose `portfolio_members` cell fails `json.loads`, OR parses to valid JSON
+that is not a list (`null`, a number, a boolean, a bare string), now yields
+an empty member set for that row on that reader (this WO's added
+`isinstance(members, list)` guard in `_incumbent_hold` — without it, the
+scalar-JSON case raised an unhandled `TypeError` that aborted the entire
+study run, confirmed by execution; `_latest_portfolio_members` already
+guarded this and simply skips such a row). When both readers' contributions
+are empty, `protected_condition_ids` is the empty set, the union step in
+`_yield_first_shortlist` adds nothing on any of its four return points, and
+its output is byte-identical to today's pure top-N/pot-rank behavior. A
+protected condition_id absent from the current `universe` is never
+fabricated into the shortlist. No gate, sizing predicate, or order surface
+reads this artifact differently than before; `_size_portfolio`'s five
+predicates are unchanged, and a measured member that fails them is
+excluded exactly as today."
+
+### CLI/scheduler/ledger wiring
+
+None required. This WO adds no new CLI command, no new collector, and no
+new cadence — `run_maker_carry_study` already runs on the cadence WO-151
+registers (dedicated job / harvest step / CLI). `ledger_anchor.py` is not
+touched: no new file, no new column on an anchor-enrolled file. If this
+section were skipped entirely the change would still take effect on every
+existing study run, because it modifies a function already on the hot path
+— there is no "collector nobody runs" risk here.
+
+### Tests (offline, fixture-based, exact hand-computed expectations; extend
+`tests/polymarket_predictive_engine/test_maker_carry_study.py`, reusing the
+existing `_scan_market`, `_deep_book`, `_config`, `_wo113_settings`,
+`_wo113_candidate` helpers; add `_latest_portfolio_members` to the existing
+`maker_carry_study` import block at the top of the file — it is not
+currently imported there)
+
+0. **Regression.** `test_yield_first_scan_selects_smaller_under_competed_pot`
+   and `test_yield_first_scan_fails_soft_to_pot_rank`
+   (`tests/polymarket_predictive_engine/test_maker_carry_study.py:259-309`)
+   pass UNMODIFIED — proof the default (`protected_condition_ids=None`) path
+   is byte-identical to pre-WO-154 behavior.
+1. **A2, missing sidecar.** `_incumbent_hold(out_root)` on a `tmp_path` with
+   no `maker_carry_portfolio_members.csv` returns `(set(), {})`.
+2. **A2, malformed-JSON latest row.** A sidecar whose only row has
+   `portfolio_members="{not json"` → `_incumbent_hold` returns
+   `(set(), {})` (per the existing `json.loads` try/except).
+3. **B1 NEW — A2, valid-but-non-list JSON latest row.** Parametrize over
+   `portfolio_members` in `("null", "123", "true", "1.5")`: for each,
+   `_incumbent_hold` does NOT raise, and returns `(set(), {})`. Against
+   unamended code this raises `TypeError` for all four values (confirmed by
+   execution) — this test fails unamended by construction.
+4. **Measured anyway, outside top-N.** `max_book_candidates=1`,
+   `yield_scan_max_markets=3`; universe = `_scan_market("big",1000.0,1)`,
+   `_scan_market("mid",500.0,2)`, `_scan_market("member",10.0,3)`, all books
+   `_deep_book()` (identical competition so ranking is pure pot order).
+   `protected_condition_ids={"0xmember"}` → `selected` contains exactly
+   `{"0xbig","0xmember"}` (NOT `"0xmid"`); `"0xmember"`'s row has
+   `yield_rank is None` and `expected_gross_at_min_size is None`;
+   `scan["yield_scan_protected_members_added"] == 1`;
+   `scan["yield_scan_protected_members_considered"] == 1`.
+5. **Differential byte-identity, union adds nothing.** Same universe as #4
+   but `protected_condition_ids={"0xbig"}` (already top-ranked) → `selected`
+   is IDENTICAL (equal list) to calling with `protected_condition_ids=None`;
+   `yield_scan_protected_members_added == 0`.
+6. **Union bound / worst case.** `max_book_candidates=2`, 5 markets
+   (`"big"`=1000, `"mid"`=500 rank top-2; `"m1"`=30, `"m2"`=20, `"m3"`=10
+   rank outside), `protected_condition_ids={"0xm1","0xm2","0xm3"}` →
+   `len(selected) == 5`; `yield_scan_protected_members_added == 3` — hand
+   proof that growth over 40 equals exactly `len(protected_condition_ids)`,
+   not a fixed ceiling.
+7. **Never fabricated.** Same universe as #4,
+   `protected_condition_ids={"0xghost"}` (absent from `universe`) →
+   `selected` identical to the unprotected run;
+   `yield_scan_protected_members_added == 0`;
+   `yield_scan_protected_members_considered == 1`.
+8. **Fallback path (book-fetch exception) also protects (N1 reworded).**
+   Reuse `test_yield_first_scan_fails_soft_to_pot_rank`'s exact fixture
+   (`universe=[_scan_market("large",1000.0,1), _scan_market("small",100.0,2)]`,
+   `max_book_candidates=1`, `_fetch_books` raises), with
+   `protected_condition_ids={"0xsmall"}` — `"0xsmall"` is already that
+   fixture's second market and is already outside the
+   `universe[:max_book_candidates]` = `universe[:1]` fallback slice, no new
+   market needed → `selected` contains `"0xlarge"` (fallback top pick) AND
+   `"0xsmall"` (protected); `scan["yield_scan_selected_markets"] == 1`
+   (unchanged meaning — computed before protection); `len(selected) == 2`;
+   pre-fix code would have produced only `["0xlarge"]`.
+9. **B5 NEW — no-scored fallback also protects.** `max_book_candidates=1`,
+   `yield_scan_max_markets=2`; universe = `_scan_market("large",1000.0,1)`,
+   `_scan_market("nsprotect",5.0,2)`; monkeypatch `_fetch_books` to return
+   `{}` (no exception, but every `_book_competition_from_books` call then
+   returns `None` since `books.get(token_id)` is `None` — this is the
+   OTHER fallback, `scan["universe_scan_mode"]=="pot_rank_fallback"`,
+   `scan["yield_scan_error"]=="no prescreen books scored"`, distinct from
+   test 8's book-fetch-exception path). `protected_condition_ids=
+   {"0xnsprotect"}` → `selected` contains `"0xlarge"` AND `"0xnsprotect"`;
+   `scan["yield_scan_selected_markets"] == 1` (unchanged); `len(selected)
+   == 2`; `yield_scan_protected_members_added == 1`. This is the exact
+   return point B5 found unenforced by the v1 test set — a build that
+   restructures items 1/2/4 above but omits this one passes tests 0-8 and
+   fails only here.
+10. **B4 REDESIGNED — Hormuz shape, true departure, derived through the
+    real union (must fail unamended).** `settings = _wo113_settings(
+    max_book_candidates=1, yield_scan_max_markets=2, share_model_c=3.0,
+    share_model_mid_band_min=0.10, share_model_mid_band_max=0.90)`;
+    `universe = [_scan_market("other",1000.0,1), _scan_market("member",
+    10.0,2)]`; monkeypatch `_fetch_books` to return `_deep_book()` for both
+    tokens and both complements (identical competition, pure pot order).
+    Call `measurement_universe, _scan =
+    maker_carry_study._yield_first_shortlist(settings, universe, [0.5],
+    protected_condition_ids={"0xmember"})` — AGAINST UNAMENDED CODE this
+    raises `TypeError` immediately (no such kwarg), so the test fails
+    unamended by construction. Then build `measured_ids =
+    {row["condition_id"] for row in measurement_universe}` and gate
+    candidate construction ON IT (this is the substantive fix — do NOT
+    hand-build the candidate list independent of `measurement_universe`,
+    which is exactly what made the v1 test 8 pass on unamended code):
+    `candidates = [c for cid, c in {"0xmember": _wo113_candidate("0xmember",
+    carry=-1.0, hours=100, snaps=200), "0xother": _wo113_candidate(
+    "0xother", carry=2.0, hours=100, snaps=200)}.items() if cid in
+    measured_ids]`. `portfolio, _, _ = _size_portfolio(settings, candidates,
+    500)` → `"0xmember"` absent (fails predicate 1, `carry>0`; `"0xother"`
+    passes). `_portfolio_composition_diff` returns a 2-tuple
+    (`maker_carry_study.py:1620`, return at `:1678-1684`) — unpack it, do NOT
+    subscript the call directly: `diff, _status =
+    _portfolio_composition_diff(previous=("2026-08-04T12:00:00Z",
+    {"0xmember": True}), current_run_at="2026-08-05T12:00:00Z",
+    portfolio=portfolio, candidates=candidates, rewarded_universe=universe,
+    measurement_universe=measurement_universe, stale_reasons={})`; then
+    `diff["departed"]` equals exactly `[{"condition_id":"0xmember",
+    "markout_measured":True,"disposition":"measured_not_sized",
+    "net_carry_usd_per_day":-1.0}]` — NEVER `not_in_candidate_scan`.
+    **Second, substantive discrimination (beyond the TypeError):** a
+    hypothetical build that accepts the kwarg
+    but does not actually apply the union would leave `measured_ids ==
+    {"0xother"}` only, so `"0xmember"` is excluded from `candidates`
+    entirely, `candidate_by_id.get("0xmember")` is `None` inside the diff,
+    and the branch falls through to `disposition="not_in_candidate_scan"`
+    (still in `rewarded_ids` via `universe`, not in `measured_ids`) — the
+    assertion above then fails on the `disposition` VALUE, not merely on a
+    raised exception.
+11. **Hormuz shape — true retention (N2 reworded).** Same 3-market universe
+    as test 4 (`big`/`mid`/`member`, `max_book_candidates=1`, `"0xmember"`
+    protected and outside top-1, `"0xmid"` excluded by the cap) →
+    `_yield_first_shortlist` measures `"0xbig"` and `"0xmember"` (proven by
+    calling it directly with the kwarg — fails `TypeError` unamended, as in
+    test 10); build two passing `_wo113_candidate` rows for
+    `"0xbig"`/`"0xmember"` and call `_size_portfolio(settings, [row_big,
+    row_member], 500, incumbents={"0xmember"}, incumbent_hold_days=
+    {"0xmember": 5})` → BOTH appear in `portfolio` — proof `"0xmember"` is
+    retained via measurement where the pre-fix code could never have
+    reached it at all.
+12. **B3 NEW — reader divergence fixture 1 (cross-day malformed latest
+    row).** Sidecar rows: `("2026-08-03T12:00:00Z",
+    '[{"condition_id":"0xhormuz","markout_measured":true}]')`,
+    `("2026-08-04T12:00:00Z", "{not json")`. `_incumbent_hold` → `incumbents
+    == set()` (the malformed latest day's empty cids win the day). `
+    _latest_portfolio_members` → `("2026-08-03T12:00:00Z",
+    {"0xhormuz": True})` (skips the malformed row). Assert the UNION —
+    `incumbents | set(prior[1])` — equals `{"0xhormuz"}`: the fail-closed
+    superset recovers what `_incumbent_hold` alone would have lost.
+13. **B3 NEW — reader divergence fixture 2 (same-day malformed latest
+    row).** Sidecar rows: `("2026-08-04T10:00:00Z",
+    '[{"condition_id":"0xhormuz","markout_measured":true}]')`,
+    `("2026-08-04T12:00:00Z", "{not json")` (same day). `_incumbent_hold` →
+    `incumbents == set()` (the `>=` same-day comparison lets the later,
+    malformed row's empty cids overwrite the valid ones).
+    `_latest_portfolio_members` → `("2026-08-04T10:00:00Z",
+    {"0xhormuz": True})`. Union == `{"0xhormuz"}`.
+14. **B3 NEW — reader divergence fixture 3 (out-of-order / clock skew).**
+    Sidecar rows in FILE order: `("2026-08-05T01:00:00Z",
+    '[{"condition_id":"0xnew","markout_measured":true}]')`,
+    `("2026-08-04T23:59:00Z", '[{"condition_id":"0xold",
+    "markout_measured":true}]')` (a later-appended row carrying an EARLIER
+    embedded timestamp). `_incumbent_hold` → `incumbents == {"0xnew"}` (max
+    by embedded day-string). `_latest_portfolio_members` → `
+    ("2026-08-04T23:59:00Z", {"0xold": True})` (last-valid-in-file-order).
+    Union == `{"0xnew", "0xold"}` — both are protected even though the two
+    readers disagree on which one is "the" latest member.
+
+### Scope classification
+
+**FROZEN → OWNER MERGE after line-audit.** This touches
+`maker_carry_study.py`'s selection surface, which is registered/control (it
+feeds the M-A/M-B maker gates' `candidates`/`portfolio` inputs). Per
+AGENTS.md's owner-authorization rule ("A change to any frozen or registered
+surface... is authorized ONLY by an owner-authored commit or an
+owner-approved pull request") and `docs/ENGINEERING_STANDARDS.md` S7 item 7,
+this is not the orchestrator's to self-merge. **This is NOT a tighten-only
+amendment** — say so explicitly at registration: it can cause a market to
+hold a portfolio slot that it could not have held before (a previously
+scan-evicted, still-qualifying incumbent), even though it never loosens any
+of the five `_size_portfolio` predicates or any other threshold. The owner
+must ratify at registration whether "measurement coverage" is the correct
+frame for a change with that outcome, per the standing rule that any
+loosening-shaped effect on a frozen surface is disclosed, not built quietly.
+
+### Day-after check
+
+On `outputs/maker_carry/maker_carry_study.json`, after the next deployed
+study run: (1) `yield_scan_protected_members_considered` and
+`yield_scan_protected_members_added` are both present and numeric on every
+ENABLED run (the disabled early return at `:2091-2093` writes a summary
+without either key — expected, per N4). (2) Cross-reference
+`outputs/maker_carry/portfolio_composition_diff.json`'s `departed` rows
+against the immediately preceding run's `maker_carry_portfolio_members.csv`
+row — but apply this signature ONLY when the same run's
+`composition_diff_status == "ok"` and the diff's `current_run_at` matches
+that run's `generated_at_utc` (N-v2-1: on the diff-write-failure path,
+`composition_diff_status` is set to `"write_failed"`, `maker_carry_study.py:2504`,
+and `write_json` for `portfolio_composition_diff.json` is skipped, so the
+file on disk can be a stale pre-deploy artifact whose `departed` rows
+legitimately still show `not_in_candidate_scan` from before this WO
+shipped — checking that stale file would misfire a revert on correct code):
+for any condition_id that appears in BOTH (a member last run and
+departed this run), its `disposition` may legitimately read ANY of
+`measured_not_sized`, `excluded_stale:*`, `excluded_resolution_risk`,
+`excluded_thin_book`, `not_in_rewarded_universe` (left the rewarded pull
+upstream of every predicate — WO-151's own NVIDIA-shape mechanism, untouched
+by this WO), or `disposition_unknown` (measured this run but its own
+`_book_competition` call failed — the pre-existing, explicitly out-of-scope
+residual noted above). **`not_in_candidate_scan` is the ONLY disposition
+that must NEVER appear** for such a condition_id post-deploy — S8 B2/B3
+make it unconditionally unreachable for a genuine prior member, because
+`protected_condition_ids` is a superset of the diff's own `prior` set by
+construction, not merely of `_incumbent_hold`'s output. **Failure
+signature:** `not_in_candidate_scan` appearing for a condition_id that was
+a prior member means the union step did not wire through correctly, and the
+WO is REVERTED, not tuned.

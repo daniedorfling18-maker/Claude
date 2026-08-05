@@ -2077,8 +2077,209 @@ def _force_maker_gates_pending_uncommitted(summary: dict[str, Any]) -> None:
     gates["maker_verdict"] = "insufficient_evidence"
 
 
-def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
+# WO-151 §151.1 (2026-08-02): the study has no cadence of its own - it has two
+# unsynchronised triggers (the dedicated scheduler job and the embedded
+# training_harvest step) and a third accidental one (scheduler restarts).
+# Record which trigger produced each run on a CLOSED domain so "unknown" is
+# the only fail-closed answer when the producer cannot be established - never
+# guessed. cli.py is out of scope for this WO, so the two subprocess-invoked
+# producers identify themselves via an environment variable (inherited by the
+# `python -m polymarket_predictive_engine.cli maker-carry-study` subprocess
+# either producer launches); a bare invocation that sets neither is "cli".
+STUDY_TRIGGER_ENV_VAR = "MAKER_STUDY_TRIGGER"
+STUDY_TRIGGER_PRODUCER_VALUES = frozenset({"intraday_job", "harvest_step"})
+STUDY_TRIGGER_DOMAIN = frozenset({"intraday_job", "harvest_step", "cli", "unknown"})
+
+# WO-151 §151.1 basis: these mirror the scheduler's own (now non-gating, see
+# run_vps_ops_scheduler.sh) MAKER_STUDY_INTRADAY_OFFSET_MIN/MAX defaults, so
+# the artifact can classify where the observed training-harvest age falls
+# relative to the window that used to gate this job. Reporting only: nothing
+# here gates the study, the sizing loop, or any M-gate.
+HARVEST_WINDOW_MIN_SECONDS = 39600
+HARVEST_WINDOW_MAX_SECONDS = 46800
+
+
+def _resolve_study_trigger(explicit: str | None) -> str:
+    """WO-151 §151.1: never guess. An explicit caller-supplied value is
+    validated against the closed domain (anything else reads "unknown").
+    Otherwise the MAKER_STUDY_TRIGGER env var set by the two subprocess
+    producers is read: its absence means a bare CLI invocation ("cli"); any
+    other value is untrusted and reads "unknown" rather than being guessed.
+    """
+    if explicit is not None:
+        candidate = explicit.strip().lower()
+        return candidate if candidate in STUDY_TRIGGER_DOMAIN else "unknown"
+    raw = os.environ.get(STUDY_TRIGGER_ENV_VAR, "").strip().lower()
+    if not raw:
+        return "cli"
+    return raw if raw in STUDY_TRIGGER_PRODUCER_VALUES else "unknown"
+
+
+def _training_harvest_success_epoch(cfg: EngineConfig) -> float | None:
+    """The SAME canonical source the scheduler's own TRAINING_AGE uses
+    (`successful_completion_epoch` / `seconds_since_success_stamp` in
+    scripts/run_vps_ops_scheduler.sh), read from Python.
+
+    #433 CODEX ROUND-1 study:2126: this used to be status.json's
+    `last_success_utc` only - a DIFFERENT source from the scheduler's own
+    canonical one, which reads the dedicated `last_success_training_harvest`
+    stamp file FIRST and falls back to status.json only when that file does
+    not exist (a WO-85 migration path for pre-existing deployments). The two
+    genuinely can diverge: `stamp_status` (writes status.json's
+    `last_success_utc`) and `touch_success_stamp` (writes the dedicated
+    file) are two separate subprocess invocations, each reading wall-clock
+    time independently, and either write can fail or go stale without the
+    other noticing. Reading only status.json risked the study silently
+    reporting a different harvest age than the scheduler itself would
+    compute for the same fact. Mirrored here: if the dedicated file exists,
+    it is authoritative - exactly as in the shell, corrupt content there
+    does NOT fall back to status.json, it fails closed to None (the shell's
+    equivalent clamps to its internal "immediately due" sentinel, which has
+    no meaning for this reporting-only field); status.json is consulted only
+    when the dedicated file is absent.
+    """
+    stamp_path = cfg.output_root / "ops_scheduler" / "last_success_training_harvest"
+    if stamp_path.is_file():
+        try:
+            raw = stamp_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        if not raw.lstrip("-").isdigit():
+            return None
+        try:
+            epoch = float(int(raw))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return epoch if epoch > 0 else None
+
+    payload = read_json(cfg.output_root / "ops_scheduler" / "status.json", default={}) or {}
+    if not isinstance(payload, dict):
+        return None
+    jobs = payload.get("jobs")
+    if not isinstance(jobs, dict):
+        return None
+    entry = jobs.get("training_harvest")
+    if not isinstance(entry, dict):
+        return None
+    parsed = parse_timestamp(entry.get("last_success_utc"))
+    return parsed.timestamp() if parsed is not None else None
+
+
+def _training_harvest_age_seconds(cfg: EngineConfig) -> float | None:
+    """Observed age (seconds) of training_harvest's last SUCCESSFUL run, read
+    from the same canonical source the scheduler's own TRAINING_AGE uses
+    (`_training_harvest_success_epoch` above; #433 CODEX ROUND-1 study:2126)
+    so every study trigger path records it (WO-151 §151.1 test 11), not only
+    the dedicated intraday job. A missing, empty, unparseable, or non-finite
+    stamp fails closed to None - never guessed, never treated as fresh or as
+    due; the study computes nothing from this beyond the reporting fields
+    below.
+
+    #433 CODEX ROUND-2: this returns the RAW value, which can be negative if
+    the recorded completion stamp is in the future (clock skew, corruption).
+    Callers are responsible for the same two corrections the scheduler's own
+    `seconds_since_success_stamp` applies together: clamp what gets
+    PUBLISHED to >= 0, and classify a negative raw value as "unknown" rather
+    than a real window position - see `run_maker_carry_study`'s
+    `training_harvest_age_seconds` construction and `_harvest_window_state`
+    respectively. This function itself never clamps, so both callers see the
+    same unmodified fact.
+    """
+    epoch = _training_harvest_success_epoch(cfg)
+    if epoch is None:
+        return None
+    age = datetime.now(timezone.utc).timestamp() - epoch
+    return age if math.isfinite(age) else None
+
+
+def _harvest_window_state(age_seconds: float | None) -> str:
+    """Descriptive-only classification against the old (now non-gating)
+    11-13h window, so starvation stays visible without inferring it from a
+    stale stamp (WO-151 scope (c)). Never gates the study.
+
+    #433 CODEX ROUND-2: a negative `age_seconds` means the recorded
+    completion timestamp is in the future relative to "now" - clock skew or a
+    corrupt stamp, never a real elapsed duration - and reads "unknown" here,
+    checked before the window bounds, so it cannot be misclassified as
+    "before_window" (which `age_seconds < HARVEST_WINDOW_MIN_SECONDS` would
+    otherwise do, since every negative number is less than the positive
+    floor). This classification runs on the RAW, unclamped age - the
+    published `training_harvest_age_seconds` field is clamped to >= 0
+    separately (mirroring the scheduler's own `seconds_since_success_stamp`
+    clamp in scripts/run_vps_ops_scheduler.sh), so the clamped value can never
+    reach this function and mask the future-stamp condition as a
+    genuinely-fresh age of zero.
+    """
+    if age_seconds is None or not math.isfinite(age_seconds):
+        return "unknown"
+    if age_seconds < 0:
+        return "unknown"
+    if age_seconds < HARVEST_WINDOW_MIN_SECONDS:
+        return "before_window"
+    if age_seconds > HARVEST_WINDOW_MAX_SECONDS:
+        return "after_window"
+    return "inside_window"
+
+
+def _maker_study_intraday_skipped_cycles_total(cfg: EngineConfig) -> int | None:
+    """The scheduler's OWN skipped_cycles_total counter for the dedicated
+    intraday job, read verbatim from status.json so the artifact never
+    invents or diverges from a value of its own (WO-151 scope (c) / test 10).
+    Missing or malformed status reads None - never guessed, never fabricated
+    as zero.
+
+    #433 CODEX ROUND-1 study:2172b (read-ordering, documented rather than
+    "fixed" - a post-run read is impossible from inside the study process):
+    `run_maker_study_intraday` (scripts/run_vps_ops_scheduler.sh) invokes
+    this study as a subprocess and only calls `stamp_status
+    maker_study_intraday ...` - the write that increments this SAME counter
+    for the CURRENT cycle - after that subprocess has already returned. This
+    function therefore always reads the counter AS OF THE START of the
+    current run; it can never see the current run's own increment, because
+    that write does not exist yet at read time. The value reported is
+    genuinely correct for "every completed cycle up to but not including
+    this one" - not stale data, just an inherent one-cycle read-ordering
+    offset from the total the NEXT run would see.
+
+    #433 CODEX ROUND-1 study:2172a: bare `int(...)` accepts three things a
+    cycle COUNT must never be - a bool (`int(True) == 1`, silently treating a
+    boolean field as a count), a negative number, and a fractional number
+    (`int(3.7) == 3`, silently truncating instead of rejecting). All three
+    fail closed to None here; only a non-bool, non-negative, integral value
+    is accepted."""
+    payload = read_json(cfg.output_root / "ops_scheduler" / "status.json", default={}) or {}
+    if not isinstance(payload, dict):
+        return None
+    jobs = payload.get("jobs")
+    if not isinstance(jobs, dict):
+        return None
+    entry = jobs.get("maker_study_intraday")
+    if not isinstance(entry, dict):
+        return None
+    if "skipped_cycles_total" not in entry:
+        return None
+    raw = entry["skipped_cycles_total"]
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, float) and not math.isfinite(raw):
+        return None
+    if isinstance(raw, float) and not raw.is_integer():
+        return None
+    try:
+        parsed = int(raw)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if parsed < 0:
+        return None
+    return parsed
+
+
+def run_maker_carry_study(cfg: EngineConfig, *, study_trigger: str | None = None) -> dict[str, Any]:
     settings = _settings(cfg)
+    trigger = _resolve_study_trigger(study_trigger)
+    harvest_age_seconds = _training_harvest_age_seconds(cfg)
+    harvest_window_state = _harvest_window_state(harvest_age_seconds)
+    intraday_skipped_cycles_total = _maker_study_intraday_skipped_cycles_total(cfg)
     out_root = cfg.output_root / "maker_carry"
     summary_path = out_root / "maker_carry_study.json"
     summary: dict[str, Any] = {
@@ -2087,6 +2288,21 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         "work_order": "WO-36",
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
+        # WO-151 §151.1 scope (a)/(c): recorded on EVERY path, including the
+        # early "disabled" return below, so the field is never absent.
+        "study_trigger": trigger,
+        # #433 CODEX ROUND-2: clamped to >= 0, mirroring the scheduler's own
+        # `seconds_since_success_stamp` clamp (scripts/run_vps_ops_scheduler.sh)
+        # exactly - a future-dated completion stamp (clock skew, corruption)
+        # would otherwise publish a negative "age", which is not a real
+        # elapsed duration. `harvest_window_state` above is computed from the
+        # RAW, unclamped value so a future stamp still reads "unknown" there
+        # rather than being masked as a fresh age of zero.
+        "training_harvest_age_seconds": (
+            round(max(harvest_age_seconds, 0.0), 3) if harvest_age_seconds is not None else None
+        ),
+        "training_harvest_window_state": harvest_window_state,
+        "maker_study_intraday_skipped_cycles_total": intraday_skipped_cycles_total,
     }
     if str(settings.get("enabled", True)).strip().lower() in {"0", "false", "no"}:
         write_json(summary_path, summary)
@@ -2402,6 +2618,12 @@ def run_maker_carry_study(cfg: EngineConfig) -> dict[str, Any]:
         "top_portfolio_market",
         "top_portfolio_question",
         "clears_100_per_month_target",
+        # WO-151 §151.1 scope (a): which trigger produced this row. write_csv's
+        # existing legacy-schema upgrade path (see MAKER_CARRY_LEDGER_LOCK
+        # comment above) already rewrites older narrower on-disk headers to
+        # the current fieldnames, so pre-existing rows without this column
+        # simply read back with an empty value - no reader change needed.
+        "study_trigger",
     ]
     history_row = {field: summary.get(field) for field in history_fields}
     # WO-111 (rev.2, anchor-safe): persist per-day portfolio membership + each

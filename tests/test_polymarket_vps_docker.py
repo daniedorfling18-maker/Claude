@@ -618,7 +618,11 @@ def test_vps_ops_scheduler_replaces_github_side_jobs():
     assert "OPS_MAKER_STUDY_INTRADAY_INTERVAL_SECONDS" in script
     assert "OPS_MAKER_STUDY_INTRADAY_OFFSET_MIN_SECONDS" in script
     assert "OPS_MAKER_STUDY_INTRADAY_OFFSET_MAX_SECONDS" in script
-    assert "11-13h offset guard" in script
+    # §151.2 sixth-file scope (2026-08-04): the stale "11-13h offset guard"
+    # detail-string tail was corrected together with the decoupling that
+    # removed the guard it named as a precondition - this pinned literal and
+    # the scheduler string change together, in the same build, or neither.
+    assert "decoupled standalone-interval cadence, no harvest-window precondition" in script
     assert "backfill-trade-prints" in script
     assert "scan-event-groups" in script
     assert "maker-live-test" in script  # WO-36 step 4 scoreboard, inert without a wallet
@@ -962,23 +966,90 @@ def test_ops_scheduler_log_rotation_is_noop_when_small_or_disabled(tmp_path):
     assert log_file.read_text(encoding="utf-8") == "y" * 5000
 
 
-def test_wo117_maker_study_overrun_classification_is_window_aware():
-    # WO-117: maker_study_intraday may only fire inside the registered 11-13h
-    # harvest-age window, whose daily recurrence drifts by more than one tick,
-    # so lateness must be judged against interval + one window width - not the
-    # bare interval, which stamped every legitimate on-window run "overrun".
+def test_wo117_maker_study_overrun_classification_is_standalone_interval_now():
+    # WO-117 originally required lateness to be judged against interval + one
+    # harvest-window width, because maker_study_intraday could only fire
+    # inside the registered 11-13h harvest-age window and its daily
+    # recurrence drifted by more than one tick. §151.2's sixth-file scope
+    # (2026-08-04, reconciling #433 CODEX ROUND-1 sched:878): that window
+    # guard is now REMOVED as a precondition (WO-151 §151.1), so there is no
+    # window width left to derive a tolerance from, and keeping the old
+    # 7200s add-on would silently widen this job's overrun tolerance beyond
+    # every other standalone-interval job's - masking real starvation.
+    # maker_study_intraday now takes the bare-interval form, exactly like
+    # trade_prints and the other standalone-interval jobs, and relies solely
+    # on schedule_skip_kind's own built-in TICK_SECONDS grace.
     script = (ROOT / "scripts" / "run_vps_ops_scheduler.sh").read_text(encoding="utf-8")
+    # The harvest-window tolerance variable is gone from this call site -
+    # removed, not repurposed under the same name (the old finding's exact
+    # arithmetic - OFFSET_MAX - OFFSET_MIN feeding a bare $((...)) - is what
+    # made a nonnumeric OPS_MAKER_STUDY_INTRADAY_OFFSET_*_SECONDS able to kill
+    # the whole scheduler; #433 CODEX ROUND-1 sched:877).
+    assert "MAKER_STUDY_WINDOW_TOLERANCE" not in script
     assert (
         "MAKER_STUDY_WINDOW_TOLERANCE=$((MAKER_STUDY_INTRADAY_OFFSET_MAX - MAKER_STUDY_INTRADAY_OFFSET_MIN))"
-        in script
+        not in script
     )
     assert (
         'schedule_skip_kind maker_study_intraday $((MAKER_STUDY_INTRADAY_INTERVAL + MAKER_STUDY_WINDOW_TOLERANCE))'
-        in script
+        not in script
     )
-    # The bare-interval form must be gone for this job only; other jobs keep it.
-    assert 'schedule_skip_kind maker_study_intraday "$MAKER_STUDY_INTRADAY_INTERVAL"' not in script
+    # The standalone-interval form now matches every other bare-interval job.
+    assert 'schedule_skip_kind maker_study_intraday "$MAKER_STUDY_INTRADAY_INTERVAL"' in script
     assert 'schedule_skip_kind trade_prints "$PRINTS_INTERVAL"' in script
+    # OFFSET_MIN/MAX are still read and numerically clamped (they still feed
+    # maker_carry_study.py's own independent harvest-age reporting fields,
+    # and remain a documented env-var surface), but no longer arithmetic'd
+    # against each other at this call site (#433 CODEX ROUND-1 sched:877).
+    assert 'case "$MAKER_STUDY_INTRADAY_OFFSET_MIN" in \'\'|*[!0-9]*) MAKER_STUDY_INTRADAY_OFFSET_MIN=39600 ;; esac' in script
+    assert 'case "$MAKER_STUDY_INTRADAY_OFFSET_MAX" in \'\'|*[!0-9]*) MAKER_STUDY_INTRADAY_OFFSET_MAX=46800 ;; esac' in script
+
+
+def test_wo117_offset_env_nonnumeric_value_does_not_kill_the_scheduler(tmp_path):
+    # #433 CODEX ROUND-1 P1 sched:877: OPS_MAKER_STUDY_INTRADAY_OFFSET_MIN/MAX
+    # _SECONDS used to feed an unconditional $((MAX - MIN)) with no numeric
+    # guard - a nonnumeric value there raised a shell "illegal number" error
+    # that killed the whole scheduler loop, not just this one job. Mirrors
+    # test_book_pulse_interval_and_timeout_env_clamps's source-the-script
+    # pattern: a garbage env value must clamp to the registered default and
+    # the script must still source cleanly (exit 0).
+    script = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+
+    def _read(**env_overrides):
+        env = {
+            **os.environ,
+            "OPS_SCHEDULER_LIBRARY_ONLY": "1",
+            "OPS_SCHEDULER_OUT_DIR": str(out_dir),
+            **env_overrides,
+        }
+        result = subprocess.run(
+            [
+                "sh",
+                "-c",
+                '. "$1"; printf "%s %s\\n" '
+                '"$MAKER_STUDY_INTRADAY_OFFSET_MIN" "$MAKER_STUDY_INTRADAY_OFFSET_MAX"',
+                "sh",
+                str(script),
+            ],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        offset_min, offset_max = result.stdout.strip().split()
+        return int(offset_min), int(offset_max)
+
+    assert _read(OPS_MAKER_STUDY_INTRADAY_OFFSET_MIN_SECONDS="abc") == (39600, 46800)
+    assert _read(OPS_MAKER_STUDY_INTRADAY_OFFSET_MAX_SECONDS="not-a-number") == (39600, 46800)
+    assert _read(OPS_MAKER_STUDY_INTRADAY_OFFSET_MIN_SECONDS="") == (39600, 46800)
+    # A numeric override still passes through unclamped (no range clamp is
+    # registered for these, only the numeric-format guard).
+    assert _read(OPS_MAKER_STUDY_INTRADAY_OFFSET_MIN_SECONDS="41000") == (41000, 46800)
+    # Defaults, sanity-checked alongside the clamps.
+    assert _read() == (39600, 46800)
 
 
 def test_wo117_window_tolerance_boundary_semantics(tmp_path):

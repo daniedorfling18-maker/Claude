@@ -11279,6 +11279,38 @@ of the three determines a check's own PASS/FAIL, and a change to any of them
 already sits inside the surface the required PR gate — the self-hosted ARM64
 suite every PR must pass — already exercises.
 
+**A further round of external review asked why `utils.py` stays excluded
+given `deploy_acceptance.py` imports `parse_timestamp` and `safe_float` from
+it directly — REJECTED, with the boundary named rather than left to be
+inferred a second time.** The closure this WO registers is bounded by
+*purpose*, not by import depth: it protects the wrapper, everything it
+stages as a gate, and the acceptance-verdict chain reached through the
+compose file's own gate command — modules whose job is to decide a check's
+PASS/FAIL or enforce a control property. `utils.py` decides nothing; it is
+the repository's shared coercion/IO helper, and `parse_timestamp`/
+`safe_float` are two of dozens of functions in it with no relationship to
+deploy control. Verified rather than assumed: `grep -rl "\bsafe_float\b\|
+\bparse_timestamp\b" src/ scripts/` finds **115 modules** (107 importing
+`safe_float`, 70 importing `parse_timestamp`) across the engine and its
+scripts that depend on these two functions' coercion behaviour — registering
+`utils.py` would flag essentially every unrelated PR that touches
+prediction, collection, or reporting code, the identical friction already
+named as the reason `cli.py` stays unregistered, above, for a change with no
+deploy-control content at all. The correct guard for a module this shared is
+test breadth, not registration, and the breadth is real but indirect:
+`grep -rl safe_float tests/` finds only **4** registered test files that
+name `safe_float` in their own text (`tests/polymarket_predictive_engine/
+test_disaster_recovery.py`, `test_trade_print_collector.py`,
+`test_volatility_penalty_wiring.py`, `test_wo92_engineering_guards.py`) and
+**0** that name `parse_timestamp` — so the guard is not those four files
+calling it directly, it is that each of the 115 dependent modules carries its
+own registered test file in the required PR gate, and a coercion change that
+shifts either function's return value shifts that module's own tested
+output without the test ever mentioning the utility by name. That is what
+"guarded by test breadth" means here, shown rather than asserted, and it is
+why the required PR gate — not `PROTECTED_CONTROL_PATHS` — is the correct
+guard for `utils.py`.
+
 **`artifact_contracts.py` does not stay on that side of the line — found on a
 further round of external review.** `deploy_acceptance.py` calls
 `build_contract_registry(cfg)` directly (`:580`) and appends a `FAIL` entry
@@ -11357,7 +11389,7 @@ twenty-eight protected paths is touched, and strictly restrictive on every PR
 that touches one.
 
 **Touch ONLY these files — this clause governs scope (a) only, since scope (b)
-builds nothing** (`git diff --stat` must show exactly these two):
+builds nothing** (`git diff --stat` must show exactly these four):
 
 - `scripts/merge_independently_reviewed_pr.py` — the `PROTECTED_CONTROL_PATHS`
   literal only.
@@ -11365,14 +11397,21 @@ builds nothing** (`git diff --stat` must show exactly these two):
   merge-control parametrisation at `:837-859` and the workflow inventory test at
   `:259` are **not** to be modified; a build that needs to edit either has
   changed behaviour it was told not to change, and must stop and escalate.
+- `src/polymarket_predictive_engine/deploy_acceptance.py` — the `sys.path`/
+  import shim for `PROTECTED_CONTROL_PATHS` and the two new payload fields
+  (`protected_control_paths_count`, `protected_control_paths_hash`), test (10)
+  below, only. No existing check, threshold, or payload field changes.
+- `tests/polymarket_predictive_engine/test_deploy_acceptance.py` — **new
+  assertions only**, for the same two fields.
 
-This WO is trimmed to that two-file registry-and-tests scope. A round-3 draft
-grew the Touch ONLY list to three files by having the VPS governance-refresh
-producer (`src/polymarket_predictive_engine/refresh_governance.py`) publish a
-production-observable field derived from this registry. That design is not
-built: see the Day-after check, below, for why it cannot be, and §153.1 for
-where the production-observable signal it was chasing is picked back up as
-its own, separately-admitted follow-on.
+This WO's Touch ONLY list grew twice and shrank once. A round-3 draft grew it
+to three files by having the VPS governance-refresh producer
+(`src/polymarket_predictive_engine/refresh_governance.py`) publish a
+production-observable field derived from this registry; that design is not
+built — see the Day-after check, below, for why it cannot be — and the third
+file was removed, back to two. A further round of review grows it again, to
+four, by a different design that does not share the removed one's mount
+problem: see test (10), below, and the Day-after check's second part, below.
 
 **Tests (enumerated).** (1) `_protected_control_path` returns `True` for each
 of the sixteen new registered paths —
@@ -11424,14 +11463,17 @@ rather than depending on someone noticing that this WO's hand-enumerated
 list is now incomplete. (This test's parse does not reach the three Path A
 entries — they are not staged or invoked by anything `scripts/deploy_vps_
 paper_manual.sh` or the compose file's text contains — which is exactly why
-(1)-(4) enumerate them by hand instead.) (8) **added on a further round of
-review, closing a visibility gap in test (7)'s own resolution step:** test
+(1)-(4) enumerate them by hand instead, and, on a further round of review,
+why test (9), below, adds a parse-based check of Path A's own text rather
+than leaving that coverage to hand-enumeration alone.) (8) **added on a
+further round of review, closing a visibility gap in test (7)'s own
+resolution step:** test
 (7) resolves the acceptance script's `deploy-acceptance` CLI invocation to
 `src/polymarket_predictive_engine/deploy_acceptance.py` by name, not by
 reading `cli.py`'s own dispatch table — `cli.py` is not, and is not made, a
 member of `PROTECTED_CONTROL_PATHS` (doing so would flag every unrelated
-command's routine maintenance as a protected-control change, the friction
-this WO's own two-file Touch ONLY scope was chosen to avoid; `cli.py` also
+command's routine maintenance as a protected-control change, the same
+friction the `utils.py` dismissal above shows with grep counts; `cli.py` also
 wraps every command's dispatch in one shared `try/except` that converts an
 exception to `ERROR: {exc}` and exit code `2`, `cli.py:820-822`, so rerouting
 the acceptance script around it to avoid registering it would itself be a
@@ -11445,6 +11487,72 @@ and asserts it still calls `build_deploy_acceptance`, imported from
 `.deploy_acceptance` — the same module test (7) already resolves to — so a
 retargeting trips this test directly. It is the one test in the set that
 reads `cli.py`'s text without adding `cli.py` itself to the protected set.
+(9) **added on a further round of review, closing the same drift gap in
+Path A that test (7) closes in Path B:** hand-enumeration in (1)-(4) proves
+the predicate accepts the two Path A one-hop helper paths once given their
+names; it does not prove the workflow still calls those two names, so a
+future rename or retarget of either call would pass (1)-(4) unchanged while
+silently routing around the protection. Test (9) closes that gap the way
+test (7) does, by parsing `.github/workflows/deploy-polymarket-vps-paper.yml`'s
+own text for its two one-hop helper invocations — the `python3
+"$GITHUB_WORKSPACE/deploy-control/scripts/verify_independent_main_
+acceptance.py"` line in the "Bind deployment to independently accepted main"
+step (`:65`) and the `bash scripts/configure_polymarket_dashboard_tailscale.
+sh` line in the tailnet-enforcement step (`:639`) — and asserting that the
+exact two-element set it resolves to is a subset of `PROTECTED_CONTROL_
+PATHS`, the same is-a-member-of-the-parse-result shape test (7) uses.
+**Verified against the current workflow file before writing this test, not
+assumed from the prose above:** the file contains eight further `scripts/…`
+references this test's parse deliberately does not target — five lines
+(`:289-290`, `:530-532`) that stage, via `git show "${GITHUB_SHA}:scripts/
+…"`, five of the six gate scripts Path B already stages and this WO already
+registers (a further `git show` line at `:291` separately stages the
+compose file itself, via `$COMPOSE_FILE` rather than a `scripts/` path, so
+it is not counted in this `scripts/`-specific tally), confirming rather than
+contradicting that set;
+one direct invocation each of the compose-staged `write_vps_telemetry_
+manifest.py` (`:644`, staged again at `:531` for the rollback closure) and
+`check_polymarket_vps_paper.sh` (`:750`, the sixth gate script, invoked
+directly here rather than staged) once the checkout itself is at the target
+SHA; and one `python scripts/render_
+polymarket_dashboard.py` invocation (`:740`, inside `docker compose exec
+polymarket-dashboard`) that stays unregistered on the same purpose basis
+`utils.py` does, above: that script only calls `render_dashboard`
+(`scripts/render_polymarket_dashboard.py:14`) to refresh the served
+cockpit's HTML/JSON after acceptance — it decides no check's PASS/FAIL and
+enforces no transport or trust property, so registering it would flag a
+reporting-only refresh as a deploy-control change. Test (9)'s parse is
+therefore two named lines, not a sweep of every `scripts/` mention in the
+file, mirroring test (7)'s own choice to parse one named construct rather
+than grep the whole script. (10) **added on a further round of review,
+building the middle path the Day-after check and §153.1, below, point to:**
+`build_deploy_acceptance` (`src/polymarket_predictive_engine/deploy_
+acceptance.py`) imports `PROTECTED_CONTROL_PATHS` directly —
+`ROOT = Path(__file__).resolve().parents[2]`; if `ROOT / "scripts"` is not
+already on `sys.path`, insert it; then `from merge_independently_reviewed_pr
+import PROTECTED_CONTROL_PATHS` — the same self-contained resolution
+`scripts/render_polymarket_dashboard.py:8-10` already uses for `src`, needed
+because `pytest.ini`'s `pythonpath = src` does not add `scripts` (verified),
+so a bare top-level import would raise `ModuleNotFoundError` under the
+offline sandbox suite even though it resolves inside the VPS container's
+`PYTHONPATH: scripts:src`. The payload gains two fields:
+`protected_control_paths_count = len(PROTECTED_CONTROL_PATHS)`, and
+`protected_control_paths_hash = hashlib.sha256("\n".join(sorted(
+PROTECTED_CONTROL_PATHS)).encode("utf-8")).hexdigest()` — sha256, not a
+weaker digest, because this value is a tamper/drift signal read by a human,
+not a performance-sensitive cache key; sorted before joining because
+`PROTECTED_CONTROL_PATHS` is a `set`, whose iteration order is not
+guaranteed stable across processes or Python versions, and an unstable join
+would make the hash change without the registry changing, defeating the
+point. The test imports the same module the same way and asserts the
+payload's two fields equal a fresh computation from that import — not a
+hardcoded count or hash literal — so this test does not go stale the day a
+later WO legitimately grows the registry past twenty-eight; the literal
+expected values for **today's** registry are stated once, in the Day-after
+check's second part, below, for the owner to read. The import happens at
+module load time, outside any `try/except`: a missing `scripts` directory is
+therefore a fail-closed import error that stops `deploy_acceptance.py` from
+loading at all, not a silently-omitted field (A2).
 
 **Fail-safe sentence.** This changes no gate threshold, no eligibility rule, no
 M-A/M-B/M-C predicate, and no order, signer, or credential surface; it can only
@@ -11491,12 +11599,21 @@ meant to give the owner. This design flaw was found after the round-3
 adjudication that grew the Touch ONLY list to three files accepted this
 producer sight unseen; it is why that third file is removed from the Touch
 ONLY list above rather than kept. The production-observable signal this was
-chasing is **deferred, not abandoned**: §153.1, below, outlines a follow-on
-that replaces file-parsing with a value computed from data already in the
-process (the imported `PROTECTED_CONTROL_PATHS` constant itself, not a read
-of the compose file), which sidesteps this mount problem entirely and is why
-it is registered separately rather than folded back into this WO's Touch
-ONLY list a second time.
+chasing is not abandoned, and — on a further round of review — not deferred
+to a separate follow-on either: it replaces file-parsing with a value
+computed from data already in the process (the imported `PROTECTED_CONTROL_
+PATHS` constant itself, not a read of the compose file), which sidesteps
+this specific mount problem entirely, but the sidestep only works on a
+producer whose own container already has `scripts/` importable without a
+repo-root file read — `refresh_governance.py`'s container does not gain
+that property just by changing what it computes, so the constant-import
+design is built on `deploy_acceptance.py` instead, test (10) above, which
+already runs inside the `vps-deploy-acceptance` service with exactly that
+property (verified against `docker-compose.vps-paper.yml`, see the
+Day-after check's second part, below). That is a second Touch ONLY addition
+to this WO, not a fold-back into a `refresh_governance.py` file this WO
+still does not touch; §153.1, below, is shrunk to a residual note
+accordingly.
 
 **The retained check — corrected on a further round of review — is a direct
 read of the merged registry on `main`, not required-gate green.** An earlier
@@ -11519,16 +11636,55 @@ a result that speaks to this registration directly rather than a
 general-purpose green run the owner must infer coverage from, which is
 exactly the gap the earlier round's own S6 objection identified and then
 talked itself out of closing. **Required-gate green on the next `main` run
-is demoted to a secondary signal**: it corroborates that tests (1)-(8) above
+is demoted to a secondary signal**: it corroborates that tests (1)-(10) above
 still pass inside the self-hosted ARM64 suite, with retained Actions history
 as that record, but the owner's day-after check no longer depends on it. If
 the `/independent-merge` path is ever un-deadlocked, its refusal on a PR
 touching any of the twenty-eight paths (blocker
 `pull_request_changes_trusted_merge_control`) remains available as
-additional runtime evidence, not this check's mechanism. **§153.1 remains
-the production-telemetry follow-on outlined below; it is not a blocking
-prerequisite for this WO's own day-after check**, which the direct registry
-read on `main` already satisfies without it.
+additional runtime evidence, not this check's mechanism.
+
+**Day-after check, part two — a further round of review adds a second,
+corroborating production signal, the "middle path" between this direct-read
+check and the unbuilt governance-refresh producer above.** The direct read
+of `main` proves what is *registered*; it says nothing about what is
+*running*, because nothing forces the deployed container's own import of
+`PROTECTED_CONTROL_PATHS` to match the text the owner just read. Test (10),
+above, closes that gap without the mount problem that killed the
+governance-refresh design: `deploy_acceptance.py` runs inside the
+`vps-deploy-acceptance` service, which mounts `./scripts:/app/scripts:ro`
+and sets `PYTHONPATH: scripts:src` (`docker-compose.vps-paper.yml`'s
+`vps-deploy-acceptance` service, verified) — the same constant-import path
+§153.1 originally outlined, on a service that, unlike `vps-ops-scheduler`,
+needs no repo-root file read to use it. Every deploy therefore republishes,
+into the existing telemetry artifact at `outputs/ops_scheduler/deploy_
+acceptance.json` (`OUTPUT_FILE`, `deploy_acceptance.py:25`), the running
+container's own `protected_control_paths_count` and `protected_control_
+paths_hash`, computed by the code that is actually deployed, not by a human
+reading source text. On the next post-deploy acceptance run after this WO
+merges, that file on the VPS repo checkout must carry:
+
+```
+protected_control_paths_count: 28
+protected_control_paths_hash: "ff29fd2b79ea8d1837cae1933c20e46cf0823e7b40acbf00f45e45ac1c2328b1"
+```
+
+— the sha256 of the twenty-eight registered paths above, sorted and
+newline-joined (recomputed and verified against that exact twenty-eight-path
+list at registration time; a future WO that changes the registry must
+restate both this count and this hash here, the same obligation A7 already
+places on every other count in this section). Reading two fields off a JSON
+file already on the reviewed VPS host is zero execution, the same as the
+`main` read above; this is a second, independent confirmation, not a
+replacement for it, and either one alone still clears **S6**.
+
+**§153.1's outline is absorbed here, not merely pointed at**: the hash
+algorithm, the field placement, and the owner's diff target — all left open
+there — are all resolved above. The one piece of §153.1 not built is a
+*second* publication of the same two fields from `refresh_governance.py`/
+`governance_refresh.json`; nothing needs it once `deploy_acceptance.json`
+carries the signal on every deploy, so it is recorded there as a residual,
+not dispatched.
 
 ### Scope (b) — the control (i) permission question, closed on empirical evidence, not built
 
@@ -11604,49 +11760,35 @@ eligible-found) already surfaces that regression as a `::warning::` on the
 run where it happens, and the withdrawn resolutions above are the correct
 starting point for whoever registers the fix at that time.
 
-### 153.1 — Follow-on stub (NOT dispatchable): production attestation of the protected-path registry
+### 153.1 — Absorbed into WO-153's own Day-after check; one residual noted, not dispatchable
 
-**Status: outline only.** This is not a registration and grants no admission.
-It is not scoped, has no A1-A10 treatment, no Touch ONLY list, and no tests —
-a full spec covering all ten must be drafted and independently admitted
-before any build starts. It exists here only so the day-after check above
-has somewhere to point the deferred production-observable signal at, rather
-than leaving that pointer dangling with nothing behind it.
+**Status: superseded by this WO's own build, not a standing follow-on.**
+This stub previously outlined a production attestation of the protected-path
+registry and left its shape for a later spec to resolve. On a further round
+of review, that shape is built directly into WO-153 instead — see test (10)
+and the Day-after check's second part, above — so nothing here is still
+open to decide, and this section is kept only as a pointer to where each
+question landed and to record the one thing that is genuinely still not
+built.
 
-**The failure mode this replaces.** The round-3 design that this WO's
-Day-after check rejects tried to prove the registry is production-correct by
-having the governance-refresh producer re-run test (7)'s closure parse
-against the compose file's text, inside the `vps-ops-scheduler` container.
-That container never mounts the repo-root `docker-compose.vps-paper.yml`
-into itself — see the Day-after check, above, for the verified mount list —
-so the parse has nothing to read there. Any redesign that still depends on
-reading files from inside that container has the same problem and is not an
-improvement.
+**Where each open question landed.** The hash algorithm and encoding: sha256
+of the sorted, newline-joined registry. Whether the value stands alone or
+pairs with a count: both, as `protected_control_paths_count` and
+`protected_control_paths_hash`. The field and its artifact: those two field
+names in `outputs/ops_scheduler/deploy_acceptance.json`, not
+`governance_refresh.json` — the mount failure that blocked
+`refresh_governance.py` (see the Day-after check, above, for the verified
+mount list) is unchanged, which is exactly why the working design runs on
+`deploy_acceptance.py`/`vps-deploy-acceptance` instead, a different producer
+whose container already has `scripts/` importable without a repo-root file
+read. What the owner diffs against: the literal count and hash this WO
+registers at merge time, restated by every future WO that changes the
+registry, the same A7 obligation every other count in this section already
+carries. Whether an unrecomputable hash still clears S6: yes — the owner
+reads and string-compares two fields, which is "reading a result," not
+"running code."
 
-**The shape of the replacement.** Compute a value from data already resident
-in the process instead of from a file read: the governance refresh already
-runs with `scripts` on `PYTHONPATH` (`docker-compose.vps-paper.yml`'s
-`vps-ops-scheduler` service sets `PYTHONPATH: scripts:src`), so
-`refresh_governance.py` can `import` `PROTECTED_CONTROL_PATHS` directly from
-`merge_independently_reviewed_pr` — no file parsing, no mount requirement —
-and publish a **hash** of the imported constant into `governance_refresh.
-json`, not a count. A count is insufficient on its own: swapping one
-protected path out for an unrelated one leaves `len(PROTECTED_CONTROL_
-PATHS)` unchanged, so `protected_control_paths_count` cannot see a
-count-preserving swap; a hash of the sorted, normalised set changes on any
-addition, removal, or substitution, which is the actual invariant a
-production attestation of this registry needs to protect.
-
-**Left open, to be resolved by the full spec before dispatch, not here:**
-the hash algorithm and encoding; whether the published value stands alone or
-pairs with the count for an owner-legible cross-check; the field name and
-its place in `governance_refresh.json`; what the owner diffs the published
-hash against — a reference value committed at registration time, recomputed
-at every future registry change, or some other anchor — and, the question
-that must not be waived by default just because this stub exists: whether a
-hash the owner cannot recompute by hand still clears **S6** (a day-after
-check the owner can carry out by reading a result, not by running code),
-the same bar that eliminated the Python-one-liner and the wait-on-an-
-unrelated-PR designs earlier in this WO. None of this is decided by this
-stub; it is recorded so the next drafting pass starts from the actual
-failure mode found here rather than rediscovering it.
+**Residual, recorded rather than dispatched:** a *second* publication of the
+same two fields from `refresh_governance.py` into `governance_refresh.json`
+would be redundant now that every deploy already republishes them in
+`deploy_acceptance.json`, and is not registered here or anywhere.

@@ -9971,7 +9971,9 @@ merge, adding the glob to `DEFAULT_LEDGER_REGISTRY` and the deployed
 
 ### 148.5 — Summary keys
 
-`tier_events_status` (∈ `{"ok","read_failed","write_failed"}`),
+`tier_events_status` (∈ `{"ok","read_failed","write_failed","skipped_portfolio_scope","skipped_unreadable_inputs","skipped_disabled"}`
+— the three members after `write_failed` are §148.6's, added when the
+sole-writer premise was falsified; reconciliation item 8 below),
 `tier_events_written` (int), `tier_events_resync` (bool),
 `tier_events_malformed_rows` (int), `tier_event_burst` (bool),
 `tier_precedence_conflicts` (int).
@@ -10153,8 +10155,9 @@ set is scope-invariant**. The keys land on whichever artifact the scope selects
 under watchlist scope (`maker_fill_replay.py:744`; the pulse never writes the
 snapshot file, which the collection-window ledger consumes — WO-149's isolation,
 not to be violated to satisfy an invariance test) — and the invariance is
-asserted by comparing the two artifacts' key sets, not by requiring one file to
-carry both scopes. **Every return path carries the six keys**: they are
+asserted by comparing the two artifacts' six-key summary subsets (test 18
+below), never their whole key sets, which legitimately differ, and not by
+requiring one file to carry both scopes. **Every return path carries the six keys**: they are
 initialized in the summary dict at construction, with the five zero values and
 `tier_events_status` set by whichever rule governs that particular return
 path — the disabled-collector rule in the third correction below takes
@@ -10218,8 +10221,20 @@ exists to close. Fixed as follows, checked in this order:
    / "maker_carry_study.json", default=...)` fell back to its failure default
    rather than returning a parsed dict — the file is missing, unreadable, or
    malformed — **or it returned a parsed dict that fails the expected summary
-   contract:** not a mapping, or a mapping missing the `portfolio` field the
-   tranche derivation reads. Both are treated identically, because
+   contract:** not a mapping, a mapping missing the `portfolio` field the
+   tranche derivation reads, or a mapping whose `portfolio` field is present
+   but is not a list — `null`, or any scalar (string, number, boolean) —
+   the exact shape `_portfolio` (`:426-438`) consumes via
+   `(summary.get("portfolio") or [])[:max_markets]`: a falsy scalar (`null`,
+   `0`, `""`, `false`) silently becomes `[]` and reads as genuinely empty
+   rather than malformed; a truthy string slices character-by-character into
+   entries `isinstance(entry, dict)` then filters away, silently masking a
+   malformed summary as an empty one; and a truthy number or mapping raises
+   on the slice, an unhandled crash rather than a controlled skip. A contract
+   check that inspects the shape before either happens turns every one of
+   these into the same explicit, controlled outcome. All three sub-conditions
+   (not a mapping, missing field, wrong-shaped field) are treated identically,
+   because
    `read_json`'s own failure default is `{}` — indistinguishable by identity
    from a syntactically valid but semantically empty summary such as a real
    `maker_carry_study.json` that parses to `{}` — so "returned a parsed dict"
@@ -10293,7 +10308,7 @@ degrades to a mislabelled status on a cycle that already wrote no rows and
 touched no state file, never to a spurious or missing row.
 
 **A4/A7 — reconciliation of the parent WO, stated exhaustively.** This
-amendment's duplicate set is seven places and no more:
+amendment's duplicate set is eight places and no more:
 
 1. **148.5's "Interleaving (S2)" paragraph** — its caller list and its
    "scheduled by nothing" claim are **superseded by the table above**. The
@@ -10335,6 +10350,10 @@ amendment's duplicate set is seven places and no more:
    scope-invariant, scoped-write contract this section registers everywhere
    else, now also stated at the one place still describing the pre-amendment
    behaviour.
+8. **148.5's "Summary keys" line** — still pinned `tier_events_status`'s
+   domain to the three pre-amendment members, `{"ok","read_failed","write_failed"}`,
+   even though this section registers three more. Corrected above to the
+   complete six-member domain, with a pointer back to this item.
 
 **The touched-file list does not change.** It remains exactly the two files the
 parent WO registers, `src/polymarket_predictive_engine/maker_fill_replay.py` and
@@ -10361,9 +10380,15 @@ of the existing numbers move:
 18. The same call records `tier_events_status == "skipped_portfolio_scope"` and
     the five zero-valued keys on `official_book_pulse.json` — the artifact
     `scope="portfolio"` actually writes (`:744`), never
-    `official_book_snapshot.json` — and that key set is identical to
-    `official_book_snapshot.json`'s key set under `scope="watchlist"`, asserted
-    by comparing the two artifacts' key sets, not by listing them.
+    `official_book_snapshot.json` — and, **restricted to the SIX tier-event
+    keys only** (`tier_events_status`, `tier_events_written`,
+    `tier_events_resync`, `tier_events_malformed_rows`, `tier_event_burst`,
+    `tier_precedence_conflicts`), that six-key subset is identical to
+    `official_book_snapshot.json`'s same six-key subset under
+    `scope="watchlist"`, asserted by comparing the two six-key subsets, not
+    the two artifacts' whole key sets — which legitimately differ, since the
+    pulse artifact alone also carries `"scope": "portfolio"` (`:754`) that
+    the watchlist snapshot never sets.
 19. No state file is written under portfolio scope: a pre-existing
     `maker_watchlist_tier_state.json` is byte-identical after the call, and an
     absent one is still absent.
@@ -10413,11 +10438,14 @@ of the existing numbers move:
     intentionally-routed pulse rather than a fully inert cycle.
 27. `scope="watchlist"`, `maker_carry_study.json` present and valid JSON but
     failing the summary contract — a bare `{}`, and, separately, a dict
-    missing the `portfolio` field — with `portfolio + persistent + seeds`
-    computing to empty as a consequence: the ledger write is skipped, **zero**
-    rows appended, any pre-existing state file byte-identical,
-    `tier_events_status == "skipped_unreadable_inputs"`, not `"ok"`. This is
-    the malformed-but-parseable case a contract-blind "is it a dict, not the
+    missing the `portfolio` field, and, separately again, a dict carrying a
+    `portfolio` field whose VALUE is not a list (`null`, and, separately, a
+    scalar such as an int or a string) — with `portfolio + persistent +
+    seeds` computing to empty as a consequence: the ledger write is skipped,
+    **zero** rows appended, any pre-existing state file byte-identical,
+    `tier_events_status == "skipped_unreadable_inputs"`, not `"ok"`, and no
+    unhandled exception propagates out of the collector. This is the
+    malformed-but-parseable case a contract-blind "is it a dict, not the
     failure default" check would misclassify as test (23)'s
     genuinely-empty, mass-departure-is-truth branch, because `read_json`'s own
     failure default is also `{}`.
@@ -10450,19 +10478,20 @@ gate, threshold, eligibility rule, or `maker_min_*` value, opens or enables an
 order path, or changes which markets are collected or polled under either
 scope.
 
-**Day-after check addition — durable, not snapshot-based; the trigger is
-corrected on external review, which caught a false-positive class in the first
-draft.** The loud signature of a missing guard needs to be **in the events
-CSV, which is append-only and survives**, rather than snapshot-based, because
-`official_book_pulse.json` is overwritten every pulse, so its latest
-`tier_events_written: 0` proves nothing about earlier cycles — a transient
-nonzero would be gone by read time; the CSV cannot forget. But the first-drafted
-trigger — any two rows for the same `condition_id` less than 900 seconds
-apart — assumed the 900-second `run_trade_prints` job is the *only* legitimate
-caller of the full-watchlist collector. It is not: `collect-maker-replay-data`
-(which reaches `snapshot_official_books(scope="watchlist")`) is also invoked
-once daily by the `training_harvest` step (`training_harvest.py:77-81`) and
-again roughly twelve hours later by the `maker_study_intraday` scheduler block
+**Day-after check addition — three drafts of a CSV-to-status join, and a
+fourth round of external review that proves the join cannot work with the
+artifacts that exist today; STOP iterating it here.** The loud signature of a
+missing guard was sought **in the events CSV, which is append-only and
+survives**, rather than snapshot-based, because `official_book_pulse.json` is
+overwritten every pulse, so its latest `tier_events_written: 0` proves nothing
+about earlier cycles — a transient nonzero would be gone by read time; the CSV
+cannot forget. The first-drafted trigger — any two rows for the same
+`condition_id` less than 900 seconds apart — assumed the 900-second
+`run_trade_prints` job is the *only* legitimate caller of the full-watchlist
+collector. It is not: `collect-maker-replay-data` (which reaches
+`snapshot_official_books(scope="watchlist")`) is also invoked once daily by
+the `training_harvest` step (`training_harvest.py:77-81`) and again roughly
+twelve hours later by the `maker_study_intraday` scheduler block
 (`run_vps_ops_scheduler.sh:629`), plus occasionally by a deploy-acceptance run
 — none of which sits on the 900-second grid, so one of them landing within 900
 seconds of a `run_trade_prints` cycle, or of each other, is a real and
@@ -10470,8 +10499,8 @@ legitimate possibility, and the proximity-only trigger would revert a
 correctly-guarded build on a coincidence of timing.
 
 **The repetition trigger drafted next — "the same `condition_id`
-accumulating four or more rows in any rolling 3600-second (1.0h) window" — is
-itself corrected on a further round of external review, which caught a
+accumulating four or more rows in any rolling 3600-second (1.0h) window" —
+was itself corrected on a further round of external review, which caught a
 second, frequency-based false-positive class it introduced.** Normal seed-cap
 oscillation at the `run_trade_prints` cadence (900s) can legitimately flip the
 same `condition_id` in and out of the seed tier several times inside one
@@ -10479,81 +10508,106 @@ hour — a market riding the ranking boundary produces the same
 departure/arrival/departure/arrival row shape a broken guard would, at a rate
 a pure row-count rule cannot tell apart from a defect. Frequency is the wrong
 axis: what distinguishes a broken guard's rows from legitimate oscillation's
-rows is not how often they occur but **whether a legitimate watchlist-scope
-producer actually ran to generate them.**
+rows is not how often they occur but whether a legitimate watchlist-scope
+producer actually ran to generate them — which motivated a third draft:
+joining the events CSV against `outputs/ops_scheduler/status.json` on producer
+identity, any events-CSV row whose `event_utc` fell in a window where
+`status.json` showed no watchlist-scope producer running in the preceding 900
+seconds.
 
-**The registered signature is therefore two-part, and only part (b) replaces
-the frequency rule — part (a) already stood on the same-day check above and is
-restated here as the whole rule's first half:**
+**RULING — STOP iterating this join; three findings, jointly decisive, prove
+the third draft cannot be salvaged from the artifacts that exist today
+either, at any threshold, on any axis:**
+1. **The `maker_study_intraday` stamp carries no start time to join
+   against.** `stamp_status maker_study_intraday` (`run_vps_ops_scheduler.sh:635`)
+   omits the fourth, `STARTED_AT` argument that `stamp_status trade_prints`
+   (`:662`) passes; per `stamp_status`'s own implementation — read the
+   previous entry (`:141-148`), then unconditionally overwrite `jobs[job_name]`
+   (`:172-193`) — a call with no `STARTED_AT` stores `"started_at_utc": ""`
+   and `"duration_seconds": None` (`:174-175`). One of the third draft's two
+   claimed producer classes has nothing in `status.json` to join an
+   `event_utc` against, not merely an imprecise timestamp.
+2. **`status.json` keeps no history at all.** Every job's entry is read once
+   and unconditionally replaced on that same job's next run (`:141-148` read,
+   `:172-193` overwrite, `:202-204` atomic write) — one row per job, always
+   most-recent, never a log. A join performed any length of time after an
+   events-CSV row was appended sees only whichever run of each job happened to
+   be most recent AT QUERY TIME, never the run that was live when that CSV row
+   was written.
+3. **`book_pulse`'s own cadence sits inside the very window the join
+   tests.** `BOOK_PULSE_INTERVAL` defaults to 300s and is clamped to
+   `[300, 900]` (`run_vps_ops_scheduler.sh:53`, `:58`, `:60`) — strictly inside
+   the join's 900-second test. Combined with finding 2, an owner query finds
+   SOME job's `status.json` timestamp within 900 seconds of query time on
+   essentially every occasion regardless of what ran near the historical row
+   under investigation; the window test degrades toward "is the scheduler
+   alive right now," not "did a watchlist producer run near this row."
 
-- **(a) Pulse-artifact check, definitive when caught — corrected on external
-  review to exempt the third correction's own domain member.** The pulse
-  artifact (`official_book_pulse.json`) reporting a `tier_events_status` that
-  is neither `skipped_portfolio_scope` **nor `skipped_disabled`** — i.e. a
-  genuinely WRONG status, not one of the two status strings a correctly
-  guarded pulse can legitimately carry — or any nonzero `tier_events_written`
-  ever observed on it, remains **conclusive proof of a missing guard on its
-  own**; this signal was never proximity- or frequency-based, and neither
-  false-positive class above reaches it. `skipped_disabled` on the pulse
-  artifact is not proof of anything: it is the correctly-guarded label for a
-  disabled collector (the third §148.6 correction above) and would fire under
-  either scope. Likewise, an **absent** pulse artifact is not proof of
-  anything on its own: the `book_pulse` scheduler job itself is intentionally
-  skippable (`OPS_BOOK_PULSE_ENABLED=0`, `run_vps_ops_scheduler.sh:675`), and
-  that scheduler-level skip — a different layer from this WO's own
-  `enabled` guard — never writes `official_book_pulse.json` at all. On a clean
-  day the pulse artifact, when the job runs, reads `skipped_portfolio_scope`
-  (or `skipped_disabled` if configured off) and the snapshot artifact reads
-  `ok`.
-- **(b) Durable CSV-side signature: producer identity, not row frequency —
-  corrected on external review to drop two producer classes the join cannot
-  actually check.** Any events-CSV row whose `event_utc` falls in a window
-  where `outputs/ops_scheduler/status.json` shows **no watchlist-scope
-  producer ran in the preceding 900 seconds** is the signature — where
-  "watchlist-scope producer," **for this join**, means one of the two
-  legitimate producer classes `status.json` actually carries a per-run,
-  overwritten-on-every-run timestamp for: `run_trade_prints`
-  (`trade_prints` in `status.json`, `stamp_status trade_prints`,
-  `run_vps_ops_scheduler.sh:662`) and the `maker_study_intraday` scheduler
-  block (`stamp_status maker_study_intraday`, `run_vps_ops_scheduler.sh:635`).
-  **The other two legitimate producer classes named in the watchlist-cadence
-  framing below are dropped from this join, not silently assumed absent, for
-  distinct reasons:** the `training_harvest` step's own per-step timing
-  (which step within the harvest ran, and when) lives in
-  `training_harvest.json` (`training_harvest.py:171-224`), not in
-  `status.json` — `status.json`'s `training_harvest` entry timestamps the
-  whole multi-step harvest job, not the `collect_maker_replay_data` step
-  specifically — and that artifact, like every job entry in `status.json`
-  itself, is overwritten every run rather than appended, so either one can
-  answer only for the single most recent harvest, never for an arbitrary
-  past events-CSV row; a deploy-acceptance run records its producers' exit
-  codes and elapsed seconds (`run_vps_deploy_acceptance.sh:80-83`) but no
-  wall-clock timestamp at all — it is unstamped by construction and cannot be
-  joined to `event_utc` on any basis, in any artifact. **This requires
-  joining the events CSV to scheduler status history and is an OWNER-run
-  forensic query, not an automated gate** — nothing in this WO computes it,
-  alerts on it, or blocks anything on it; a row whose window coincides only
-  with a `training_harvest` or deploy-acceptance run is inconclusive under
-  this join, not cleared and not flagged, and the owner falls back to (a)
-  above or manual correlation against those runs' own artifacts.
-  **Seed-cap oscillation at watchlist cadence is legitimate under this
-  signature and is explicitly NOT a revert trigger:** every row it produces
-  falls inside the 900-second window following the `run_trade_prints` cycle
-  that computed it, so the join finds a producer and the row is cleared,
-  regardless of how many rows the same `condition_id` accumulates in an hour.
+**Demoted accordingly: ALL CSV churn heuristics — proximity, frequency, and
+the producer-identity join replacing them — are advisory owner indicators
+only, explicitly non-conclusive, with NO registered revert consequence tied
+to any of them.** An owner may still eyeball the events CSV for a suspicious
+churn pattern by hand; nothing here forbids that, and the watchlist-cadence
+facts below remain useful background for doing so. But nothing in this WO
+computes, alerts on, or reverts against a CSV-side pattern, and no further
+redraft of this join is registered in this citation amendment.
 
-**Watchlist-cadence framing, corrected to name every legitimate producer.**
-The full-watchlist collector under `scope="watchlist"` is not driven by
-`run_trade_prints` alone: it runs roughly **96 times/day** from
-`run_trade_prints` (86400s / 900s), plus roughly **2 times/day** from the
-`training_harvest` + `maker_study_intraday` pair named above, plus occasional
-deploy-acceptance invocations — all legitimate writers of the same ledger under
-the same scope, none of them a second implementation. Of these, only
-`run_trade_prints` and `maker_study_intraday` are producers the status-history
-join in (b) above can find within 900 seconds of any row they generate; the
-`training_harvest` step and deploy-acceptance runs are legitimate writers this
-framing accounts for in the cadence total but that (b) drops from its
-checkable set, for the reasons stated there.
+**Registered guard assurance is exactly two things — everything else above is
+context, not a gate:**
+- **(a) Pulse-artifact check, definitive when caught — untouched by the three
+  findings above; none of them reaches it, because it was never proximity-,
+  frequency-, or join-based.** The pulse artifact (`official_book_pulse.json`)
+  reporting a `tier_events_status` that is neither `skipped_portfolio_scope`
+  **nor `skipped_disabled`** — i.e. a genuinely WRONG status, not one of the
+  two status strings a correctly guarded pulse can legitimately carry — or
+  any nonzero `tier_events_written` ever observed on it, remains
+  **conclusive proof of a missing guard on its own**, extending the same-day
+  check already registered above. `skipped_disabled` on the pulse artifact is
+  not proof of anything: it is the correctly-guarded label for a disabled
+  collector (the third §148.6 correction above) and would fire under either
+  scope. Likewise, an **absent** pulse artifact is not proof of anything on
+  its own: the `book_pulse` scheduler job itself is intentionally skippable
+  (`OPS_BOOK_PULSE_ENABLED=0`, `run_vps_ops_scheduler.sh:675`), and that
+  scheduler-level skip — a different layer from this WO's own `enabled`
+  guard — never writes `official_book_pulse.json` at all. On a clean day the
+  pulse artifact, when the job runs, reads `skipped_portfolio_scope` (or
+  `skipped_disabled` if configured off) and the snapshot artifact reads `ok`.
+  Its one limitation is observation cadence, not validity: a guard failure
+  between one owner read and the next pulse's overwrite can go uncaught by
+  this channel alone — which is exactly why (b) below, not a second
+  production heuristic, is the other half of this guarantee.
+- **(b) The enumerated tests (17)-(27), in the required PR gate.** These run
+  the actual scope guard, empty-watchlist, contract-validation, and
+  `skipped_disabled` code against constructed fixtures instead of inferring
+  producer identity from artifacts findings 1-3 above prove cannot support
+  it, and they gate merge directly rather than degrading silently in
+  production the way an unverifiable heuristic would.
+
+**A durable producer trail needs a schema-bearing artifact and is explicitly
+deferred — not registered in this citation amendment.** Making a CSV-to-producer
+join actually conclusive needs an artifact purpose-built to carry producer
+identity per event, and none of today's artifacts are that. Two candidates,
+named so the deferral is not lost to the next round: **(i)** producer-identity
+fields added to the 148.2 STATE json (`maker_watchlist_tier_state.json`) —
+cheapest to add, but 148.2 is `write_json` full-rewrite, latest-write-only, so
+it would still answer only for the run that most recently touched it, not an
+arbitrary past events-CSV row, unless paired with a further change making it
+durable across runs; or **(ii)** a WO-152-style sidecar — a dedicated,
+schema-bearing, durably historied artifact recording producer identity per
+run, on the pattern WO-152 registers elsewhere. Either is a future WO's scope.
+
+**Watchlist-cadence framing — retained as background for an owner's
+manual/advisory use only, not a gate input.** The full-watchlist collector
+under `scope="watchlist"` is not driven by `run_trade_prints` alone: it runs
+roughly **96 times/day** from `run_trade_prints` (86400s / 900s), plus
+roughly **2 times/day** from the `training_harvest` (`training_harvest.py:77-81`)
+and `maker_study_intraday` (`run_vps_ops_scheduler.sh:629`) pair, plus
+occasional deploy-acceptance invocations (`run_vps_deploy_acceptance.sh:80-83`)
+— all legitimate writers of the same ledger under the same scope, none of
+them a second implementation. None of these facts feed any registered check:
+per the ruling above, no CSV-to-status join is conclusive with today's
+artifacts, so this framing is retained purely as background for the owner's
+own eyeballing, never as an automated signal.
 
 ## WO-149 — The replay join has no contemporaneous book state for 23% of prints, so every maker economic number is unvalidated model output — `done` (2026-08-02, PR #422; registered 2026-08-01; new scheduler job + registered watchdog freshness entry + a keyword-only scope on the sole official-book collector, routed owner-merge after two independent line-audits covering disjoint halves; **`max_book_state_lag_seconds` stays 1800 — no tolerance is loosened**; one lint fix round for an `F821` the offline suite could not see, because `from __future__ import annotations` makes the annotation unevaluated; **DEPLOY PENDING, and this is the binding one for the campaign** — `run_book_pulse` never fires on the VPS, so no `official_book_pulse.json` is produced and `M-B`'s `mb1_tier0_coverage_sufficient` stays `false`. Merging this WO did not move M-B; deploying it is what will)
 

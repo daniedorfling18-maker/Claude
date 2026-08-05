@@ -38,6 +38,14 @@ case "$HARVEST_RETRY_INTERVAL" in ''|*[!0-9]*) HARVEST_RETRY_INTERVAL=1800 ;; es
 MAKER_STUDY_INTRADAY_INTERVAL="${OPS_MAKER_STUDY_INTRADAY_INTERVAL_SECONDS:-86400}"
 MAKER_STUDY_INTRADAY_OFFSET_MIN="${OPS_MAKER_STUDY_INTRADAY_OFFSET_MIN_SECONDS:-39600}"
 MAKER_STUDY_INTRADAY_OFFSET_MAX="${OPS_MAKER_STUDY_INTRADAY_OFFSET_MAX_SECONDS:-46800}"
+# #433 CODEX ROUND-1 P1 sched:877: these two feed maker_carry_study.py's own
+# harvest-age reporting (via HARVEST_WINDOW_MIN/MAX_SECONDS literals there,
+# independent of these env-derived shell vars) and previously fed a $((...))
+# subtraction below; clamp to numeric BEFORE any arithmetic ever touches them
+# so a nonnumeric env value cannot throw "illegal number" and kill the whole
+# scheduler loop, same idiom as BOOK_PULSE_INTERVAL/TIMEOUT above.
+case "$MAKER_STUDY_INTRADAY_OFFSET_MIN" in ''|*[!0-9]*) MAKER_STUDY_INTRADAY_OFFSET_MIN=39600 ;; esac
+case "$MAKER_STUDY_INTRADAY_OFFSET_MAX" in ''|*[!0-9]*) MAKER_STUDY_INTRADAY_OFFSET_MAX=46800 ;; esac
 PRINTS_INTERVAL="${OPS_TRADE_PRINTS_INTERVAL_SECONDS:-900}"
 PRINTS_TIMEOUT="${OPS_TRADE_PRINTS_TIMEOUT_SECONDS:-300}"
 # WO-149: higher-frequency official-book observation for the CURRENT
@@ -640,13 +648,13 @@ run_maker_study_intraday() {
   JOB_PID=$!
   wait_with_safety_pulses "$JOB_PID" maker_study_intraday
   CODE=$?
-  # WO-151 §151.1 drift note (recorded, not "fixed"): this detail string's
-  # "11-13h offset guard" tail is now stale prose - the guard it names was
-  # REMOVED as a precondition below - but it is left byte-identical because
-  # (a) it is a free-text, never-parsed "detail" field (stamp_status above
-  # never branches on it) and (b) tests/test_polymarket_vps_docker.py (out of
-  # this WO's exactly-five-file touched list) asserts this literal substring.
-  stamp_status maker_study_intraday "$CODE" "intraday maker-carry-study; training_harvest_age=${TRAINING_AGE}s; 11-13h offset guard"
+  # §151.2 sixth-file scope (2026-08-04): the prior "11-13h offset guard" tail
+  # here was stale prose - the guard it named was REMOVED as a precondition
+  # above, not merely renamed - so it is corrected in place, together with
+  # the pinned literal at tests/test_polymarket_vps_docker.py, in this same
+  # build. It remains a free-text "detail" field only; stamp_status never
+  # branches on its contents.
+  stamp_status maker_study_intraday "$CODE" "intraday maker-carry-study; training_harvest_age=${TRAINING_AGE}s; decoupled standalone-interval cadence, no harvest-window precondition"
   log "maker_study_intraday: exit $CODE"
 }
 
@@ -866,16 +874,20 @@ while :; do
     # trigger path - so the relationship stays measurable without gating on
     # it. Nothing here changes what the study computes.
     #
-    # WO-117 measurement correctness (rationale unchanged, retained here): the
-    # bare 24h interval alone stamped every legitimate on-window run "overrun"
-    # (10 consecutive by 2026-07-25), because this job's firing time under the
-    # old window drifted by more than TICK_SECONDS. That tolerance is kept
-    # unchanged even though the gate it was compensating for is gone -
-    # dropping both together would relabel runs "overrun" purely because the
-    # slack allowance disappeared, not because anything got slower. The SLO
-    # target itself is untouched and still fires on real starvation.
-    MAKER_STUDY_WINDOW_TOLERANCE=$((MAKER_STUDY_INTRADAY_OFFSET_MAX - MAKER_STUDY_INTRADAY_OFFSET_MIN))
-    JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind maker_study_intraday $((MAKER_STUDY_INTRADAY_INTERVAL + MAKER_STUDY_WINDOW_TOLERANCE)))"
+    # WO-117 measurement correctness, SUPERSEDED for this job by the
+    # decoupling above (#433 CODEX ROUND-1 sched:878, reconciled against
+    # §151.2's sixth-file scope): the old harvest-window tolerance
+    # (OFFSET_MAX - OFFSET_MIN, 7200s) existed to stop the window-gated job's
+    # legitimate on-window drift from being mislabeled "overrun" against the
+    # bare interval. That window guard no longer exists as a precondition, so
+    # there is no window width left to derive a tolerance from, and keeping
+    # the old 7200s add-on here would silently widen this job's overrun
+    # tolerance to interval + 7200s + TICK_SECONDS - masking real starvation
+    # that every other standalone-interval job (trade_prints, book_pulse, ...)
+    # would already flag. This job now takes the SAME standalone-interval
+    # tolerance every other bare-interval job gets from schedule_skip_kind's
+    # own "$AGE -gt interval + TICK_SECONDS" check - no extra add-on.
+    JOB_SCHEDULE_SKIP_KIND="$(schedule_skip_kind maker_study_intraday "$MAKER_STUDY_INTRADAY_INTERVAL")"
     touch_stamp maker_study_intraday
     run_maker_study_intraday
     JOB_SCHEDULE_SKIP_KIND=""

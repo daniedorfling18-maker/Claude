@@ -2115,14 +2115,43 @@ def _resolve_study_trigger(explicit: str | None) -> str:
     return raw if raw in STUDY_TRIGGER_PRODUCER_VALUES else "unknown"
 
 
-def _training_harvest_age_seconds(cfg: EngineConfig) -> float | None:
-    """Observed age (seconds) of training_harvest's last SUCCESSFUL run, read
-    directly from the scheduler's own status.json so every study trigger path
-    records it (WO-151 §151.1 test 11), not only the dedicated intraday job.
-    A missing, empty, unparseable, or non-finite stamp fails closed to None -
-    never guessed, never treated as fresh or as due; the study computes
-    nothing from this beyond the reporting fields below.
+def _training_harvest_success_epoch(cfg: EngineConfig) -> float | None:
+    """The SAME canonical source the scheduler's own TRAINING_AGE uses
+    (`successful_completion_epoch` / `seconds_since_success_stamp` in
+    scripts/run_vps_ops_scheduler.sh), read from Python.
+
+    #433 CODEX ROUND-1 study:2126: this used to be status.json's
+    `last_success_utc` only - a DIFFERENT source from the scheduler's own
+    canonical one, which reads the dedicated `last_success_training_harvest`
+    stamp file FIRST and falls back to status.json only when that file does
+    not exist (a WO-85 migration path for pre-existing deployments). The two
+    genuinely can diverge: `stamp_status` (writes status.json's
+    `last_success_utc`) and `touch_success_stamp` (writes the dedicated
+    file) are two separate subprocess invocations, each reading wall-clock
+    time independently, and either write can fail or go stale without the
+    other noticing. Reading only status.json risked the study silently
+    reporting a different harvest age than the scheduler itself would
+    compute for the same fact. Mirrored here: if the dedicated file exists,
+    it is authoritative - exactly as in the shell, corrupt content there
+    does NOT fall back to status.json, it fails closed to None (the shell's
+    equivalent clamps to its internal "immediately due" sentinel, which has
+    no meaning for this reporting-only field); status.json is consulted only
+    when the dedicated file is absent.
     """
+    stamp_path = cfg.output_root / "ops_scheduler" / "last_success_training_harvest"
+    if stamp_path.is_file():
+        try:
+            raw = stamp_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        if not raw.lstrip("-").isdigit():
+            return None
+        try:
+            epoch = float(int(raw))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return epoch if epoch > 0 else None
+
     payload = read_json(cfg.output_root / "ops_scheduler" / "status.json", default={}) or {}
     if not isinstance(payload, dict):
         return None
@@ -2133,9 +2162,23 @@ def _training_harvest_age_seconds(cfg: EngineConfig) -> float | None:
     if not isinstance(entry, dict):
         return None
     parsed = parse_timestamp(entry.get("last_success_utc"))
-    if parsed is None:
+    return parsed.timestamp() if parsed is not None else None
+
+
+def _training_harvest_age_seconds(cfg: EngineConfig) -> float | None:
+    """Observed age (seconds) of training_harvest's last SUCCESSFUL run, read
+    from the same canonical source the scheduler's own TRAINING_AGE uses
+    (`_training_harvest_success_epoch` above; #433 CODEX ROUND-1 study:2126)
+    so every study trigger path records it (WO-151 §151.1 test 11), not only
+    the dedicated intraday job. A missing, empty, unparseable, or non-finite
+    stamp fails closed to None - never guessed, never treated as fresh or as
+    due; the study computes nothing from this beyond the reporting fields
+    below.
+    """
+    epoch = _training_harvest_success_epoch(cfg)
+    if epoch is None:
         return None
-    age = (datetime.now(timezone.utc) - parsed).total_seconds()
+    age = datetime.now(timezone.utc).timestamp() - epoch
     return age if math.isfinite(age) else None
 
 
@@ -2154,9 +2197,30 @@ def _harvest_window_state(age_seconds: float | None) -> str:
 
 def _maker_study_intraday_skipped_cycles_total(cfg: EngineConfig) -> int | None:
     """The scheduler's OWN skipped_cycles_total counter for the dedicated
-    intraday job, read verbatim so the artifact can never disagree with it
-    (WO-151 scope (c) / test 10). Missing or malformed status reads None -
-    never guessed, never fabricated as zero."""
+    intraday job, read verbatim from status.json so the artifact never
+    invents or diverges from a value of its own (WO-151 scope (c) / test 10).
+    Missing or malformed status reads None - never guessed, never fabricated
+    as zero.
+
+    #433 CODEX ROUND-1 study:2172b (read-ordering, documented rather than
+    "fixed" - a post-run read is impossible from inside the study process):
+    `run_maker_study_intraday` (scripts/run_vps_ops_scheduler.sh) invokes
+    this study as a subprocess and only calls `stamp_status
+    maker_study_intraday ...` - the write that increments this SAME counter
+    for the CURRENT cycle - after that subprocess has already returned. This
+    function therefore always reads the counter AS OF THE START of the
+    current run; it can never see the current run's own increment, because
+    that write does not exist yet at read time. The value reported is
+    genuinely correct for "every completed cycle up to but not including
+    this one" - not stale data, just an inherent one-cycle read-ordering
+    offset from the total the NEXT run would see.
+
+    #433 CODEX ROUND-1 study:2172a: bare `int(...)` accepts three things a
+    cycle COUNT must never be - a bool (`int(True) == 1`, silently treating a
+    boolean field as a count), a negative number, and a fractional number
+    (`int(3.7) == 3`, silently truncating instead of rejecting). All three
+    fail closed to None here; only a non-bool, non-negative, integral value
+    is accepted."""
     payload = read_json(cfg.output_root / "ops_scheduler" / "status.json", default={}) or {}
     if not isinstance(payload, dict):
         return None
@@ -2168,10 +2232,20 @@ def _maker_study_intraday_skipped_cycles_total(cfg: EngineConfig) -> int | None:
         return None
     if "skipped_cycles_total" not in entry:
         return None
+    raw = entry["skipped_cycles_total"]
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, float) and not math.isfinite(raw):
+        return None
+    if isinstance(raw, float) and not raw.is_integer():
+        return None
     try:
-        return int(entry["skipped_cycles_total"])
+        parsed = int(raw)
     except (TypeError, ValueError, OverflowError):
         return None
+    if parsed < 0:
+        return None
+    return parsed
 
 
 def run_maker_carry_study(cfg: EngineConfig, *, study_trigger: str | None = None) -> dict[str, Any]:

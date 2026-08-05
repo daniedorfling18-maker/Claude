@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 from polymarket_predictive_engine import maker_carry_study
@@ -1907,9 +1908,23 @@ def _write_scheduler_status(
 
 def test_harvest_age_and_window_state_and_skipped_cycles_match_scheduler_status(tmp_path, monkeypatch) -> None:
     """WO-151 §151.1 tests (10) and (11): skipped_cycles_total and the window
-    state appear in the artifact and MATCH the scheduler's own counter, and
-    the observed harvest age is recorded on every path - including the early
-    "disabled" return, which never reaches the candidate/portfolio logic."""
+    state appear in the artifact and echo verbatim whatever status.json's
+    counter holds AT READ TIME, and the observed harvest age is recorded on
+    every path - including the early "disabled" return, which never reaches
+    the candidate/portfolio logic.
+
+    #433 CODEX ROUND-1 study:2172b (read-ordering, documented not "fixed"):
+    in production the study subprocess is invoked BEFORE the scheduler's own
+    `stamp_status maker_study_intraday` call for the SAME cycle runs (that
+    call happens only after the study's subprocess returns), so the counter
+    this test writes directly and reads back is, end to end, always the
+    total AS OF THE START of the current run - it can never include this
+    run's own outcome, because that increment does not exist yet at the
+    moment the study can read it. A post-run read from inside the study
+    process is impossible: the study has no way to observe a shell-side
+    write that only happens after its own process exits. See
+    `_maker_study_intraday_skipped_cycles_total`'s docstring for the full
+    read-ordering note."""
     cfg = _config(tmp_path)
 
     # Inside the old 11-13h window (40000s ~= 11.1h).
@@ -1964,29 +1979,128 @@ def test_harvest_age_and_window_state_and_skipped_cycles_match_scheduler_status(
     assert disabled_summary["training_harvest_age_seconds"] is not None
 
 
-def test_skipped_cycles_total_infinite_counter_does_not_raise_and_reads_as_none(tmp_path, monkeypatch) -> None:
-    """A status.json carrying Infinity for the scheduler's own counter must
-    not crash the study - int(float("inf")) raises OverflowError, which is
-    a malformed-read case like any other and must read as None, never
-    propagate."""
+def test_harvest_age_prefers_the_dedicated_stamp_file_over_status_json(tmp_path, monkeypatch) -> None:
+    """#433 CODEX ROUND-1 study:2126: the scheduler's own canonical source for
+    training_harvest's success age is `successful_completion_epoch`
+    (scripts/run_vps_ops_scheduler.sh), which reads the dedicated
+    `last_success_training_harvest` stamp file FIRST and falls back to
+    status.json's last_success_utc only when that file does not exist. The
+    study must read the SAME source, not a second, independently-written one
+    that can genuinely diverge from it. Proven here by writing a
+    status.json last_success_utc that disagrees with the dedicated stamp
+    file and asserting the study follows the dedicated file, exactly like
+    the scheduler's own TRAINING_AGE would."""
     cfg = _config(tmp_path)
     _calm_market_requests(monkeypatch)
-    _write_scheduler_status(cfg, maker_study_intraday_skipped_cycles_total=float("inf"))
+
+    # status.json says the harvest succeeded 200000s ago (after_window) - but
+    # the dedicated stamp file, the scheduler's canonical source, says it
+    # succeeded only 40000s ago (inside_window). If the study reads
+    # status.json it disagrees with the scheduler; it must not.
+    stale_status_stamp = (datetime.now(timezone.utc) - timedelta(seconds=200000)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _write_scheduler_status(cfg, training_harvest_last_success_utc=stale_status_stamp)
+
+    ops_dir = cfg.output_root / "ops_scheduler"
+    ops_dir.mkdir(parents=True, exist_ok=True)
+    canonical_epoch = int(datetime.now(timezone.utc).timestamp()) - 40000
+    (ops_dir / "last_success_training_harvest").write_text(f"{canonical_epoch}\n", encoding="utf-8")
+
+    summary = run_maker_carry_study(cfg)
+
+    assert summary["training_harvest_window_state"] == "inside_window"
+    assert abs(summary["training_harvest_age_seconds"] - 40000) < 5
+
+
+def test_harvest_age_dedicated_stamp_file_corrupt_fails_closed_without_status_json_fallback(
+    tmp_path, monkeypatch
+) -> None:
+    """#433 CODEX ROUND-1 study:2126: mirrors the shell's own
+    `successful_completion_epoch` exactly - once the dedicated stamp file
+    EXISTS, it is authoritative and there is no fallback to status.json, even
+    if its content is corrupt. A corrupt-but-present dedicated file must fail
+    closed to None (unknown), not silently resurrect a status.json value the
+    scheduler itself would not have used."""
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+
+    fresh_status_stamp = (datetime.now(timezone.utc) - timedelta(seconds=100)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _write_scheduler_status(cfg, training_harvest_last_success_utc=fresh_status_stamp)
+
+    ops_dir = cfg.output_root / "ops_scheduler"
+    ops_dir.mkdir(parents=True, exist_ok=True)
+    (ops_dir / "last_success_training_harvest").write_text("not-an-epoch\n", encoding="utf-8")
+
+    summary = run_maker_carry_study(cfg)
+
+    assert summary["training_harvest_window_state"] == "unknown"
+    assert summary["training_harvest_age_seconds"] is None
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [
+        float("inf"),
+        float("-inf"),
+        float("nan"),
+        True,  # #433 CODEX ROUND-1 study:2172a: int(True) == 1 - a bool is not a count.
+        False,  # int(False) == 0 - would fabricate a real-looking zero.
+        -1,  # a count is never negative.
+        -0.5,
+        3.7,  # int(3.7) == 3 - silent truncation, not a genuine integral count.
+        "not-a-number",
+    ],
+    ids=[
+        "inf",
+        "neg_inf",
+        "nan",
+        "bool_true",
+        "bool_false",
+        "negative_int",
+        "negative_float",
+        "fractional_float",
+        "non_numeric_string",
+    ],
+)
+def test_skipped_cycles_total_invalid_values_do_not_raise_and_read_as_none(
+    tmp_path, monkeypatch, bad_value
+) -> None:
+    """#433 CODEX ROUND-1 study:2172a: skipped_cycles_total is accepted only
+    if it is non-bool, non-negative, and integral - every other shape
+    (infinite/NaN, a bool masquerading as 0/1, a negative count, a
+    fractional count silently truncated by int(), or a non-numeric string)
+    must not crash the study and must read as None, never a fabricated or
+    truncated value."""
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+    _write_scheduler_status(cfg, maker_study_intraday_skipped_cycles_total=bad_value)
 
     summary = run_maker_carry_study(cfg)
 
     assert summary["maker_study_intraday_skipped_cycles_total"] is None
 
 
-def test_skipped_cycles_total_absent_key_reads_as_none_not_fabricated_zero(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "malformed_entry",
+    [
+        {},  # no skipped_cycles_total key at all
+        {"skipped_cycles_total": None},
+        {"skipped_cycles_total": []},
+        {"skipped_cycles_total": {}},
+    ],
+    ids=["absent_key", "null_value", "list_value", "dict_value"],
+)
+def test_skipped_cycles_total_absent_or_malformed_entry_reads_as_none_not_fabricated_zero(
+    tmp_path, monkeypatch, malformed_entry
+) -> None:
     """When the maker_study_intraday job entry exists but carries no
-    skipped_cycles_total key at all, the docstring promises None - never a
-    fabricated zero."""
+    skipped_cycles_total key at all, or the key's value is a shape int()
+    can never accept, the docstring promises None - never a fabricated
+    zero."""
     cfg = _config(tmp_path)
     _calm_market_requests(monkeypatch)
     write_json(
         cfg.output_root / "ops_scheduler" / "status.json",
-        {"jobs": {"maker_study_intraday": {}}},
+        {"jobs": {"maker_study_intraday": malformed_entry}},
     )
 
     summary = run_maker_carry_study(cfg)
@@ -2033,11 +2147,29 @@ def _candidate_rows_for_replay(cfg) -> dict[str, dict[str, str]]:
     return {str(row.get("condition_id") or ""): row for row in rows if row.get("condition_id")}
 
 
+def _wo151_baseline_object_available() -> bool:
+    """#433 P2 test:2042 / CODEX ROUND-1 finding 6: `git show b6b9b88:...`
+    (used below) requires the b6b9b88 commit object to be present locally.
+    CI's checkout is shallow (fetch-depth limited) and does not always carry
+    that far back, so `git show` there fails with exit 128 - the confirmed
+    cause of the #433 red gate (run 30912347454, job 92001908907). Probe for
+    the object first so the differential test can SKIP instead of ERROR on a
+    shallow checkout, rather than treating a missing object as a test bug."""
+    probe = subprocess.run(
+        ["git", "cat-file", "-e", "b6b9b88^{commit}"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    return probe.returncode == 0
+
+
 def _load_wo151_baseline_maker_carry_study_module():
     """Loads maker_carry_study.py exactly as it stood at this WO's registered
     branch point (b6b9b88 - the ancestry-tested commit this branch was cut
     from), so the byte-identity test below is a genuine differential against
-    the PRE-change function, not the new code checked against itself."""
+    the PRE-change function, not the new code checked against itself. Caller
+    must have already verified `_wo151_baseline_object_available()`."""
     baseline_source = subprocess.run(
         ["git", "show", "b6b9b88:src/polymarket_predictive_engine/maker_carry_study.py"],
         cwd=REPO_ROOT,
@@ -2061,7 +2193,24 @@ def test_byte_identical_economics_before_and_after_wo151(tmp_path, monkeypatch) 
     study's economics are untouched. Implemented as a genuine differential
     against the function as it stood at this branch's registered ancestor
     commit (b6b9b88), loaded fresh via `git show`, rather than the new code
-    checked against itself."""
+    checked against itself.
+
+    #433 P2 test:2042: on a shallow checkout (no local b6b9b88 object) this
+    differential cannot run at all - SKIP with an explicit reason naming the
+    shallow checkout, rather than erroring the whole suite. The byte-identity
+    claim is NOT left unguarded on that path:
+    test_byte_identical_economics_matches_b6b9b88_golden_literals below
+    asserts the same fixture's economics against literals already produced by
+    the b6b9b88 code, and never skips."""
+    if not _wo151_baseline_object_available():
+        pytest.skip(
+            "shallow checkout: b6b9b88 commit object unavailable locally "
+            "(git show/cat-file exit 128) - the genuine git-show differential "
+            "cannot run here; see "
+            "test_byte_identical_economics_matches_b6b9b88_golden_literals "
+            "for the non-skipping golden-literal guard on this same claim"
+        )
+
     after_dir = tmp_path / "after"
     after_dir.mkdir()
     before_dir = tmp_path / "before"
@@ -2087,3 +2236,33 @@ def test_byte_identical_economics_before_and_after_wo151(tmp_path, monkeypatch) 
     ]
     assert after["portfolio_capital_usd"] == before["portfolio_capital_usd"]
     assert after["maker_gates"]["M_C_payout_floor"] == before["maker_gates"]["M_C_payout_floor"]
+
+
+def test_byte_identical_economics_matches_b6b9b88_golden_literals(tmp_path, monkeypatch) -> None:
+    """Non-skipping companion to test_byte_identical_economics_before_and_after_wo151
+    (#433 P2 test:2042). That test's git-show differential SKIPs on a shallow
+    checkout, which would otherwise leave the byte-identity claim (WO-151
+    §151.1 test (12)) with no guard at all on that path. These literals were
+    computed ONCE by running baseline_module.run_maker_carry_study(before_cfg)
+    against the exact fixture below, where baseline_module is
+    src/polymarket_predictive_engine/maker_carry_study.py as it stood at
+    commit b6b9b88 (verified locally to match this same fixture's current-code
+    output byte-for-byte before being pinned here). Every call site that ever
+    fires the b6b9b88-vs-current differential runs over this same
+    calm-market/_config fixture, so a golden-literal comparison against it is
+    equivalent to the differential, without requiring the ancestor commit
+    object to be present."""
+    cfg = _config(tmp_path)
+    _calm_market_requests(monkeypatch)
+    after = run_maker_carry_study(cfg)
+
+    assert after["status"] == "ok"
+    assert after["portfolio_markets"] == 1
+    assert after["portfolio_net_carry_usd_per_day"] == 4.48
+    assert after["portfolio_capital_usd"] == 500.0
+    assert [round(r["net_carry_usd_per_day"], 6) for r in after["portfolio"]] == [4.4839]
+    assert after["maker_gates"]["M_C_payout_floor"] == {
+        "registered_rule": "Every sized market must clear the venue's daily reward payout floor.",
+        "state": "pass_by_construction",
+        "min_daily_payout_usd": 1.0,
+    }

@@ -9529,12 +9529,12 @@ default) is accepted unchanged. (22) **added on a further round of review,
 exercising the A2 edge-case branches for `universe_pages`, in
 `test_maker_carry_study.py` alongside tests (1)-(4), (20), and (21):**
 `_settings` with raw config `universe_pages` set to `""`, `"abc"`, `float("nan")`,
-`0`, and `-1` each raise the same configuration error as `universe_pages: 9`
-— five sub-cases, one assertion each — and none falls through to a silent
+`float("inf")`, `float("-inf")`, `0`, and `-1` each raise the same configuration error as `universe_pages: 9`
+— seven sub-cases, one assertion each — and none falls through to a silent
 `0`-page scan. (23) **added on the same round, the symmetric case for
 `page_size`:** `_settings` with raw config `page_size` set to `""`, `"abc"`,
-`float("nan")`, `0`, and `-1` each raise the same configuration error as
-`page_size: 101`, with the same five sub-cases and the same no-silent-zero
+`float("nan")`, `float("inf")`, `float("-inf")`, `0`, and `-1` each raise the same configuration error as
+`page_size: 101`, with the same seven sub-cases and the same no-silent-zero
 guarantee.
 
 **Honest consequence — corrected on further review of the actual filter/cap
@@ -9561,7 +9561,7 @@ what the existing, unmodified filter-then-cap ordering already does, and
 describing it as a guaranteed poll-count reduction was the error. This WO's
 reliable, honest observable is the new diagnostic counters
 (`persistent`, `seed`, `portfolio_observed_not_excluded`,
-`close_time_unparseable`) — not the aggregate `markets_polled` count, which
+`close_time_unparseable`, `kept_missing_fields`) — not the aggregate `markets_polled` count, which
 this WO makes no claim about moving in either direction. Capping before
 filtering would change collection breadth (which candidates enter the
 pre-cap pool at all) and is deliberately out of scope for this
@@ -9611,7 +9611,10 @@ key count equals `min(excluded_stale, 200)` exactly; when `excluded_stale ==
 0` (nothing stale in the current scan), `min(0, 200) == 0` and the map is
 legitimately EMPTY — that is a clean day, not a defect, and the check must
 not fail it. Non-empty is required only once `excluded_stale > 0`, and the
-exact key-count equality holds unconditionally either way. (2)
+exact key-count equality holds unconditionally either way. Additionally,
+`excluded_stale_condition_ids_truncated == (excluded_stale > 200)` holds,
+added on a further round of review to pin the boolean against the same
+threshold as the key-count equality above. (2)
 `watchlist_excluded_expired.
 stale_map_status == "ok"` is **required immediately after deploy
 acceptance** — no wait, no documented-unavailable exception; anything other
@@ -9786,7 +9789,11 @@ parent's Scope paragraph is amended on this same round to disclose both
 clamps as registered, disclosed tightenings — the deployed values do not
 move, and an out-of-range configuration is rejected loudly, never silently
 accepted or silently truncated — rather than leaving a reader to reconcile
-them against the "no config value moves" sentence unaided.
+them against the "no config value moves" sentence unaided. Twenty-second and
+twenty-third tests were added on a further round of review to exercise the
+A2 edge-case branches — empty, unparseable, non-finite, zero, and negative —
+for the `universe_pages` and `page_size` clamps respectively (§147.1); the
+same heading-not-line convention holds for them too.
 
 **The same drift affects three other queued work orders and is named here so it
 is not rediscovered one wasted builder at a time.** None of the three is

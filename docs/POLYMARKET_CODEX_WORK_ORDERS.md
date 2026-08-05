@@ -11191,14 +11191,16 @@ blocked.**
 
 ### Scope (a) — add the deploy-control surface to the registry
 
-Add exactly fourteen entries to `PROTECTED_CONTROL_PATHS` — the twelve
-carried since the previous round, plus the two Path A entries added on this
-round of review, at the end of the list below. `PROTECTED_CONTROL_PATHS`
-already holds twelve pre-existing entries
+Add exactly sixteen entries to `PROTECTED_CONTROL_PATHS` — the twelve
+carried since the previous round, plus the two Path A entries added on the
+round before this one, plus the two entries added on this round of
+review — the acceptance chain's contract-registry module and Path A's
+tailnet-transport script, both explained where each is introduced below.
+`PROTECTED_CONTROL_PATHS` already holds twelve pre-existing entries
 (`scripts/merge_independently_reviewed_pr.py:34-47`, the merge-control
-surface this WO predates), so the registry totals twenty-six entries once
-this WO merges: twelve pre-existing plus fourteen new. Both numbers — 14
-new, 26 total — are restated everywhere a count appears below, because an
+surface this WO predates), so the registry totals twenty-eight entries once
+this WO merges: twelve pre-existing plus sixteen new. Both numbers — 16
+new, 28 total — are restated everywhere a count appears below, because an
 earlier round conflated "new entries added" with "total registry size" and
 asserted a total of twelve where it should have said twenty-four; that
 mistake is not repeated here.
@@ -11216,8 +11218,10 @@ mistake is not repeated here.
 "docker-compose.vps-paper.yml"
 "scripts/run_vps_deploy_acceptance.sh"
 "src/polymarket_predictive_engine/deploy_acceptance.py"
+"src/polymarket_predictive_engine/artifact_contracts.py"
 ".github/workflows/deploy-polymarket-vps-paper.yml"
 "scripts/verify_independent_main_acceptance.py"
+"scripts/configure_polymarket_dashboard_tailscale.sh"
 ```
 
 The script entry was added on external review, which was right: the workflow
@@ -11243,13 +11247,17 @@ point the rollback script at nothing — without touching a single registered
 path, which is the same invisibility this WO exists to close, one call frame
 down. The closure rule this WO applies is therefore **protected = the wrapper
 + everything it stages as gates + the acceptance-verdict chain the staged
-compose command invokes**, not the wrapper alone — which is why twelve of
-the fourteen new entries are: the original workflow/script/test-file triad,
+compose command invokes**, not the wrapper alone — which is why thirteen of
+the sixteen new entries are: the original workflow/script/test-file triad,
 plus the six scripts `stage_target_scripts` stages and the compose file it
-stages alongside them, plus the two-file acceptance-verdict chain reached
-through that compose file's own service command, below. The remaining two
-new entries, below, belong to a second closure rule reached on a further
-round of review.
+stages alongside them, plus the three-file acceptance-verdict chain reached
+through that compose file's own service command, below (the acceptance
+script and its module as before, plus the contract-registry module that
+module itself imports, added on a further round of review). The remaining
+three new entries, below, belong to a second closure rule reached on
+further rounds of review: Path A's own binding step and, added one round
+later, the tailnet-transport enforcement step the same workflow runs one
+line after it.
 
 A third round of external review closed the remaining gap: the compose file
 just added to the registry is itself a dispatch table, and one entry in it —
@@ -11263,13 +11271,27 @@ compose file's text while leaving what its own gate command runs unprotected
 would leave the acceptance verdict itself — the thing `:348` fails the
 deploy on — outside every registered path, the same invisibility this WO
 exists to close, at the bottom of the call chain rather than partway down
-it. The line stops there: `deploy_acceptance.py`'s own library imports
-(`artifact_contracts`, `config`, `degraded_state_watchdog`, `utils`) are not
-added, because a change to any of them already sits inside the surface the
-required PR gate — the self-hosted ARM64 suite every PR must pass — already
-exercises; this WO protects the direct verdict implementation, not its
-transitive imports, and states that boundary rather than leaving it to be
-inferred.
+it. The line stops at direct verdict implementations, not at transitive
+imports a generic utility module happens to supply: `deploy_acceptance.py`'s
+imports of `config`, `degraded_state_watchdog` (used only for the static
+`MISSING_INPUT_RULES` set), and `utils` stay excluded on that basis — none
+of the three determines a check's own PASS/FAIL, and a change to any of them
+already sits inside the surface the required PR gate — the self-hosted ARM64
+suite every PR must pass — already exercises.
+
+**`artifact_contracts.py` does not stay on that side of the line — found on a
+further round of external review.** `deploy_acceptance.py` calls
+`build_contract_registry(cfg)` directly (`:580`) and appends a `FAIL` entry
+to its own `checks` list keyed on that call's `status` (`:592-599`), the same
+list every other acceptance check sits in and the list `build_deploy_
+acceptance`'s overall PASS/FAIL is computed from; it separately calls
+`validate_contract_fixture` three more times inside its own check functions
+(`:100`, `:171`, `:272`). `artifact_contracts.py` is therefore a second
+direct verdict implementation reached one import away, not a transitive
+utility like the three above, and this WO protects it on the same basis it
+protects `deploy_acceptance.py` itself: it is added to the registry above and
+to the parse-based closure test below, which is extended to resolve this
+same import line.
 
 A further review pass — looking at the deploy surface as a whole rather than
 only the call chain traced above — found a second, independent gap of the
@@ -11292,6 +11314,22 @@ direct one-hop call rather than a staged, parsed chain; it is not folded
 into the parse-based closure test below, and that boundary is stated here
 rather than left to be inferred.
 
+**A further round of external review found a third Path A gap of the same
+shape.** The same workflow's deploy step, one line after the compose `up -d`
+invocation, runs `PM_VPS_REPO_DIR="$REPO_DIR" bash scripts/configure_
+polymarket_dashboard_tailscale.sh` (`.github/workflows/deploy-polymarket-vps-
+paper.yml:639`) to enforce the tailnet-only authenticated HTTPS dashboard
+transport contract. Leaving that script unregistered would let a later PR
+silently weaken or remove the one control that keeps the dashboard off the
+public internet, on the same deploy path whose binding check this WO already
+protects — the same invisibility this WO exists to close, one line further
+down Path A than the previous round looked. It is added by hand for the same
+reason the other two Path A entries are: it is a direct one-hop call from the
+workflow's own step text, not something `scripts/deploy_vps_paper_manual.sh`
+or the compose file stages or invokes, so it is not reachable by the
+parse-based closure test below and is enumerated with the rest of Path A in
+tests (1)-(4) instead.
+
 Nothing else in that set, in `PROTECTED_PYTHON_ENTRYPOINTS`, in
 `TRUSTED_REVIEW_ASSOCIATIONS`, in `CONTROL_REVIEW_STATES`, or in the body of
 `_protected_control_path` changes. This is **strictly tightening**: the predicate
@@ -11299,7 +11337,7 @@ returns `True` for strictly more paths and `False` for none it previously
 accepted, so the merge gate can only become more conservative.
 
 **A2.** `_protected_control_path` already normalises `\\` to `/`, strips leading
-`./` and `/`, and compares the normalised string against the set; the fourteen
+`./` and `/`, and compares the normalised string against the set; the sixteen
 new entries are ordinary normalised relative paths and reach the existing
 `normalized in PROTECTED_CONTROL_PATHS` branch with no new parsing. No new
 comparison is introduced, so there is no new missing/empty/unparseable case.
@@ -11315,7 +11353,7 @@ WO would have added a second reader there, in the governance-refresh producer,
 which is why that producer is not built, see the Day-after check below.)
 **Widening the set cannot cause a merge**; it can only add paths to a list
 that makes the gate refuse. The effect is therefore dormant unless one of the
-twenty-six protected paths is touched, and strictly restrictive on every PR
+twenty-eight protected paths is touched, and strictly restrictive on every PR
 that touches one.
 
 **Touch ONLY these files — this clause governs scope (a) only, since scope (b)
@@ -11337,7 +11375,7 @@ where the production-observable signal it was chasing is picked back up as
 its own, separately-admitted follow-on.
 
 **Tests (enumerated).** (1) `_protected_control_path` returns `True` for each
-of the fourteen new registered paths —
+of the sixteen new registered paths —
 `.github/workflows/deploy_vps_paper_dispatch.yml`,
 `scripts/deploy_vps_paper_manual.sh`,
 `tests/test_deploy_vps_paper_dispatch_workflow.py`,
@@ -11350,21 +11388,24 @@ of the fourteen new registered paths —
 `docker-compose.vps-paper.yml`,
 `scripts/run_vps_deploy_acceptance.sh`,
 `src/polymarket_predictive_engine/deploy_acceptance.py`,
-`.github/workflows/deploy-polymarket-vps-paper.yml`, and
-`scripts/verify_independent_main_acceptance.py`; (2) it returns `True`
-for each of the same fourteen paths in the forms `./<path>` and `/<path>` and
+`src/polymarket_predictive_engine/artifact_contracts.py`,
+`.github/workflows/deploy-polymarket-vps-paper.yml`,
+`scripts/verify_independent_main_acceptance.py`, and
+`scripts/configure_polymarket_dashboard_tailscale.sh`; (2) it returns `True`
+for each of the same sixteen paths in the forms `./<path>` and `/<path>` and
 with backslash separators, exercising the existing normaliser; (3) a
 simulated PR touching only the dispatch workflow reports
 `trusted_merge_control_unchanged: false` and lists that path in
 `protected_control_changes`; (4) the same for the test file alone, the
 deploy script alone, the acceptance script alone, the acceptance module
-alone, the Path A workflow alone, and the Path A acceptance-verifier script
-alone; (5) every
+alone, the contract-registry module alone, the Path A workflow alone, the
+Path A acceptance-verifier script alone, and the Path A tailnet-transport
+script alone; (5) every
 path in `PROTECTED_CONTROL_PATHS` **before** this change still returns `True` —
 the tightening-only claim, asserted rather than argued; (6) a path outside the
 set — `src/polymarket_predictive_engine/cli.py` — still returns `False`, so the
 widening did not become a prefix match; (7) a closure test, added on external
-review and extended on a further round of it, that does not merely
+review and extended on further rounds of it, that does not merely
 re-enumerate the six staged scripts by hand but parses `scripts/deploy_vps_
 paper_manual.sh`'s own text — the `for helper in ...` list inside
 `stage_target_scripts` and the `git … show "$target_sha:$COMPOSE_FILE"`
@@ -11372,21 +11413,44 @@ line's `COMPOSE_FILE` default — **and** parses the resulting compose file's
 `vps-deploy-acceptance` service `command:` line (`docker-compose.vps-paper.
 yml:254`) to find `scripts/run_vps_deploy_acceptance.sh`, and that script's
 own `deploy-acceptance` CLI invocation to resolve `src/polymarket_predictive_
-engine/deploy_acceptance.py` — asserting that every path either parse
+engine/deploy_acceptance.py`, **and, added on a further round of review,
+that module's own `from .artifact_contracts import build_contract_registry,
+validate_contract_fixture` line to resolve `src/polymarket_predictive_
+engine/artifact_contracts.py`** — asserting that every path either parse
 produces is a member of `PROTECTED_CONTROL_PATHS`; this is the one test in
 the set that fails on its own if a future PR adds an eighth staged helper, or
 swaps the acceptance chain for something else, without registering it,
 rather than depending on someone noticing that this WO's hand-enumerated
-list is now incomplete. (This test's parse does not reach the two Path A
+list is now incomplete. (This test's parse does not reach the three Path A
 entries — they are not staged or invoked by anything `scripts/deploy_vps_
 paper_manual.sh` or the compose file's text contains — which is exactly why
-(1)-(4) enumerate them by hand instead.)
+(1)-(4) enumerate them by hand instead.) (8) **added on a further round of
+review, closing a visibility gap in test (7)'s own resolution step:** test
+(7) resolves the acceptance script's `deploy-acceptance` CLI invocation to
+`src/polymarket_predictive_engine/deploy_acceptance.py` by name, not by
+reading `cli.py`'s own dispatch table — `cli.py` is not, and is not made, a
+member of `PROTECTED_CONTROL_PATHS` (doing so would flag every unrelated
+command's routine maintenance as a protected-control change, the friction
+this WO's own two-file Touch ONLY scope was chosen to avoid; `cli.py` also
+wraps every command's dispatch in one shared `try/except` that converts an
+exception to `ERROR: {exc}` and exit code `2`, `cli.py:820-822`, so rerouting
+the acceptance script around it to avoid registering it would itself be a
+production behaviour change, not the small edit it first looks like, and is
+not made here). A PR that repointed `cli.py`'s
+`elif args.command == "deploy-acceptance":` branch at a different
+implementation would therefore pass every test above while silently
+retargeting the verdict. Test (8) closes that gap without registering
+`cli.py`: it parses `cli.py`'s own source text for that exact `elif` branch
+and asserts it still calls `build_deploy_acceptance`, imported from
+`.deploy_acceptance` — the same module test (7) already resolves to — so a
+retargeting trips this test directly. It is the one test in the set that
+reads `cli.py`'s text without adding `cli.py` itself to the protected set.
 
 **Fail-safe sentence.** This changes no gate threshold, no eligibility rule, no
 M-A/M-B/M-C predicate, and no order, signer, or credential surface; it can only
 cause the merge gate to refuse a PR it would previously have accepted, never the
 reverse, and a failure of the added entries degrades to the pre-WO-153 behaviour
-of not flagging those fourteen files.
+of not flagging those sixteen files.
 
 **Operational cost, stated rather than left to be discovered.** Once this merges,
 routine edits to `tests/test_deploy_vps_paper_dispatch_workflow.py` — including
@@ -11435,7 +11499,7 @@ it is registered separately rather than folded back into this WO's Touch
 ONLY list a second time.
 
 **The retained check, until §153.1 lands, is required-gate green.** The
-enumerated predicate tests (1)-(7) above run inside the self-hosted ARM64
+enumerated predicate tests (1)-(8) above run inside the self-hosted ARM64
 suite every PR must pass; the day after this WO merges, the owner confirms
 the next required-gate run on `main` is green, with retained Actions history
 as the record. This is the same mechanism an earlier round rejected on S6
@@ -11446,7 +11510,7 @@ outweighed now: the alternative that would have cleared it outright proved
 unimplementable, and a deferred, correctly-scoped follow-on is preferable to
 either shipping the broken producer or leaving this WO's day-after check
 unstated. If the `/independent-merge` path is ever un-deadlocked, its
-refusal on a PR touching any of the twenty-six paths (blocker
+refusal on a PR touching any of the twenty-eight paths (blocker
 `pull_request_changes_trusted_merge_control`) remains available as
 additional runtime evidence, not this check's mechanism.
 
@@ -11458,12 +11522,24 @@ implementation rather than about the registration, and is recorded here as such:
 the existing gate queries `repos/{repo}/collaborators?affiliation=all&per_page=100`
 (`scripts/audit_github_merge_gate.py:454`) and #428's workflow step queries the
 same collection — the premise on which
-Path B's permanent loosening was registered. The query needs
-`administration: read`. The workflow declares
+Path B's permanent loosening was registered. **Corrected on a further round of
+review — the permission this endpoint actually needs is a different, and
+cheaper, grant than first registered here.** Per GitHub's documented
+requirements for `List repository collaborators`, the call needs the
+fine-grained token itself to carry **Metadata: read**, *and*, independently of
+the token's declared permissions, the calling principal — the PAT's user, or
+the GitHub App installation — must already hold write, maintain, or admin
+access to the repository; the endpoint is not gated by any `administration`
+permission at all. (`administration` is also, separately, not a valid key in a
+workflow `permissions:` block — `GITHUB_TOKEN` scopes do not include it —
+which this paragraph noted correctly even while misnaming the actual
+requirement above it.) The workflow declares
 `permissions: {actions: read, contents: read}` per WO-145's least-privilege
 registration, and an explicit `permissions:` block sets every unlisted scope to
-`none`, **so the call 403s on every run and control (i) takes its UNDETERMINED
-branch every time.** The #428 build makes that loud — a `::warning::` stating the
+`none`, **so the call still 403s on every run and control (i) still takes its
+UNDETERMINED branch every time** — `GITHUB_TOKEN` carries neither the Metadata
+grant nor a qualifying collaborator-level principal of its own. The #428 build
+makes that loud — a `::warning::` stating the
 premise is UNVERIFIED for that run — rather than letting it read as a green
 notice, which is the correct fail direction and is why this is a registration
 question and not a build defect.
@@ -11472,11 +11548,12 @@ question and not a build defect.
 clause that would have allowed widening the permission block was struck during
 the registration gate. Widening it now to make control (i) answer would reverse
 a registered decision; leaving it means the control never answers. The two
-admissible resolutions are (i) the owner provisions a credential that can
-actually carry repository-administration read — `administration` is **not** a
-valid key in a workflow `permissions:` block (`GITHUB_TOKEN` scopes do not
-include it), so this means a fine-grained PAT or a GitHub App installation
-token stored as a repository secret — and the least-privilege clause is amended
+admissible resolutions are (i) the owner provisions a fine-grained PAT — or a
+GitHub App installation token — stored as a repository secret, scoped to
+**Metadata: read** and held by (or installed for) a principal that already has
+write, maintain, or admin access to this repository; that is a materially
+cheaper grant than the repository-administration credential an earlier draft
+of this paragraph called for, and the least-privilege clause is amended
 to record the exception, its basis, and the new secret's existence, or
 (ii) the registration accepts that control (i) is permanently undetermined under
 its own permission grant and says so in the WO text, so no future reader mistakes

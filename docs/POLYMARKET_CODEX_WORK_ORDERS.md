@@ -9314,6 +9314,33 @@ selection, eligibility, or sizing gate. `maker_carry_study.json` is verified
 anchor risk. `maker_carry_history.csv` and `maker_carry_portfolio_members.csv`
 byte-identical.
 
+**Honesty gap on the 800 worst case, closed on a further round of review.**
+The `800` above is the DEPLOYED CONFIG's current `universe_pages: 8`, not an
+enforced ceiling: `_settings` (`:448-449`) merges the raw config's
+`universe_pages` verbatim — `merged.update({k: v for k, v in raw.items() if v
+is not None})` — with no upper bound of any kind, so a future config edit to,
+say, `universe_pages: 20` would silently raise the true worst-case scanned
+universe to `2000` markets while this WO's `200`-key cap and its 25%
+derivation sat unrevised and now false. **This amendment additionally
+registers a validated upper bound: `_settings` must reject a configured
+`universe_pages` above `8` with a hard configuration error, checked
+immediately after the raw-config merge at `:449` and before the value is
+used anywhere** — a strictly-tightening input clamp, narrowing what is today
+an unbounded positive integer down to `<= 8`, never widening it. Unlike the
+WO-129 evidence-gate minima a few lines below in this same function
+(`:453-461`), which silently raise a floor via `max()` because more evidence
+is always safe, a configured `universe_pages` above the ceiling gets a loud,
+rejected error rather than a silent downward clamp: silently shrinking the
+scanned universe would change collection breadth invisibly, and a deployment
+that genuinely wants more than `8` pages must make that a deliberate,
+reviewed change to this WO's basis, not a value this validation quietly
+overrides. With that clamp registered, `8 x 100 = 800` is the TRUE, enforced
+worst case, not merely today's observed value, and `200` stays sound at
+**25%** of that now-bounded ceiling. This adds exactly one validation branch
+to `maker_carry_study.py`'s `_settings` — that file, and its test file, are
+already on this WO's **"Touch ONLY these files"** list, so the list does not
+change.
+
 ### 147.2 — Collector side: one shared predicate, two tranches
 
 Add exactly one helper `_watchlist_expired_reasons(row, stale_map, *, as_of)`
@@ -9436,15 +9463,44 @@ condition id → kept, `kept_missing_fields == 1`, `close_time_unparseable == 0`
 a second persistent market with `uma_resolution_status` missing, likewise no
 stale-map entry → kept, `kept_missing_fields == 2` cumulative — distinct from,
 and not conflated with, the `close_time_unparseable` counter exercised by
-tests 7-9.
+tests 7-9. (20) **added on further review, exercising the `universe_pages`
+upper-bound clamp (§147.1), in `test_maker_carry_study.py` alongside tests
+(1)-(4):** `_settings` with raw config `universe_pages: 9` raises a
+configuration error before any network call; `universe_pages: 8` (the
+deployed config's own value) is accepted unchanged; the code default `5` is
+unaffected.
 
-**Honest consequence, stated rather than discovered later.** The three tranche
-budgets are independent (`persistent_cap` at `:796`, seed `cap` at `:814`), so
-freeing a persistent slot **reduces the number of markets polled**; it does not
-reallocate that slot to seeding. This WO lowers API and disk spend and removes
-noise from `seasoning_runway`; it does **not** increase seeding breadth. Any
-reallocation would be a `max_candidate_markets` change and is deliberately not
-bundled.
+**Honest consequence — corrected on further review of the actual filter/cap
+ordering, which is filter-then-cap in both amended tranches, not cap-then-filter.**
+`_recent_book_markets` (`:441-489`) filters every mtime-sorted candidate
+through the new expiry check (147.2) as it builds its own unbounded internal
+list — the check sits before that function's own `watchlist.append` at
+`:488` — and only the CALLER slices the filtered result to `persistent_cap`
+afterward (`:790-797`). `_candidate_seed_markets` (`:492-576`) filters through
+the same expiry check inside its skip loop (`:515-535`) while building
+`ranked`, and only truncates to `cap` at the very end (`ranked[:cap]`,
+`:573`). Because filtering happens BEFORE the cap in both tranches, excluding
+an expired market frees its slot for the next-best-ranked non-expired
+candidate that was already waiting just past the cap line — **within the
+same tranche, this is backfill, not a guaranteed reduction.**
+`markets_polled` therefore does not necessarily drop: it drops only when a
+tranche's post-filter pool has fewer eligible candidates left than its cap to
+fill it, and holds steady whenever a replacement candidate is available. The
+three tranche BUDGETS remain independent of EACH OTHER (`persistent_cap` at
+`:796`, seed `cap` at `:814`) — a freed persistent slot never reallocates to
+seeding, and this WO still builds no `max_candidate_markets` change — but
+within a single tranche, backfill from that tranche's own ranking is exactly
+what the existing, unmodified filter-then-cap ordering already does, and
+describing it as a guaranteed poll-count reduction was the error. This WO's
+reliable, honest observable is the new diagnostic counters
+(`persistent`, `seed`, `portfolio_observed_not_excluded`,
+`close_time_unparseable`) — not the aggregate `markets_polled` count, which
+this WO makes no claim about moving in either direction. Capping before
+filtering would change collection breadth (which candidates enter the
+pre-cap pool at all) and is deliberately out of scope for this
+citation-and-consequence correction: the fix here is to the WORDING, not to
+`_recent_book_markets` or `_candidate_seed_markets`'s existing order of
+operations.
 
 **Scope: OWNER MERGE after line-audit.** Collection breadth and two diagnostic
 fields only; no gate, threshold, eligibility rule, screen, sizing rule, funding
@@ -9472,8 +9528,14 @@ on the study's organic cadence and accepting `"unavailable"` as documented
 and expected until it elapsed — had the direction backwards: after a
 successful deploy, `"unavailable"` can only be a regression, never the
 expected state. That allowance is deleted. After one collector cycle (<= 15
-min): (1) `excluded_stale_condition_ids` non-empty with key count
-`min(excluded_stale, 200)`. (2) `watchlist_excluded_expired.
+min): (1) **corrected on further review — non-empty is required only when
+`excluded_stale > 0`, not unconditionally:** `excluded_stale_condition_ids`
+key count equals `min(excluded_stale, 200)` exactly; when `excluded_stale ==
+0` (nothing stale in the current scan), `min(0, 200) == 0` and the map is
+legitimately EMPTY — that is a clean day, not a defect, and the check must
+not fail it. Non-empty is required only once `excluded_stale > 0`, and the
+exact key-count equality holds unconditionally either way. (2)
+`watchlist_excluded_expired.
 stale_map_status == "ok"` is **required immediately after deploy
 acceptance** — no wait, no documented-unavailable exception; anything other
 than `"ok"` at that point is a regression to investigate, not an expected
@@ -9482,7 +9544,19 @@ transient. (3) **record the numbers** — `persistent`, `seed`,
 `close_time_unparseable`. **A result of `persistent: 0` is a valid and
 informative outcome** meaning the tranche is clean today and this WO bought
 observability rather than hygiene; it is not a build failure. (4)
-`markets_polled` drops by exactly `persistent + seed`. (5) `seasoning_runway`
+**corrected on further review of the actual filter/cap ordering:**
+`markets_polled` is NOT required to drop. Both amended tranches filter before
+they cap (`:790-797` for persistent, `:515-535` then `ranked[:cap]` at `:573`
+for seed — see the Honest consequence paragraph above), so excluding an
+expired market frees its slot for the next-best-ranked non-expired candidate
+already waiting past the cap line, and the tranche backfills from its own
+ranking whenever one is available. The reliable observable of this WO's
+effect is the diagnostic counters already recorded at (3) —
+`persistent`, `seed`, `portfolio_observed_not_excluded`,
+`close_time_unparseable` — not the aggregate `markets_polled` count, which
+this WO registers no required direction for: it may drop (when a tranche's
+filtered pool has fewer eligible candidates left than its cap), hold steady
+(when backfill fills the freed slot), but never rise. (5) `seasoning_runway`
 contains no id listed in `excluded_stale_condition_ids`. (6)
 `maker_replay_collection_windows.csv` cadence per portfolio market unchanged.
 
@@ -9616,7 +9690,9 @@ this amendment's first draft cited register line numbers for them and those
 numbers had already drifted by the time the PR was reviewed, which is this
 amendment's own lesson applied to itself. A nineteenth test was added on a
 later round of review to exercise the `kept_missing_fields` counter (§147.3);
-the same heading-not-line convention holds for it.
+the same heading-not-line convention holds for it. A twentieth test was added
+on a further round of review to exercise the `universe_pages` upper-bound
+clamp (§147.1); the same heading-not-line convention holds for it too.
 
 **The same drift affects three other queued work orders and is named here so it
 is not rediscovered one wasted builder at a time.** None of the three is

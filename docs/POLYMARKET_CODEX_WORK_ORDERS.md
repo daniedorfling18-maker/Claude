@@ -10205,7 +10205,7 @@ for the wrong reason — because the bound moved, not because recovery improved.
 WO-146 is the fix; WO-150 is a separate correction of what the bound describes.
 Both should land.
 
-## WO-151 — The maker study has no cadence of its own: two trigger paths, one gated behind a 43.75%-failing harvest — `queued` (registered 2026-08-02; scheduler + harvest-step surface → OWNER MERGE after line-audit; observability and scheduling only, no gate/threshold/eligibility change; registered-ancestry: b6b9b88 ancestor-of 18a0fec PASS — first dispatch, respin head 27e401e same ancestry)
+## WO-151 — The maker study has no cadence of its own: two trigger paths, one gated behind a 43.75%-failing harvest — `queued` (registered 2026-08-02; scheduler + harvest-step surface → OWNER MERGE after line-audit; observability and scheduling only, no gate/threshold/eligibility change; registered-ancestry: b6b9b88 ancestor-of 18a0fec PASS — first dispatch; registered-ancestry: b6b9b88 ancestor-of 27e401e PASS — respin)
 
 **Provenance — measured, 2026-08-02.** M-A banks a day only if the day's LAST
 run holds target, so *when* the study runs is load-bearing for the campaign. It
@@ -10483,6 +10483,43 @@ changed; the live text now states the ratified direction directly.
 **Precedent.** Same class as §145.2: the registered string now matches the
 registered decision, recorded rather than silently fixed.
 
+**Why this does not violate S8 A2, and what would.** A2 (`docs/ENGINEERING_STANDARDS.md`
+S8) requires that every threshold comparison state what a missing, empty,
+unparseable, or non-finite input does, and that the stated answer be the
+fail-**closed** branch. §151.2's ratification of test (9) does not weaken that
+rule; it fixes what the rule's object is for this comparison. A2's fail-closed
+rule governs threshold comparisons on **measurement and health paths** — an
+unverifiable input must never read as **healthy**, and must never mark
+anything as **measured**. The `maker_study_intraday` due-stamp is neither: it
+is a **scheduler-liveness** input, and for a liveness input "fail closed"
+means something structurally different — the job never fires again after one
+corrupt stamp write, i.e. permanent, silent disablement of the very
+measurement A2 exists to protect, because the stamp's only writer is the job's
+own fire branch (`scripts/run_vps_ops_scheduler.sh:856`) and there is no
+independent repair path. The WO-120 convention — an unreadable stamp reads as
+immediately due — is the established, registered, tested convention for
+exactly this input class, applied uniformly to every other due-stamp in the
+same file (`governance_refresh`, `clv_snapshot`, `locked_card_refresh`,
+`trade_prints`, `book_pulse`, `ledger_anchor`, `maker_safety_refresh`).
+Firing a read-only study early on a corrupt cadence stamp marks nothing
+measured and moves no gate, threshold, or eligibility rule.
+
+Stated explicitly: this is a **scope clarification of A2's object**, not a
+weakening of A2. A fail-open reading of any **measurement** input remains
+forbidden — what would violate A2 is a fail-open reading applied to a
+measurement or health comparison itself (for example, a corrupt
+`book_history_hours` reading as fresh, or a corrupt safety-refresh stamp
+reading as healthy), because there an unverifiable input would be allowed to
+claim something was measured or something is safe. §151.2 ratifies neither of
+those; it ratifies a scheduling-liveness due-stamp reading as due.
+
+A clarifying note for `docs/ENGINEERING_STANDARDS.md` S8 A2 — "A2 binds
+measurement/health comparisons; scheduler liveness stamps follow the WO-120
+convention" — is **PROPOSED here but NOT edited into the standard by this
+PR**. Binding-standard text changes go through their own owner-merge PR (the
+governance path); this section registers the proposal without pre-empting
+that process.
+
 **Folded into §151.1's touched-file list, not deferred (§432 round-1,
 2026-08-04).** `run_maker_study_intraday`'s `stamp_status` detail string
 (`scripts/run_vps_ops_scheduler.sh:635`) still reads *"...11-13h offset
@@ -10492,3 +10529,23 @@ a follow-up WO, §151.1's touched-file list is extended to six files (adding
 that test file): the detail string and the pinned docker-test literal are
 updated together, in the same build, or neither is. Recorded as a scope
 expansion of this same WO, review-driven.
+
+**The same sixth-file scope also covers the WO-117 overrun-classification
+test, missed by the reconciliation above.**
+`test_wo117_maker_study_overrun_classification_is_window_aware`
+(`tests/test_polymarket_vps_docker.py:965-980`) asserts that
+`MAKER_STUDY_WINDOW_TOLERANCE=$((MAKER_STUDY_INTRADAY_OFFSET_MAX -
+MAKER_STUDY_INTRADAY_OFFSET_MIN))` is defined in
+`scripts/run_vps_ops_scheduler.sh`, that
+`schedule_skip_kind maker_study_intraday $((MAKER_STUDY_INTRADAY_INTERVAL +
+MAKER_STUDY_WINDOW_TOLERANCE))` is the call made there, and it forbids the
+bare-interval call `schedule_skip_kind maker_study_intraday
+"$MAKER_STUDY_INTRADAY_INTERVAL"`. §151.1's decoupling literal removes the
+harvest-age offset window as a precondition entirely, so once built there is
+no offset width left to derive an interval-plus-window tolerance from, and the
+overrun classification collapses to exactly the bare-interval call this test
+currently forbids. These assertions must be **replaced**, not left standing,
+to pin the new standalone-interval `schedule_skip_kind` call form, and
+`MAKER_STUDY_WINDOW_TOLERANCE` is removed or repurposed to whatever the
+standalone-interval build actually needs. This is part of the same sixth-file
+scope above, not a seventh file.

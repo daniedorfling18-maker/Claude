@@ -1956,6 +1956,23 @@ def test_harvest_age_and_window_state_and_skipped_cycles_match_scheduler_status(
         assert abs(summary["training_harvest_age_seconds"] - age_seconds) < 5
         assert summary["maker_study_intraday_skipped_cycles_total"] == 3
 
+    # #433 CODEX ROUND-2: a future-dated completion stamp (clock skew,
+    # corruption) yields a negative raw age. The published age must clamp to
+    # 0.0 - mirroring the scheduler's own `seconds_since_success_stamp`
+    # clamp (scripts/run_vps_ops_scheduler.sh) - never a negative number, and
+    # the window state must read "unknown", not "before_window": a naive
+    # `age < HARVEST_WINDOW_MIN_SECONDS` comparison is true for every
+    # negative number, which would silently misclassify a future/corrupt
+    # stamp as a genuinely fresh one.
+    future_stamp = (datetime.now(timezone.utc) + timedelta(seconds=3600)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _write_scheduler_status(
+        cfg, training_harvest_last_success_utc=future_stamp, maker_study_intraday_skipped_cycles_total=5
+    )
+    summary = run_maker_carry_study(cfg)
+    assert summary["training_harvest_window_state"] == "unknown"
+    assert summary["training_harvest_age_seconds"] == 0.0
+    assert summary["maker_study_intraday_skipped_cycles_total"] == 5
+
     for bad_stamp in ("", "not-a-timestamp", None):
         _write_scheduler_status(cfg, training_harvest_last_success_utc=bad_stamp)
         summary = run_maker_carry_study(cfg)

@@ -2174,6 +2174,16 @@ def _training_harvest_age_seconds(cfg: EngineConfig) -> float | None:
     stamp fails closed to None - never guessed, never treated as fresh or as
     due; the study computes nothing from this beyond the reporting fields
     below.
+
+    #433 CODEX ROUND-2: this returns the RAW value, which can be negative if
+    the recorded completion stamp is in the future (clock skew, corruption).
+    Callers are responsible for the same two corrections the scheduler's own
+    `seconds_since_success_stamp` applies together: clamp what gets
+    PUBLISHED to >= 0, and classify a negative raw value as "unknown" rather
+    than a real window position - see `run_maker_carry_study`'s
+    `training_harvest_age_seconds` construction and `_harvest_window_state`
+    respectively. This function itself never clamps, so both callers see the
+    same unmodified fact.
     """
     epoch = _training_harvest_success_epoch(cfg)
     if epoch is None:
@@ -2185,8 +2195,24 @@ def _training_harvest_age_seconds(cfg: EngineConfig) -> float | None:
 def _harvest_window_state(age_seconds: float | None) -> str:
     """Descriptive-only classification against the old (now non-gating)
     11-13h window, so starvation stays visible without inferring it from a
-    stale stamp (WO-151 scope (c)). Never gates the study."""
+    stale stamp (WO-151 scope (c)). Never gates the study.
+
+    #433 CODEX ROUND-2: a negative `age_seconds` means the recorded
+    completion timestamp is in the future relative to "now" - clock skew or a
+    corrupt stamp, never a real elapsed duration - and reads "unknown" here,
+    checked before the window bounds, so it cannot be misclassified as
+    "before_window" (which `age_seconds < HARVEST_WINDOW_MIN_SECONDS` would
+    otherwise do, since every negative number is less than the positive
+    floor). This classification runs on the RAW, unclamped age - the
+    published `training_harvest_age_seconds` field is clamped to >= 0
+    separately (mirroring the scheduler's own `seconds_since_success_stamp`
+    clamp in scripts/run_vps_ops_scheduler.sh), so the clamped value can never
+    reach this function and mask the future-stamp condition as a
+    genuinely-fresh age of zero.
+    """
     if age_seconds is None or not math.isfinite(age_seconds):
+        return "unknown"
+    if age_seconds < 0:
         return "unknown"
     if age_seconds < HARVEST_WINDOW_MIN_SECONDS:
         return "before_window"
@@ -2265,8 +2291,15 @@ def run_maker_carry_study(cfg: EngineConfig, *, study_trigger: str | None = None
         # WO-151 §151.1 scope (a)/(c): recorded on EVERY path, including the
         # early "disabled" return below, so the field is never absent.
         "study_trigger": trigger,
+        # #433 CODEX ROUND-2: clamped to >= 0, mirroring the scheduler's own
+        # `seconds_since_success_stamp` clamp (scripts/run_vps_ops_scheduler.sh)
+        # exactly - a future-dated completion stamp (clock skew, corruption)
+        # would otherwise publish a negative "age", which is not a real
+        # elapsed duration. `harvest_window_state` above is computed from the
+        # RAW, unclamped value so a future stamp still reads "unknown" there
+        # rather than being masked as a fresh age of zero.
         "training_harvest_age_seconds": (
-            round(harvest_age_seconds, 3) if harvest_age_seconds is not None else None
+            round(max(harvest_age_seconds, 0.0), 3) if harvest_age_seconds is not None else None
         ),
         "training_harvest_window_state": harvest_window_state,
         "maker_study_intraday_skipped_cycles_total": intraday_skipped_cycles_total,

@@ -10205,7 +10205,7 @@ for the wrong reason — because the bound moved, not because recovery improved.
 WO-146 is the fix; WO-150 is a separate correction of what the bound describes.
 Both should land.
 
-## WO-151 — The maker study has no cadence of its own: two trigger paths, one gated behind a 43.75%-failing harvest — `queued` (registered 2026-08-02; scheduler + harvest-step surface → OWNER MERGE after line-audit; observability and scheduling only, no gate/threshold/eligibility change)
+## WO-151 — The maker study has no cadence of its own: two trigger paths, one gated behind a 43.75%-failing harvest — `queued` (registered 2026-08-02; scheduler + harvest-step surface → OWNER MERGE after line-audit; observability and scheduling only, no gate/threshold/eligibility change; registered-ancestry: b6b9b88 ancestor-of 18a0fec PASS — first dispatch; registered-ancestry: b6b9b88 ancestor-of 27e401e PASS — respin)
 
 **Provenance — measured, 2026-08-02.** M-A banks a day only if the day's LAST
 run holds target, so *when* the study runs is load-bearing for the campaign. It
@@ -10266,13 +10266,22 @@ visible rather than inferred from a stale stamp.
 
 **A1/A2 obligations for the builder.** Any interval, window, or age bound
 introduced carries a literal and a stated basis; every comparison states what a
-missing, empty, unparseable, or non-finite stamp does, and the answer is the
-fail-closed branch — a study that cannot establish its own trigger records
-`"unknown"` and does not claim a cadence it did not have.
+missing, empty, unparseable, or non-finite stamp does. A due-stamp read through
+the shared `seconds_since_stamp` convention follows WO-120's registered
+fail-**open** reading — missing or corrupt reads as immediately due, so the job
+fires rather than being permanently starved by one corrupt cadence stamp
+(ratified at §151.2, performed inline here and at §151.1) — while a study that
+cannot establish its own trigger still records `"unknown"` and does not claim a
+cadence it did not have.
 
-**Fail-safe sentence.** A missing, empty, unparseable, or non-finite harvest or
-job stamp leaves the dedicated job un-fired and records the window state rather
-than assuming the window is open; a study run whose trigger cannot be
+**Fail-safe sentence.** *(The job-stamp half of the clause below is SUPERSEDED
+by §151.2, added 2026-08-04 — see that section for the adjudication. The
+harvest-stamp half, per test (8), is unchanged.)* A missing, empty,
+unparseable, or non-finite harvest stamp never blocks the decoupled dedicated
+job from firing, per test (8); a missing, empty, unparseable, or non-finite
+job due-stamp (`maker_study_intraday`) reads as due and the job fires, per
+§151.2's WO-120 fail-open ratification; either path records the window state
+rather than assuming it silently; a study run whose trigger cannot be
 established records `study_trigger: "unknown"` rather than guessing; nothing here
 changes what the study computes, which markets it measures, or any gate,
 threshold, or eligibility rule; and a failure of this work order's machinery
@@ -10286,7 +10295,7 @@ enumerated tests**, so it failed A10 and could not be built. It was caught
 before a builder was dispatched against it, which is the check working; it is
 recorded here rather than quietly fixed.
 
-**Touch ONLY these files** (`git diff --stat` must show exactly these five):
+**Touch ONLY these files** (`git diff --stat` must show exactly these six):
 
 - `src/polymarket_predictive_engine/maker_carry_study.py` — scope (a) the
   `study_trigger` field on `maker_carry_study.json` and on each
@@ -10304,6 +10313,12 @@ recorded here rather than quietly fixed.
   status stamp at `:635`.
 - `tests/polymarket_predictive_engine/test_maker_carry_study.py`
 - `tests/polymarket_predictive_engine/test_training_harvest.py`
+- `tests/test_polymarket_vps_docker.py` — added 2026-08-04 (§432 round-1, review-driven
+  scope expansion). The pinned `stamp_status` detail-string literal at `:621` must be
+  updated to match the accurate standalone-cadence prose written into
+  `scripts/run_vps_ops_scheduler.sh:635` (replacing the stale *"...11-13h offset guard"*
+  wording left over from the removed offset guard). The scheduler detail string and this
+  test's pinned literal change together, in the same build, or neither does.
 
 **Do NOT touch** `maker_min_book_history_hours` (48.0), `maker_min_book_snapshots`
 (100), `target_net_usd_per_day` (3.33), `max_trusted_reward_share` (0.05),
@@ -10325,9 +10340,14 @@ whatever corpus exists; it does not require a harvest to have just succeeded.
 measurable.
 
 **A2 for every new comparison.** A missing, empty, unparseable, or non-finite
-`maker_study_intraday` stamp leaves the job **un-fired** and records the window
-state; it never reads as "due". A run whose trigger cannot be established
-records `study_trigger: "unknown"` and never guesses.
+`maker_study_intraday` stamp reads as **due** — the shared `seconds_since_stamp`
+reader's registered WO-120 convention (a missing stamp reads `999999999`s old, a
+corrupt or empty stamp reads epoch `0`, both `>= interval`) applies to this
+stamp exactly as it does to every other stamp in the file, so the job fires
+rather than being starved forever by one corrupt due-stamp (ratified at
+§151.2) — and the window state is recorded on every path rather than assumed
+silently. A run whose trigger cannot be established records
+`study_trigger: "unknown"` and never guesses.
 
 **Tests (enumerated).** (1) a study run invoked by the dedicated job records
 `study_trigger: "intraday_job"`; (2) invoked as harvest step 10, it records
@@ -10341,8 +10361,9 @@ test failure, not a new domain member; (6) the field appears on **both**
 the reader tolerates the legacy header; (8) with the harvest stamp absent,
 unparseable, non-finite, and 200000s old, the dedicated job still fires once its
 own interval has elapsed — the decoupling, and the test that proves starvation
-is closed; (9) with the `maker_study_intraday` stamp absent or unparseable the
-job does **not** fire and the window state is recorded (A2 fail-closed);
+is closed; (9) with the `maker_study_intraday` stamp absent or unparseable the job
+**fires** — WO-120's fail-open convention applied to the job's own due-stamp,
+ratified at §151.2 — and the window state is recorded (A2 fail-open);
 (10) `skipped_cycles_total` and the window state appear in the artifact and match
 the scheduler's own counter; (11) the observed harvest age is recorded in the
 artifact on every path; (12) byte-identity — a study run over a fixed fixture
@@ -10405,3 +10426,147 @@ historical per-run `maker_carry_candidates.csv` exists — only the current
 snapshot — so predicate-level "why did X leave" is answerable for the latest
 departure only. WO-148's tier-event ledger is the closest existing remedy;
 a per-run candidate archive would be its complement and is not proposed here.
+
+### 151.2 — Test (9)'s fail-direction was wrong; the builder's inversion is ratified (added 2026-08-04 from the WO-151 build escalation and its independent line audit)
+
+**The contradiction, as adjudicated.** §151.1's A2 paragraph — *"A missing,
+empty, unparseable, or non-finite `maker_study_intraday` stamp leaves the job
+**un-fired** and records the window state; it never reads as 'due'"* — and
+test (9) — *"with the `maker_study_intraday` stamp absent or unparseable the
+job does **not** fire and the window state is recorded (A2 fail-closed)"* —
+registered a fail-**closed** direction for the job's own due-stamp. Verified
+against the tree, that direction contradicts three things: (i) **test (8)'s
+opposite fail-direction for the harvest stamp in the same enumerated list** —
+*"with the harvest stamp absent, unparseable, non-finite, and 200000s old, the
+dedicated job still fires once its own interval has elapsed"*, i.e. fail-open;
+(ii) **the §151.1 decoupling literal's sole surviving condition** — the window
+condition becomes *"the `maker_study_intraday` stamp is at least
+`MAKER_STUDY_INTRADAY_INTERVAL` old"* alone, the offset guard removed as a
+precondition. That single comparison is evaluated by the shared
+`seconds_since_stamp` reader (`scripts/run_vps_ops_scheduler.sh:208-222`),
+whose registered WO-120 convention treats a missing stamp as `999999999`
+seconds old and a corrupt/empty stamp as epoch `0` — both of which satisfy the
+`>= interval` test, i.e. both read as **immediately due**. That is exactly the
+fail-open outcome test (9) forbade, produced by the one condition §151.1 left
+standing; and (iii) **the parent WO's fail-safe sentence**, which paired
+"harvest or job stamp" under a single "leaves the dedicated job un-fired"
+clause even though test (8) already required the harvest half of that same
+clause to be false. A literal test (9) would require `maker_study_intraday`'s
+own call to `seconds_since_stamp` to behave oppositely to every other call in
+the file — `governance_refresh`, `clv_snapshot`, `locked_card_refresh`,
+`trade_prints`, `book_pulse`, `ledger_anchor`, `maker_safety_refresh` — which
+is exactly the uniform convention WO-120 exists to guarantee.
+
+**The starvation argument.** The only writer of the `maker_study_intraday`
+stamp is `touch_stamp maker_study_intraday` (`scripts/run_vps_ops_scheduler.sh:856`),
+inside the job's own fire branch — there is no independent repair path. Under
+a literal test (9), one corrupt stamp file permanently disables the job: it
+can never again read as due, so it can never fire, so it can never rewrite its
+own stamp. That is precisely the stall class WO-120 was registered to close.
+Firing a read-only study on a corrupt cadence stamp risks at worst one extra
+run; it moves no gate, threshold, or eligibility rule.
+
+**RATIFY.** Test (9) is re-registered with the WO-120 fail-open direction —
+missing or corrupt `maker_study_intraday` due-stamp reads as due, and the job
+fires — matching what the builder built and what the independent line audit
+verified. The parent fail-safe sentence's clause *"A missing … or job stamp
+leaves the dedicated job un-fired"* is SUPERSEDED for the job's own due-stamp;
+the harvest stamp's handling per test (8) is unchanged. That sentence is
+edited inline, in this same commit, within WO-151's own preamble above.
+**§432 round-1 (2026-08-04):** describing a supersession is not
+re-registration — §151.1's A2 paragraph and test (9)'s own text, and the
+parent A1/A2 obligation sentence above, are likewise edited inline (not merely
+narrated as superseded) in this same commit, within WO-151's own preamble and
+§151.1. This section stands as the historical record of why the direction
+changed; the live text now states the ratified direction directly.
+
+**Precedent.** Same class as §145.2: the registered string now matches the
+registered decision, recorded rather than silently fixed.
+
+**Why this does not violate S8 A2, and what would.** A2 (`docs/ENGINEERING_STANDARDS.md`
+S8) requires that every threshold comparison state what a missing, empty,
+unparseable, or non-finite input does, and that the stated answer be the
+fail-**closed** branch. §151.2's ratification of test (9) does not weaken that
+rule; it fixes what the rule's object is for this comparison. A2's fail-closed
+rule governs threshold comparisons on **measurement and health paths** — an
+unverifiable input must never read as **healthy**, and must never mark
+anything as **measured**. The `maker_study_intraday` due-stamp is neither: it
+is a **scheduler-liveness** input, and for a liveness input "fail closed"
+means something structurally different — the job never fires again after one
+corrupt stamp write, i.e. permanent, silent disablement of the very
+measurement A2 exists to protect, because the stamp's only writer is the job's
+own fire branch (`scripts/run_vps_ops_scheduler.sh:856`) and there is no
+independent repair path. The WO-120 convention — an unreadable stamp reads as
+immediately due — is the established, registered, tested convention for
+exactly this input class, applied uniformly to every other due-stamp in the
+same file (`governance_refresh`, `clv_snapshot`, `locked_card_refresh`,
+`trade_prints`, `book_pulse`, `ledger_anchor`, `maker_safety_refresh`).
+Firing a read-only study early on a corrupt cadence stamp marks nothing
+measured and moves no gate, threshold, or eligibility rule.
+
+Stated explicitly: this is a **scope clarification of A2's object**, not a
+weakening of A2. A fail-open reading of any **measurement** input remains
+forbidden — what would violate A2 is a fail-open reading applied to a
+measurement or health comparison itself (for example, a corrupt
+`book_history_hours` reading as fresh, or a corrupt safety-refresh stamp
+reading as healthy), because there an unverifiable input would be allowed to
+claim something was measured or something is safe. §151.2 ratifies neither of
+those; it ratifies a scheduling-liveness due-stamp reading as due.
+
+A clarifying note for `docs/ENGINEERING_STANDARDS.md` S8 A2 — "A2 binds
+measurement/health comparisons; scheduler liveness stamps follow the WO-120
+convention" — was **proposed here but not edited into the standard by this
+PR**; that binding-standard text change goes through its own owner-merge PR
+(the governance path), so this section registered the proposal without
+pre-empting that process. **That PR now exists: #434** (`claude/register-s8-a2-liveness-clarification`),
+appending the clarification to S8 A2 itself. **Merge order: #434 → #432 → #433**
+— the standard's own text change lands first, this section's ratification
+next, then the WO-151 build.
+
+**Folded into §151.1's touched-file list, not deferred (§432 round-1,
+2026-08-04).** `run_maker_study_intraday`'s `stamp_status` detail string
+(`scripts/run_vps_ops_scheduler.sh:635`) still reads *"...11-13h offset
+guard"* — stale prose left over from the removed offset guard, pinned as a
+literal by `tests/test_polymarket_vps_docker.py:621`. Rather than leave this to
+a follow-up WO, §151.1's touched-file list is extended to six files (adding
+that test file): the detail string and the pinned docker-test literal are
+updated together, in the same build, or neither is. Recorded as a scope
+expansion of this same WO, review-driven.
+
+**The same sixth-file scope also covers the WO-117 overrun-classification
+test, missed by the reconciliation above.**
+`test_wo117_maker_study_overrun_classification_is_window_aware`
+(`tests/test_polymarket_vps_docker.py:965-980`) asserts that
+`MAKER_STUDY_WINDOW_TOLERANCE=$((MAKER_STUDY_INTRADAY_OFFSET_MAX -
+MAKER_STUDY_INTRADAY_OFFSET_MIN))` is defined in
+`scripts/run_vps_ops_scheduler.sh`, that
+`schedule_skip_kind maker_study_intraday $((MAKER_STUDY_INTRADAY_INTERVAL +
+MAKER_STUDY_WINDOW_TOLERANCE))` is the call made there, and it forbids the
+bare-interval call `schedule_skip_kind maker_study_intraday
+"$MAKER_STUDY_INTRADAY_INTERVAL"`. §151.1's decoupling literal removes the
+harvest-age offset window as a precondition entirely, so once built there is
+no offset width left to derive an interval-plus-window tolerance from, and the
+overrun classification collapses to exactly the bare-interval call this test
+currently forbids. These assertions must be **replaced**, not left standing,
+to pin the new standalone-interval `schedule_skip_kind` call form, and
+`MAKER_STUDY_WINDOW_TOLERANCE` is removed or repurposed to whatever the
+standalone-interval build actually needs. This is part of the same sixth-file
+scope above, not a seventh file.
+
+**The same sixth-file scope also covers `test_wo117_window_tolerance_boundary_semantics`
+(`tests/test_polymarket_vps_docker.py:984-1015`), missed by the same
+reconciliation.** This test pins the tolerance-widened boundary directly:
+`kind(90000, 86400) == "overrun"` (bare interval mislabels an on-window run),
+`kind(90000, 86400 + 7200) == ""` (interval + tolerance reads it correctly as
+on-schedule), and `kind(86400 + 7200 + 300 + 60, 86400 + 7200) == "overrun"`
+(genuine starvation past the widened bound still stamps). Once
+`MAKER_STUDY_WINDOW_TOLERANCE` is removed per the reconciliation above, there
+is no widened bound left for the middle two calls to exercise — the
+`effective_interval` argument `schedule_skip_kind` receives collapses to the
+bare interval alone. These three boundary assertions must be **replaced**,
+not left standing, with the standalone-interval build's own boundary
+expectations: on-schedule at and immediately after the bare interval, and
+`"overrun"` only once a tick past it — the two-region (bare-interval-overrun
+vs. widened-on-schedule) shape this test currently proves is retired along
+with the tolerance it measures. This is part of the same sixth-file scope
+above, not a seventh file.

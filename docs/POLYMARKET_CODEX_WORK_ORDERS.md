@@ -9336,10 +9336,31 @@ that genuinely wants more than `8` pages must make that a deliberate,
 reviewed change to this WO's basis, not a value this validation quietly
 overrides. With that clamp registered, `8 x 100 = 800` is the TRUE, enforced
 worst case, not merely today's observed value, and `200` stays sound at
-**25%** of that now-bounded ceiling. This adds exactly one validation branch
-to `maker_carry_study.py`'s `_settings` — that file, and its test file, are
-already on this WO's **"Touch ONLY these files"** list, so the list does not
-change.
+**25%** of that now-bounded ceiling.
+
+**A second, symmetric gap, found on a further round of review: `page_size` is
+merged exactly the same unbounded way, at the same `:449` line, and consumed
+exactly as unboundedly at `:810-819` (`"limit": int(settings["page_size"])`,
+`"offset": page * int(settings["page_size"])`).** The `universe_pages <= 8`
+clamp above bounds only one factor of the worst-case product; a configured
+`page_size` above the deployed `100` (`polymarket_predictive_config.example.
+yaml:108`, in the same `maker_carry_study:` block as `universe_pages`'s `:107`)
+would silently raise the true worst case past `800` while the clamp just
+registered, and this WO's `200`-key cap, sat unrevised and now false — the
+same honesty gap, one config key over. **This amendment registers a second
+validated upper bound, at the same site and under the same rule as the
+first: `_settings` must reject a configured `page_size` above `100` with a
+hard configuration error, checked immediately after the raw-config merge at
+`:449` and before the value is used anywhere** — strictly tightening,
+narrowing an unbounded positive integer down to `<= 100`, never widening it,
+and rejected loudly rather than silently truncated, exactly like the
+`universe_pages` clamp beside it. With both clamps registered, `8 x 100 =
+800` is now the TRUE, enforced worst case on BOTH factors, not merely one of
+them, and `200` stays sound at **25%** of that doubly-bounded ceiling. This
+adds one more validation branch, immediately alongside the first, to the
+same function in the same already-touched file — that file, and its test
+file, are already on this WO's **"Touch ONLY these files"** list, so the
+list does not change.
 
 ### 147.2 — Collector side: one shared predicate, two tranches
 
@@ -9468,7 +9489,12 @@ upper-bound clamp (§147.1), in `test_maker_carry_study.py` alongside tests
 (1)-(4):** `_settings` with raw config `universe_pages: 9` raises a
 configuration error before any network call; `universe_pages: 8` (the
 deployed config's own value) is accepted unchanged; the code default `5` is
-unaffected.
+unaffected. (21) **added on a further round of review, exercising the
+`page_size` upper-bound clamp (§147.1), in `test_maker_carry_study.py`
+alongside tests (1)-(4) and (20):** `_settings` with raw config
+`page_size: 101` raises a configuration error before any network call;
+`page_size: 100` (the deployed config's own value, and also the code
+default) is accepted unchanged.
 
 **Honest consequence — corrected on further review of the actual filter/cap
 ordering, which is filter-then-cap in both amended tranches, not cap-then-filter.**
@@ -9504,7 +9530,17 @@ operations.
 
 **Scope: OWNER MERGE after line-audit.** Collection breadth and two diagnostic
 fields only; no gate, threshold, eligibility rule, screen, sizing rule, funding
-value, or config value moves in either direction. Tighten-only in the collection
+value, or config value moves in either direction — **disclosed on a further
+round of review: this covers the two §147.1 input-validation clamps
+(`universe_pages <= 8`, `page_size <= 100`) as well, and is not contradicted by
+them.** Neither clamp moves any config value — the deployed `8` and `100` are
+exactly the deployed `8` and `100` before and after this WO — and neither
+silently accepts or silently truncates an out-of-range configuration; each
+only ever REJECTS one, loudly, with a hard configuration error, before the
+value is used anywhere. A clamp that only ever refuses a value it did not
+refuse before is a registered tightening of validation, not a config-value
+move, and is disclosed here rather than left for a reader to reconcile against
+this sentence unaided. Tighten-only in the collection
 sense: fewer markets may be polled, never more, and only on positively parsed
 evidence of pastness. **Routing note:** the register previously contradicted
 itself on collection-only WOs (WO-131 at `:6028` "non-frozen → orchestrator
@@ -9692,7 +9728,14 @@ amendment's own lesson applied to itself. A nineteenth test was added on a
 later round of review to exercise the `kept_missing_fields` counter (§147.3);
 the same heading-not-line convention holds for it. A twentieth test was added
 on a further round of review to exercise the `universe_pages` upper-bound
-clamp (§147.1); the same heading-not-line convention holds for it too.
+clamp (§147.1); the same heading-not-line convention holds for it too. A
+twenty-first test was added on yet a further round of review to exercise the
+symmetric `page_size` upper-bound clamp (§147.1) found on that same round; the
+parent's Scope paragraph is amended on this same round to disclose both
+clamps as registered, disclosed tightenings — the deployed values do not
+move, and an out-of-range configuration is rejected loudly, never silently
+accepted or silently truncated — rather than leaving a reader to reconcile
+them against the "no config value moves" sentence unaided.
 
 **The same drift affects three other queued work orders and is named here so it
 is not rediscovered one wasted builder at a time.** None of the three is

@@ -9234,7 +9234,7 @@ invisible at the deployed configuration and only binds if the ceiling is ever
 tightened.
 
 
-## WO-147 — Expired markets on the official-book watchlist: measure first, exclude on positive evidence — `queued` (registered 2026-08-01; collection-side hygiene and observability only; **RE-SCOPED at drafting — the original framing was disproved, see Provenance**; no gate, threshold, eligibility rule, or funding value changes → OWNER MERGE after line-audit)
+## WO-147 — Expired markets on the official-book watchlist: measure first, exclude on positive evidence — `queued` (registered 2026-08-01; collection-side hygiene and observability only; **RE-SCOPED at drafting — the original framing was disproved, see Provenance**; no gate, threshold, eligibility rule, or funding value changes — **exempting the two §147.1 input-validation ceilings (`universe_pages <= 8`, `page_size <= 100`), disclosed as registered, strictly-tightening validation clamps rather than eligibility or funding thresholds; see Scope, below** — → OWNER MERGE after line-audit)
 
 **Provenance — the framing that opened this WO was disproved and is corrected.**
 The orchestrator's brief framed `excluded_stale: 62` (`venue_close_time_past: 61`,
@@ -9276,6 +9276,12 @@ predicate rather than a second implementation. Does **NOT** build: any change to
 `delisted_skip_threshold`, `delisted_cooldown_hours`, the seed tier ordering,
 `maker_replay_collection_windows.csv` or `coverage_ratio` semantics, any watchdog
 registration, or any order/signer/credential surface. No new artifact.
+**The one exception to this list, added on a further round of review and
+disclosed rather than left for a reader to reconcile unaided: §147.1's two
+input-validation ceilings (`universe_pages <= 8`, `page_size <= 100`) are
+registered strictly-tightening validation clamps, not an eligibility or
+funding threshold from the list above — see Scope, below, for why that
+distinction holds.**
 
 **Touch ONLY these files** (`git diff --stat` must show exactly these four):
 - `src/polymarket_predictive_engine/maker_carry_study.py`
@@ -9362,6 +9368,23 @@ same function in the same already-touched file — that file, and its test
 file, are already on this WO's **"Touch ONLY these files"** list, so the
 list does not change.
 
+**A2 — both new clamps, every branch (added on a further round of review,
+closing a gap the ceiling-only wording left open).** The two paragraphs
+above state the ceiling branch (`> 8`, `> 100`); every other configured
+value a builder could encounter at that same site takes the identical
+hard-error path, not a silent default: empty (`""`), unparseable (a
+non-numeric string), non-finite (`nan`, `inf`, `-inf` if the raw config
+value arrives as a float), zero, and negative all raise the same hard
+configuration error as a too-large value, checked at the same site
+(`:449`) before the value is used anywhere. **The one branch that must not
+exist is a silent `int()`/`max(0, ...)` coercion to `0` on any of these**
+— a `universe_pages` or `page_size` of `0` is not a smaller, safer scan, it
+is a scan that silently covers nothing and reports a clean watchlist
+indistinguishable from a genuinely clean one, which is a more dangerous
+failure than the too-large case these clamps were first registered to
+close. Fail-closed on every one of these inputs, never fail-open toward an
+empty scan.
+
 ### 147.2 — Collector side: one shared predicate, two tranches
 
 Add exactly one helper `_watchlist_expired_reasons(row, stale_map, *, as_of)`
@@ -9398,8 +9421,16 @@ Missing `question` → `_title_dates("")` returns `[]` → kept. Missing
 entirely, `"stale_ignored"`. **Basis for 48.0h:** two times the registered study
 interval `OPS_MAKER_STUDY_INTRADAY_INTERVAL_SECONDS` default 86400s
 (`run_vps_ops_scheduler.sh:38`) — one missed study run tolerated, two is not
-evidence. In the map AND parsing clean → excluded (union; the study's own
-exclusion is the stronger evidence).
+evidence. **Corrected on a further round of review: this sentence's own
+"AND" wording contradicted §147.3's fail-safe precedence rule, below, and is
+fixed to match it, not left as a second, weaker rule for this predicate
+alone.** In the map → excluded on its own, whether or not the current row's
+own fields parse cleanly — the study's own exclusion is positive evidence
+that does not require the current row's parse to also succeed, per §147.3's
+fail-safe sentence. Out of the map but parsing shows pastness on the
+current row → excluded on that evidence alone too. The predicate returns
+the union of both reason sources; either one is independently sufficient,
+and neither is conditioned on the other.
 
 ### 147.3 — Diagnostics
 
@@ -9494,7 +9525,17 @@ unaffected. (21) **added on a further round of review, exercising the
 alongside tests (1)-(4) and (20):** `_settings` with raw config
 `page_size: 101` raises a configuration error before any network call;
 `page_size: 100` (the deployed config's own value, and also the code
-default) is accepted unchanged.
+default) is accepted unchanged. (22) **added on a further round of review,
+exercising the A2 edge-case branches for `universe_pages`, in
+`test_maker_carry_study.py` alongside tests (1)-(4), (20), and (21):**
+`_settings` with raw config `universe_pages` set to `""`, `"abc"`, `float("nan")`,
+`0`, and `-1` each raise the same configuration error as `universe_pages: 9`
+— five sub-cases, one assertion each — and none falls through to a silent
+`0`-page scan. (23) **added on the same round, the symmetric case for
+`page_size`:** `_settings` with raw config `page_size` set to `""`, `"abc"`,
+`float("nan")`, `0`, and `-1` each raise the same configuration error as
+`page_size: 101`, with the same five sub-cases and the same no-silent-zero
+guarantee.
 
 **Honest consequence — corrected on further review of the actual filter/cap
 ordering, which is filter-then-cap in both amended tranches, not cap-then-filter.**
@@ -9577,7 +9618,8 @@ acceptance** — no wait, no documented-unavailable exception; anything other
 than `"ok"` at that point is a regression to investigate, not an expected
 transient. (3) **record the numbers** — `persistent`, `seed`,
 `portfolio_observed_not_excluded`,
-`close_time_unparseable`. **A result of `persistent: 0` is a valid and
+`close_time_unparseable`, and **`kept_missing_fields`, added on a further
+round of review alongside the other four counters** (§147.3). **A result of `persistent: 0` is a valid and
 informative outcome** meaning the tranche is clean today and this WO bought
 observability rather than hygiene; it is not a build failure. (4)
 **corrected on further review of the actual filter/cap ordering:**
@@ -9589,7 +9631,7 @@ already waiting past the cap line, and the tranche backfills from its own
 ranking whenever one is available. The reliable observable of this WO's
 effect is the diagnostic counters already recorded at (3) —
 `persistent`, `seed`, `portfolio_observed_not_excluded`,
-`close_time_unparseable` — not the aggregate `markets_polled` count, which
+`close_time_unparseable`, `kept_missing_fields` — not the aggregate `markets_polled` count, which
 this WO registers no required direction for: it may drop (when a tranche's
 filtered pool has fewer eligible candidates left than its cap), hold steady
 (when backfill fills the freed slot), but never rise. (5) `seasoning_runway`
@@ -9638,13 +9680,22 @@ were additionally confirmed byte-identical against `33ab8f7^1`:
 | `:957`, `:968` | the two `snapshot_official_books(cfg)` calls | `:1033`, `:1044` |
 
 **`maker_carry_study.py` is unaffected.** That file was not touched by WO-146,
-WO-149 or WO-150, and all eleven of this WO's citations into it — `:582-605`,
-`:842`, `:858`, `:859`, `:844-846`, `:903`, `:850`, `:2311-2313`, `:2488`,
-`:399-400`, `:1710-1718` — resolve exactly (`:1666-1667` was recorded here on
-the prior round of review, but that line range does not belong to any of this
-WO's citations — it is WO-151's cite into this same file — so it is removed
-here rather than corrected in place; recount twelve→eleven). They are **not**
-to be edited.
+WO-149 or WO-150, and all eleven of this WO's **original, pre-clamp**
+citations into it — `:582-605`, `:842`, `:858`, `:859`, `:844-846`, `:903`,
+`:850`, `:2311-2313`, `:2488`, `:399-400`, `:1710-1718` — resolve exactly
+(`:1666-1667` was recorded here on the prior round of review, but that line
+range does not belong to any of this WO's citations — it is WO-151's cite
+into this same file — so it is removed here rather than corrected in place;
+recount twelve→eleven). They are **not** to be edited. **Narrowed on a
+further round of review, closing a completeness gap this claim left open:**
+this eleven-range list is not the complete set of this WO's citations into
+`maker_carry_study.py` — §147.1's two input-validation clamps add three
+more, `:448-449`, `:453-461`, and `:810-819`, verified above where each is
+introduced. Those three are deliberately **excluded** from the "not to be
+edited" eleven: they are exactly the sites the clamps' own hard-error
+branches insert at and around, so a build implementing §147.1 is expected
+to touch them, unlike the original eleven, which the clamps do not touch
+and which stay locked.
 
 **Three self-referential citations into this register are also stale**, from
 unrelated later edits, and are corrected here rather than left for the same

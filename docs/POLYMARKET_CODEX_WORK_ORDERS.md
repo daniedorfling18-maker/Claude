@@ -9830,10 +9830,10 @@ dispatchable:
 **Provenance.** An analyst could not compute the seed-to-eligible conversion rate
 at all. Verified cause: tier assignment is recomputed from scratch every
 collector cycle inside `snapshot_official_books` — `portfolio` at
-`maker_fill_replay.py:723`, `persistent` at `:727-734`, `seeds` at `:747-753` —
-and only the three current COUNTS are persisted (`:770-772`). Nothing records
+`maker_fill_replay.py:763`, `persistent` at `:790-797`, `seeds` at `:810-816` —
+and only the three current COUNTS are persisted (`:833-835`). Nothing records
 which market was in which tranche at which time, and `_candidate_seed_markets`
-(`:487-571`) re-ranks the whole candidate set every cycle with no memory. A
+(`:492-576`) re-ranks the whole candidate set every cycle with no memory. A
 market that falls out of the portfolio, keeps accruing history through the
 mtime-driven persistent tranche, and later re-enters the seed ranking is
 therefore indistinguishable from an organic graduate.
@@ -9878,7 +9878,7 @@ constraint is adopted even though the file is not enrolled — see 148.4.**
 Closed domains: `tier` ∈ `{"portfolio","persistent","seed","absent"}`;
 `previous_tier` ∈ the same plus `"unknown"`. **`"unknown"` means the prior state
 could not be established and the event MUST NOT be counted as a conversion.**
-`event_utc` is the run's `generated_at_utc` (`:708`).
+`event_utc` is the run's `generated_at_utc` (`:745`).
 
 **Writer: `utils.append_csv_rows` only.** Never `write_csv`, never truncation,
 row-capping, sorting, or rewriting. **The WO-115 incident is the reason:** a
@@ -9978,17 +9978,21 @@ sole-writer premise was falsified; reconciliation item 8 below),
 `tier_events_malformed_rows` (int), `tier_event_burst` (bool),
 `tier_precedence_conflicts` (int).
 
-**Reads/Writes.** Reads its own two artifacts only — no cross-producer
-dependency, so S3 is satisfied trivially. Writes the events CSV (append-only) and
-the state JSON (atomic snapshot) under `scope="watchlist"` only, plus six keys on
-whichever artifact the scope selects — `official_book_snapshot.json` under
-watchlist scope, `official_book_pulse.json` under portfolio scope (§148.6's scope
-guard; reconciliation item 7 below).
+**Reads/Writes.** Reads §148.6's three-input contract — the
+`maker_carry_study.json` summary, `maker_carry_candidates.csv`'s existence, and
+the `official_books` directory's existence, skipping on absence
+(`skipped_unreadable_inputs`) — not merely its own two artifacts; S3 is
+satisfied by that registered fail-closed contract, not trivially. Writes the
+events CSV (append-only) and the state JSON (atomic snapshot) under
+`scope="watchlist"` only, plus six keys on whichever artifact the scope selects
+— `official_book_snapshot.json` under watchlist scope, `official_book_pulse.json`
+under portfolio scope (§148.6's scope guard; reconciliation item 7 below).
 **Interleaving (S2):** sole writer is `snapshot_official_books`, reached only via
 `collect_maker_replay_data` (`:957`, `:968`) and the `snapshot-official-books`
 CLI command (`cli.py:430-439`). The scheduler runs jobs **serially**, each
 blocking on `wait_with_safety_pulses`, and the concurrent safety-pulse members
-(`run_vps_ops_scheduler.sh:655-665`) write none of these paths.
+(`run_vps_ops_scheduler.sh:787-805`, the current `wait_with_safety_pulses`
+region) write none of these paths.
 **`snapshot-official-books` is registered in the CLI but scheduled by nothing —
 verified, no match for `official` in the scheduler. The builder must re-verify
 this caller set with its own grep and STOP and report if it disagrees.**
@@ -10276,13 +10280,14 @@ directory existing on disk.** Fixed as follows, checked in this order:
    alone cannot be the success test; the dict must also carry the contract's
    fields. **Extended on a further round of review to the list's own
    entries, closing a gap one level deeper than the container-shape check
-   above.** A `portfolio` field that IS a list still fails the contract if
-   **every** entry in it fails `_portfolio`'s own per-entry shape test — not
-   a `dict`, or a `dict` that carries none of the four fields `_portfolio`
-   (`:426-438`) reads (`condition_id`, `token_id`, `quote_size_shares`,
-   `quote_distance`): `[{}]`, or a list of strings, or a list of numbers, are
-   contract-invalid the same way a non-list `portfolio` value is — an
-   all-entries-fail list is register-worthy evidence of a malformed producer
+   above.** A `portfolio` field that IS a list still fails the contract if it
+   is a **non-empty list every entry of which fails** `_portfolio`'s own
+   per-entry shape test — not a `dict`, or a `dict` that carries none of the
+   four fields `_portfolio` (`:426-438`) reads (`condition_id`, `token_id`,
+   `quote_size_shares`, `quote_distance`): `[{}]`, or a list of strings, or a
+   list of numbers, are contract-invalid the same way a non-list `portfolio`
+   value is — an all-entries-fail list is register-worthy evidence of a
+   malformed producer
    output, not a genuinely empty portfolio, which a well-formed producer
    would have written as `[]` directly rather than as a list of items
    carrying none of the shape a portfolio entry needs. **A mixed list is
@@ -10394,7 +10399,7 @@ degrades to a mislabelled status on a cycle that already wrote no rows and
 touched no state file, never to a spurious or missing row.
 
 **A4/A7 — reconciliation of the parent WO, stated exhaustively.** This
-amendment's duplicate set is nine places and no more:
+amendment's duplicate set is ten places and no more:
 
 1. **148.5's "Interleaving (S2)" paragraph** — its caller list and its
    "scheduled by nothing" claim are **superseded by the table above**. The
@@ -10410,7 +10415,11 @@ amendment's duplicate set is nine places and no more:
    rows/cycle x 96) — **unchanged and now correct**. It was computed against the
    full-watchlist cadence (96 cycles/day at 900s), which is the only cadence that
    now writes; the pulse's own **288 cycles/day** (86400/300) all contribute zero
-   rows under this amendment's guard.
+   rows under this amendment's guard. **Acknowledged, not recomputed:** the
+   full-watchlist collector also runs the **+~2/day** non-`trade_prints`
+   cycles from `training_harvest` and `maker_study_intraday` (see the
+   Watchlist-cadence framing below) — immaterial to an order-of-magnitude
+   estimate, noted here rather than left silently uncounted.
 4. **Day-after check (2)** — unchanged, and only satisfiable under this
    correction.
 5. **148.3(2)'s `exclude` citations** — `:728` and `:749-750` are stale from
@@ -10454,6 +10463,20 @@ amendment's duplicate set is nine places and no more:
    — it correctly describes what happens once the write IS reached — and is
    not itself edited; only 148.5's restatement of it needed the
    qualification, since that is the sentence that reads as unconditional.
+10. **The Provenance paragraph's and 148.1's own citations, plus 148.5's
+    safety-pulse-members citation** — also stale from the same WO-149 line
+    drift and not caught by items 1-9 above, because those nine covered only
+    148.3's and 148.5's own paragraphs, not Provenance or 148.1. Corrected
+    inline at each site, every replacement re-verified directly against
+    `origin/main`'s source rather than inferred from the table above:
+    Provenance's `portfolio` cite `:723`→`:763`, `persistent` cite
+    `:727-734`→`:790-797`, `seeds` cite `:747-753`→`:810-816`, the
+    persisted-COUNTS cite `:770-772`→`:833-835`, and `_candidate_seed_markets`
+    `(:487-571)`→`(:492-576)`; 148.1's `event_utc` anchor `:708`→`:745`; and
+    148.5's "concurrent safety-pulse members" cite
+    `run_vps_ops_scheduler.sh:655-665`→`:787-805`, the function boundaries of
+    the current `wait_with_safety_pulses`. Every claim each citation supports
+    is re-verified against the corrected line and unchanged.
 
 **The touched-file list does not change.** It remains exactly the two files the
 parent WO registers, `src/polymarket_predictive_engine/maker_fill_replay.py` and
@@ -10573,8 +10596,8 @@ of the existing numbers move:
     file byte-identical, `tier_events_status == "skipped_unreadable_inputs"`.
     Separately, the same fixture with the candidates CSV present but
     genuinely listing zero rows (an empty, well-formed CSV with only the
-    header) takes the OPPOSITE path if the resulting watchlist is also
-    empty: `tier_events_status == "ok"`, proving the check distinguishes
+    header) takes the OPPOSITE path: `tier_events_status == "ok"`, proving
+    the check distinguishes
     "file missing" from "file present and genuinely empty", not merely
     "file produced zero rows" — the distinction this test exists to prove
     is drawn correctly.
@@ -10589,8 +10612,8 @@ of the existing numbers move:
     appended even though `portfolio + persistent + seeds` is nonempty (from
     the seed tranche alone). Separately, the same fixture with the
     directory present but genuinely empty of matching files takes the
-    `"ok"` path when the resulting watchlist is also empty, the same
-    missing-vs-empty distinction test (28) draws for the candidates CSV.
+    `"ok"` path, the same missing-vs-empty distinction test (28) draws for
+    the candidates CSV.
 30. **Added on a further round of review, exercising the portfolio
     entry-shape extension.** `scope="watchlist"`, `maker_carry_study.json`
     readable and a mapping, with `portfolio` set to `[{}]` — a list
@@ -10735,7 +10758,7 @@ context, not a gate:**
   between one owner read and the next pulse's overwrite can go uncaught by
   this channel alone — which is exactly why (b) below, not a second
   production heuristic, is the other half of this guarantee.
-- **(b) The enumerated tests (17)-(27), in the required PR gate.** These run
+- **(b) The enumerated tests (17)-(30), in the required PR gate.** These run
   the actual scope guard, empty-watchlist, contract-validation, and
   `skipped_disabled` code against constructed fixtures instead of inferring
   producer identity from artifacts findings 1-3 above prove cannot support

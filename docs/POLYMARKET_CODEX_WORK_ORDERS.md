@@ -9993,8 +9993,14 @@ blocking on `wait_with_safety_pulses`, and the concurrent safety-pulse members
 verified, no match for `official` in the scheduler. The builder must re-verify
 this caller set with its own grep and STOP and report if it disagrees.**
 
-**Fail-safe sentence.** A missing or empty tier-event ledger records this cycle's
-whole watchlist as arrivals from `absent`; an unreadable ledger appends nothing
+**Fail-safe sentence.** A missing or empty tier-event ledger records this
+cycle's whole watchlist as arrivals from `absent` **— reconciled with
+§148.6's three skip statuses, reconciliation item 9 there: this genesis
+behaviour presumes the write is reached at all, and under
+`skipped_portfolio_scope`, `skipped_unreadable_inputs`, or
+`skipped_disabled` it is not — a missing ledger under any of those three
+conditions records nothing that cycle, genesis or not, because the skip
+fires before the diff runs**; an unreadable ledger appends nothing
 and records `tier_events_status: "read_failed"` rather than appending from an
 unknown baseline; a missing, malformed, or more-than-six-hour-old state file
 stamps every event this cycle `previous_tier: "unknown"`, which excludes it from
@@ -10045,11 +10051,18 @@ selection behaviour, gate, threshold, eligibility rule, or funding value.
 Tighten-only statement: nothing moves in either direction; the watchlist computed
 at `:754` must be provably identical (test 14). **Disclosed here, per §148.6's
 reconciliation of the sole-writer premise:** the ledger write is scoped to the
-full-watchlist collector only. Under `scope="portfolio"` (the `run_book_pulse`
-pulse, 300s) the collector appends no event and writes no state file —
+full-watchlist collector only. Under `scope="portfolio"` **and the collector
+enabled** (the `run_book_pulse` pulse, 300s) the collector appends no event
+and writes no state file —
 `tier_events_status` reads `skipped_portfolio_scope` and the other five summary
 keys are emitted at their zero values, so the key set stays scope-invariant
-across both artifacts. **§148.6 also discloses a second, opposite-direction
+across both artifacts. **Qualified on a further round of review: the disabled
+override wins.** A disabled config (`enabled=False`) under `scope="portfolio"`
+does not read `skipped_portfolio_scope` at all — §148.6's third correction
+checks the `enabled` guard first, before either scope's logic runs, and
+labels that exit `skipped_disabled` regardless of scope. `skipped_portfolio_scope`
+is therefore the label for an ENABLED pulse run only; the sentence above is
+qualified accordingly rather than left to read as unconditional. **§148.6 also discloses a second, opposite-direction
 correction under `scope="watchlist"`:** a genuinely empty watchlist backed by a
 successfully-read `maker_carry_study.json` now runs the diff instead of taking
 the unamended `no_portfolio` shortcut, and so can WRITE MORE departure rows
@@ -10214,9 +10227,31 @@ non-empty — and an unamended diff would run normally, treating the vanished
 portfolio tranche as a real mass departure for every market that was in it,
 when the true cause is a glitched read, not a genuine exit: **false
 departures for prior portfolio members**, the exact failure this correction
-exists to close. Fixed as follows, checked in this order:
+exists to close.
 
-1. **Absent, unreadable, unparseable, or contract-invalid summary — checked
+**Extended on a further round of external review — the same failure exists
+on the OTHER two tranches' inputs, and gating condition (2) below on the
+study summary alone leaves it open.** `persistent` (`_recent_book_markets`,
+`:790-792`) reads the `official_books` directory (`books_dir.exists()` at
+`:458-460`); `seeds` (`_candidate_seed_markets`, `:810-816`) reads
+`maker_carry_candidates.csv` via `candidate_rows = _candidate_map(cfg)`
+(`:762`, itself `read_csv_rows` at `:422`). Both degrade to an empty list on
+an input that does not exist, with nothing distinguishing that from a
+genuinely-empty directory or CSV — the identical `{}`-on-failure ambiguity
+`read_json`'s own default has, one tranche input over. So an official-books
+directory that got wiped, or a candidates CSV that failed to write this
+cycle, collapses `persistent` or `seeds` to empty exactly the way a glitched
+study-summary read collapses `portfolio`, and — unless this amendment's
+mass-departure branch also checks these two inputs — would be diffed as a
+real mass departure for every persistent or seed market that was on the
+prior watchlist, the same false-departure failure one tranche input over.
+**The success contract this correction requires is therefore for ALL THREE
+tranche inputs, not the study summary alone: the summary read (below), AND
+`maker_carry_candidates.csv` existing on disk, AND the `official_books`
+directory existing on disk.** Fixed as follows, checked in this order:
+
+1. **Absent, unreadable, unparseable, or contract-invalid summary, OR a
+   missing candidates CSV, OR a missing `official_books` directory — checked
    first, regardless of the resulting watchlist's size.** `read_json(out_root
    / "maker_carry_study.json", default=...)` fell back to its failure default
    rather than returning a parsed dict — the file is missing, unreadable, or
@@ -10239,36 +10274,87 @@ exists to close. Fixed as follows, checked in this order:
    from a syntactically valid but semantically empty summary such as a real
    `maker_carry_study.json` that parses to `{}` — so "returned a parsed dict"
    alone cannot be the success test; the dict must also carry the contract's
-   fields. The ledger write is skipped entirely under either sub-condition —
-   no rows appended, no state file written, the same no-op shape as the
-   portfolio-scope skip but for a distinct cause — with the fifth domain
+   fields. **Extended on a further round of review to the list's own
+   entries, closing a gap one level deeper than the container-shape check
+   above.** A `portfolio` field that IS a list still fails the contract if
+   **every** entry in it fails `_portfolio`'s own per-entry shape test — not
+   a `dict`, or a `dict` that carries none of the four fields `_portfolio`
+   (`:426-438`) reads (`condition_id`, `token_id`, `quote_size_shares`,
+   `quote_distance`): `[{}]`, or a list of strings, or a list of numbers, are
+   contract-invalid the same way a non-list `portfolio` value is — an
+   all-entries-fail list is register-worthy evidence of a malformed producer
+   output, not a genuinely empty portfolio, which a well-formed producer
+   would have written as `[]` directly rather than as a list of items
+   carrying none of the shape a portfolio entry needs. **A mixed list is
+   NOT contract-invalid** — `_portfolio`'s own per-entry filtering
+   (`isinstance(entry, dict)` then the four-field check) is precisely
+   designed to tolerate some entries failing while others pass, and letting
+   the valid entries through while dropping the rest is the existing,
+   tighten-only behaviour already registered there, not a new failure mode
+   this amendment intercepts; only the all-fail case — where `_portfolio`
+   would silently return `[]` for a reason indistinguishable from a
+   genuinely empty portfolio — is added to the contract check. **Added on a further round of review, closing the persistent/seed
+   half of the same gap: the identical treatment applies to the other two
+   tranche inputs.** `maker_carry_candidates.csv`
+   (`cfg.output_root / "maker_carry" / "maker_carry_candidates.csv"`, read by
+   `_candidate_map` at `:422` via `read_csv_rows`) not existing on disk, and
+   the `official_books` directory (`cfg.output_root / "maker_carry" /
+   "official_books"`, checked by `_recent_book_markets` itself at `:459`) not
+   existing on disk, are each checked directly by this amendment's own
+   `Path.exists()` test — a check this amendment adds, not a change to
+   `read_csv_rows` or `_recent_book_markets`, which stay exactly as
+   registered elsewhere and keep silently returning `[]`/an empty tranche for
+   their own callers. Either missing artifact takes this same skip branch,
+   for the same reason: `read_csv_rows` returning `[]` for a missing file is
+   indistinguishable from `read_csv_rows` returning `[]` for a file that
+   exists and genuinely lists zero candidates, and `_recent_book_markets`
+   returning `[]` for a missing directory is indistinguishable from it
+   returning `[]` for a directory that exists and genuinely holds no
+   in-window book files — the same `{}`-on-failure ambiguity as the summary,
+   twice over. The ledger write is skipped entirely under any of these
+   sub-conditions — no rows appended, no state file written, the same no-op
+   shape as the portfolio-scope skip but for a distinct cause — with the
+   fifth domain
    member, `tier_events_status = "skipped_unreadable_inputs"`, **whether or
    not `portfolio + persistent + seeds` is empty as a result.** A nonempty
    watchlist built from a failed read is exactly the case a check gated on
    emptiness alone would miss, because diffing it would silently manufacture
    false departures for every market that was in the portfolio tranche
-   before the read glitched, not only in the all-empty case.
-2. **Readable summary, genuinely empty watchlist.** Only once the read is
-   confirmed to have succeeded — `read_json` returned a parsed dict that ALSO
-   satisfies the summary contract above (a mapping carrying the expected
-   fields, `portfolio` included) — does emptiness get evaluated: if
+   before the read glitched, not only in the all-empty case — and the same
+   is true, one tranche input over, for a nonempty watchlist built while the
+   candidates CSV or the `official_books` directory is missing: the
+   persistent or seed markets that survive on some OTHER input (a portfolio
+   entry does not depend on either) would otherwise be diffed as real,
+   while the persistent/seed markets lost to the missing input are not
+   distinguishable from a genuine departure without this check.
+2. **Readable summary AND present candidates CSV AND present `official_books`
+   directory, genuinely empty watchlist.** Only once all three tranche
+   inputs are confirmed present and, for the summary, contract-valid — `read_json`
+   returned a parsed dict that ALSO satisfies the summary contract above (a
+   mapping carrying the expected fields, `portfolio` included), AND
+   `maker_carry_candidates.csv` exists, AND the `official_books` directory
+   exists — does emptiness get evaluated: if
    `portfolio + persistent + seeds` is still empty, this is truth, not an
-   artifact of a read failure or a malformed-but-parseable summary: **mass
+   artifact of a read failure, a malformed-but-parseable summary, or a
+   missing candidates CSV or `official_books` directory: **mass
    absent departures ARE truth here.** The ledger write proceeds even though
    the watchlist itself is empty, diffing every previously-tracked condition
    id against `current_tier = {}` and emitting a departure row for each one
    that was not already `"absent"`. `tier_events_status = "ok"`; a departure
    count equal to the entire prior watchlist is a valid, expected outcome, not
    a defect. A syntactically valid but contract-invalid dict (bare `{}`, or a
-   mapping missing `portfolio`) never reaches this branch — it stayed in
-   condition (1) above — so it can never be mistaken for the genuinely-empty
+   mapping missing `portfolio`), a missing candidates CSV, or a missing
+   `official_books` directory never reaches this branch — each stayed in
+   condition (1) above — so none can be mistaken for the genuinely-empty
    case this branch exists to honour.
 
 The two conditions cannot co-occur: checking (1) first and unconditionally on
-the read outcome (including the contract check) means a failed or
-contract-invalid read always takes the skip regardless of watchlist size, and
-(2) is reached only once (1) has ruled out both a read failure and a
-contract-invalid parse; and, as throughout this section, neither applies under
+all three tranche inputs (including the summary contract check) means any
+one of a failed/contract-invalid summary read, a missing candidates CSV, or
+a missing `official_books` directory always takes the skip regardless of
+watchlist size, and
+(2) is reached only once (1) has ruled out every one of those three failure
+modes; and, as throughout this section, neither applies under
 `scope="portfolio"`, where the portfolio-scope skip fires first.
 
 **A third, distinct binding correction — the `enabled=False` early return
@@ -10308,7 +10394,7 @@ degrades to a mislabelled status on a cycle that already wrote no rows and
 touched no state file, never to a spurious or missing row.
 
 **A4/A7 — reconciliation of the parent WO, stated exhaustively.** This
-amendment's duplicate set is eight places and no more:
+amendment's duplicate set is nine places and no more:
 
 1. **148.5's "Interleaving (S2)" paragraph** — its caller list and its
    "scheduled by nothing" claim are **superseded by the table above**. The
@@ -10354,6 +10440,20 @@ amendment's duplicate set is eight places and no more:
    domain to the three pre-amendment members, `{"ok","read_failed","write_failed"}`,
    even though this section registers three more. Corrected above to the
    complete six-member domain, with a pointer back to this item.
+9. **148.5's Fail-safe sentence, and 148.3's matching genesis rule it
+   restates** — both said a missing or empty ledger unconditionally records
+   the whole watchlist as arrivals, with no acknowledgement that this
+   section's three skip statuses can each prevent the write from being
+   reached at all. Corrected inline at 148.5's Fail-safe sentence above,
+   pointing back to this item: the genesis behaviour applies only when the
+   write is reached — under `skipped_portfolio_scope`,
+   `skipped_unreadable_inputs`, or `skipped_disabled`, a missing ledger
+   records nothing that cycle, because the skip fires before the diff runs,
+   genesis or not. 148.3(1)'s own genesis rule ("Events CSV missing/empty →
+   genesis, every member emits from `"absent"`") is unchanged in substance
+   — it correctly describes what happens once the write IS reached — and is
+   not itself edited; only 148.5's restatement of it needed the
+   qualification, since that is the sentence that reads as unconditional.
 
 **The touched-file list does not change.** It remains exactly the two files the
 parent WO registers, `src/polymarket_predictive_engine/maker_fill_replay.py` and
@@ -10380,15 +10480,26 @@ of the existing numbers move:
 18. The same call records `tier_events_status == "skipped_portfolio_scope"` and
     the five zero-valued keys on `official_book_pulse.json` — the artifact
     `scope="portfolio"` actually writes (`:744`), never
-    `official_book_snapshot.json` — and, **restricted to the SIX tier-event
-    keys only** (`tier_events_status`, `tier_events_written`,
-    `tier_events_resync`, `tier_events_malformed_rows`, `tier_event_burst`,
-    `tier_precedence_conflicts`), that six-key subset is identical to
-    `official_book_snapshot.json`'s same six-key subset under
-    `scope="watchlist"`, asserted by comparing the two six-key subsets, not
-    the two artifacts' whole key sets — which legitimately differ, since the
-    pulse artifact alone also carries `"scope": "portfolio"` (`:754`) that
-    the watchlist snapshot never sets.
+    `official_book_snapshot.json`. **Corrected on a further round of
+    review: the cross-artifact invariance this test checks is key PRESENCE
+    and TYPE, never value equality — the two scopes' six-key VALUES
+    legitimately differ (`tier_events_status` alone takes a different
+    closed-domain member per scope in the general case, and the counts
+    differ whenever a watchlist-scope cycle actually writes rows), so
+    asserting the two artifacts' six-key subsets are identical, as an
+    earlier draft of this test did, is simply false in the general case and
+    only happened to hold on that draft's own narrow fixture.** Restricted
+    to the SIX tier-event keys only (`tier_events_status`,
+    `tier_events_written`, `tier_events_resync`, `tier_events_malformed_rows`,
+    `tier_event_burst`, `tier_precedence_conflicts`), the test asserts that
+    BOTH `official_book_pulse.json` under `scope="portfolio"` and
+    `official_book_snapshot.json` under `scope="watchlist"` carry all six
+    keys, with `tier_events_status` a string member of the closed six-value
+    domain and the other five keys typed `int`/`bool` as registered —
+    checked per artifact, never by comparing one artifact's values against
+    the other's, and never against the two artifacts' whole key sets, which
+    legitimately differ, since the pulse artifact alone also carries
+    `"scope": "portfolio"` (`:754`) that the watchlist snapshot never sets.
 19. No state file is written under portfolio scope: a pre-existing
     `maker_watchlist_tier_state.json` is byte-identical after the call, and an
     absent one is still absent.
@@ -10449,6 +10560,54 @@ of the existing numbers move:
     failure default" check would misclassify as test (23)'s
     genuinely-empty, mass-departure-is-truth branch, because `read_json`'s own
     failure default is also `{}`.
+28. **Added on a further round of review, extending the readable-branch
+    precondition to the candidates-CSV input.** `scope="watchlist"`, a
+    readable and contract-valid `maker_carry_study.json` whose `portfolio`
+    tranche is genuinely empty, persistent markets present on disk (a
+    populated `official_books` directory) but `maker_carry_candidates.csv`
+    **absent** — so `seeds` is empty for the same reason `read_csv_rows`
+    returns `[]` for a missing file, not because zero candidates were
+    genuinely ranked — asserts the ledger write is skipped, **zero** rows
+    appended even though the resulting `portfolio + persistent + seeds` is
+    nonempty (from the persistent tranche alone), any pre-existing state
+    file byte-identical, `tier_events_status == "skipped_unreadable_inputs"`.
+    Separately, the same fixture with the candidates CSV present but
+    genuinely listing zero rows (an empty, well-formed CSV with only the
+    header) takes the OPPOSITE path if the resulting watchlist is also
+    empty: `tier_events_status == "ok"`, proving the check distinguishes
+    "file missing" from "file present and genuinely empty", not merely
+    "file produced zero rows" — the distinction this test exists to prove
+    is drawn correctly.
+29. **The symmetric case for the `official_books` directory.** Same
+    fixture shape as (28): a readable, contract-valid, empty-portfolio
+    summary, seed markets present (a populated, readable
+    `maker_carry_candidates.csv`) but the `official_books` directory
+    **absent** from disk — so `persistent` is empty for the same reason
+    `_recent_book_markets` returns `[]` for a missing directory, not
+    because zero in-window book files were genuinely found — asserts
+    `tier_events_status == "skipped_unreadable_inputs"` and **zero** rows
+    appended even though `portfolio + persistent + seeds` is nonempty (from
+    the seed tranche alone). Separately, the same fixture with the
+    directory present but genuinely empty of matching files takes the
+    `"ok"` path when the resulting watchlist is also empty, the same
+    missing-vs-empty distinction test (28) draws for the candidates CSV.
+30. **Added on a further round of review, exercising the portfolio
+    entry-shape extension.** `scope="watchlist"`, `maker_carry_study.json`
+    readable and a mapping, with `portfolio` set to `[{}]` — a list
+    containing one dict with none of the four required fields — and,
+    separately, `portfolio` set to `["a", "b"]` — a list of strings, no
+    entry a dict at all — with persistent and seed empty as well (a truly
+    empty watchlist as a consequence): both fixtures assert
+    `tier_events_status == "skipped_unreadable_inputs"`, **zero** rows
+    appended, any pre-existing state file byte-identical — proving the
+    all-entries-fail case is treated as contract-invalid, not genuinely
+    empty. Separately, a **mixed** `portfolio` list — one well-formed entry
+    carrying all four required fields alongside one `{}` and one string —
+    with the well-formed entry's `condition_id` present on the prior
+    watchlist and persistent/seed empty: asserts `tier_events_status ==
+    "ok"` and the diff runs normally against the single surviving portfolio
+    entry, proving a mixed list is NOT contract-invalid and `_portfolio`'s
+    own per-entry filtering is left untouched.
 
 **Fail-safe sentence for §148.6.** This section's three corrections pull in
 different directions, and none is covered by a single blanket claim; each is

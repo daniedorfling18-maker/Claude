@@ -9494,7 +9494,8 @@ sentence's precedence rule, not an exception to it; this is the 61-market case
 and the only path that catches it.** (11) study JSON
 missing → `"unavailable"`, watchlist equals pre-change baseline. (12) map a list
 not a dict → `"malformed"`. (13) study `generated_at_utc` at `now-47.9h` →
-`"ok"` and source B applies; advance the run clock to `now-48.1h` →
+`"ok"` and stale-map evidence applies (an id present in
+`excluded_stale_condition_ids` is excluded); advance the run clock to `now-48.1h` →
 `"stale_ignored"` — the S1-mandated clock-advance pair. (14) seed tranche with
 one expired candidate → `candidate_seed_exclusions["expired"] == 1`, remaining
 tier ordering unchanged against a golden list. (15) portfolio tranche with an
@@ -9607,10 +9608,16 @@ successful deploy, `"unavailable"` can only be a regression, never the
 expected state. That allowance is deleted. After one collector cycle (<= 15
 min): (1) **corrected on further review — non-empty is required only when
 `excluded_stale > 0`, not unconditionally:** `excluded_stale_condition_ids`
-key count equals `min(excluded_stale, 200)` exactly; when `excluded_stale ==
-0` (nothing stale in the current scan), `min(0, 200) == 0` and the map is
-legitimately EMPTY — that is a clean day, not a defect, and the check must
-not fail it. Non-empty is required only once `excluded_stale > 0`, and the
+key count — over distinct non-empty stale condition ids, since
+`maker_carry_study.py:843-847` adds a key only when the stale market's
+`conditionId` is non-empty while `excluded_stale` increments once per stale
+market regardless, so marker-count and id-count can legitimately differ
+(safe-noisy: a mismatch here can only produce a false-alarm check failure,
+never mask a missed exclusion) — equals `min(excluded_stale, 200)` exactly;
+when `excluded_stale == 0` (nothing stale in the current scan), `min(0, 200)
+== 0` and the map is legitimately EMPTY — that is a clean day, not a defect,
+and the check must not fail it. Non-empty is required only once
+`excluded_stale > 0`, and the
 exact key-count equality holds unconditionally either way. Additionally,
 `excluded_stale_condition_ids_truncated == (excluded_stale > 200)` holds,
 added on a further round of review to pin the boolean against the same

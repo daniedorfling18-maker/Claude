@@ -11191,7 +11191,17 @@ blocked.**
 
 ### Scope (a) — add the deploy-control surface to the registry
 
-Add exactly twelve entries to `PROTECTED_CONTROL_PATHS`:
+Add exactly fourteen entries to `PROTECTED_CONTROL_PATHS` — the twelve
+carried since the previous round, plus the two Path A entries added on this
+round of review, at the end of the list below. `PROTECTED_CONTROL_PATHS`
+already holds twelve pre-existing entries
+(`scripts/merge_independently_reviewed_pr.py:34-47`, the merge-control
+surface this WO predates), so the registry totals twenty-six entries once
+this WO merges: twelve pre-existing plus fourteen new. Both numbers — 14
+new, 26 total — are restated everywhere a count appears below, because an
+earlier round conflated "new entries added" with "total registry size" and
+asserted a total of twelve where it should have said twenty-four; that
+mistake is not repeated here.
 
 ```
 ".github/workflows/deploy_vps_paper_dispatch.yml"
@@ -11206,6 +11216,8 @@ Add exactly twelve entries to `PROTECTED_CONTROL_PATHS`:
 "docker-compose.vps-paper.yml"
 "scripts/run_vps_deploy_acceptance.sh"
 "src/polymarket_predictive_engine/deploy_acceptance.py"
+".github/workflows/deploy-polymarket-vps-paper.yml"
+"scripts/verify_independent_main_acceptance.py"
 ```
 
 The script entry was added on external review, which was right: the workflow
@@ -11231,11 +11243,13 @@ point the rollback script at nothing — without touching a single registered
 path, which is the same invisibility this WO exists to close, one call frame
 down. The closure rule this WO applies is therefore **protected = the wrapper
 + everything it stages as gates + the acceptance-verdict chain the staged
-compose command invokes**, not the wrapper alone — which is why the
-set below is twelve entries: the original workflow/script/test-file triad,
+compose command invokes**, not the wrapper alone — which is why twelve of
+the fourteen new entries are: the original workflow/script/test-file triad,
 plus the six scripts `stage_target_scripts` stages and the compose file it
 stages alongside them, plus the two-file acceptance-verdict chain reached
-through that compose file's own service command, below.
+through that compose file's own service command, below. The remaining two
+new entries, below, belong to a second closure rule reached on a further
+round of review.
 
 A third round of external review closed the remaining gap: the compose file
 just added to the registry is itself a dispatch table, and one entry in it —
@@ -11257,6 +11271,27 @@ exercises; this WO protects the direct verdict implementation, not its
 transitive imports, and states that boundary rather than leaving it to be
 inferred.
 
+A further review pass — looking at the deploy surface as a whole rather than
+only the call chain traced above — found a second, independent gap of the
+same shape. `.github/workflows/deploy-polymarket-vps-paper.yml` ("Path A" —
+`scripts/deploy_vps_paper_manual.sh:4-7` names the two registered deploy
+routes this way) is not part of the chain rooted at `deploy_vps_paper_
+dispatch.yml`; it is the other registered deploy route, and it binds a
+deploy to independently-accepted-main evidence itself, in its own "Bind
+deployment to independently accepted main" step
+(`.github/workflows/deploy-polymarket-vps-paper.yml:58-69`), whose `python3`
+invocation (`:65`) runs `scripts/verify_independent_main_acceptance.py` —
+verified directly against the workflow file, not inferred. Protecting
+Path B's acceptance-verdict chain while leaving Path A's own binding check
+unregistered would let a later PR delete or gut that check on the *other*
+deploy path without touching a single registered file — the same
+invisibility this WO exists to close, on the path this WO had not yet
+looked at. Both files are added by hand, the way the original
+workflow/script/test-file triad was, because Path A's binding step is a
+direct one-hop call rather than a staged, parsed chain; it is not folded
+into the parse-based closure test below, and that boundary is stated here
+rather than left to be inferred.
+
 Nothing else in that set, in `PROTECTED_PYTHON_ENTRYPOINTS`, in
 `TRUSTED_REVIEW_ASSOCIATIONS`, in `CONTROL_REVIEW_STATES`, or in the body of
 `_protected_control_path` changes. This is **strictly tightening**: the predicate
@@ -11264,7 +11299,7 @@ returns `True` for strictly more paths and `False` for none it previously
 accepted, so the merge gate can only become more conservative.
 
 **A2.** `_protected_control_path` already normalises `\\` to `/`, strips leading
-`./` and `/`, and compares the normalised string against the set; the twelve
+`./` and `/`, and compares the normalised string against the set; the fourteen
 new entries are ordinary normalised relative paths and reach the existing
 `normalized in PROTECTED_CONTROL_PATHS` branch with no new parsing. No new
 comparison is introduced, so there is no new missing/empty/unparseable case.
@@ -11273,15 +11308,18 @@ comparison is introduced, so there is no new missing/empty/unparseable case.
 exactly one site, `_protected_control_path:115`, which is called at exactly one
 site, `:360`, whose result feeds `protected_control_changes` (`:404`) and
 `trusted_merge_control_unchanged` (`:386`). Both are report fields on the merge
-attestation. **Widening the set cannot cause a merge**; it can only add paths to
-a list that makes the gate refuse. The effect is therefore dormant only when
-none of the twelve protected paths is changed, and strictly restrictive on
-every PR that changes one.
+attestation. (Verified: `grep -rn PROTECTED_CONTROL_PATHS src/ scripts/` finds
+only the definition at `scripts/merge_independently_reviewed_pr.py:34` and this
+one read site at `:115` — no reader exists in `src/`; a round-3 draft of this
+WO would have added a second reader there, in the governance-refresh producer,
+which is why that producer is not built, see the Day-after check below.)
+**Widening the set cannot cause a merge**; it can only add paths to a list
+that makes the gate refuse. The effect is therefore dormant unless one of the
+twenty-six protected paths is touched, and strictly restrictive on every PR
+that touches one.
 
 **Touch ONLY these files — this clause governs scope (a) only, since scope (b)
-builds nothing** (`git diff --stat` must show exactly these three; the third
-entry is itself review-driven scope growth, recorded here rather than left
-implicit — see the Day-after check below):
+builds nothing** (`git diff --stat` must show exactly these two):
 
 - `scripts/merge_independently_reviewed_pr.py` — the `PROTECTED_CONTROL_PATHS`
   literal only.
@@ -11289,13 +11327,17 @@ implicit — see the Day-after check below):
   merge-control parametrisation at `:837-859` and the workflow inventory test at
   `:259` are **not** to be modified; a build that needs to edit either has
   changed behaviour it was told not to change, and must stop and escalate.
-- `src/polymarket_predictive_engine/refresh_governance.py` — add the two new
-  `governance_refresh.json` fields only (`protected_control_paths_count`,
-  `staged_set_subset_ok`); no other behaviour of the governance refresh
-  changes.
+
+This WO is trimmed to that two-file registry-and-tests scope. A round-3 draft
+grew the Touch ONLY list to three files by having the VPS governance-refresh
+producer (`src/polymarket_predictive_engine/refresh_governance.py`) publish a
+production-observable field derived from this registry. That design is not
+built: see the Day-after check, below, for why it cannot be, and §153.1 for
+where the production-observable signal it was chasing is picked back up as
+its own, separately-admitted follow-on.
 
 **Tests (enumerated).** (1) `_protected_control_path` returns `True` for each
-of the twelve registered paths —
+of the fourteen new registered paths —
 `.github/workflows/deploy_vps_paper_dispatch.yml`,
 `scripts/deploy_vps_paper_manual.sh`,
 `tests/test_deploy_vps_paper_dispatch_workflow.py`,
@@ -11306,14 +11348,17 @@ of the twelve registered paths —
 `scripts/write_vps_telemetry_manifest.py`,
 `scripts/check_polymarket_vps_paper.sh`,
 `docker-compose.vps-paper.yml`,
-`scripts/run_vps_deploy_acceptance.sh`, and
-`src/polymarket_predictive_engine/deploy_acceptance.py`; (2) it returns `True`
-for each of the same twelve paths in the forms `./<path>` and `/<path>` and
+`scripts/run_vps_deploy_acceptance.sh`,
+`src/polymarket_predictive_engine/deploy_acceptance.py`,
+`.github/workflows/deploy-polymarket-vps-paper.yml`, and
+`scripts/verify_independent_main_acceptance.py`; (2) it returns `True`
+for each of the same fourteen paths in the forms `./<path>` and `/<path>` and
 with backslash separators, exercising the existing normaliser; (3) a
 simulated PR touching only the dispatch workflow reports
 `trusted_merge_control_unchanged: false` and lists that path in
 `protected_control_changes`; (4) the same for the test file alone, the
-deploy script alone, the acceptance script alone, and the acceptance module
+deploy script alone, the acceptance script alone, the acceptance module
+alone, the Path A workflow alone, and the Path A acceptance-verifier script
 alone; (5) every
 path in `PROTECTED_CONTROL_PATHS` **before** this change still returns `True` —
 the tightening-only claim, asserted rather than argued; (6) a path outside the
@@ -11332,17 +11377,16 @@ produces is a member of `PROTECTED_CONTROL_PATHS`; this is the one test in
 the set that fails on its own if a future PR adds an eighth staged helper, or
 swaps the acceptance chain for something else, without registering it,
 rather than depending on someone noticing that this WO's hand-enumerated
-list is now incomplete; (8) the governance-refresh producer's
-`governance_refresh.json` output carries `protected_control_paths_count`
-equal to `len(PROTECTED_CONTROL_PATHS)` and `staged_set_subset_ok: true`,
-both computed by calling the same parse function test (7) uses rather than a
-second, divergent implementation of it.
+list is now incomplete. (This test's parse does not reach the two Path A
+entries — they are not staged or invoked by anything `scripts/deploy_vps_
+paper_manual.sh` or the compose file's text contains — which is exactly why
+(1)-(4) enumerate them by hand instead.)
 
 **Fail-safe sentence.** This changes no gate threshold, no eligibility rule, no
 M-A/M-B/M-C predicate, and no order, signer, or credential surface; it can only
 cause the merge gate to refuse a PR it would previously have accepted, never the
 reverse, and a failure of the added entries degrades to the pre-WO-153 behaviour
-of not flagging those twelve files.
+of not flagging those fourteen files.
 
 **Operational cost, stated rather than left to be discovered.** Once this merges,
 routine edits to `tests/test_deploy_vps_paper_dispatch_workflow.py` — including
@@ -11357,35 +11401,52 @@ attestation is produced only by the `/independent-merge` path, which is
 deadlocked and is not how owner-routed PRs merge; and on detecting a protected
 path that script fails its step, so no attestation artifact is published for
 exactly the PRs this control flags. The check is therefore **local and
-direct**, not attestation-based — and, on a further round of external review,
-the mechanism below is revised a second time: an earlier draft proposed a
-read-only `_protected_control_path` invocation from a Python one-liner as
-part (b) of this check; that form was dropped for **S6** (a day-after check
-the owner can carry out by reading a result, not by running code — typing a
-one-liner into a shell fails that bar regardless of how harmless the call
-is). The draft that replaced it — reading the next PR's required ARM64 gate
-as evidence — was itself rejected on the same S6 ground on further review:
-it makes the owner wait on an unrelated future PR and infer this
-registration's coverage from a general-purpose green CI run, rather than
-reading a result that speaks to this registration directly. The retained
-check instead makes the registry itself production-observable: the existing
-VPS governance-refresh producer (`src/polymarket_predictive_engine/refresh_
-governance.py`, run as `run_governance_refresh` by `scripts/run_vps_ops_
-scheduler.sh`) already writes `governance_refresh.json` into `outputs/
-polymarket_model_governance/`, and `scripts/push_vps_telemetry.sh` already
-publishes that directory, unmodified, to `origin/vps-telemetry` on its
-existing cadence. That output additionally carries
-`protected_control_paths_count` (`len(PROTECTED_CONTROL_PATHS)`) and
-`staged_set_subset_ok` (`True` iff the closure parse's set — test (7) above
-— is a subset of the registry), both computed by the same parse the closure
-test uses, never a second implementation of it. On the day after merge the
-owner reads `protected_control_paths_count == 12` and
-`staged_set_subset_ok: true` off the already-checked `origin/vps-telemetry`
-branch — a result, not a command. This is scope growth over the original
-two-file Touch ONLY list, made on this further round of external review
-rather than left implicit, and recorded as such where the Touch ONLY list is
-stated above. If the `/independent-merge` path is ever un-deadlocked, its
-refusal on a PR touching any of the twelve paths (blocker
+direct**, not attestation-based. An earlier draft proposed a read-only
+`_protected_control_path` invocation from a Python one-liner as part (b) of
+this check; that form was dropped for **S6** (a day-after check the owner can
+carry out by reading a result, not by running code — typing a one-liner into
+a shell fails that bar regardless of how harmless the call is).
+
+A second draft tried to clear S6 by making the registry itself
+production-observable: have the existing VPS governance-refresh producer
+(`src/polymarket_predictive_engine/refresh_governance.py`, run as
+`run_governance_refresh` by `scripts/run_vps_ops_scheduler.sh`) additionally
+publish `protected_control_paths_count` and `staged_set_subset_ok` into its
+already-pushed `governance_refresh.json`, computed by the same parse test (7)
+above uses. **That design is not implementable and is not built.** The
+producer runs inside the `vps-ops-scheduler` container, whose `volumes:`
+mount only `./docs`, `./scripts`, and `./src` into the container, read-only
+(`docker-compose.vps-paper.yml:215-226`) — the repo-root `docker-compose.
+vps-paper.yml` file itself is never mounted in. Test (7)'s parse needs the
+compose file's own text (to find the `vps-deploy-acceptance` service's
+`command:` line); a producer running inside that container has no path from
+which to read it, so it would either crash on every refresh or (if guarded)
+publish a permanently-false `staged_set_subset_ok` that reflects a missing
+mount, not a registry drift — neither of which is the signal this check was
+meant to give the owner. This design flaw was found after the round-3
+adjudication that grew the Touch ONLY list to three files accepted this
+producer sight unseen; it is why that third file is removed from the Touch
+ONLY list above rather than kept. The production-observable signal this was
+chasing is **deferred, not abandoned**: §153.1, below, outlines a follow-on
+that replaces file-parsing with a value computed from data already in the
+process (the imported `PROTECTED_CONTROL_PATHS` constant itself, not a read
+of the compose file), which sidesteps this mount problem entirely and is why
+it is registered separately rather than folded back into this WO's Touch
+ONLY list a second time.
+
+**The retained check, until §153.1 lands, is required-gate green.** The
+enumerated predicate tests (1)-(7) above run inside the self-hosted ARM64
+suite every PR must pass; the day after this WO merges, the owner confirms
+the next required-gate run on `main` is green, with retained Actions history
+as the record. This is the same mechanism an earlier round rejected on S6
+grounds — it makes the owner infer this registration's coverage from a
+general-purpose green CI run rather than reading a result that speaks to
+this registration directly — and that objection is not wrong, it is simply
+outweighed now: the alternative that would have cleared it outright proved
+unimplementable, and a deferred, correctly-scoped follow-on is preferable to
+either shipping the broken producer or leaving this WO's day-after check
+unstated. If the `/independent-merge` path is ever un-deadlocked, its
+refusal on a PR touching any of the twenty-six paths (blocker
 `pull_request_changes_trusted_merge_control`) remains available as
 additional runtime evidence, not this check's mechanism.
 
@@ -11422,3 +11483,50 @@ its own permission grant and says so in the WO text, so no future reader mistake
 the warning for a transient failure. **Nothing is built under scope (b) until the
 owner picks one**; this section exists so the conflict is on the record rather
 than living in a warning string on the VPS.
+
+### 153.1 — Follow-on stub (NOT dispatchable): production attestation of the protected-path registry
+
+**Status: outline only.** This is not a registration and grants no admission.
+It is not scoped, has no A1-A10 treatment, no Touch ONLY list, and no tests —
+a full spec covering all ten must be drafted and independently admitted
+before any build starts. It exists here only so the day-after check above
+has somewhere to point the deferred production-observable signal at, rather
+than leaving that pointer dangling with nothing behind it.
+
+**The failure mode this replaces.** The round-3 design that this WO's
+Day-after check rejects tried to prove the registry is production-correct by
+having the governance-refresh producer re-run test (7)'s closure parse
+against the compose file's text, inside the `vps-ops-scheduler` container.
+That container never mounts the repo-root `docker-compose.vps-paper.yml`
+into itself — see the Day-after check, above, for the verified mount list —
+so the parse has nothing to read there. Any redesign that still depends on
+reading files from inside that container has the same problem and is not an
+improvement.
+
+**The shape of the replacement.** Compute a value from data already resident
+in the process instead of from a file read: the governance refresh already
+runs with `scripts` on `PYTHONPATH` (`docker-compose.vps-paper.yml`'s
+`vps-ops-scheduler` service sets `PYTHONPATH: scripts:src`), so
+`refresh_governance.py` can `import` `PROTECTED_CONTROL_PATHS` directly from
+`merge_independently_reviewed_pr` — no file parsing, no mount requirement —
+and publish a **hash** of the imported constant into `governance_refresh.
+json`, not a count. A count is insufficient on its own: swapping one
+protected path out for an unrelated one leaves `len(PROTECTED_CONTROL_
+PATHS)` unchanged, so `protected_control_paths_count` cannot see a
+count-preserving swap; a hash of the sorted, normalised set changes on any
+addition, removal, or substitution, which is the actual invariant a
+production attestation of this registry needs to protect.
+
+**Left open, to be resolved by the full spec before dispatch, not here:**
+the hash algorithm and encoding; whether the published value stands alone or
+pairs with the count for an owner-legible cross-check; the field name and
+its place in `governance_refresh.json`; what the owner diffs the published
+hash against — a reference value committed at registration time, recomputed
+at every future registry change, or some other anchor — and, the question
+that must not be waived by default just because this stub exists: whether a
+hash the owner cannot recompute by hand still clears **S6** (a day-after
+check the owner can carry out by reading a result, not by running code),
+the same bar that eliminated the Python-one-liner and the wait-on-an-
+unrelated-PR designs earlier in this WO. None of this is decided by this
+stub; it is recorded so the next drafting pass starts from the actual
+failure mode found here rather than rediscovering it.

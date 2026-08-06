@@ -521,3 +521,34 @@ def test_wo102_toxicity_floor_rules_are_legitimate_requote_reasons(tmp_path: Pat
         _seed_acceptance(cfg, requote_state="pull_quotes_now", requote_rule=rule)
         result = build_deploy_acceptance(cfg, expected_deploy_sha="newsha", as_of=AS_OF)
         assert result["status"] == "PASS", rule
+
+
+def test_wo153_deploy_acceptance_reports_protected_control_paths_count_and_hash(
+    tmp_path: Path,
+) -> None:
+    # WO-153 test (10): the running container's own import of
+    # PROTECTED_CONTROL_PATHS, not a hardcoded count/hash literal, so this
+    # test does not go stale the day a later WO legitimately grows the
+    # registry. Import it "the same way" deploy_acceptance.py does — the
+    # self-contained sys.path resolution, since pytest.ini's
+    # `pythonpath = src` does not add `scripts`.
+    import hashlib
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    root = _Path(__file__).resolve().parents[2]
+    scripts_dir = root / "scripts"
+    if str(scripts_dir) not in _sys.path:
+        _sys.path.insert(0, str(scripts_dir))
+    from merge_independently_reviewed_pr import PROTECTED_CONTROL_PATHS
+
+    cfg = _cfg(tmp_path)
+    _seed_acceptance(cfg)
+
+    result = build_deploy_acceptance(cfg, expected_deploy_sha="newsha", as_of=AS_OF)
+
+    assert result["protected_control_paths_count"] == len(PROTECTED_CONTROL_PATHS)
+    expected_hash = hashlib.sha256(
+        "\n".join(sorted(PROTECTED_CONTROL_PATHS)).encode("utf-8")
+    ).hexdigest()
+    assert result["protected_control_paths_hash"] == expected_hash

@@ -44,6 +44,29 @@ PROTECTED_CONTROL_PATHS = {
     "sitecustomize.py",
     "tox.ini",
     "usercustomize.py",
+    # WO-153 scope (a) — the deploy-control surface. `_protected_control_path`
+    # predates any deploy-control surface; these sixteen entries are the
+    # dispatch workflow/script/test-file triad, the six scripts and the
+    # compose file `stage_target_scripts` stages as gates, the three-file
+    # acceptance-verdict chain reached through that compose file's own gate
+    # command, and Path A's own binding step plus its tailnet-transport
+    # enforcement step.
+    ".github/workflows/deploy_vps_paper_dispatch.yml",
+    "scripts/deploy_vps_paper_manual.sh",
+    "tests/test_deploy_vps_paper_dispatch_workflow.py",
+    "scripts/preflight_vps_capacity.py",
+    "scripts/validate_dashboard_private_transport.py",
+    "scripts/update_vps_checkout_preserving_runtime.py",
+    "scripts/rollback_vps_paper_deploy.py",
+    "scripts/write_vps_telemetry_manifest.py",
+    "scripts/check_polymarket_vps_paper.sh",
+    "docker-compose.vps-paper.yml",
+    "scripts/run_vps_deploy_acceptance.sh",
+    "src/polymarket_predictive_engine/deploy_acceptance.py",
+    "src/polymarket_predictive_engine/artifact_contracts.py",
+    ".github/workflows/deploy-polymarket-vps-paper.yml",
+    "scripts/verify_independent_main_acceptance.py",
+    "scripts/configure_polymarket_dashboard_tailscale.sh",
 }
 # The trusted workflow invokes these tools through ``python -m`` while its
 # current directory is the candidate checkout.  A top-level module/package

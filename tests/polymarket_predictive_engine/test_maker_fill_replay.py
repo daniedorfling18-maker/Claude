@@ -6,6 +6,7 @@ import gzip
 import json
 import os
 import re
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,15 @@ from polymarket_predictive_engine import trade_print_collector
 from polymarket_predictive_engine.cli import COMMANDS
 from polymarket_predictive_engine.config import load_config
 from polymarket_predictive_engine.maker_fill_replay import run_maker_fill_replay
-from polymarket_predictive_engine.utils import read_json, write_csv, write_json
+from polymarket_predictive_engine.utils import (
+    append_csv_rows,
+    csv_columns,
+    parse_timestamp,
+    read_csv_rows,
+    read_json,
+    write_csv,
+    write_json,
+)
 
 
 def _config(tmp_path: Path):
@@ -2033,3 +2042,1084 @@ def test_wo149_run_maker_fill_replay_publishes_lag_fields_at_top_level(tmp_path)
     assert summary["fills_beyond_legacy_lag"] == 0
     assert summary["entry_state_lag_unmeasurable"] == 0
     assert summary["no_contemporaneous_state_rate"] == 0.0
+
+
+# ===========================================================================
+# WO-148: the maker-watchlist tier-assignment event ledger.
+# Tests (1)-(16) are 148.5's own enumeration; tests (17)-(30) are §148.6's
+# appended enumeration. Numbering follows the register, not file order.
+# ===========================================================================
+
+
+def _wo148_config(tmp_path: Path, **overrides: Any):
+    """A `snapshot_official_books` config with roomy tranche caps (25 each,
+    matching the deployed caps §148.6 reasons about) so small watchlist
+    fixtures are never accidentally truncated. Overrides mutate the loaded
+    config's own `raw` dict directly - no YAML round-trip, so passing a
+    YAML-boolean-alias string such as `"false"` or `"no"` for `enabled`
+    cannot be silently reinterpreted as a real boolean by the dumper.
+    """
+
+    cfg = _config(tmp_path)
+    cfg.raw["maker_fill_replay"].update(
+        {
+            "book_source": "official",
+            "request_pause_seconds": 0,
+            "regime_days": 7,
+            "max_markets": 25,
+            "max_persistent_markets": 25,
+            "max_candidate_markets": 25,
+        }
+    )
+    cfg.raw["maker_fill_replay"].update(overrides)
+    return cfg
+
+
+def _wo148_portfolio_entries(pairs) -> list[dict[str, Any]]:
+    return [
+        {"condition_id": cid, "token_id": tok, "quote_size_shares": 10, "quote_distance": 0.01}
+        for cid, tok in pairs
+    ]
+
+
+def _wo148_study(cfg, portfolio_pairs=(), *, generated_at_utc: str = "2026-07-10T00:00:00Z") -> None:
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {
+            "generated_at_utc": generated_at_utc,
+            "portfolio": _wo148_portfolio_entries(portfolio_pairs),
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+
+
+def _wo148_candidates_and_books(
+    cfg,
+    *,
+    candidates=(),
+    persistent_books=(),
+    write_candidates_csv: bool = True,
+    write_books_dir: bool = True,
+) -> None:
+    out = cfg.output_root / "maker_carry"
+    if write_candidates_csv:
+        write_csv(
+            out / "maker_carry_candidates.csv",
+            [{"condition_id": cid, "token_id": tok, "net_carry_usd_per_day": "1.0"} for cid, tok in candidates],
+            fieldnames=["condition_id", "token_id", "net_carry_usd_per_day"],
+        )
+    if write_books_dir:
+        (out / "official_books").mkdir(parents=True, exist_ok=True)
+    for cid, tok in persistent_books:
+        _recent_book_file(cfg, cid, tok)
+
+
+def _wo148_deny_network(monkeypatch) -> None:
+    def _boom(*args, **kwargs):
+        raise RuntimeError("WO-148 tests must not perform network calls")
+
+    monkeypatch.setattr(maker_fill_replay.requests, "post", _boom)
+    monkeypatch.setattr(maker_fill_replay.requests, "get", _boom)
+    monkeypatch.setattr(maker_fill_replay.time, "sleep", lambda *_: None)
+
+
+def _tier_events_path(cfg) -> Path:
+    return cfg.output_root / "maker_carry" / maker_fill_replay.TIER_EVENTS_CSV_NAME
+
+
+def _tier_state_path(cfg) -> Path:
+    return cfg.output_root / "maker_carry" / maker_fill_replay.TIER_STATE_JSON_NAME
+
+
+def _seed_tier_events(cfg, rows) -> None:
+    append_csv_rows(_tier_events_path(cfg), rows, fieldnames=maker_fill_replay.TIER_EVENT_FIELDS)
+
+
+def _seed_tier_state(cfg, *, generated_at_utc: str, **extra: Any) -> None:
+    payload = {
+        "generated_at_utc": generated_at_utc,
+        "work_order": "WO-148",
+        "watchlist_size": 0,
+        "tier_counts": {"portfolio": 0, "persistent": 0, "seed": 0},
+        "reporting_only": True,
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+    payload.update(extra)
+    write_json(_tier_state_path(cfg), payload)
+
+
+def test_wo148_test1_genesis_emits_arrivals_from_absent_for_the_whole_watchlist(tmp_path, monkeypatch):
+    # Test (1): 2 portfolio + 1 persistent + 3 seed -> exactly 6 rows, header
+    # exactly as registered, every previous_tier == "absent".
+    cfg = _wo148_config(tmp_path)
+    _wo148_study(cfg, [("0xp1", "tokP1"), ("0xp2", "tokP2")])
+    _wo148_candidates_and_books(
+        cfg,
+        candidates=[
+            ("0xp1", "tokP1"), ("0xp2", "tokP2"), ("0xr1", "tokR1"),
+            ("0xs1", "tokS1"), ("0xs2", "tokS2"), ("0xs3", "tokS3"),
+        ],
+        persistent_books=[("0xr1", "tokR1")],
+    )
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    # A fresh state file keeps this run out of resync (the same device test
+    # (17) uses) so genesis rows are stamped "absent", not "unknown" - resync
+    # itself is exercised separately by tests (6)-(8).
+    _seed_tier_state(cfg, generated_at_utc="2026-07-14T12:00:00Z")
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert summary["tier_events_status"] == "ok"
+    assert summary["tier_events_written"] == 6
+    assert summary["tier_events_resync"] is False
+    assert summary["tier_events_malformed_rows"] == 0
+    assert summary["tier_event_burst"] is False
+    assert summary["tier_precedence_conflicts"] == 0
+    events_path = _tier_events_path(cfg)
+    assert csv_columns(events_path) == maker_fill_replay.TIER_EVENT_FIELDS
+    rows = read_csv_rows(events_path)
+    assert len(rows) == 6
+    assert {row["condition_id"] for row in rows} == {"0xp1", "0xp2", "0xr1", "0xs1", "0xs2", "0xs3"}
+    assert all(row["previous_tier"] == "absent" for row in rows)
+    tiers = {row["condition_id"]: row["tier"] for row in rows}
+    assert tiers["0xp1"] == tiers["0xp2"] == "portfolio"
+    assert tiers["0xr1"] == "persistent"
+    assert tiers["0xs1"] == tiers["0xs2"] == tiers["0xs3"] == "seed"
+
+
+def test_wo148_test2_idempotent_rerun_appends_nothing_and_bytes_match(tmp_path, monkeypatch):
+    # Test (2): re-run identical -> 0 rows, file bytes byte-identical.
+    cfg = _wo148_config(tmp_path)
+    _wo148_study(cfg, [("0xp1", "tokP1")])
+    _wo148_candidates_and_books(cfg, candidates=[("0xp1", "tokP1")])
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _seed_tier_state(cfg, generated_at_utc="2026-07-14T12:00:00Z")
+
+    first = maker_fill_replay.snapshot_official_books(cfg)
+    assert first["tier_events_written"] == 1
+    events_path = _tier_events_path(cfg)
+    bytes_after_first = events_path.read_bytes()
+
+    second = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert second["tier_events_written"] == 0
+    assert second["tier_events_status"] == "ok"
+    assert events_path.read_bytes() == bytes_after_first
+
+
+def test_wo148_test3_promotion_seed_to_portfolio_emits_one_row(tmp_path, monkeypatch):
+    # Test (3): promotion seed -> portfolio -> exactly 1 row.
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _seed_tier_state(cfg, generated_at_utc="2026-07-14T12:00:00Z")
+
+    _wo148_study(cfg, [])
+    _wo148_candidates_and_books(cfg, candidates=[("0xmove", "tokMove")])
+    first = maker_fill_replay.snapshot_official_books(cfg)
+    assert first["tier_events_written"] == 1
+
+    _wo148_study(cfg, [("0xmove", "tokMove")])
+    second = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert second["tier_events_written"] == 1
+    rows = read_csv_rows(_tier_events_path(cfg))
+    assert rows[-1]["condition_id"] == "0xmove"
+    assert rows[-1]["previous_tier"] == "seed"
+    assert rows[-1]["tier"] == "portfolio"
+
+
+def test_wo148_test4_departure_emits_absent_row(tmp_path, monkeypatch):
+    # Test (4): departure -> 1 row, tier == "absent".
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _seed_tier_state(cfg, generated_at_utc="2026-07-14T12:00:00Z")
+
+    _wo148_study(cfg, [("0xleave", "tokLeave"), ("0xstay", "tokStay")])
+    _wo148_candidates_and_books(cfg, candidates=[("0xleave", "tokLeave"), ("0xstay", "tokStay")])
+    first = maker_fill_replay.snapshot_official_books(cfg)
+    assert first["tier_events_written"] == 2
+
+    # 0xleave genuinely departs - dropped from the portfolio AND the
+    # candidate ranking, so it cannot reappear as a seed this cycle.
+    _wo148_study(cfg, [("0xstay", "tokStay")])
+    _wo148_candidates_and_books(cfg, candidates=[("0xstay", "tokStay")])
+    second = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert second["tier_events_written"] == 1
+    rows = read_csv_rows(_tier_events_path(cfg))
+    assert rows[-1] == {
+        "event_utc": "2026-07-14T12:00:00Z",
+        "condition_id": "0xleave",
+        "token_id": "tokLeave",
+        "previous_tier": "portfolio",
+        "tier": "absent",
+    }
+
+
+def test_wo148_test5_reentry_seed_absent_seed_produces_three_rows(tmp_path, monkeypatch):
+    # Test (5): re-entry seed -> absent -> seed -> three rows; a conversion
+    # computation sees two distinct seed entries.
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _seed_tier_state(cfg, generated_at_utc="2026-07-14T12:00:00Z")
+    _wo148_study(cfg, [])  # portfolio stays empty throughout; only seed flickers.
+
+    _wo148_candidates_and_books(cfg, candidates=[("0xflicker", "tokFlicker")])
+    c1 = maker_fill_replay.snapshot_official_books(cfg)
+    assert c1["tier_events_written"] == 1
+
+    _wo148_candidates_and_books(cfg, candidates=[])
+    c2 = maker_fill_replay.snapshot_official_books(cfg)
+    assert c2["tier_events_written"] == 1
+
+    _wo148_candidates_and_books(cfg, candidates=[("0xflicker", "tokFlicker")])
+    c3 = maker_fill_replay.snapshot_official_books(cfg)
+    assert c3["tier_events_written"] == 1
+
+    rows = read_csv_rows(_tier_events_path(cfg))
+    flicker_rows = [row for row in rows if row["condition_id"] == "0xflicker"]
+    assert [row["tier"] for row in flicker_rows] == ["seed", "absent", "seed"]
+    assert [row["previous_tier"] for row in flicker_rows] == ["absent", "seed", "absent"]
+    seed_entries = [row for row in flicker_rows if row["tier"] == "seed"]
+    assert len(seed_entries) == 2
+
+
+def test_wo148_test6_missing_state_file_stamps_unknown_and_sets_resync(tmp_path, monkeypatch):
+    # Test (6): state missing -> all (emitted) rows "unknown", resync True.
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _wo148_study(cfg, [])
+    _wo148_candidates_and_books(cfg, candidates=[("0xseed1", "tokSeed1")])
+    # Prior tier established via the ledger's OWN last row, not the state
+    # file - deliberately a DIFFERENT tier than this cycle computes, so a
+    # real transition exists to observe the resync stamping on.
+    _seed_tier_events(
+        cfg,
+        [
+            {
+                "event_utc": "2026-07-10T00:00:00Z",
+                "condition_id": "0xseed1",
+                "token_id": "tokSeed1",
+                "previous_tier": "absent",
+                "tier": "portfolio",
+            }
+        ],
+    )
+    assert not _tier_state_path(cfg).exists()
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert summary["tier_events_resync"] is True
+    assert summary["tier_events_written"] == 1
+    rows = read_csv_rows(_tier_events_path(cfg))
+    assert rows[-1]["previous_tier"] == "unknown"
+    assert rows[-1]["tier"] == "seed"
+
+
+def test_wo148_test7_state_age_boundary_at_21600_seconds(tmp_path, monkeypatch):
+    # Test (7), S1 clock-advance pair: state at now-21599s -> real prior
+    # tier; advance the clock to now-21601s -> "unknown".
+    def _run(root: Path, *, offset_seconds: float):
+        root.mkdir()
+        cfg = _wo148_config(root)
+        _wo148_study(cfg, [])
+        _wo148_candidates_and_books(cfg, candidates=[("0xclock", "tokClock")])
+        _seed_tier_events(
+            cfg,
+            [
+                {
+                    "event_utc": "2026-07-14T00:00:00Z",
+                    "condition_id": "0xclock",
+                    "token_id": "tokClock",
+                    "previous_tier": "absent",
+                    "tier": "portfolio",
+                }
+            ],
+        )
+        _seed_tier_state(cfg, generated_at_utc="2026-07-14T00:00:00Z")
+        run_stamp = (parse_timestamp("2026-07-14T00:00:00Z") + timedelta(seconds=offset_seconds)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        return cfg, run_stamp
+
+    _wo148_deny_network(monkeypatch)
+
+    cfg_within, stamp_within = _run(tmp_path / "within", offset_seconds=21599)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: stamp_within)
+    within = maker_fill_replay.snapshot_official_books(cfg_within)
+    assert within["tier_events_resync"] is False
+    assert read_csv_rows(_tier_events_path(cfg_within))[-1]["previous_tier"] == "portfolio"
+
+    cfg_beyond, stamp_beyond = _run(tmp_path / "beyond", offset_seconds=21601)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: stamp_beyond)
+    beyond = maker_fill_replay.snapshot_official_books(cfg_beyond)
+    assert beyond["tier_events_resync"] is True
+    assert read_csv_rows(_tier_events_path(cfg_beyond))[-1]["previous_tier"] == "unknown"
+
+
+def test_wo148_test8_unparseable_absent_and_future_state_all_resync(tmp_path, monkeypatch):
+    # Test (8): state unparseable, absent, and future-by-60s -> "unknown" in
+    # all three.
+    def _base(root: Path):
+        root.mkdir()
+        cfg = _wo148_config(root)
+        _wo148_study(cfg, [])
+        _wo148_candidates_and_books(cfg, candidates=[("0xstate", "tokState")])
+        _seed_tier_events(
+            cfg,
+            [
+                {
+                    "event_utc": "2026-07-14T00:00:00Z",
+                    "condition_id": "0xstate",
+                    "token_id": "tokState",
+                    "previous_tier": "absent",
+                    "tier": "portfolio",
+                }
+            ],
+        )
+        return cfg
+
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T00:10:00Z")
+
+    cfg_unparseable = _base(tmp_path / "unparseable")
+    _tier_state_path(cfg_unparseable).parent.mkdir(parents=True, exist_ok=True)
+    _tier_state_path(cfg_unparseable).write_text("{not json", encoding="utf-8")
+    unparseable = maker_fill_replay.snapshot_official_books(cfg_unparseable)
+    assert unparseable["tier_events_resync"] is True
+    assert read_csv_rows(_tier_events_path(cfg_unparseable))[-1]["previous_tier"] == "unknown"
+
+    cfg_absent = _base(tmp_path / "absent")
+    assert not _tier_state_path(cfg_absent).exists()
+    absent = maker_fill_replay.snapshot_official_books(cfg_absent)
+    assert absent["tier_events_resync"] is True
+    assert read_csv_rows(_tier_events_path(cfg_absent))[-1]["previous_tier"] == "unknown"
+
+    cfg_future = _base(tmp_path / "future")
+    _seed_tier_state(cfg_future, generated_at_utc="2026-07-14T00:11:00Z")  # 60s in the future
+    future = maker_fill_replay.snapshot_official_books(cfg_future)
+    assert future["tier_events_resync"] is True
+    assert read_csv_rows(_tier_events_path(cfg_future))[-1]["previous_tier"] == "unknown"
+
+
+def test_wo148_test9_unreadable_ledger_read_failed(tmp_path, monkeypatch):
+    # Test (9): unreadable ledger -> 0 rows, "read_failed", state not
+    # written, collector still returns normally.
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _wo148_study(cfg, [("0xp1", "tokP1")])
+    _wo148_candidates_and_books(cfg, candidates=[("0xp1", "tokP1")])
+    events_path = _tier_events_path(cfg)
+    events_path.parent.mkdir(parents=True, exist_ok=True)
+    events_path.mkdir()  # a directory at the ledger's own path is unreadable as a CSV
+    state_path = _tier_state_path(cfg)
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert summary["tier_events_status"] == "read_failed"
+    assert summary["tier_events_written"] == 0
+    assert not state_path.exists()
+    assert summary["status"] in {"ok", "partial", "failed"}  # the collector itself still ran
+    assert events_path.is_dir()  # left untouched, never converted into a file
+
+
+def test_wo148_test10_append_raises_write_failed_state_not_written(tmp_path, monkeypatch):
+    # Test (10): append_csv_rows monkeypatched to raise -> "write_failed",
+    # state not written, return otherwise unchanged.
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _wo148_study(cfg, [("0xp1", "tokP1")])
+    _wo148_candidates_and_books(cfg, candidates=[("0xp1", "tokP1")])
+
+    def _boom(*args, **kwargs):
+        raise OSError("simulated append failure")
+
+    monkeypatch.setattr(maker_fill_replay, "append_csv_rows", _boom)
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert summary["tier_events_status"] == "write_failed"
+    assert summary["tier_events_written"] == 0
+    assert not _tier_state_path(cfg).exists()
+    assert summary["portfolio_markets"] == 1
+    assert summary["markets_polled"] == 1
+
+
+def test_wo148_test11_malformed_rows_ignored_counted_prefix_preserved(tmp_path, monkeypatch):
+    # Test (11): malformed historical rows -> ignored, counted, and the file
+    # prefix preceding the append is byte-identical (the WO-115 regression
+    # guard).
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _wo148_study(cfg, [("0xp1", "tokP1"), ("0xp2", "tokP2")])
+    _wo148_candidates_and_books(cfg, candidates=[("0xp1", "tokP1"), ("0xp2", "tokP2")])
+    _seed_tier_state(cfg, generated_at_utc="2026-07-14T12:00:00Z")
+
+    events_path = _tier_events_path(cfg)
+    events_path.parent.mkdir(parents=True, exist_ok=True)
+    events_path.write_text(
+        "event_utc,condition_id,token_id,previous_tier,tier\n"
+        "2026-07-01T00:00:00Z,0xp1,tokP1,absent,portfolio\n"
+        "2026-07-01T00:00:00Z,,tokBad,absent,portfolio\n"
+        "2026-07-01T00:00:00Z,0xbadtier,tokBad2,absent,not_a_tier\n",
+        encoding="utf-8",
+    )
+    prefix_before = events_path.read_bytes()
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert summary["tier_events_malformed_rows"] == 2
+    assert summary["tier_events_written"] == 1  # only 0xp2 is a genuine new arrival
+    assert events_path.read_bytes().startswith(prefix_before)
+
+
+def test_wo148_test12_burst_of_201_transitions_all_written_and_flagged(tmp_path):
+    # Test (12): 201 transitions -> all 201 written, tier_event_burst True.
+    out_root = tmp_path / "maker_carry"
+    out_root.mkdir(parents=True)
+    portfolio = [{"condition_id": f"0xburst{i:04d}", "token_id": f"tokBurst{i:04d}"} for i in range(201)]
+
+    result = maker_fill_replay._write_tier_events(out_root, "2026-07-14T12:00:00Z", portfolio, [], [])
+
+    assert result["tier_events_status"] == "ok"
+    assert result["tier_events_written"] == 201
+    assert result["tier_event_burst"] is True
+    rows = read_csv_rows(out_root / maker_fill_replay.TIER_EVENTS_CSV_NAME)
+    assert len(rows) == 201
+
+
+def test_wo148_test13_precedence_conflict_portfolio_wins_and_is_counted(tmp_path):
+    # Test (13): precedence conflict -> registered precedence applied,
+    # tier_precedence_conflicts == 1.
+    out_root = tmp_path / "maker_carry"
+    out_root.mkdir(parents=True)
+    portfolio = [{"condition_id": "0xdupe", "token_id": "tokDupe"}]
+    persistent = [{"condition_id": "0xdupe", "token_id": "tokDupeStale"}]
+
+    result = maker_fill_replay._write_tier_events(out_root, "2026-07-14T12:00:00Z", portfolio, persistent, [])
+
+    assert result["tier_precedence_conflicts"] == 1
+    rows = read_csv_rows(out_root / maker_fill_replay.TIER_EVENTS_CSV_NAME)
+    assert len(rows) == 1
+    assert rows[0]["tier"] == "portfolio"
+
+
+def test_wo148_test14_selection_invariance_ledger_write_does_not_move_the_watchlist(tmp_path, monkeypatch):
+    # Test (14): selection invariance - the exact watchlist (order and
+    # membership) and market_polls are identical whether or not the WO-148
+    # ledger sidecar actually writes anything, proving no selection
+    # behaviour moved.
+    def _build(root: Path):
+        root.mkdir()
+        cfg = _wo148_config(root)
+        _wo148_study(cfg, [("0xp1", "tokP1")])
+        _wo148_candidates_and_books(
+            cfg,
+            candidates=[("0xp1", "tokP1"), ("0xs1", "tokS1")],
+            persistent_books=[("0xr1", "tokR1")],
+        )
+        return cfg
+
+    cfg_control = _build(tmp_path / "control")
+    cfg_live = _build(tmp_path / "live")
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+
+    def _noop_tier_events(*_args, **_kwargs):
+        return {
+            "tier_events_status": "ok",
+            "tier_events_written": 0,
+            "tier_events_resync": False,
+            "tier_events_malformed_rows": 0,
+            "tier_event_burst": False,
+            "tier_precedence_conflicts": 0,
+        }
+
+    with monkeypatch.context() as m:
+        m.setattr(maker_fill_replay, "_write_tier_events", _noop_tier_events)
+        control = maker_fill_replay.snapshot_official_books(cfg_control)
+    live = maker_fill_replay.snapshot_official_books(cfg_live)
+
+    tier_keys = {
+        "tier_events_status",
+        "tier_events_written",
+        "tier_events_resync",
+        "tier_events_malformed_rows",
+        "tier_event_burst",
+        "tier_precedence_conflicts",
+    }
+
+    def _comparable(summary):
+        trimmed = {k: v for k, v in summary.items() if k not in tier_keys}
+        trimmed["files_written"] = [Path(p).name for p in trimmed["files_written"]]
+        return trimmed
+
+    assert _comparable(control) == _comparable(live)
+    assert [poll["condition_id"] for poll in control["market_polls"]] == [
+        poll["condition_id"] for poll in live["market_polls"]
+    ]
+
+
+def test_wo148_test15_ledger_artifacts_are_not_enrolled():
+    # Test (15): non-enrolment guard - neither new path appears in
+    # DEFAULT_LEDGER_REGISTRY nor the example config's ledger_globs.
+    from polymarket_predictive_engine.ledger_anchor import DEFAULT_LEDGER_REGISTRY
+
+    registered_globs = {entry["glob"] for entry in DEFAULT_LEDGER_REGISTRY}
+    assert f"maker_carry/{maker_fill_replay.TIER_EVENTS_CSV_NAME}" not in registered_globs
+    assert f"maker_carry/{maker_fill_replay.TIER_STATE_JSON_NAME}" not in registered_globs
+
+    raw = yaml.safe_load(Path("polymarket_predictive_config.example.yaml").read_text(encoding="utf-8"))
+    example_globs = {entry["glob"] for entry in raw["ledger_anchor"]["ledger_globs"]}
+    assert f"maker_carry/{maker_fill_replay.TIER_EVENTS_CSV_NAME}" not in example_globs
+    assert f"maker_carry/{maker_fill_replay.TIER_STATE_JSON_NAME}" not in example_globs
+
+
+def test_wo148_test16_ledger_path_string_and_caller_set_are_exhaustively_scanned():
+    # Test (16), corrected per §148.6 reconciliation item 6: the ledger CSV
+    # path string appears in exactly one non-test source file, at exactly
+    # one call site (its own module-level constant definition), and
+    # `snapshot_official_books(` is called from exactly the four §148.6
+    # table sites, split 2 (maker_fill_replay.py) + 2 (cli.py) - the
+    # unamended 148.5 expectation ("exactly :957, :968, and cli.py:431",
+    # three sites) is superseded.
+    root = Path(__file__).resolve().parents[2]
+    roots = {
+        "src": root / "src",
+        "scripts": root / "scripts",
+        "tests": root / "tests",
+        ".github": root / ".github",
+    }
+    call_pattern = re.compile(r"(?<!def )snapshot_official_books\(")
+    ledger_pattern = re.compile(re.escape(maker_fill_replay.TIER_EVENTS_CSV_NAME))
+
+    visited_files = 0
+    caller_hits: dict[str, list[str]] = {name: [] for name in roots}
+    ledger_hits: dict[str, list[str]] = {name: [] for name in roots}
+    for name, scan_root in roots.items():
+        if not scan_root.exists():
+            continue
+        for path in scan_root.rglob("*.py"):
+            if path.relative_to(root).parts[0] == ".claude":
+                continue
+            visited_files += 1
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for match in call_pattern.finditer(text):
+                line_no = text.count("\n", 0, match.start()) + 1
+                caller_hits[name].append(f"{path.name}:{line_no}")
+            for match in ledger_pattern.finditer(text):
+                line_no = text.count("\n", 0, match.start()) + 1
+                ledger_hits[name].append(f"{path.name}:{line_no}")
+
+    assert visited_files > 0
+    src_calls = caller_hits["src"]
+    assert len(src_calls) == 4
+    assert sum(1 for site in src_calls if site.startswith("maker_fill_replay.py:")) == 2
+    assert sum(1 for site in src_calls if site.startswith("cli.py:")) == 2
+    assert caller_hits["scripts"] == []
+    assert caller_hits[".github"] == []
+
+    non_test_ledger_hits = ledger_hits["src"] + ledger_hits["scripts"] + ledger_hits[".github"]
+    assert len(non_test_ledger_hits) == 1
+    assert non_test_ledger_hits[0].startswith("maker_fill_replay.py:")
+
+
+def test_wo148_test17_portfolio_scope_appends_nothing_despite_prior_membership(tmp_path, monkeypatch):
+    # Test (17): scope="portfolio" with a non-empty portfolio and prior
+    # persistent/seed membership seeded as rows in the events CSV appends
+    # ZERO rows and the events file is byte-identical before and after. This
+    # is the case that fails against the unamended spec and is the reason
+    # §148.6 exists - see the discrimination proof recorded in this build's
+    # report.
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _wo148_study(cfg, [("0xport", "tokPort")])
+    _wo148_candidates_and_books(cfg, candidates=[("0xport", "tokPort")])
+    _seed_tier_events(
+        cfg,
+        [
+            {
+                "event_utc": "2026-07-10T00:00:00Z",
+                "condition_id": "0xport",
+                "token_id": "tokPort",
+                "previous_tier": "absent",
+                "tier": "portfolio",
+            },
+            {
+                "event_utc": "2026-07-10T00:00:00Z",
+                "condition_id": "0xpersist",
+                "token_id": "tokPersist",
+                "previous_tier": "absent",
+                "tier": "persistent",
+            },
+            {
+                "event_utc": "2026-07-10T00:00:00Z",
+                "condition_id": "0xseeded",
+                "token_id": "tokSeeded",
+                "previous_tier": "absent",
+                "tier": "seed",
+            },
+        ],
+    )
+    _seed_tier_state(cfg, generated_at_utc="2026-07-14T12:00:00Z")
+    events_before = _tier_events_path(cfg).read_bytes()
+    state_before = _tier_state_path(cfg).read_bytes()
+
+    summary = maker_fill_replay.snapshot_official_books(cfg, scope="portfolio")
+
+    assert summary["tier_events_status"] == "skipped_portfolio_scope"
+    assert summary["tier_events_written"] == 0
+    assert _tier_events_path(cfg).read_bytes() == events_before
+    assert _tier_state_path(cfg).read_bytes() == state_before
+
+
+def test_wo148_test18_pulse_and_snapshot_each_carry_all_six_typed_keys(tmp_path, monkeypatch):
+    # Test (18): both artifacts carry all six tier-event keys with
+    # tier_events_status a member of the closed six-value domain and the
+    # other five typed int/bool - checked per artifact, never by comparing
+    # one artifact's values against the other's.
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _wo148_study(cfg, [("0xport", "tokPort")])
+    _wo148_candidates_and_books(cfg, candidates=[("0xport", "tokPort")])
+    _seed_tier_state(cfg, generated_at_utc="2026-07-14T12:00:00Z")
+
+    maker_fill_replay.snapshot_official_books(cfg, scope="portfolio")
+    maker_fill_replay.snapshot_official_books(cfg)  # scope="watchlist"
+
+    pulse = read_json(cfg.output_root / "maker_carry" / "official_book_pulse.json")
+    snapshot = read_json(cfg.output_root / "maker_carry" / "official_book_snapshot.json")
+    domain = {
+        "ok",
+        "read_failed",
+        "write_failed",
+        "skipped_portfolio_scope",
+        "skipped_unreadable_inputs",
+        "skipped_disabled",
+    }
+    for artifact in (pulse, snapshot):
+        assert isinstance(artifact["tier_events_status"], str)
+        assert artifact["tier_events_status"] in domain
+        assert isinstance(artifact["tier_events_written"], int)
+        assert isinstance(artifact["tier_events_resync"], bool)
+        assert isinstance(artifact["tier_events_malformed_rows"], int)
+        assert isinstance(artifact["tier_event_burst"], bool)
+        assert isinstance(artifact["tier_precedence_conflicts"], int)
+    assert pulse["scope"] == "portfolio"
+    assert pulse["tier_events_status"] == "skipped_portfolio_scope"
+    assert snapshot["tier_events_status"] == "ok"
+
+
+def test_wo148_test19_no_state_file_written_under_portfolio_scope(tmp_path, monkeypatch):
+    # Test (19): no state file is written under portfolio scope - a
+    # pre-existing state file is byte-identical after the call, and an
+    # absent one is still absent.
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _wo148_study(cfg, [("0xport", "tokPort")])
+    _wo148_candidates_and_books(cfg, candidates=[("0xport", "tokPort")])
+
+    assert not _tier_state_path(cfg).exists()
+    maker_fill_replay.snapshot_official_books(cfg, scope="portfolio")
+    assert not _tier_state_path(cfg).exists()
+
+    _seed_tier_state(cfg, generated_at_utc="2020-01-01T00:00:00Z")
+    sentinel_bytes = _tier_state_path(cfg).read_bytes()
+    maker_fill_replay.snapshot_official_books(cfg, scope="portfolio")
+    assert _tier_state_path(cfg).read_bytes() == sentinel_bytes
+
+
+def test_wo148_test20_scheduler_order_interleaving_produces_no_spurious_churn(tmp_path, monkeypatch):
+    # Test (20): interleaving in the real scheduler order - watchlist cycle
+    # (genesis rows) -> portfolio pulse (zero rows) -> portfolio pulse (zero
+    # rows) -> watchlist cycle with no tier change (zero rows). Total rows
+    # equal the genesis count.
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _wo148_study(cfg, [("0xp1", "tokP1")])
+    _wo148_candidates_and_books(
+        cfg,
+        candidates=[("0xp1", "tokP1"), ("0xs1", "tokS1")],
+        persistent_books=[("0xr1", "tokR1")],
+    )
+    _seed_tier_state(cfg, generated_at_utc="2026-07-14T12:00:00Z")
+
+    watchlist_1 = maker_fill_replay.snapshot_official_books(cfg)  # run_trade_prints
+    genesis_written = watchlist_1["tier_events_written"]
+    assert genesis_written == 3
+
+    pulse_1 = maker_fill_replay.snapshot_official_books(cfg, scope="portfolio")  # run_book_pulse
+    pulse_2 = maker_fill_replay.snapshot_official_books(cfg, scope="portfolio")  # run_book_pulse
+    watchlist_2 = maker_fill_replay.snapshot_official_books(cfg)  # run_trade_prints, unchanged
+
+    assert pulse_1["tier_events_written"] == 0
+    assert pulse_2["tier_events_written"] == 0
+    assert watchlist_2["tier_events_written"] == 0
+    assert len(read_csv_rows(_tier_events_path(cfg))) == genesis_written
+
+
+def test_wo148_test21_watchlist_scope_behaviour_is_unchanged_by_148_6(tmp_path, monkeypatch):
+    # Test (21): scope="watchlist" behaviour is unchanged by this amendment.
+    # Tests (1)-(16) above ARE 148.5's list run under the §148.6 guard, per
+    # the register's own "asserted by running them rather than by argument."
+    # This is a minimal, self-contained re-confirmation in one place.
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _wo148_study(cfg, [("0xp1", "tokP1")])
+    _wo148_candidates_and_books(cfg, candidates=[("0xp1", "tokP1")])
+    _seed_tier_state(cfg, generated_at_utc="2026-07-14T12:00:00Z")
+
+    summary = maker_fill_replay.snapshot_official_books(cfg, scope="watchlist")
+
+    assert summary["tier_events_status"] == "ok"
+    assert summary["tier_events_written"] == 1
+
+
+def test_wo148_test22_portfolio_scope_empty_portfolio_still_carries_six_keys(tmp_path, monkeypatch):
+    # Test (22): scope="portfolio" with an EMPTY portfolio takes the
+    # no_portfolio early return - the path the write-site anchor never
+    # reaches - and the summary still carries all six tier-event keys with
+    # tier_events_status == "skipped_portfolio_scope".
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _wo148_study(cfg, [])
+    _wo148_candidates_and_books(cfg, candidates=[])
+
+    summary = maker_fill_replay.snapshot_official_books(cfg, scope="portfolio")
+
+    assert summary["status"] == "no_portfolio"
+    assert summary["tier_events_status"] == "skipped_portfolio_scope"
+    assert summary["tier_events_written"] == 0
+    assert summary["tier_events_resync"] is False
+    assert summary["tier_events_malformed_rows"] == 0
+    assert summary["tier_event_burst"] is False
+    assert summary["tier_precedence_conflicts"] == 0
+    assert not _tier_state_path(cfg).exists()
+
+
+def test_wo148_test23_watchlist_scope_genuinely_empty_watchlist_runs_the_diff(tmp_path, monkeypatch):
+    # Test (23): scope="watchlist", readable maker_carry_study.json,
+    # sequential cycles - nonempty (genesis) -> truly empty (one departure
+    # row) -> re-entry at the same tier (one arrival row). Against the
+    # unamended (pre-item-2) behaviour both later cycles take the
+    # no_portfolio shortcut and emit ZERO rows each.
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _seed_tier_state(cfg, generated_at_utc="2026-07-14T12:00:00Z")
+    _wo148_study(cfg, [])
+
+    _wo148_candidates_and_books(cfg, candidates=[("0xebb", "tokEbb")])
+    c1 = maker_fill_replay.snapshot_official_books(cfg)
+    assert c1["tier_events_written"] == 1
+    assert c1["tier_events_status"] == "ok"
+
+    _wo148_candidates_and_books(cfg, candidates=[])
+    c2 = maker_fill_replay.snapshot_official_books(cfg)
+    assert c2["status"] == "no_portfolio"
+    assert c2["tier_events_status"] == "ok"
+    assert c2["tier_events_written"] == 1
+    rows_after_c2 = read_csv_rows(_tier_events_path(cfg))
+    assert rows_after_c2[-1] == {
+        "event_utc": "2026-07-14T12:00:00Z",
+        "condition_id": "0xebb",
+        "token_id": "tokEbb",
+        "previous_tier": "seed",
+        "tier": "absent",
+    }
+
+    _wo148_candidates_and_books(cfg, candidates=[("0xebb", "tokEbb")])
+    c3 = maker_fill_replay.snapshot_official_books(cfg)
+    assert c3["tier_events_written"] == 1
+    rows_after_c3 = read_csv_rows(_tier_events_path(cfg))
+    assert rows_after_c3[-1]["previous_tier"] == "absent"
+    assert rows_after_c3[-1]["tier"] == "seed"
+
+
+def test_wo148_test24_missing_or_unparseable_study_json_skips_the_ledger(tmp_path, monkeypatch):
+    # Test (24): scope="watchlist", maker_carry_study.json missing (and,
+    # separately, present but unparseable) with the watchlist empty as a
+    # consequence - the ledger write is skipped, zero rows appended,
+    # "skipped_unreadable_inputs".
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+
+    root_missing = tmp_path / "missing"
+    root_missing.mkdir()
+    cfg_missing = _wo148_config(root_missing)
+    _wo148_candidates_and_books(cfg_missing, candidates=[])
+    assert not (cfg_missing.output_root / "maker_carry" / "maker_carry_study.json").exists()
+    _seed_tier_state(cfg_missing, generated_at_utc="2020-01-01T00:00:00Z")
+    sentinel_missing = _tier_state_path(cfg_missing).read_bytes()
+
+    missing_summary = maker_fill_replay.snapshot_official_books(cfg_missing)
+
+    assert missing_summary["status"] == "no_portfolio"
+    assert missing_summary["tier_events_status"] == "skipped_unreadable_inputs"
+    assert missing_summary["tier_events_written"] == 0
+    assert _tier_state_path(cfg_missing).read_bytes() == sentinel_missing
+
+    root_bad = tmp_path / "unparseable"
+    root_bad.mkdir()
+    cfg_bad = _wo148_config(root_bad)
+    _wo148_candidates_and_books(cfg_bad, candidates=[])
+    study_path = cfg_bad.output_root / "maker_carry" / "maker_carry_study.json"
+    study_path.parent.mkdir(parents=True, exist_ok=True)
+    study_path.write_text("{not json", encoding="utf-8")
+    _seed_tier_state(cfg_bad, generated_at_utc="2020-01-01T00:00:00Z")
+    sentinel_bad = _tier_state_path(cfg_bad).read_bytes()
+
+    bad_summary = maker_fill_replay.snapshot_official_books(cfg_bad)
+
+    assert bad_summary["status"] == "no_portfolio"
+    assert bad_summary["tier_events_status"] == "skipped_unreadable_inputs"
+    assert bad_summary["tier_events_written"] == 0
+    assert _tier_state_path(cfg_bad).read_bytes() == sentinel_bad
+
+
+@pytest.mark.parametrize("disabled_value", ["false", "0", "no"])
+def test_wo148_test25_disabled_watchlist_scope_never_reads_study_json(tmp_path, monkeypatch, disabled_value):
+    # Test (25): scope="watchlist" with `enabled` falsy never reaches
+    # maker_carry_study.json - mocked to raise if read, to prove the read
+    # stage is never entered - appends zero rows, writes no state file, and
+    # tier_events_status == "skipped_disabled" on official_book_snapshot.json.
+    cfg = _wo148_config(tmp_path, enabled=disabled_value)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+
+    def _boom_read_json(*_args, **_kwargs):
+        raise AssertionError("disabled collector must never read maker_carry_study.json")
+
+    monkeypatch.setattr(maker_fill_replay, "read_json", _boom_read_json)
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert summary["status"] == "disabled"
+    assert summary["tier_events_status"] == "skipped_disabled"
+    assert summary["tier_events_written"] == 0
+    persisted = read_json(cfg.output_root / "maker_carry" / "official_book_snapshot.json")
+    assert persisted["tier_events_status"] == "skipped_disabled"
+    assert not _tier_events_path(cfg).exists()
+    assert not _tier_state_path(cfg).exists()
+
+
+@pytest.mark.parametrize("disabled_value", ["false", "0", "no"])
+def test_wo148_test26_disabled_portfolio_scope_reports_skipped_disabled_not_scope(tmp_path, monkeypatch, disabled_value):
+    # Test (26): the same disabled config under scope="portfolio" records
+    # tier_events_status == "skipped_disabled", not "skipped_portfolio_scope"
+    # - the priority case, since the disabled guard fires before the
+    # scope-based one.
+    cfg = _wo148_config(tmp_path, enabled=disabled_value)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+
+    summary = maker_fill_replay.snapshot_official_books(cfg, scope="portfolio")
+
+    assert summary["status"] == "disabled"
+    assert summary["tier_events_status"] == "skipped_disabled"
+    persisted = read_json(cfg.output_root / "maker_carry" / "official_book_pulse.json")
+    assert persisted["tier_events_status"] == "skipped_disabled"
+
+
+@pytest.mark.parametrize(
+    "study_payload",
+    [
+        {},
+        {"other_field": 1},
+        {"portfolio": None},
+        {"portfolio": 5},
+        {"portfolio": "not-a-list"},
+    ],
+)
+def test_wo148_test27_contract_invalid_summary_shapes_skip_the_ledger(tmp_path, monkeypatch, study_payload):
+    # Test (27): scope="watchlist", maker_carry_study.json present and valid
+    # JSON but failing the summary contract (bare {}, missing "portfolio",
+    # or "portfolio" present but not a list) with portfolio+persistent+seeds
+    # computing to empty as a consequence - skipped, zero rows,
+    # "skipped_unreadable_inputs", no unhandled exception.
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {**study_payload, "paper_trading_invoked": False, "live_trading_invoked": False},
+    )
+    _wo148_candidates_and_books(cfg, candidates=[])
+    _seed_tier_state(cfg, generated_at_utc="2020-01-01T00:00:00Z")
+    sentinel = _tier_state_path(cfg).read_bytes()
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert summary["status"] == "no_portfolio"
+    assert summary["tier_events_status"] == "skipped_unreadable_inputs"
+    assert summary["tier_events_written"] == 0
+    assert _tier_state_path(cfg).read_bytes() == sentinel
+
+
+def test_wo148_test28_missing_candidates_csv_skips_even_with_nonempty_watchlist(tmp_path, monkeypatch):
+    # Test (28): a readable, contract-valid, empty-portfolio summary,
+    # persistent markets present on disk, but maker_carry_candidates.csv
+    # ABSENT - skipped, zero rows, even though portfolio+persistent+seeds is
+    # nonempty (from persistent alone).
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _wo148_study(cfg, [])
+    _recent_book_file(cfg, "0xpersist", "tokPersist")
+    assert not (cfg.output_root / "maker_carry" / "maker_carry_candidates.csv").exists()
+    _seed_tier_state(cfg, generated_at_utc="2020-01-01T00:00:00Z")
+    sentinel = _tier_state_path(cfg).read_bytes()
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert summary["markets_polled"] == 1
+    assert summary["tier_events_status"] == "skipped_unreadable_inputs"
+    assert summary["tier_events_written"] == 0
+    assert _tier_state_path(cfg).read_bytes() == sentinel
+
+
+def test_wo148_test28b_present_but_empty_candidates_csv_is_genuinely_ok(tmp_path, monkeypatch):
+    # Test (28), second half: the SAME fixture with the candidates CSV
+    # present but genuinely listing zero rows takes the "ok" path - proving
+    # the check distinguishes "file missing" from "file present and
+    # genuinely empty".
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _wo148_study(cfg, [])
+    _recent_book_file(cfg, "0xpersist", "tokPersist")
+    _wo148_candidates_and_books(cfg, candidates=[])  # present, header-only, zero rows
+    _seed_tier_state(cfg, generated_at_utc="2026-07-14T12:00:00Z")
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert summary["tier_events_status"] == "ok"
+
+
+def test_wo148_test29_missing_official_books_dir_skips_even_with_nonempty_watchlist(tmp_path, monkeypatch):
+    # Test (29), symmetric case for the official_books directory: seed
+    # markets present (a populated candidates CSV) but the official_books
+    # directory ABSENT - skipped, zero rows appended, even though the
+    # watchlist is nonempty (from the seed tranche alone).
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _wo148_study(cfg, [])
+    _wo148_candidates_and_books(cfg, candidates=[("0xseed1", "tokSeed1")], write_books_dir=False)
+    assert not (cfg.output_root / "maker_carry" / "official_books").exists()
+    _seed_tier_state(cfg, generated_at_utc="2020-01-01T00:00:00Z")
+    sentinel = _tier_state_path(cfg).read_bytes()
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert summary["markets_polled"] == 1
+    assert summary["tier_events_status"] == "skipped_unreadable_inputs"
+    assert summary["tier_events_written"] == 0
+    assert _tier_state_path(cfg).read_bytes() == sentinel
+
+
+def test_wo148_test29b_present_but_empty_official_books_dir_is_genuinely_ok(tmp_path, monkeypatch):
+    # Test (29), second half: the directory present but genuinely empty of
+    # matching files takes the "ok" path - the same missing-vs-empty
+    # distinction test (28) draws for the candidates CSV.
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _wo148_study(cfg, [])
+    _wo148_candidates_and_books(cfg, candidates=[("0xseed1", "tokSeed1")], write_books_dir=True)
+    _seed_tier_state(cfg, generated_at_utc="2026-07-14T12:00:00Z")
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert summary["tier_events_status"] == "ok"
+
+
+@pytest.mark.parametrize("portfolio_field", [[{}], ["a", "b"]])
+def test_wo148_test30_all_entries_failing_shape_test_is_contract_invalid(tmp_path, monkeypatch, portfolio_field):
+    # Test (30): a portfolio field that IS a list still fails the contract if
+    # every entry fails the per-entry shape test - [{}] (a dict with none of
+    # the four required fields) and ["a", "b"] (no entry a dict at all), with
+    # persistent and seed empty too - both skip, zero rows.
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"portfolio": portfolio_field, "paper_trading_invoked": False, "live_trading_invoked": False},
+    )
+    _wo148_candidates_and_books(cfg, candidates=[])
+    _seed_tier_state(cfg, generated_at_utc="2020-01-01T00:00:00Z")
+    sentinel = _tier_state_path(cfg).read_bytes()
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert summary["tier_events_status"] == "skipped_unreadable_inputs"
+    assert summary["tier_events_written"] == 0
+    assert _tier_state_path(cfg).read_bytes() == sentinel
+
+
+def test_wo148_test30b_mixed_portfolio_list_is_not_contract_invalid(tmp_path, monkeypatch):
+    # Test (30), second half: a MIXED portfolio list - one well-formed entry
+    # alongside a {} and a string - is NOT contract-invalid; the diff runs
+    # normally against the single surviving portfolio entry.
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {
+            "portfolio": [
+                {"condition_id": "0xgood", "token_id": "tokGood", "quote_size_shares": 10, "quote_distance": 0.01},
+                {},
+                "not-a-dict",
+            ],
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    _wo148_candidates_and_books(cfg, candidates=[("0xgood", "tokGood")])
+    # 0xgood was already on the prior watchlist as a seed, so the diff has a
+    # real transition to prove it actually ran against the surviving entry.
+    _seed_tier_events(
+        cfg,
+        [
+            {
+                "event_utc": "2026-07-10T00:00:00Z",
+                "condition_id": "0xgood",
+                "token_id": "tokGood",
+                "previous_tier": "absent",
+                "tier": "seed",
+            }
+        ],
+    )
+    _seed_tier_state(cfg, generated_at_utc="2026-07-14T12:00:00Z")
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert summary["tier_events_status"] == "ok"
+    assert summary["tier_events_written"] == 1
+    rows = read_csv_rows(_tier_events_path(cfg))
+    assert rows[-1] == {
+        "event_utc": "2026-07-14T12:00:00Z",
+        "condition_id": "0xgood",
+        "token_id": "tokGood",
+        "previous_tier": "seed",
+        "tier": "portfolio",
+    }

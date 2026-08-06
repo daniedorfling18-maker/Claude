@@ -527,6 +527,169 @@ def test_past_dated_rewarded_market_is_excluded_before_selection(tmp_path, monke
     assert read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_candidates.csv") == []
 
 
+# --- WO-147 §147.1: persist the per-condition stale map -----------------------
+
+
+def _stale_and_clean_universe(tmp_path, monkeypatch):
+    """3 stale (past venue close time) + 2 clean (deep book, full history)
+    rewarded markets - WO-147 test (1)/(3)/(4)'s shared fixture."""
+    cfg = _config(tmp_path)
+    monkeypatch.setattr(maker_carry_study, "now_utc", lambda: "2026-07-13T12:00:00Z")
+    stale = [_market(f"Stale market {t}", t, 100.0) for t in ("s1", "s2", "s3")]
+    for market in stale:
+        # Only the market's OWN venue close time (`endDate`, read via
+        # `_candidate_staleness_reasons`'s `endDateIso`/`endDate` fallback)
+        # is set to the past. `clobRewards`' own `endDate` is left at
+        # `_market()`'s far-future default: `_live_pot_usd` requires
+        # `reward.endDate >= today` for the reward to count toward `pot`
+        # (`:536`), and pot < min_daily_pot_usd is a stricter, EARLIER
+        # filter (`:876`) than the staleness check this fixture means to
+        # exercise - setting the reward's own endDate to the past zeroed the
+        # pot and dropped these markets before staleness ever ran.
+        market["endDate"] = "2026-01-01T00:00:00Z"
+    clean = [_market(f"Clean market {t}", t, 100.0) for t in ("c1", "c2")]
+    books = {}
+    histories = {}
+    for t in ("c1", "c2"):
+        books[t] = _deep_book()
+        books[f"{t}-no"] = _deep_book()
+        histories[(t, "1d")] = _flat_history(200)
+        histories[(t, "1w")] = _flat_history(200)
+    _fake_requests(monkeypatch, markets=stale + clean, books=books, histories=histories)
+
+    summary = run_maker_carry_study(cfg)
+    return cfg, summary
+
+
+def test_wo147_excluded_stale_condition_ids_persisted_sorted_and_capped(tmp_path, monkeypatch):
+    # WO-147 test (1).
+    cfg, summary = _stale_and_clean_universe(tmp_path, monkeypatch)
+
+    assert summary["excluded_stale"] == 3
+    assert summary["excluded_stale_condition_ids"] == {
+        "0xs1": ["venue_close_time_past"],
+        "0xs2": ["venue_close_time_past"],
+        "0xs3": ["venue_close_time_past"],
+    }
+    assert list(summary["excluded_stale_condition_ids"]) == sorted(summary["excluded_stale_condition_ids"])
+    assert summary["excluded_stale_condition_ids_truncated"] is False
+
+
+def test_wo147_excluded_stale_condition_ids_caps_at_200_lexicographically_smallest(tmp_path, monkeypatch):
+    # WO-147 test (2).
+    cfg = _config(tmp_path)
+    monkeypatch.setattr(maker_carry_study, "now_utc", lambda: "2026-07-13T12:00:00Z")
+    markets = []
+    for i in range(201):
+        token = f"{i:03d}"
+        market = _market(f"Stale market {token}", token, 100.0)
+        # See _stale_and_clean_universe above: only the market's own
+        # venue close time moves to the past; `clobRewards`' own `endDate`
+        # stays at the far-future default so `_live_pot_usd` still counts
+        # the reward and these markets reach the staleness check at all.
+        market["endDate"] = "2026-01-01T00:00:00Z"
+        markets.append(market)
+    _fake_requests(monkeypatch, markets=markets, books={}, histories={})
+
+    summary = run_maker_carry_study(cfg)
+
+    assert summary["excluded_stale"] == 201
+    assert len(summary["excluded_stale_condition_ids"]) == 200
+    assert set(summary["excluded_stale_condition_ids"]) == {f"0x{i:03d}" for i in range(200)}
+    assert summary["excluded_stale_condition_ids_truncated"] is True
+
+
+def test_wo147_stale_condition_ids_never_appear_in_candidates_csv(tmp_path, monkeypatch):
+    # WO-147 test (3): re-asserts the disjointness this WO's provenance
+    # depends on (the 62 excluded_stale markets are a disjoint population
+    # consuming no candidate slot).
+    cfg, summary = _stale_and_clean_universe(tmp_path, monkeypatch)
+
+    candidate_ids = {
+        row["condition_id"]
+        for row in read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_candidates.csv")
+    }
+    assert candidate_ids.isdisjoint({"0xs1", "0xs2", "0xs3"})
+    assert candidate_ids.isdisjoint(summary["excluded_stale_condition_ids"])
+
+
+def test_wo147_stale_map_addition_leaves_history_and_members_schema_byte_identical(tmp_path, monkeypatch):
+    # WO-147 test (4): `maker_carry_history.csv` and
+    # `maker_carry_portfolio_members.csv` are unaffected by the new
+    # `excluded_stale_condition_ids`/`_truncated` keys, which land only on
+    # the JSON summary - neither CSV writer reads `stale_diagnostic` at all.
+    cfg, summary = _stale_and_clean_universe(tmp_path, monkeypatch)
+
+    history = read_csv_rows(cfg.output_root / "maker_carry" / "maker_carry_history.csv")
+    assert len(history) == 1
+    assert set(history[0].keys()) == _MC_HISTORY_FIELDS
+    assert "excluded_stale_condition_ids" not in history[0]
+
+    members = _members_rows(cfg)
+    assert len(members) == 1
+    assert set(members[0].keys()) == {"generated_at_utc", "portfolio_members"}
+
+
+# --- WO-147 §147.1: universe_pages / page_size validated upper bounds --------
+
+
+def test_wo147_universe_pages_clamp_rejects_above_ceiling_before_any_network_call(tmp_path, monkeypatch):
+    # WO-147 test (20).
+    cfg = _config(tmp_path)
+
+    def fail_get(*args, **kwargs):
+        raise AssertionError("universe_pages validation must happen before any network call")
+
+    monkeypatch.setattr(maker_carry_study.requests, "get", fail_get)
+
+    cfg.raw["maker_carry_study"]["universe_pages"] = 9
+    with pytest.raises(ValueError):
+        maker_carry_study._settings(cfg)
+
+    cfg.raw["maker_carry_study"]["universe_pages"] = 8
+    assert maker_carry_study._settings(cfg)["universe_pages"] == 8
+
+    del cfg.raw["maker_carry_study"]["universe_pages"]
+    assert maker_carry_study._settings(cfg)["universe_pages"] == 5
+
+
+def test_wo147_page_size_clamp_rejects_above_ceiling_before_any_network_call(tmp_path, monkeypatch):
+    # WO-147 test (21).
+    cfg = _config(tmp_path)
+
+    def fail_get(*args, **kwargs):
+        raise AssertionError("page_size validation must happen before any network call")
+
+    monkeypatch.setattr(maker_carry_study.requests, "get", fail_get)
+
+    cfg.raw["maker_carry_study"]["page_size"] = 101
+    with pytest.raises(ValueError):
+        maker_carry_study._settings(cfg)
+
+    cfg.raw["maker_carry_study"]["page_size"] = 100
+    assert maker_carry_study._settings(cfg)["page_size"] == 100
+
+
+@pytest.mark.parametrize("bad_value", ["", "abc", float("nan"), float("inf"), float("-inf"), 0, -1])
+def test_wo147_universe_pages_clamp_rejects_every_a2_edge_case(tmp_path, bad_value):
+    # WO-147 test (22): empty, unparseable, non-finite, zero, and negative
+    # each raise the same configuration error - none falls through to a
+    # silent 0-page scan.
+    cfg = _config(tmp_path)
+    cfg.raw["maker_carry_study"]["universe_pages"] = bad_value
+    with pytest.raises(ValueError):
+        maker_carry_study._settings(cfg)
+
+
+@pytest.mark.parametrize("bad_value", ["", "abc", float("nan"), float("inf"), float("-inf"), 0, -1])
+def test_wo147_page_size_clamp_rejects_every_a2_edge_case(tmp_path, bad_value):
+    # WO-147 test (23): the symmetric case for page_size.
+    cfg = _config(tmp_path)
+    cfg.raw["maker_carry_study"]["page_size"] = bad_value
+    with pytest.raises(ValueError):
+        maker_carry_study._settings(cfg)
+
+
 def test_published_share_model_worked_example_uses_market_and_complement(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     settings = maker_carry_study._settings(cfg)

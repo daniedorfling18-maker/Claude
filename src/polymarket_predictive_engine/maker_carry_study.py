@@ -41,6 +41,41 @@ Model, per candidate market (all inputs from free, key-less public APIs):
   charged the WORST of the bar windows and the markout estimate.
 - Payout floor: Polymarket pays no reward below $1/market/day, so the sized
   portfolio only admits quotes whose gross reward clears that floor.
+- Incumbent measurement coverage (WO-154, 2026-08-05): ``_yield_first_shortlist``
+  additionally measures every CURRENT portfolio member - the union of
+  ``_incumbent_hold``'s and ``_latest_portfolio_members``'s reads of
+  ``maker_carry_portfolio_members.csv`` - regardless of its yield rank, so a
+  paying incumbent can never be evicted with ``not_in_candidate_scan`` merely
+  because it ranked outside ``max_book_candidates`` this run. **There is no
+  registered ceiling on how many such members can be added in a single run:**
+  the true bound is ``len(measurement_universe) <= max_book_candidates +
+  len(protected_condition_ids)``, and ``protected_condition_ids`` is sized by
+  the last two portfolio-membership snapshots combined, never by a configured
+  cap (``max_markets`` does not exist anywhere in this module or its config
+  block). This is a measurement-coverage fix only: it does not touch,
+  weaken, or strengthen any of the five ``_size_portfolio`` predicates, the
+  $500 capital cap, or the $1.00 payout floor.
+
+  WO-154 fail-safe: a missing or zero-byte ``maker_carry_portfolio_members.csv``
+  yields ``_incumbent_hold(out_root) == (set(), {})`` and
+  ``_latest_portfolio_members(out_root) is None`` (via ``utils.read_csv_rows``,
+  which guarantees ``[]`` ONLY for a missing/zero-byte file - an
+  existing-but-unreadable file propagates, unchanged from before this WO, and
+  is out of scope here). A latest row whose ``portfolio_members`` cell fails
+  ``json.loads``, OR parses to valid JSON that is not a list (``null``, a
+  number, a boolean, a bare string), now yields an empty member set for that
+  row on that reader (this WO's added ``isinstance(members, list)`` guard in
+  ``_incumbent_hold`` - without it, the scalar-JSON case raised an unhandled
+  ``TypeError`` that aborted the entire study run, confirmed by execution;
+  ``_latest_portfolio_members`` already guarded this and simply skips such a
+  row). When both readers' contributions are empty, ``protected_condition_ids``
+  is the empty set, the union step in ``_yield_first_shortlist`` adds nothing
+  on any of its four return points, and its output is byte-identical to
+  today's pure top-N/pot-rank behavior. A protected condition_id absent from
+  the current ``universe`` is never fabricated into the shortlist. No gate,
+  sizing predicate, or order surface reads this artifact differently than
+  before; ``_size_portfolio``'s five predicates are unchanged, and a measured
+  member that fails them is excluded exactly as today.
 
 MAKER GATES (pre-registered 2026-07-09, before any accrued trend history;
 clarified same day, also pre-history: M-A counts distinct UTC DAYS, not runs,
@@ -1097,18 +1132,82 @@ def _yield_first_shortlist(
     settings: dict[str, Any],
     universe: list[dict[str, Any]],
     fractions: list[float],
+    protected_condition_ids: set[str] | frozenset[str] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """WO-56 prescreen: rank the rewarded universe by expected gross reward at
+    min size (published-v2 share model) and measure only the top
+    ``max_book_candidates`` this run, falling back to pure pot-rank order if
+    the book prescreen itself fails or scores nothing.
+
+    WO-154 addition: ``protected_condition_ids`` (the union of
+    ``_incumbent_hold``'s and ``_latest_portfolio_members``'s reads of
+    ``maker_carry_portfolio_members.csv``, computed by the caller) is
+    additionally measured on every return path, regardless of yield rank, so
+    a paying incumbent can never be evicted with ``not_in_candidate_scan``
+    while it is still present in this run's rewarded universe. Default
+    ``None`` (treated as empty) reproduces today's pure top-N/pot-rank
+    behavior byte-for-byte.
+
+    Fail-safe: when ``protected_condition_ids`` is empty (missing or
+    zero-byte sidecar, or every latest row unparseable/non-list on both
+    readers), the union step adds nothing on any of the four return points
+    and this function's output is byte-identical to the pre-WO-154 behavior.
+    A protected condition_id absent from ``universe`` is never fabricated
+    into the shortlist - it is simply not added. No gate, sizing predicate,
+    or order surface reads this function's output differently than before;
+    ``_size_portfolio``'s five predicates are unchanged, and a measured
+    member that fails them is excluded exactly as today.
+    """
+    protected_condition_ids = protected_condition_ids or frozenset()
+
+    def _apply_protection(
+        selected: list[dict[str, Any]],
+        selected_keys: set[str],
+        diagnostics: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        # Additive union, applied ONCE per call, after selected/selected_keys
+        # are final. Iterates the FULL universe (never scan_universe), the
+        # same condition_id-or-token_id fallback shape the existing backfill
+        # loop uses, PLUS a .strip() the backfill loop does not have (WO-154
+        # Change item 6 - this closure only; the shipped backfill loop is
+        # untouched). Does NOT count against max_book_candidates.
+        # yield_scan_selected_markets keeps its
+        # EXISTING meaning (computed by the caller BEFORE this call) - the
+        # protection count is reported ONLY via the two new keys below, never
+        # folded into the existing one, so it stays byte-identical when
+        # protected_condition_ids is empty.
+        protected_added = 0
+        for market in universe:
+            key = str(market.get("condition_id") or market.get("token_id") or "").strip()
+            if key and key in protected_condition_ids and key not in selected_keys:
+                row = dict(market)
+                # Not selected via yield rank this run (never scanned/scored,
+                # OR scored but ranked outside max_book_candidates) - record
+                # this honestly, never fabricate a rank or gross figure.
+                row["yield_rank"] = None
+                row["expected_gross_at_min_size"] = None
+                selected.append(row)
+                selected_keys.add(key)
+                protected_added += 1
+        diagnostics["yield_scan_protected_members_considered"] = len(protected_condition_ids)
+        diagnostics["yield_scan_protected_members_added"] = protected_added
+        return selected, diagnostics
+
     max_candidates = int(settings["max_book_candidates"])
     max_scan = max(max_candidates, int(settings.get("yield_scan_max_markets") or max_candidates))
     scan_universe = universe[:max_scan]
     if not scan_universe:
-        return [], {
-            "universe_scan_mode": "yield_first_v1",
-            "yield_scan_considered_markets": 0,
-            "yield_scan_scored_markets": 0,
-            "yield_scan_selected_markets": 0,
-            "yield_scan_fallback": False,
-        }
+        return _apply_protection(
+            [],
+            set(),
+            {
+                "universe_scan_mode": "yield_first_v1",
+                "yield_scan_considered_markets": 0,
+                "yield_scan_scored_markets": 0,
+                "yield_scan_selected_markets": 0,
+                "yield_scan_fallback": False,
+            },
+        )
 
     token_ids: list[str] = []
     for market in scan_universe:
@@ -1144,25 +1243,35 @@ def _yield_first_shortlist(
                 scored.append((best_gross, market))
     except Exception as exc:  # noqa: BLE001 - prescreen must fail soft to registered pot ranking
         selected = [dict(row) for row in universe[:max_candidates]]
-        return selected, {
-            "universe_scan_mode": "pot_rank_fallback",
-            "yield_scan_considered_markets": len(scan_universe),
-            "yield_scan_scored_markets": 0,
-            "yield_scan_selected_markets": len(selected),
-            "yield_scan_fallback": True,
-            "yield_scan_error": f"{type(exc).__name__}: {exc}",
-        }
+        selected_keys = {str(row.get("condition_id") or row.get("token_id") or "") for row in selected}
+        return _apply_protection(
+            selected,
+            selected_keys,
+            {
+                "universe_scan_mode": "pot_rank_fallback",
+                "yield_scan_considered_markets": len(scan_universe),
+                "yield_scan_scored_markets": 0,
+                "yield_scan_selected_markets": len(selected),
+                "yield_scan_fallback": True,
+                "yield_scan_error": f"{type(exc).__name__}: {exc}",
+            },
+        )
 
     if not scored:
         selected = [dict(row) for row in universe[:max_candidates]]
-        return selected, {
-            "universe_scan_mode": "pot_rank_fallback",
-            "yield_scan_considered_markets": len(scan_universe),
-            "yield_scan_scored_markets": 0,
-            "yield_scan_selected_markets": len(selected),
-            "yield_scan_fallback": True,
-            "yield_scan_error": "no prescreen books scored",
-        }
+        selected_keys = {str(row.get("condition_id") or row.get("token_id") or "") for row in selected}
+        return _apply_protection(
+            selected,
+            selected_keys,
+            {
+                "universe_scan_mode": "pot_rank_fallback",
+                "yield_scan_considered_markets": len(scan_universe),
+                "yield_scan_scored_markets": 0,
+                "yield_scan_selected_markets": len(selected),
+                "yield_scan_fallback": True,
+                "yield_scan_error": "no prescreen books scored",
+            },
+        )
 
     scored.sort(key=lambda item: item[0], reverse=True)
     selected: list[dict[str, Any]] = []
@@ -1184,13 +1293,17 @@ def _yield_first_shortlist(
             selected.append(dict(market))
             selected_keys.add(key)
 
-    return selected, {
-        "universe_scan_mode": "yield_first_v1",
-        "yield_scan_considered_markets": len(scan_universe),
-        "yield_scan_scored_markets": len(scored),
-        "yield_scan_selected_markets": len(selected),
-        "yield_scan_fallback": False,
-    }
+    return _apply_protection(
+        selected,
+        selected_keys,
+        {
+            "universe_scan_mode": "yield_first_v1",
+            "yield_scan_considered_markets": len(scan_universe),
+            "yield_scan_scored_markets": len(scored),
+            "yield_scan_selected_markets": len(selected),
+            "yield_scan_fallback": False,
+        },
+    )
 
 
 def _legacy_book_competition(settings: dict[str, Any], token_id: str, v: float) -> dict[str, Any] | None:
@@ -1552,7 +1665,12 @@ def _incumbent_hold(out_root: Path) -> tuple[set[str], dict[str, int]]:
     """WO-113 selection stickiness: read the WO-111 membership sidecar and
     return (incumbent condition_ids from the latest run, consecutive
     distinct-UTC-day hold count per incumbent). Fail-safe: a missing or
-    unreadable ledger yields no incumbents, so stickiness simply does not apply."""
+    unreadable ledger yields no incumbents, so stickiness simply does not apply.
+    WO-154: a latest row whose `portfolio_members` cell fails `json.loads`,
+    OR parses to valid JSON that is not a list (`null`, a number, a boolean,
+    a bare string), now yields an empty member set for that row on that
+    reader, rather than raising an unhandled `TypeError` from the
+    un-guarded comprehension below."""
     rows = read_csv_rows(out_root / "maker_carry_portfolio_members.csv")
     by_day: dict[str, set[str]] = {}
     latest_day = ""
@@ -1564,6 +1682,8 @@ def _incumbent_hold(out_root: Path) -> tuple[set[str], dict[str, int]]:
         try:
             members = json.loads(row.get("portfolio_members") or "[]")
         except (ValueError, TypeError):
+            members = []
+        if not isinstance(members, list):
             members = []
         cids = {
             str(member.get("condition_id") or "")
@@ -2309,11 +2429,31 @@ def run_maker_carry_study(cfg: EngineConfig, *, study_trigger: str | None = None
         return summary
 
     universe, errors, stale_diagnostic = _rewarded_universe(settings)
+    incumbents, incumbent_hold_days = _incumbent_hold(out_root)
+    # WO-137 reads the latest membership evidence before this run appends its
+    # row. The append-only sidecar remains owned solely by the WO-111 writer.
+    previous_portfolio_error: Exception | None = None
+    try:
+        previous_portfolio = _latest_portfolio_members(out_root)
+    except Exception as exc:  # noqa: BLE001 - reporting must not take down the study
+        previous_portfolio = None
+        previous_portfolio_error = exc
+    # WO-154: the fail-closed UNION of both readers' outputs. Any condition_id
+    # that either reader treats as a current/latest member is measured this
+    # run regardless of yield rank, so `_portfolio_composition_diff`'s own
+    # `prior` set (built from `previous_portfolio`) is always a subset of
+    # this union - `not_in_candidate_scan` becomes unreachable for a genuine
+    # prior member (S8 B3).
+    protected_condition_ids = set(incumbents) | (
+        set(previous_portfolio[1]) if previous_portfolio else set()
+    )
     pause = float(settings["request_pause_seconds"])
     candidates: list[dict[str, Any]] = []
     resolution_class_stats = _resolution_quality_class_stats(cfg)
     fractions = sorted({float(f) for f in (settings.get("quote_distance_fractions") or [0.5]) if 0 < float(f) < 1}) or [0.5]
-    measurement_universe, yield_scan = _yield_first_shortlist(settings, universe, fractions)
+    measurement_universe, yield_scan = _yield_first_shortlist(
+        settings, universe, fractions, protected_condition_ids=protected_condition_ids
+    )
     if yield_scan.get("yield_scan_error"):
         errors.append(f"yield prescreen: {yield_scan['yield_scan_error']}")
     for market in measurement_universe:
@@ -2409,22 +2549,15 @@ def run_maker_carry_study(cfg: EngineConfig, *, study_trigger: str | None = None
             time.sleep(pause)
 
     # WO-113: attach observed official-book depth to every candidate, so the
-    # sizer can exclude markets too fresh to yield a measured M-B markout, and
-    # read the prior portfolio for selection stickiness. Reporting-only fields;
-    # they gate WHICH market is measured, never an M-gate threshold.
+    # sizer can exclude markets too fresh to yield a measured M-B markout.
+    # `incumbents`/`incumbent_hold_days` and `previous_portfolio`/
+    # `previous_portfolio_error` were already computed earlier (WO-154 moved
+    # both membership reads up before the `_yield_first_shortlist` call, so
+    # their union could gate what gets measured); reused unchanged here.
     for candidate in candidates:
         span_hours, snapshot_count = _book_history_depth(out_root, str(candidate.get("condition_id") or ""))
         candidate["book_history_hours"] = round(span_hours, 4)
         candidate["book_snapshot_count"] = snapshot_count
-    incumbents, incumbent_hold_days = _incumbent_hold(out_root)
-    # WO-137 reads the latest membership evidence before this run appends its
-    # row. The append-only sidecar remains owned solely by the WO-111 writer.
-    previous_portfolio_error: Exception | None = None
-    try:
-        previous_portfolio = _latest_portfolio_members(out_root)
-    except Exception as exc:  # noqa: BLE001 - reporting must not take down the study
-        previous_portfolio = None
-        previous_portfolio_error = exc
 
     # Registered sizing is still evaluated only at capital_cap_usd. WO-57
     # reuses this exact function for supplementary planning caps below.
@@ -2531,6 +2664,8 @@ def run_maker_carry_study(cfg: EngineConfig, *, study_trigger: str | None = None
             "yield_scan_scored_markets": yield_scan["yield_scan_scored_markets"],
             "yield_scan_selected_markets": yield_scan["yield_scan_selected_markets"],
             "yield_scan_fallback": yield_scan["yield_scan_fallback"],
+            "yield_scan_protected_members_considered": yield_scan["yield_scan_protected_members_considered"],
+            "yield_scan_protected_members_added": yield_scan["yield_scan_protected_members_added"],
             "candidates_measured": len(candidates),
             "candidates_thin_book_untrusted": sum(1 for r in candidates if r.get("estimate_quality") == "thin_book_untrusted"),
             "candidates_resolution_high_risk": sum(1 for r in candidates if r.get("resolution_risk") == "high"),

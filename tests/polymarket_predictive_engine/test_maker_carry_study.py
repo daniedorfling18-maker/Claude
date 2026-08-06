@@ -29,6 +29,7 @@ from polymarket_predictive_engine.maker_carry_study import (
     STUDY_TRIGGER_PRODUCER_VALUES,
     _book_history_depth,
     _incumbent_hold,
+    _latest_portfolio_members,
     _maker_carry_ledger_lock_path,
     _measurement_eligible,
     _portfolio_composition_diff,
@@ -320,6 +321,154 @@ def test_yield_first_scan_fails_soft_to_pot_rank(tmp_path, monkeypatch):
     assert scan["universe_scan_mode"] == "pot_rank_fallback"
     assert scan["yield_scan_fallback"] is True
     assert "synthetic book outage" in scan["yield_scan_error"]
+
+
+def test_wo154_protected_incumbent_measured_outside_top_n(tmp_path, monkeypatch):
+    """Test 4 (Measured anyway, outside top-N)."""
+    cfg = _config(tmp_path)
+    settings = maker_carry_study._settings(cfg)
+    settings["max_book_candidates"] = 1
+    settings["yield_scan_max_markets"] = 3
+    universe = [
+        _scan_market("big", 1000.0, 1),
+        _scan_market("mid", 500.0, 2),
+        _scan_market("member", 10.0, 3),
+    ]
+    books = {token: _deep_book() for token in ("big", "big-no", "mid", "mid-no", "member", "member-no")}
+    monkeypatch.setattr(maker_carry_study, "_fetch_books", lambda _settings, _tokens: books)
+
+    selected, scan = maker_carry_study._yield_first_shortlist(
+        settings, universe, [0.5], protected_condition_ids={"0xmember"}
+    )
+
+    assert {row["condition_id"] for row in selected} == {"0xbig", "0xmember"}
+    member_row = next(row for row in selected if row["condition_id"] == "0xmember")
+    assert member_row["yield_rank"] is None
+    assert member_row["expected_gross_at_min_size"] is None
+    assert scan["yield_scan_protected_members_added"] == 1
+    assert scan["yield_scan_protected_members_considered"] == 1
+
+
+def test_wo154_protected_member_already_selected_adds_nothing(tmp_path, monkeypatch):
+    """Test 5 (Differential byte-identity, union adds nothing)."""
+    cfg = _config(tmp_path)
+    settings = maker_carry_study._settings(cfg)
+    settings["max_book_candidates"] = 1
+    settings["yield_scan_max_markets"] = 3
+    universe = [
+        _scan_market("big", 1000.0, 1),
+        _scan_market("mid", 500.0, 2),
+        _scan_market("member", 10.0, 3),
+    ]
+    books = {token: _deep_book() for token in ("big", "big-no", "mid", "mid-no", "member", "member-no")}
+    monkeypatch.setattr(maker_carry_study, "_fetch_books", lambda _settings, _tokens: books)
+
+    selected_unprotected, _scan_unprotected = maker_carry_study._yield_first_shortlist(settings, universe, [0.5])
+    selected_protected, scan_protected = maker_carry_study._yield_first_shortlist(
+        settings, universe, [0.5], protected_condition_ids={"0xbig"}
+    )
+
+    assert selected_protected == selected_unprotected
+    assert scan_protected["yield_scan_protected_members_added"] == 0
+
+
+def test_wo154_union_bound_worst_case_growth_equals_protected_count(tmp_path, monkeypatch):
+    """Test 6 (Union bound / worst case): growth over max_book_candidates equals
+    exactly len(protected_condition_ids), never a fixed ceiling."""
+    cfg = _config(tmp_path)
+    settings = maker_carry_study._settings(cfg)
+    settings["max_book_candidates"] = 2
+    universe = [
+        _scan_market("big", 1000.0, 1),
+        _scan_market("mid", 500.0, 2),
+        _scan_market("m1", 30.0, 3),
+        _scan_market("m2", 20.0, 4),
+        _scan_market("m3", 10.0, 5),
+    ]
+    books = {}
+    for token in ("big", "mid", "m1", "m2", "m3"):
+        books[token] = _deep_book()
+        books[f"{token}-no"] = _deep_book()
+    monkeypatch.setattr(maker_carry_study, "_fetch_books", lambda _settings, _tokens: books)
+
+    selected, scan = maker_carry_study._yield_first_shortlist(
+        settings, universe, [0.5], protected_condition_ids={"0xm1", "0xm2", "0xm3"}
+    )
+
+    assert len(selected) == 5
+    assert scan["yield_scan_protected_members_added"] == 3
+
+
+def test_wo154_protected_ghost_id_never_fabricated(tmp_path, monkeypatch):
+    """Test 7 (Never fabricated): a protected condition_id absent from `universe`
+    is never fabricated into the shortlist."""
+    cfg = _config(tmp_path)
+    settings = maker_carry_study._settings(cfg)
+    settings["max_book_candidates"] = 1
+    settings["yield_scan_max_markets"] = 3
+    universe = [
+        _scan_market("big", 1000.0, 1),
+        _scan_market("mid", 500.0, 2),
+        _scan_market("member", 10.0, 3),
+    ]
+    books = {token: _deep_book() for token in ("big", "big-no", "mid", "mid-no", "member", "member-no")}
+    monkeypatch.setattr(maker_carry_study, "_fetch_books", lambda _settings, _tokens: books)
+
+    selected_unprotected, _scan_unprotected = maker_carry_study._yield_first_shortlist(settings, universe, [0.5])
+    selected_protected, scan_protected = maker_carry_study._yield_first_shortlist(
+        settings, universe, [0.5], protected_condition_ids={"0xghost"}
+    )
+
+    assert selected_protected == selected_unprotected
+    assert scan_protected["yield_scan_protected_members_added"] == 0
+    assert scan_protected["yield_scan_protected_members_considered"] == 1
+
+
+def test_wo154_book_fetch_exception_fallback_also_protects(tmp_path, monkeypatch):
+    """Test 8 (Fallback path (book-fetch exception) also protects; N1 reworded).
+    Reuses test_yield_first_scan_fails_soft_to_pot_rank's exact fixture."""
+    cfg = _config(tmp_path)
+    settings = maker_carry_study._settings(cfg)
+    settings["max_book_candidates"] = 1
+    settings["yield_scan_max_markets"] = 2
+    universe = [_scan_market("large", 1_000.0, 1), _scan_market("small", 100.0, 2)]
+
+    def fail_books(_settings, _tokens):
+        raise RuntimeError("synthetic book outage")
+
+    monkeypatch.setattr(maker_carry_study, "_fetch_books", fail_books)
+
+    selected, scan = maker_carry_study._yield_first_shortlist(
+        settings, universe, [0.5], protected_condition_ids={"0xsmall"}
+    )
+
+    assert {row["condition_id"] for row in selected} == {"0xlarge", "0xsmall"}
+    assert scan["yield_scan_selected_markets"] == 1  # unchanged meaning - computed before protection
+    assert len(selected) == 2  # pre-fix code would have produced only ["0xlarge"]
+
+
+def test_wo154_no_scored_fallback_also_protects(tmp_path, monkeypatch):
+    """Test 9 (B5 NEW - no-scored fallback also protects): the OTHER fallback
+    path (pot_rank_fallback via "no prescreen books scored"), distinct from
+    test 8's book-fetch-exception path."""
+    cfg = _config(tmp_path)
+    settings = maker_carry_study._settings(cfg)
+    settings["max_book_candidates"] = 1
+    settings["yield_scan_max_markets"] = 2
+    universe = [_scan_market("large", 1_000.0, 1), _scan_market("nsprotect", 5.0, 2)]
+
+    monkeypatch.setattr(maker_carry_study, "_fetch_books", lambda _settings, _tokens: {})
+
+    selected, scan = maker_carry_study._yield_first_shortlist(
+        settings, universe, [0.5], protected_condition_ids={"0xnsprotect"}
+    )
+
+    assert scan["universe_scan_mode"] == "pot_rank_fallback"
+    assert scan["yield_scan_error"] == "no prescreen books scored"
+    assert {row["condition_id"] for row in selected} == {"0xlarge", "0xnsprotect"}
+    assert scan["yield_scan_selected_markets"] == 1  # unchanged
+    assert len(selected) == 2
+    assert scan["yield_scan_protected_members_added"] == 1
 
 
 def test_candidate_staleness_reasons_cover_close_and_resolution_states():
@@ -1582,6 +1731,146 @@ def test_wo113_incumbent_hold_reads_membership_sidecar(tmp_path):
     assert hold["0xA"] == 3  # three consecutive distinct UTC days
 
 
+# ---------------------------------------------------------------------------
+# WO-154 enumerated tests (1-3, 12-14: `_incumbent_hold` / `_latest_portfolio_members`
+# reader fail-safety and divergence; 4-9: `_yield_first_shortlist` protection; 10-11:
+# real-union Hormuz-shape composition-diff derivation. Docstring WO reference above.)
+# ---------------------------------------------------------------------------
+
+
+def test_wo154_incumbent_hold_missing_sidecar_returns_empty(tmp_path):
+    """Test 1 (A2, missing sidecar)."""
+    out_root = tmp_path / "outputs" / "maker_carry"
+    out_root.mkdir(parents=True)
+
+    incumbents, hold = _incumbent_hold(out_root)
+
+    assert incumbents == set()
+    assert hold == {}
+
+
+def test_wo154_incumbent_hold_malformed_json_returns_empty(tmp_path):
+    """Test 2 (A2, malformed-JSON latest row)."""
+    out_root = tmp_path / "outputs" / "maker_carry"
+    out_root.mkdir(parents=True)
+    write_csv(
+        out_root / "maker_carry_portfolio_members.csv",
+        [{"generated_at_utc": "2026-08-04T12:00:00Z", "portfolio_members": "{not json"}],
+        fieldnames=["generated_at_utc", "portfolio_members"],
+    )
+
+    incumbents, hold = _incumbent_hold(out_root)
+
+    assert incumbents == set()
+    assert hold == {}
+
+
+@pytest.mark.parametrize("portfolio_members_json", ["null", "123", "true", "1.5"])
+def test_wo154_incumbent_hold_valid_non_list_json_does_not_raise(tmp_path, portfolio_members_json):
+    """Test 3 (B1 NEW - A2, valid-but-non-list JSON latest row).
+
+    Against unamended code this raises `TypeError` for all four parametrized
+    values (confirmed by execution) - this test fails unamended by
+    construction.
+    """
+    out_root = tmp_path / "outputs" / "maker_carry"
+    out_root.mkdir(parents=True)
+    write_csv(
+        out_root / "maker_carry_portfolio_members.csv",
+        [{"generated_at_utc": "2026-08-04T12:00:00Z", "portfolio_members": portfolio_members_json}],
+        fieldnames=["generated_at_utc", "portfolio_members"],
+    )
+
+    incumbents, hold = _incumbent_hold(out_root)
+
+    assert incumbents == set()
+    assert hold == {}
+
+
+def test_wo154_reader_divergence_cross_day_malformed_latest_row(tmp_path):
+    """Test 12 (B3 NEW - reader divergence fixture 1, cross-day malformed latest row)."""
+    out_root = tmp_path / "outputs" / "maker_carry"
+    out_root.mkdir(parents=True)
+    write_csv(
+        out_root / "maker_carry_portfolio_members.csv",
+        [
+            {
+                "generated_at_utc": "2026-08-03T12:00:00Z",
+                "portfolio_members": json.dumps([{"condition_id": "0xhormuz", "markout_measured": True}]),
+            },
+            {"generated_at_utc": "2026-08-04T12:00:00Z", "portfolio_members": "{not json"},
+        ],
+        fieldnames=["generated_at_utc", "portfolio_members"],
+    )
+
+    incumbents, _hold = _incumbent_hold(out_root)
+    assert incumbents == set()  # the malformed latest day's empty cids win the day
+
+    prior = _latest_portfolio_members(out_root)
+    assert prior == ("2026-08-03T12:00:00Z", {"0xhormuz": True})  # skips the malformed row
+
+    union = incumbents | set(prior[1])
+    assert union == {"0xhormuz"}  # the fail-closed superset recovers what _incumbent_hold alone would lose
+
+
+def test_wo154_reader_divergence_same_day_malformed_latest_row(tmp_path):
+    """Test 13 (B3 NEW - reader divergence fixture 2, same-day malformed latest row)."""
+    out_root = tmp_path / "outputs" / "maker_carry"
+    out_root.mkdir(parents=True)
+    write_csv(
+        out_root / "maker_carry_portfolio_members.csv",
+        [
+            {
+                "generated_at_utc": "2026-08-04T10:00:00Z",
+                "portfolio_members": json.dumps([{"condition_id": "0xhormuz", "markout_measured": True}]),
+            },
+            {"generated_at_utc": "2026-08-04T12:00:00Z", "portfolio_members": "{not json"},
+        ],
+        fieldnames=["generated_at_utc", "portfolio_members"],
+    )
+
+    incumbents, _hold = _incumbent_hold(out_root)
+    # the >= same-day comparison lets the later, malformed row's empty cids
+    # overwrite the valid ones.
+    assert incumbents == set()
+
+    prior = _latest_portfolio_members(out_root)
+    assert prior == ("2026-08-04T10:00:00Z", {"0xhormuz": True})
+
+    union = incumbents | set(prior[1])
+    assert union == {"0xhormuz"}
+
+
+def test_wo154_reader_divergence_out_of_order_clock_skew(tmp_path):
+    """Test 14 (B3 NEW - reader divergence fixture 3, out-of-order / clock skew)."""
+    out_root = tmp_path / "outputs" / "maker_carry"
+    out_root.mkdir(parents=True)
+    write_csv(
+        out_root / "maker_carry_portfolio_members.csv",
+        [
+            # FILE order: a later-appended row carrying an EARLIER embedded timestamp.
+            {
+                "generated_at_utc": "2026-08-05T01:00:00Z",
+                "portfolio_members": json.dumps([{"condition_id": "0xnew", "markout_measured": True}]),
+            },
+            {
+                "generated_at_utc": "2026-08-04T23:59:00Z",
+                "portfolio_members": json.dumps([{"condition_id": "0xold", "markout_measured": True}]),
+            },
+        ],
+        fieldnames=["generated_at_utc", "portfolio_members"],
+    )
+
+    incumbents, _hold = _incumbent_hold(out_root)
+    assert incumbents == {"0xnew"}  # max by embedded day-string
+
+    prior = _latest_portfolio_members(out_root)
+    assert prior == ("2026-08-04T23:59:00Z", {"0xold": True})  # last-valid-in-file-order
+
+    union = incumbents | set(prior[1])
+    assert union == {"0xnew", "0xold"}  # both protected even though the readers disagree
+
+
 def test_wo113_fresh_market_excluded_even_when_carry_is_highest():
     settings = _wo113_settings()
     fresh = _wo113_candidate("0xfresh", carry=5.0, hours=5.0, snaps=18)  # top carry, no depth
@@ -1687,6 +1976,96 @@ def test_wo137_missing_prior_run_is_explicit_and_empty():
     assert status == "no_prior_run"
     assert diff["previous_run_at"] is None
     assert diff["entered"] == diff["departed"] == diff["held"] == []
+
+
+def test_wo154_hormuz_shape_true_departure_via_real_union(monkeypatch):
+    """Test 10 (B4 REDESIGNED - Hormuz shape, true departure, derived through
+    the real union; must fail unamended). Calling `_yield_first_shortlist`
+    with `protected_condition_ids` against unamended code raises `TypeError`
+    immediately (no such kwarg), so this test fails unamended by
+    construction. Beyond that TypeError: a hypothetical build that accepts
+    the kwarg but does not apply the union would leave `measured_ids ==
+    {"0xother"}` only, excluding "0xmember" from `candidates` entirely, and
+    the diff would fall through to `disposition="not_in_candidate_scan"` -
+    the assertion below then fails on the disposition VALUE, not merely on a
+    raised exception.
+    """
+    settings = _wo113_settings(
+        max_book_candidates=1,
+        yield_scan_max_markets=2,
+        share_model_c=3.0,
+        share_model_mid_band_min=0.10,
+        share_model_mid_band_max=0.90,
+    )
+    universe = [_scan_market("other", 1000.0, 1), _scan_market("member", 10.0, 2)]
+    books = {token: _deep_book() for token in ("other", "other-no", "member", "member-no")}
+    monkeypatch.setattr(maker_carry_study, "_fetch_books", lambda _settings, _tokens: books)
+
+    measurement_universe, _scan = maker_carry_study._yield_first_shortlist(
+        settings, universe, [0.5], protected_condition_ids={"0xmember"}
+    )
+
+    measured_ids = {row["condition_id"] for row in measurement_universe}
+    candidate_pool = {
+        "0xmember": _wo113_candidate("0xmember", carry=-1.0, hours=100, snaps=200),
+        "0xother": _wo113_candidate("0xother", carry=2.0, hours=100, snaps=200),
+    }
+    candidates = [c for cid, c in candidate_pool.items() if cid in measured_ids]
+    portfolio, _capital, _net = _size_portfolio(settings, candidates, 500)
+
+    assert "0xmember" not in {row["condition_id"] for row in portfolio}  # fails predicate 1, carry>0
+    assert "0xother" in {row["condition_id"] for row in portfolio}
+
+    diff, _status = _portfolio_composition_diff(
+        previous=("2026-08-04T12:00:00Z", {"0xmember": True}),
+        current_run_at="2026-08-05T12:00:00Z",
+        portfolio=portfolio,
+        candidates=candidates,
+        rewarded_universe=universe,
+        measurement_universe=measurement_universe,
+        stale_reasons={},
+    )
+
+    assert diff["departed"] == [
+        {
+            "condition_id": "0xmember",
+            "markout_measured": True,
+            "disposition": "measured_not_sized",
+            "net_carry_usd_per_day": -1.0,
+        }
+    ]
+
+
+def test_wo154_hormuz_shape_true_retention(tmp_path, monkeypatch):
+    """Test 11 (Hormuz shape - true retention; N2 reworded): "0xmember" is
+    retained via measurement where the pre-fix code could never have reached
+    it at all - proven by calling `_yield_first_shortlist` directly with the
+    kwarg (fails `TypeError` unamended, as in test 10)."""
+    cfg = _config(tmp_path)
+    settings = maker_carry_study._settings(cfg)
+    settings["max_book_candidates"] = 1
+    settings["yield_scan_max_markets"] = 3
+    universe = [
+        _scan_market("big", 1000.0, 1),
+        _scan_market("mid", 500.0, 2),
+        _scan_market("member", 10.0, 3),
+    ]
+    books = {token: _deep_book() for token in ("big", "big-no", "mid", "mid-no", "member", "member-no")}
+    monkeypatch.setattr(maker_carry_study, "_fetch_books", lambda _settings, _tokens: books)
+
+    measurement_universe, _scan = maker_carry_study._yield_first_shortlist(
+        settings, universe, [0.5], protected_condition_ids={"0xmember"}
+    )
+    measured_ids = {row["condition_id"] for row in measurement_universe}
+    assert measured_ids == {"0xbig", "0xmember"}  # "0xmid" excluded by the cap
+
+    row_big = _wo113_candidate("0xbig", carry=2.0, hours=100, snaps=200)
+    row_member = _wo113_candidate("0xmember", carry=1.0, hours=100, snaps=200)
+    portfolio, _capital, _net = _size_portfolio(
+        settings, [row_big, row_member], 500, incumbents={"0xmember"}, incumbent_hold_days={"0xmember": 5}
+    )
+
+    assert {row["condition_id"] for row in portfolio} == {"0xbig", "0xmember"}
 
 
 def test_wo137_diff_write_failure_does_not_change_subject_ledgers(tmp_path, monkeypatch):

@@ -27,6 +27,7 @@ import requests
 from .config import EngineConfig, load_config
 from .trade_print_collector import collect_maker_portfolio_trade_prints
 from .utils import (
+    append_csv_rows,
     normalize_external_timestamp,
     now_utc,
     parse_timestamp,
@@ -701,6 +702,232 @@ def _books_by_token(payload: Any, token_ids: list[str]) -> dict[str, dict[str, A
 
 _SNAPSHOT_SCOPES = frozenset({"watchlist", "portfolio"})
 
+# WO-148: the maker-watchlist tier-assignment event ledger. Append-only per
+# 148.1 - never write_csv, never truncated, row-capped, sorted, or rewritten.
+# The WO-115 incident (a full-rewrite writer on an append-only-shaped ledger
+# re-serialised historical rows and blocked every anchor run for ten days) is
+# the reason. Deliberately NOT enrolled in ledger_anchor.DEFAULT_LEDGER_REGISTRY
+# nor the example config's `ledger_globs` - see 148.4. Referenced by name in
+# exactly this one place so the WO-148 test (16) static scan for the literal
+# path string has exactly one call site to find.
+TIER_EVENTS_CSV_NAME = "maker_watchlist_tier_events.csv"
+TIER_STATE_JSON_NAME = "maker_watchlist_tier_state.json"
+TIER_EVENT_FIELDS = ["event_utc", "condition_id", "token_id", "previous_tier", "tier"]
+_TIER_DOMAIN = frozenset({"portfolio", "persistent", "seed", "absent"})
+# 148.3: 6.0h == 24 consecutive missed 900s `run_trade_prints` cycles; measured
+# against the deployed collection ledger's observed 637-minute (10.62h) worst
+# inter-poll gap, not chosen for roundness.
+_TIER_STATE_MAX_AGE_SECONDS = 21600.0
+# 148.3: deployed caps (max_markets/max_persistent_markets/max_candidate_markets
+# all 25) bound a total-churn cycle at 75 departures + 75 arrivals == 150 rows;
+# 200 is 150 + 33% headroom, so exceeding it is structurally impossible and
+# signals a defect - rows are still written, never dropped.
+_TIER_EVENT_BURST_THRESHOLD = 200
+# The four fields `_portfolio` (:426-438) reads from a portfolio entry.
+_PORTFOLIO_CONTRACT_FIELDS = ("condition_id", "token_id", "quote_size_shares", "quote_distance")
+
+
+def _portfolio_field_contract_valid(value: Any) -> bool:
+    """§148.6 correction 2: is a `maker_carry_study.json` ``portfolio`` field
+    shaped like a real (possibly genuinely empty) portfolio, rather than a
+    read failure or malformed producer output masquerading as one?
+
+    A list is contract-valid if it is empty - a well-formed producer can
+    legitimately rank zero candidates - or if AT LEAST ONE entry is a dict
+    carrying at least one of the four fields ``_portfolio`` reads. Only a
+    NON-EMPTY list every entry of which fails that per-entry shape test is
+    contract-invalid; a mixed list (some entries pass, some fail) is not,
+    because ``_portfolio``'s own per-entry filtering already tolerates that.
+    """
+
+    if not isinstance(value, list):
+        return False
+    if not value:
+        return True
+    return any(
+        isinstance(entry, dict) and any(field in entry for field in _PORTFOLIO_CONTRACT_FIELDS)
+        for entry in value
+    )
+
+
+def _tier_summary_contract_valid(maker_summary: Any) -> bool:
+    """§148.6 correction 2, condition (1): the summary must be a mapping
+    carrying a contract-valid ``portfolio`` field - not merely "a dict",
+    because ``read_json``'s own failure default is also ``{}``, identical by
+    construction to a syntactically valid but semantically empty summary.
+    """
+
+    if not isinstance(maker_summary, dict):
+        return False
+    if "portfolio" not in maker_summary:
+        return False
+    return _portfolio_field_contract_valid(maker_summary.get("portfolio"))
+
+
+def _write_tier_events(
+    out_root: Path,
+    generated_at: str,
+    portfolio: list[dict[str, Any]],
+    persistent: list[dict[str, Any]],
+    seeds: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """148.1/148.3: diff this cycle's watchlist against the ledger's own last
+    row per condition id and append only the transitions, then (on success
+    only) snapshot the 148.2 liveness state file.
+
+    Callers must have already confirmed ``scope="watchlist"`` and the §148.6
+    three-input contract (summary contract-valid, candidates CSV present,
+    ``official_books`` directory present) - this function performs no scope
+    or input-existence check of its own; it only ever runs the diff.
+    """
+
+    events_path = out_root / TIER_EVENTS_CSV_NAME
+    state_path = out_root / TIER_STATE_JSON_NAME
+
+    # 148.3(2): current_tier from this cycle's three lists; multi-membership
+    # is impossible by construction (`exclude` at :791, :810-812) but if it
+    # occurs precedence is portfolio > persistent > seed - iterate in that
+    # order and count every later duplicate as a conflict without moving it.
+    current_tier: dict[str, str] = {}
+    current_token: dict[str, str] = {}
+    precedence_conflicts = 0
+    for tier_name, entries in (("portfolio", portfolio), ("persistent", persistent), ("seed", seeds)):
+        for entry in entries:
+            condition_id = str(entry.get("condition_id") or "").strip()
+            if not condition_id:
+                continue
+            if condition_id in current_tier:
+                precedence_conflicts += 1
+                continue
+            current_tier[condition_id] = tier_name
+            current_token[condition_id] = str(entry.get("token_id") or "").strip()
+
+    # A2/148.3(1): unreadable ledger (OSError/csv.Error) -> no rows appended,
+    # "read_failed", state not written - never diffed from an unknown baseline.
+    try:
+        existing_rows = read_csv_rows(events_path)
+    except (OSError, csv.Error):
+        return {
+            "tier_events_status": "read_failed",
+            "tier_events_written": 0,
+            "tier_events_resync": False,
+            "tier_events_malformed_rows": 0,
+            "tier_event_burst": False,
+            "tier_precedence_conflicts": precedence_conflicts,
+        }
+
+    # 148.3(1): last_tier = the tier of the LAST row in file order per
+    # condition id; absent -> "absent" (handled by the .get default below).
+    # A2: a row with empty condition_id or a tier outside the closed domain
+    # is ignored for last_tier and counted, never repaired or rewritten.
+    last_tier: dict[str, str] = {}
+    last_token: dict[str, str] = {}
+    malformed_rows = 0
+    for row in existing_rows:
+        condition_id = str(row.get("condition_id") or "").strip()
+        tier = str(row.get("tier") or "").strip()
+        if not condition_id or tier not in _TIER_DOMAIN:
+            malformed_rows += 1
+            continue
+        last_tier[condition_id] = tier
+        last_token[condition_id] = str(row.get("token_id") or "").strip()
+
+    # 148.3(3)-(4): resync=True when the state file is missing, unreadable,
+    # not a dict, `generated_at_utc` absent/unparseable, age negative, or
+    # age > 21600.0 (6.0h), anchored to the run clock (S1).
+    state = read_json(state_path, default=None)
+    resync = True
+    if isinstance(state, dict):
+        state_dt = parse_timestamp(state.get("generated_at_utc"))
+        run_dt = parse_timestamp(generated_at)
+        if state_dt is not None and run_dt is not None:
+            age = (run_dt - state_dt).total_seconds()
+            if isfinite(age) and 0.0 <= age <= _TIER_STATE_MAX_AGE_SECONDS:
+                resync = False
+
+    # 148.3(5)-(6): emit one row per condition id whose CURRENT tier differs
+    # from its REAL last tier (the idempotency dedup key), with the RECORDED
+    # previous_tier replaced by "unknown" only when resync fires - resync
+    # changes what is written, never whether a transition is considered to
+    # have happened.
+    event_rows: list[dict[str, Any]] = []
+    for condition_id in sorted(set(last_tier) | set(current_tier)):
+        last = last_tier.get(condition_id, "absent")
+        current = current_tier.get(condition_id, "absent")
+        if current == last:
+            continue
+        token_id = current_token.get(condition_id) or last_token.get(condition_id, "")
+        event_rows.append(
+            {
+                "event_utc": generated_at,
+                "condition_id": condition_id,
+                "token_id": token_id,
+                "previous_tier": "unknown" if resync else last,
+                "tier": current,
+            }
+        )
+
+    # A2: `append_csv_rows` raising is caught - "write_failed", state not
+    # written, and the caller (snapshot_official_books) continues normally -
+    # a measurement sidecar must never stop the collector.
+    try:
+        append_csv_rows(events_path, event_rows, fieldnames=TIER_EVENT_FIELDS)
+    except Exception:
+        return {
+            "tier_events_status": "write_failed",
+            "tier_events_written": 0,
+            "tier_events_resync": resync,
+            "tier_events_malformed_rows": malformed_rows,
+            "tier_event_burst": False,
+            "tier_precedence_conflicts": precedence_conflicts,
+        }
+
+    # 148.2: liveness state file, written AFTER the events append, atomic
+    # full-rewrite, only on a successful append. B1 fix round: this write is
+    # brought under the SAME failure containment as the append above - on a
+    # zero-transition cycle (the steady state; Day-after check (2) requires
+    # it) `append_csv_rows` short-circuits before touching disk when `rows`
+    # is empty (utils.py:191-192), making this write_json call the cycle's
+    # first disk write. A raise here (state path exists as a directory,
+    # ENOSPC/EROFS/permission) must not escape - "write_failed", same as an
+    # append failure, and the caller (snapshot_official_books) continues
+    # normally - a measurement sidecar must never stop the collector.
+    try:
+        write_json(
+            state_path,
+            {
+                "generated_at_utc": generated_at,
+                "work_order": "WO-148",
+                "watchlist_size": len(portfolio) + len(persistent) + len(seeds),
+                "tier_counts": {
+                    "portfolio": len(portfolio),
+                    "persistent": len(persistent),
+                    "seed": len(seeds),
+                },
+                "reporting_only": True,
+                "paper_trading_invoked": False,
+                "live_trading_invoked": False,
+            },
+        )
+    except Exception:
+        return {
+            "tier_events_status": "write_failed",
+            "tier_events_written": len(event_rows),
+            "tier_events_resync": resync,
+            "tier_events_malformed_rows": malformed_rows,
+            "tier_event_burst": len(event_rows) > _TIER_EVENT_BURST_THRESHOLD,
+            "tier_precedence_conflicts": precedence_conflicts,
+        }
+
+    return {
+        "tier_events_status": "ok",
+        "tier_events_written": len(event_rows),
+        "tier_events_resync": resync,
+        "tier_events_malformed_rows": malformed_rows,
+        "tier_event_burst": len(event_rows) > _TIER_EVENT_BURST_THRESHOLD,
+        "tier_precedence_conflicts": precedence_conflicts,
+    }
+
 
 def snapshot_official_books(cfg: EngineConfig, *, scope: str = "watchlist") -> dict[str, Any]:
     """Append one current official CLOB book for tracked markets.
@@ -750,17 +977,67 @@ def snapshot_official_books(cfg: EngineConfig, *, scope: str = "watchlist") -> d
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
     }
+    # WO-148 §148.6: every return path carries these six keys - initialized
+    # here at construction so a path that never reaches the write-site anchor
+    # below (the disabled early return, or the no_portfolio early return
+    # under either scope) cannot silently drop them and break the
+    # scope-invariant key set (test 22).
+    summary["tier_events_status"] = "ok"
+    summary["tier_events_written"] = 0
+    summary["tier_events_resync"] = False
+    summary["tier_events_malformed_rows"] = 0
+    summary["tier_event_burst"] = False
+    summary["tier_precedence_conflicts"] = 0
     if portfolio_scope:
         summary["scope"] = "portfolio"
         summary["work_order"] = "WO-149"
+        # §148.6 binding correction: the tier-event ledger is written ONLY
+        # when this function runs under scope="watchlist". Under
+        # scope="portfolio" no event is appended and no state file is
+        # written, regardless of the resulting watchlist's size - `persistent`
+        # and `seeds` are forced to `[]` by construction under this scope
+        # (the pulse does not compute those two tranches at all), so a writer
+        # with no information about them cannot contribute a transition.
+        # Guarded by the SAME `portfolio_scope` boolean the tranche
+        # computation branches on below (`:764`) - never re-derived here.
+        summary["tier_events_status"] = "skipped_portfolio_scope"
     if str(settings.get("enabled", True)).strip().lower() in {"0", "false", "no"}:
+        # §148.6 third binding correction: this exit precedes BOTH
+        # scope-based checks and needs its own label, assigned before either
+        # `write_json` call so it takes priority regardless of scope -
+        # neither "ok" (a disabled collector did not run at all) nor
+        # `skipped_portfolio_scope` (which implies the pulse ran and was
+        # correctly routed away from the watchlist write) is accurate here.
+        summary["tier_events_status"] = "skipped_disabled"
         write_json(summary_path, summary)
         return summary
     maker_summary = read_json(out_root / "maker_carry_study.json", default={}) or {}
     if not isinstance(maker_summary, dict):
         maker_summary = {}
     candidate_rows = _candidate_map(cfg)
-    portfolio = _portfolio(maker_summary, candidate_rows, int(settings["max_markets"]))
+    # §148.6 correction 2: `_portfolio` (:426-438) consumes `summary["portfolio"]`
+    # via a raw slice, `(summary.get("portfolio") or [])[:max_markets]` - a
+    # truthy non-list scalar (an int or a mapping) RAISES there instead of
+    # degrading to a controlled skip. §148.6's second binding correction, and
+    # the substitution below that implements it, applies only under
+    # `scope="watchlist"` - "as throughout this section, neither applies
+    # under scope=\"portfolio\", where the portfolio-scope skip fires first."
+    # Gated on the SAME `portfolio_scope` boolean already computed above
+    # (`:967`), never re-derived here: under `scope="portfolio"` a malformed
+    # summary is passed through UNSUBSTITUTED, preserving the pre-existing
+    # loud `TypeError` `_portfolio` raises on it, because that scope's own
+    # skip (`skipped_portfolio_scope`) already makes this contract check
+    # unnecessary there. Under `scope="watchlist"` an invalid summary is
+    # substituted with `{}`, which `_portfolio` already handles exactly like
+    # every OTHER bad-but-non-crashing shape it survives (a falsy scalar, an
+    # empty string) - contributing zero portfolio entries, never raising.
+    summary_contract_ok = _tier_summary_contract_valid(maker_summary)
+    portfolio = _portfolio(
+        maker_summary if (portfolio_scope or summary_contract_ok) else {},
+        candidate_rows,
+        int(settings["max_markets"]),
+    )
+    tier_inputs_ok = False
     if portfolio_scope:
         # WO-149.1(1): scope="portfolio" polls ONLY the current portfolio; the
         # persistent (WO-104) and candidate-seed (WO-116) tranches are
@@ -814,8 +1091,34 @@ def snapshot_official_books(cfg: EngineConfig, *, scope: str = "watchlist") -> d
             cap=max(0, int(settings.get("max_candidate_markets", 0))),
             skip_tokens=skip_tokens,
         )
+        # §148.6 second binding correction, checked first and independently
+        # of the resulting watchlist's size: ALL THREE tranche inputs must be
+        # confirmed present (and, for the summary, contract-valid) before an
+        # empty watchlist can be trusted as a genuine mass departure rather
+        # than an artifact of a glitched read on any ONE of them - a failure
+        # on only the portfolio's summary read, or only the candidates CSV,
+        # or only the official_books directory, does not necessarily empty
+        # the other two tranches, so gating on the summary alone (or on
+        # emptiness alone) would miss it.
+        candidates_csv_path = out_root / "maker_carry_candidates.csv"
+        books_dir = out_root / "official_books"
+        tier_inputs_ok = (
+            summary_contract_ok
+            and candidates_csv_path.exists()
+            and books_dir.exists()
+        )
+        if not tier_inputs_ok:
+            summary["tier_events_status"] = "skipped_unreadable_inputs"
     watchlist = portfolio + persistent + seeds
     if not watchlist:
+        if tier_inputs_ok:
+            # §148.6 second binding correction: a genuinely empty watchlist
+            # backed by fully-validated tranche inputs is truth, not an
+            # artifact of a read failure - run the diff so a real mass
+            # departure is recorded (up to the entire prior watchlist)
+            # instead of silently lost via this shortcut, which is the exact
+            # confusion 148.1 exists to end.
+            summary.update(_write_tier_events(out_root, generated_at, portfolio, persistent, seeds))
         summary.update(
             {
                 "status": "no_portfolio",
@@ -833,6 +1136,11 @@ def snapshot_official_books(cfg: EngineConfig, *, scope: str = "watchlist") -> d
     summary["portfolio_markets"] = len(portfolio)
     summary["persistent_markets"] = len(persistent)
     summary["candidate_seed_markets"] = len(seeds)
+    if tier_inputs_ok:
+        # WO-148 write site: the tier assignment is a fact regardless of
+        # whether the HTTP polls below succeed, so it is recorded here,
+        # before the batch POST - this keeps a heartbeat when polling fails.
+        summary.update(_write_tier_events(out_root, generated_at, portfolio, persistent, seeds))
 
     base = str(settings["clob_base_url"]).rstrip("/")
     timeout = float(settings["request_timeout_seconds"])

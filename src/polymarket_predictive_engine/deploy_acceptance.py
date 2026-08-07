@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -19,6 +20,21 @@ from .artifact_contracts import build_contract_registry, validate_contract_fixtu
 from .config import EngineConfig, load_config
 from .degraded_state_watchdog import MISSING_INPUT_RULES
 from .utils import ensure_dir, parse_timestamp, read_csv_rows, read_json, safe_float, write_json
+
+# WO-153 test (10) — resolve PROTECTED_CONTROL_PATHS from the merge-control
+# script itself so the running container's own import matches the registry
+# text an owner reads on `main`, not a copy that can drift from it. `scripts`
+# is on `PYTHONPATH` inside the `vps-deploy-acceptance` service
+# (`docker-compose.vps-paper.yml`), but `pytest.ini`'s `pythonpath = src`
+# does not add it, so this self-contained resolution — the same one
+# `scripts/render_polymarket_dashboard.py` uses for `src` — is required under
+# the offline sandbox suite. This import happens at module load time, outside
+# any try/except: a missing `scripts` directory is a fail-closed import error
+# that stops this module from loading at all, not a silently-omitted field.
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from merge_independently_reviewed_pr import PROTECTED_CONTROL_PATHS  # noqa: E402 - sys.path must be set first
 
 
 WORK_ORDER = "WO-79"
@@ -610,6 +626,16 @@ def build_deploy_acceptance(
         "checks": checks,
         "diffs": {str(row.get("id")): row.get("defects", []) for row in checks},
         "contract_registry_status": registry.get("status"),
+        # WO-153 test (10) — a drift/tamper signal computed from the running
+        # container's own import of PROTECTED_CONTROL_PATHS, not a copy of the
+        # text an owner reads on `main`. sha256, not a weaker digest, because
+        # this is read by a human, not used as a performance-sensitive cache
+        # key; sorted before joining because PROTECTED_CONTROL_PATHS is a
+        # `set`, whose iteration order is not guaranteed stable.
+        "protected_control_paths_count": len(PROTECTED_CONTROL_PATHS),
+        "protected_control_paths_hash": hashlib.sha256(
+            "\n".join(sorted(PROTECTED_CONTROL_PATHS)).encode("utf-8")
+        ).hexdigest(),
         "real_current_data": True,
         "read_only": True,
         "decision_use": "deployment acceptance and owner alerting only",

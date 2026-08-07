@@ -1026,3 +1026,270 @@ def test_atomic_squash_fails_closed_if_main_advances_before_ref_update() -> None
             expected_head=head,
             expected_main=main,
         )
+
+
+# --- WO-153 scope (a) — the deploy-control surface added to
+# PROTECTED_CONTROL_PATHS. Twelve pre-existing entries plus sixteen new ones
+# totals twenty-eight; both counts are hardcoded here (not read off the live
+# module) so these tests fail if the registration is incomplete rather than
+# trivially agreeing with whatever the module currently contains.
+
+WO_153_PRE_EXISTING_PATHS = (
+    ".github/workflows/required-pr-gate.yml",
+    ".github/workflows/independent-pr-merge.yml",
+    "scripts/audit_github_merge_gate.py",
+    "scripts/merge_independently_reviewed_pr.py",
+    "pyproject.toml",
+    "pytest.ini",
+    "pytest.toml",
+    "setup.py",
+    "setup.cfg",
+    "sitecustomize.py",
+    "tox.ini",
+    "usercustomize.py",
+)
+
+WO_153_NEW_PATHS = (
+    ".github/workflows/deploy_vps_paper_dispatch.yml",
+    "scripts/deploy_vps_paper_manual.sh",
+    "tests/test_deploy_vps_paper_dispatch_workflow.py",
+    "scripts/preflight_vps_capacity.py",
+    "scripts/validate_dashboard_private_transport.py",
+    "scripts/update_vps_checkout_preserving_runtime.py",
+    "scripts/rollback_vps_paper_deploy.py",
+    "scripts/write_vps_telemetry_manifest.py",
+    "scripts/check_polymarket_vps_paper.sh",
+    "docker-compose.vps-paper.yml",
+    "scripts/run_vps_deploy_acceptance.sh",
+    "src/polymarket_predictive_engine/deploy_acceptance.py",
+    "src/polymarket_predictive_engine/artifact_contracts.py",
+    ".github/workflows/deploy-polymarket-vps-paper.yml",
+    "scripts/verify_independent_main_acceptance.py",
+    "scripts/configure_polymarket_dashboard_tailscale.sh",
+)
+
+
+def test_wo153_pre_existing_and_new_paths_do_not_overlap() -> None:
+    assert set(WO_153_PRE_EXISTING_PATHS) & set(WO_153_NEW_PATHS) == set()
+    assert len(WO_153_PRE_EXISTING_PATHS) == 12
+    assert len(WO_153_NEW_PATHS) == 16
+
+
+@pytest.mark.parametrize("path", WO_153_NEW_PATHS)
+def test_wo153_new_deploy_control_paths_are_protected(path: str) -> None:
+    # (1) `_protected_control_path` returns True for each of the sixteen new
+    # registered paths.
+    assert independent_merge._protected_control_path(path) is True
+
+
+@pytest.mark.parametrize("path", WO_153_NEW_PATHS)
+def test_wo153_new_deploy_control_paths_survive_normalisation(path: str) -> None:
+    # (2) it returns True for each of the same sixteen paths in the forms
+    # `./<path>` and `/<path>` and with backslash separators, exercising the
+    # existing normaliser.
+    assert independent_merge._protected_control_path(f"./{path}") is True
+    assert independent_merge._protected_control_path(f"/{path}") is True
+    assert independent_merge._protected_control_path(path.replace("/", "\\")) is True
+
+
+@pytest.mark.parametrize("path", WO_153_NEW_PATHS)
+def test_wo153_new_deploy_control_path_alone_reports_protected_change(path: str) -> None:
+    # (3) + (4): a simulated PR touching only one of the sixteen new paths —
+    # the dispatch workflow, the test file, the deploy script, the acceptance
+    # script, the acceptance module, the contract-registry module, the Path A
+    # workflow, the Path A acceptance-verifier script, and the Path A
+    # tailnet-transport script, each in turn via this parametrisation —
+    # reports `trusted_merge_control_unchanged: false` and lists that path in
+    # `protected_control_changes`.
+    evidence = _candidate_evidence()
+    evidence["changed_files"] = [{"filename": path}]
+
+    result = independent_merge.evaluate_merge_candidate(**evidence)
+
+    assert result["eligible"] is False
+    assert result["checks"]["trusted_merge_control_unchanged"] is False
+    assert result["protected_control_changes"] == [path]
+    assert "pull_request_changes_trusted_merge_control" in result["blockers"]
+
+
+@pytest.mark.parametrize("path", WO_153_PRE_EXISTING_PATHS)
+def test_wo153_pre_existing_protected_paths_still_protected(path: str) -> None:
+    # (5) every path in PROTECTED_CONTROL_PATHS before this change still
+    # returns True — the tightening-only claim, asserted rather than argued.
+    assert independent_merge._protected_control_path(path) is True
+
+
+def test_wo153_path_outside_the_set_is_still_unprotected() -> None:
+    # (6) a path outside the set still returns False, so the widening did
+    # not become a prefix match.
+    assert (
+        independent_merge._protected_control_path(
+            "src/polymarket_predictive_engine/cli.py"
+        )
+        is False
+    )
+
+
+def test_wo153_widening_is_strictly_more_protective_never_less() -> None:
+    # Scope (a) is strictly tightening: the predicate flags strictly more
+    # paths as protected after this change, and every path it flagged before
+    # this change it still flags — never fewer.
+    pre = set(WO_153_PRE_EXISTING_PATHS)
+    new = set(WO_153_NEW_PATHS)
+    assert independent_merge.PROTECTED_CONTROL_PATHS == pre | new
+    assert len(independent_merge.PROTECTED_CONTROL_PATHS) == 28
+    for path in pre:
+        assert independent_merge._protected_control_path(path) is True
+    for path in new:
+        assert independent_merge._protected_control_path(path) is True
+    # A path this WO does not register, and did not register before it,
+    # stays unprotected both before and after — the widening adds, it does
+    # not also silently narrow the unprotected set into a false match.
+    assert (
+        independent_merge._protected_control_path(
+            "src/polymarket_predictive_engine/cli.py"
+        )
+        is False
+    )
+
+
+def _wo153_stage_target_scripts_helpers(script_text: str) -> list[str]:
+    match = re.search(r"for helper in(?P<body>.*?)\n\s*do\b", script_text, re.DOTALL)
+    assert match, "stage_target_scripts helper list not found in deploy script"
+    names = [token.rstrip("\\") for token in match.group("body").split()]
+    names = [token for token in names if token]
+    assert names, "stage_target_scripts helper list parsed to zero entries"
+    return [f"scripts/{name}" for name in names]
+
+
+def _wo153_compose_file_default(script_text: str) -> str:
+    match = re.search(r'COMPOSE_FILE="\$\{PM_COMPOSE_FILE:-([^}]+)\}"', script_text)
+    assert match, "COMPOSE_FILE default not found in deploy script"
+    return match.group(1)
+
+
+def _wo153_compose_service_block(compose_text: str, service_name: str) -> str:
+    lines = compose_text.splitlines()
+    start = next(
+        i
+        for i, line in enumerate(lines)
+        if line.strip() == f"{service_name}:" and re.match(r"^ {2}\S", line)
+    )
+    body: list[str] = []
+    for line in lines[start + 1 :]:
+        if re.match(r"^ {2}\S", line):
+            break
+        body.append(line)
+    return "\n".join(body)
+
+
+def test_wo153_deploy_script_closure_chain_is_fully_registered() -> None:
+    # (7) a closure test that does not merely re-enumerate the six staged
+    # scripts by hand but parses `scripts/deploy_vps_paper_manual.sh`'s own
+    # text — the `for helper in ...` list inside `stage_target_scripts` and
+    # the `COMPOSE_FILE` default — and parses the resulting compose file's
+    # `vps-deploy-acceptance` service `command:` line to find
+    # `scripts/run_vps_deploy_acceptance.sh`, and that script's own
+    # `deploy-acceptance` CLI invocation to resolve
+    # `src/polymarket_predictive_engine/deploy_acceptance.py`, and that
+    # module's own `from .artifact_contracts import ...` line to resolve
+    # `src/polymarket_predictive_engine/artifact_contracts.py` — asserting
+    # every path the parse produces is a member of PROTECTED_CONTROL_PATHS.
+    deploy_script = (ROOT / "scripts" / "deploy_vps_paper_manual.sh").read_text(
+        encoding="utf-8"
+    )
+    helpers = _wo153_stage_target_scripts_helpers(deploy_script)
+    compose_file = _wo153_compose_file_default(deploy_script)
+
+    compose_text = (ROOT / compose_file).read_text(encoding="utf-8")
+    service_block = _wo153_compose_service_block(compose_text, "vps-deploy-acceptance")
+    command_match = re.search(r"^\s*command:\s*(.+)$", service_block, re.MULTILINE)
+    assert command_match, "vps-deploy-acceptance command: line not found"
+    acceptance_script_match = re.search(r"scripts/\S+\.sh", command_match.group(1))
+    assert acceptance_script_match, "acceptance script invocation not found"
+    acceptance_script = acceptance_script_match.group(0)
+
+    acceptance_script_text = (ROOT / acceptance_script).read_text(encoding="utf-8")
+    assert "cli deploy-acceptance" in acceptance_script_text, (
+        "acceptance script no longer invokes the deploy-acceptance CLI command"
+    )
+    deploy_acceptance_module = "src/polymarket_predictive_engine/deploy_acceptance.py"
+
+    deploy_acceptance_text = (ROOT / deploy_acceptance_module).read_text(encoding="utf-8")
+    assert (
+        "from .artifact_contracts import build_contract_registry, validate_contract_fixture"
+        in deploy_acceptance_text
+    ), "deploy_acceptance.py no longer imports the contract-registry module"
+    artifact_contracts_module = "src/polymarket_predictive_engine/artifact_contracts.py"
+
+    resolved = set(helpers) | {
+        compose_file,
+        acceptance_script,
+        deploy_acceptance_module,
+        artifact_contracts_module,
+    }
+    assert len(resolved) >= 10, resolved  # non-zero, exhaustive visit count (A3)
+    for path in sorted(resolved):
+        assert independent_merge._protected_control_path(path) is True, path
+
+
+def test_wo153_cli_deploy_acceptance_dispatch_is_not_retargeted() -> None:
+    # (8) closes a visibility gap in test (7)'s own resolution step: test (7)
+    # resolves the `deploy-acceptance` CLI invocation to
+    # `src/polymarket_predictive_engine/deploy_acceptance.py` by name, not by
+    # reading `cli.py`'s own dispatch table. `cli.py` is not, and is not
+    # made, a member of PROTECTED_CONTROL_PATHS (registering it would flag
+    # every unrelated command's routine maintenance as a protected-control
+    # change). This test instead parses `cli.py`'s own source text for the
+    # exact `elif args.command == "deploy-acceptance":` branch and asserts it
+    # still calls `build_deploy_acceptance`, imported from `.deploy_acceptance`
+    # — so a retargeted branch trips this test directly without registering
+    # `cli.py` itself.
+    cli_text = (ROOT / "src" / "polymarket_predictive_engine" / "cli.py").read_text(
+        encoding="utf-8"
+    )
+    assert "from .deploy_acceptance import build_deploy_acceptance" in cli_text, (
+        "cli.py no longer imports build_deploy_acceptance from .deploy_acceptance"
+    )
+    branch_match = re.search(
+        r'elif args\.command == "deploy-acceptance":\s*\n\s*_print\(build_deploy_acceptance\(cfg\)\)',
+        cli_text,
+    )
+    assert branch_match, (
+        "the deploy-acceptance dispatch branch no longer calls build_deploy_acceptance directly"
+    )
+
+
+def test_wo153_path_a_one_hop_helpers_are_registered() -> None:
+    # (9) closes the same drift gap in Path A that test (7) closes in Path B:
+    # hand-enumeration in (1)-(4) proves the predicate accepts the two Path A
+    # one-hop helper paths once given their names; it does not prove the
+    # workflow still calls those two names. This test parses
+    # `.github/workflows/deploy-polymarket-vps-paper.yml`'s own text for its
+    # two one-hop helper invocations — the
+    # `verify_independent_main_acceptance.py` line in the "Bind deployment to
+    # independently accepted main" step, and the
+    # `configure_polymarket_dashboard_tailscale.sh` line in the tailnet
+    # enforcement step — and asserts the exact two-element set it resolves to
+    # is a subset of PROTECTED_CONTROL_PATHS.
+    workflow_text = (
+        ROOT / ".github" / "workflows" / "deploy-polymarket-vps-paper.yml"
+    ).read_text(encoding="utf-8")
+
+    verify_match = re.search(
+        r"deploy-control/(scripts/verify_independent_main_acceptance\.py)",
+        workflow_text,
+    )
+    tailscale_match = re.search(
+        r"bash (scripts/configure_polymarket_dashboard_tailscale\.sh)",
+        workflow_text,
+    )
+    assert verify_match, "verify_independent_main_acceptance.py invocation not found"
+    assert tailscale_match, "configure_polymarket_dashboard_tailscale.sh invocation not found"
+
+    resolved = {verify_match.group(1), tailscale_match.group(1)}
+    assert resolved == {
+        "scripts/verify_independent_main_acceptance.py",
+        "scripts/configure_polymarket_dashboard_tailscale.sh",
+    }
+    assert resolved <= independent_merge.PROTECTED_CONTROL_PATHS

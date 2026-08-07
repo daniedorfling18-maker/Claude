@@ -3209,6 +3209,66 @@ def test_wo148_b1_state_path_is_a_directory_reports_write_failed(tmp_path, monke
     assert persisted["tier_events_status"] == "write_failed"
 
 
+def test_wo148_b1_state_write_raising_on_genesis_cycle_reports_true_event_count_and_burst(tmp_path, monkeypatch):
+    # B1, third fixture: the two tests above both use the zero-transition
+    # fixture (`len(event_rows) == 0`), so neither can tell
+    # `"tier_events_written": len(event_rows)` / `"tier_event_burst":
+    # len(event_rows) > _TIER_EVENT_BURST_THRESHOLD` (:915/:918, the second
+    # write_failed branch, guarding the state write) apart from a regression
+    # that collapses either to a literal `0` / `False` - both read 0 either
+    # way. This fixture is a genesis cycle instead: the CSV append SUCCEEDS
+    # with N=205 real transition rows (5 portfolio + 0 persistent + 200 seed,
+    # hand-counted below), then the state write fails exactly as above.
+    #
+    # N is deliberately pushed past _TIER_EVENT_BURST_THRESHOLD (200, see
+    # :721-725) by overriding max_candidate_markets far above the deployed
+    # cap of 25 that the threshold comment says makes 200 "structurally
+    # impossible" in production - the override exists purely to exercise
+    # tier_event_burst's True arm at all, which no other test in this file
+    # reaches under the deployed-cap-shaped default fixture.
+    cfg = _wo148_config(tmp_path, max_candidate_markets=250)
+    # Hand count: 5 portfolio pairs (0xp001..0xp005) + 200 seed candidates
+    # (0xs001..0xs200, disjoint condition-id prefix, all within the
+    # max_candidate_markets=250 cap) + 0 persistent (no official_books/*.csv.gz
+    # written) = 205 total watchlist entries. The ledger is empty beforehand,
+    # so EVERY entry's last tier defaults to "absent" and differs from its
+    # current tier -> exactly 205 emitted rows. 205 > 200, so
+    # tier_event_burst is True for this cycle.
+    portfolio_pairs = [(f"0xp{i:03d}", f"tokP{i:03d}") for i in range(1, 6)]
+    seed_pairs = [(f"0xs{i:03d}", f"tokS{i:03d}") for i in range(1, 201)]
+    expected_n = len(portfolio_pairs) + len(seed_pairs)
+    assert expected_n == 205
+    _wo148_study(cfg, portfolio_pairs)
+    _wo148_candidates_and_books(cfg, candidates=portfolio_pairs + seed_pairs)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _seed_tier_state(cfg, generated_at_utc="2026-07-14T12:00:00Z")
+    state_path = _tier_state_path(cfg)
+    real_write_json = maker_fill_replay.write_json
+
+    def _raise_on_state_path(path, payload):
+        if Path(path) == state_path:
+            raise OSError("simulated state write failure (ENOSPC/EROFS/permission)")
+        return real_write_json(path, payload)
+
+    monkeypatch.setattr(maker_fill_replay, "write_json", _raise_on_state_path)
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)  # must not raise
+
+    assert summary["tier_events_status"] == "write_failed"
+    assert summary["tier_events_written"] == 205  # == expected_n, the true count, not 0
+    assert summary["tier_event_burst"] is True  # 205 > 200 == _TIER_EVENT_BURST_THRESHOLD
+    events_rows = read_csv_rows(_tier_events_path(cfg))
+    assert len(events_rows) == 205  # the append landed on disk before the state write failed
+    assert summary["status"] in {"ok", "partial", "failed"}  # the collector itself still ran
+    snapshot_path = cfg.output_root / "maker_carry" / "official_book_snapshot.json"
+    assert snapshot_path.exists()
+    persisted = read_json(snapshot_path)
+    assert persisted["tier_events_status"] == "write_failed"
+    assert persisted["tier_events_written"] == 205
+    assert persisted["tier_event_burst"] is True
+
+
 def test_wo148_n2_malformed_portfolio_contract_raises_under_portfolio_scope_only(tmp_path, monkeypatch):
     # N2 (register fidelity): §148.6's contract-invalid-summary substitution
     # ("neither applies under scope=\"portfolio\", where the portfolio-scope

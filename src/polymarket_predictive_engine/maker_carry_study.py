@@ -435,16 +435,24 @@ def _validated_page_count(value: Any, *, name: str, ceiling: int) -> int:
     200-key cap sat unrevised and false. Strictly tightening: this only ever
     narrows an unbounded positive integer down to `<= ceiling`, never widens
     it, and every out-of-range or unusable input - empty, unparseable,
-    non-finite (nan/inf/-inf), zero, or negative - takes the SAME loud,
-    rejected error path, never a silent `int()`/`max(0, ...)` coercion. A
-    `0` here is not a smaller, safer scan: it is a scan that covers nothing
-    and reports a clean watchlist indistinguishable from a genuinely clean
-    one, which is the more dangerous failure this validation exists to
-    prevent.
+    non-finite (nan/inf/-inf), zero, negative, or FRACTIONAL (0.5, 0.9,
+    1e-4, "0.5" - anything whose float value is not its own int()) - takes
+    the SAME loud, rejected error path, never a silent `int()`/`max(0,
+    ...)` coercion. A fractional value below 1 is not a smaller, safer
+    scan: `int()` truncates it to `0`, and a `0` here is a scan that covers
+    nothing and reports a clean watchlist indistinguishable from a
+    genuinely clean one, which is the more dangerous failure this
+    validation exists to prevent.
     """
 
     numeric = safe_float(value)
-    if numeric is None or not math.isfinite(numeric) or numeric <= 0 or numeric > ceiling:
+    if (
+        numeric is None
+        or not math.isfinite(numeric)
+        or numeric <= 0
+        or numeric > ceiling
+        or numeric != int(numeric)
+    ):
         raise ValueError(
             f"maker_carry_study.{name} must be a positive integer <= {ceiling}, got {value!r}"
         )

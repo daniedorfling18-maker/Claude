@@ -1444,6 +1444,11 @@ def test_wo149_portfolio_scope_polls_only_the_current_portfolio_2_3_4(tmp_path, 
     assert pulse_path.is_file()
     pulse = read_json(pulse_path)
     assert pulse["scope"] == "portfolio"
+    # F9: WO-147's two new diagnostic keys are structurally unreachable
+    # under scope="portfolio" (§147.4's "material non-finding") - the
+    # portfolio pulse must carry NEITHER of them.
+    assert "watchlist_excluded_expired" not in pulse
+    assert "watchlist_excluded_expired_examples" not in pulse
     assert (cfg.output_root / "maker_carry" / "official_book_snapshot.json").read_bytes() == sentinel_bytes
 
 

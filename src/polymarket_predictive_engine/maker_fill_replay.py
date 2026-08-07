@@ -424,6 +424,24 @@ def _candidate_map(cfg: EngineConfig) -> dict[str, dict[str, str]]:
     return {str(row.get("condition_id") or ""): row for row in rows if row.get("condition_id")}
 
 
+def _valid_stale_reasons(value: Any) -> list[str]:
+    """WO-147 fix round (F8): a stale-map entry is trustworthy only as a
+    list/tuple of `str` reasons.
+
+    Anything else - a bare string (which would otherwise explode into
+    per-character "reasons" if handed straight to `list()`), a dict, a
+    number, or a list/tuple containing a non-str element - is malformed and
+    is treated as carrying NO reasons: not iterated, and handled by the
+    exact same path as an absent or genuinely empty entry ("no reasons for
+    this id"), never silently vanished into a false "kept, nothing to see
+    here".
+    """
+
+    if isinstance(value, (list, tuple)) and all(isinstance(reason, str) for reason in value):
+        return list(value)
+    return []
+
+
 def _watchlist_expired_reasons(
     row: dict[str, Any], stale_map: dict[str, list[str]], *, as_of: datetime
 ) -> list[str]:
@@ -438,13 +456,15 @@ def _watchlist_expired_reasons(
     source is independently sufficient and neither is conditioned on the
     other; the stale map's positive evidence therefore excludes a market
     even when the current row's own fields are themselves missing (WO-147
-    test 10 - the 61-market persistent case).
+    test 10 - the 61-market persistent case). A malformed stale-map entry
+    (F8) is validated via `_valid_stale_reasons` rather than iterated
+    directly.
     """
 
     from .maker_carry_study import _candidate_staleness_reasons
 
     condition_id = str(row.get("condition_id") or "").strip()
-    reasons = list(stale_map.get(condition_id) or [])
+    reasons = _valid_stale_reasons(stale_map.get(condition_id))
     market = {
         "endDateIso": row.get("end_date_utc"),
         "question": row.get("question"),
@@ -461,12 +481,15 @@ def _watchlist_kept_counters(row: dict[str, Any]) -> tuple[bool, bool]:
 
     Meaningful only once `_watchlist_expired_reasons` returned no reasons for
     this row - by construction that also means the stale map carries no
-    entry for it, since every persisted entry is non-empty, which is the
-    fail-safe precedence rule's own guarantee. A missing/empty/unparseable/
-    non-finite `end_date_utc` cannot itself be read as fresh, and a missing
-    `question` or `uma_resolution_status` cannot itself be read as clean, so
-    each is counted rather than silently assumed live. Reuses
-    `normalize_external_timestamp`; never a second date parser.
+    VALID, non-empty entry for it (per `_valid_stale_reasons`, F8 fix round:
+    an absent id, a genuinely empty `[]`, and a malformed non-list/tuple-of-
+    str entry are all "no reasons for this id" and route through this same
+    kept-counting path rather than any of them silently vanishing), which is
+    the fail-safe precedence rule's own guarantee. A missing/empty/
+    unparseable/non-finite `end_date_utc` cannot itself be read as fresh,
+    and a missing `question` or `uma_resolution_status` cannot itself be
+    read as clean, so each is counted rather than silently assumed live.
+    Reuses `normalize_external_timestamp`; never a second date parser.
     """
 
     close_time_unparseable = normalize_external_timestamp(row.get("end_date_utc")) is None
@@ -482,27 +505,42 @@ def _watchlist_stale_map(raw_summary: Any, *, as_of: datetime) -> tuple[dict[str
     Fails open toward collecting on every branch - the map returned is
     EMPTY, never partially trusted, whenever the status is anything but
     "ok": `raw_summary` missing/unreadable/not-a-dict => "unavailable"; a
-    present-but-non-dict `excluded_stale_condition_ids` => "malformed"; an
-    absent, unparseable, future, or more-than-48h-old `generated_at_utc` =>
-    "stale_ignored". Basis for 48.0h: two times the registered study
-    interval `OPS_MAKER_STUDY_INTRADAY_INTERVAL_SECONDS` default 86400s -
-    one missed study run tolerated, two is not evidence.
+    present dict with no `excluded_stale_condition_ids` key at all, or that
+    key present but `None` (F2 fix round - a valid dict study file that
+    simply never reached the point of writing the key is unmeasured, not a
+    genuinely empty scan, and must not be indistinguishable from "ok") =>
+    "unavailable"; a present-but-non-dict `excluded_stale_condition_ids`, or
+    a present dict any of whose entries is not a list/tuple of `str` (F8 fix
+    round - routed through this SAME "malformed" classification rather than
+    a new status value) => "malformed"; an absent, unparseable, future, or
+    more-than-48h-old `generated_at_utc` => "stale_ignored". A present,
+    genuinely empty `excluded_stale_condition_ids: {}` (a clean scan that
+    found nothing stale) stays "ok". Basis for 48.0h: two times the
+    registered study interval `OPS_MAKER_STUDY_INTRADAY_INTERVAL_SECONDS`
+    default 86400s - one missed study run tolerated, two is not evidence.
     """
 
     if not isinstance(raw_summary, dict):
         return {}, "unavailable"
+    if "excluded_stale_condition_ids" not in raw_summary:
+        return {}, "unavailable"
     condition_ids = raw_summary.get("excluded_stale_condition_ids")
     if condition_ids is None:
-        condition_ids = {}
+        return {}, "unavailable"
     if not isinstance(condition_ids, dict):
         return {}, "malformed"
+    validated_condition_ids: dict[str, list[str]] = {}
+    for condition_id, entry in condition_ids.items():
+        if not (isinstance(entry, (list, tuple)) and all(isinstance(reason, str) for reason in entry)):
+            return {}, "malformed"
+        validated_condition_ids[condition_id] = list(entry)
     study_as_of = parse_timestamp(raw_summary.get("generated_at_utc"))
     if study_as_of is None:
         return {}, "stale_ignored"
     age_hours = (as_of - study_as_of).total_seconds() / 3600.0
     if age_hours < 0 or age_hours > 48.0:
         return {}, "stale_ignored"
-    return condition_ids, "ok"
+    return validated_condition_ids, "ok"
 
 
 def _portfolio(summary: dict[str, Any], candidates: dict[str, dict[str, str]], max_markets: int) -> list[dict[str, Any]]:
@@ -588,7 +626,7 @@ def _recent_book_markets(
                     {"condition_id": condition_id, "tranche": "persistent", "reasons": reasons}
                 )
             continue
-        if condition_id not in stale_map:
+        if not _valid_stale_reasons(stale_map.get(condition_id)):
             close_time_unparseable, missing_fields = _watchlist_kept_counters(row)
             if close_time_unparseable:
                 exclusions["close_time_unparseable"] += 1
@@ -654,7 +692,7 @@ def _candidate_seed_markets(
                     {"condition_id": condition_id, "tranche": "seed", "reasons": reasons}
                 )
             continue
-        if condition_id not in stale_map:
+        if not _valid_stale_reasons(stale_map.get(condition_id)):
             close_time_unparseable, missing_fields = _watchlist_kept_counters(row)
             if close_time_unparseable:
                 expiry_diagnostics["close_time_unparseable"] += 1

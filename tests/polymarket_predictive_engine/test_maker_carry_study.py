@@ -599,6 +599,37 @@ def test_wo147_excluded_stale_condition_ids_caps_at_200_lexicographically_smalle
     assert summary["excluded_stale_condition_ids_truncated"] is True
 
 
+def test_wo147_excluded_stale_condition_ids_caps_at_200_smallest_even_fed_descending(tmp_path, monkeypatch):
+    # F4: the test above feeds the 201 stale markets in ASCENDING id order,
+    # so a cap-BEFORE-sort implementation (take the first 200 dict entries
+    # encountered, THEN sort those 200) would produce the identical {0x000..
+    # 0x199} result and the test would not discriminate between that bug and
+    # the registered sort-THEN-cap behaviour. Feeding the SAME 201 ids in
+    # DESCENDING order (0x200 down to 0x000) breaks that coincidence: a
+    # cap-before-sort implementation would keep the first 200 *encountered*
+    # (0x200..0x001, dropping 0x000) and only then sort them, yielding
+    # {0x001..0x200} - the 200 LARGEST, not the 200 smallest. The correct,
+    # registered behaviour sorts the full 201-entry population first and
+    # caps second, so it must still land on exactly {0x000..0x199} regardless
+    # of feed order.
+    cfg = _config(tmp_path)
+    monkeypatch.setattr(maker_carry_study, "now_utc", lambda: "2026-07-13T12:00:00Z")
+    markets = []
+    for i in reversed(range(201)):
+        token = f"{i:03d}"
+        market = _market(f"Stale market {token}", token, 100.0)
+        market["endDate"] = "2026-01-01T00:00:00Z"
+        markets.append(market)
+    _fake_requests(monkeypatch, markets=markets, books={}, histories={})
+
+    summary = run_maker_carry_study(cfg)
+
+    assert summary["excluded_stale"] == 201
+    assert len(summary["excluded_stale_condition_ids"]) == 200
+    assert set(summary["excluded_stale_condition_ids"]) == {f"0x{i:03d}" for i in range(200)}
+    assert summary["excluded_stale_condition_ids_truncated"] is True
+
+
 def test_wo147_stale_condition_ids_never_appear_in_candidates_csv(tmp_path, monkeypatch):
     # WO-147 test (3): re-asserts the disjointness this WO's provenance
     # depends on (the 62 excluded_stale markets are a disjoint population
@@ -684,6 +715,32 @@ def test_wo147_universe_pages_clamp_rejects_every_a2_edge_case(tmp_path, bad_val
 @pytest.mark.parametrize("bad_value", ["", "abc", float("nan"), float("inf"), float("-inf"), 0, -1])
 def test_wo147_page_size_clamp_rejects_every_a2_edge_case(tmp_path, bad_value):
     # WO-147 test (23): the symmetric case for page_size.
+    cfg = _config(tmp_path)
+    cfg.raw["maker_carry_study"]["page_size"] = bad_value
+    with pytest.raises(ValueError):
+        maker_carry_study._settings(cfg)
+
+
+# --- F1 fix round: a fractional value must never truncate to a scan that --
+# --- silently covers nothing (int(0.9) == 0, int("0.5") == 0, etc.) -------
+
+
+@pytest.mark.parametrize("bad_value", [0.5, 0.9, 1e-4, "0.5", 8.5])
+def test_wo147_universe_pages_clamp_rejects_fractional_values(tmp_path, bad_value):
+    # F1 (BLOCKER): 0.5/0.9/1e-4/"0.5" all pass the pre-fix finite/positive/
+    # <=ceiling guards and int()-truncate to 0, making `range(0)` scan
+    # nothing while reporting status=no_candidates/errors=[] -
+    # indistinguishable from a genuinely clean watchlist. 8.5 is the
+    # near-ceiling fractional case. Every one must raise, never truncate.
+    cfg = _config(tmp_path)
+    cfg.raw["maker_carry_study"]["universe_pages"] = bad_value
+    with pytest.raises(ValueError):
+        maker_carry_study._settings(cfg)
+
+
+@pytest.mark.parametrize("bad_value", [0.5, 0.9, 1e-4, "0.5", 8.5])
+def test_wo147_page_size_clamp_rejects_fractional_values(tmp_path, bad_value):
+    # F1 (BLOCKER): the symmetric case for page_size (ceiling 100).
     cfg = _config(tmp_path)
     cfg.raw["maker_carry_study"]["page_size"] = bad_value
     with pytest.raises(ValueError):

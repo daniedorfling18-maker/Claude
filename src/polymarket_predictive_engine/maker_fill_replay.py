@@ -883,23 +883,41 @@ def _write_tier_events(
         }
 
     # 148.2: liveness state file, written AFTER the events append, atomic
-    # full-rewrite, only on a successful append.
-    write_json(
-        state_path,
-        {
-            "generated_at_utc": generated_at,
-            "work_order": "WO-148",
-            "watchlist_size": len(portfolio) + len(persistent) + len(seeds),
-            "tier_counts": {
-                "portfolio": len(portfolio),
-                "persistent": len(persistent),
-                "seed": len(seeds),
+    # full-rewrite, only on a successful append. B1 fix round: this write is
+    # brought under the SAME failure containment as the append above - on a
+    # zero-transition cycle (the steady state; Day-after check (2) requires
+    # it) `append_csv_rows` short-circuits before touching disk when `rows`
+    # is empty (utils.py:191-192), making this write_json call the cycle's
+    # first disk write. A raise here (state path exists as a directory,
+    # ENOSPC/EROFS/permission) must not escape - "write_failed", same as an
+    # append failure, and the caller (snapshot_official_books) continues
+    # normally - a measurement sidecar must never stop the collector.
+    try:
+        write_json(
+            state_path,
+            {
+                "generated_at_utc": generated_at,
+                "work_order": "WO-148",
+                "watchlist_size": len(portfolio) + len(persistent) + len(seeds),
+                "tier_counts": {
+                    "portfolio": len(portfolio),
+                    "persistent": len(persistent),
+                    "seed": len(seeds),
+                },
+                "reporting_only": True,
+                "paper_trading_invoked": False,
+                "live_trading_invoked": False,
             },
-            "reporting_only": True,
-            "paper_trading_invoked": False,
-            "live_trading_invoked": False,
-        },
-    )
+        )
+    except Exception:
+        return {
+            "tier_events_status": "write_failed",
+            "tier_events_written": len(event_rows),
+            "tier_events_resync": resync,
+            "tier_events_malformed_rows": malformed_rows,
+            "tier_event_burst": len(event_rows) > _TIER_EVENT_BURST_THRESHOLD,
+            "tier_precedence_conflicts": precedence_conflicts,
+        }
 
     return {
         "tier_events_status": "ok",
@@ -1000,16 +1018,24 @@ def snapshot_official_books(cfg: EngineConfig, *, scope: str = "watchlist") -> d
     # §148.6 correction 2: `_portfolio` (:426-438) consumes `summary["portfolio"]`
     # via a raw slice, `(summary.get("portfolio") or [])[:max_markets]` - a
     # truthy non-list scalar (an int or a mapping) RAISES there instead of
-    # degrading to a controlled skip. The summary contract is therefore
-    # checked BEFORE `_portfolio` ever runs, for BOTH scopes, so a malformed
-    # producer output can never crash the collector; an invalid summary is
-    # substituted with `{}` here, which `_portfolio` already handles exactly
-    # like every OTHER bad-but-non-crashing shape it survives (a falsy
-    # scalar, an empty string) - contributing zero portfolio entries, never
-    # raising.
+    # degrading to a controlled skip. §148.6's second binding correction, and
+    # the substitution below that implements it, applies only under
+    # `scope="watchlist"` - "as throughout this section, neither applies
+    # under scope=\"portfolio\", where the portfolio-scope skip fires first."
+    # Gated on the SAME `portfolio_scope` boolean already computed above
+    # (`:967`), never re-derived here: under `scope="portfolio"` a malformed
+    # summary is passed through UNSUBSTITUTED, preserving the pre-existing
+    # loud `TypeError` `_portfolio` raises on it, because that scope's own
+    # skip (`skipped_portfolio_scope`) already makes this contract check
+    # unnecessary there. Under `scope="watchlist"` an invalid summary is
+    # substituted with `{}`, which `_portfolio` already handles exactly like
+    # every OTHER bad-but-non-crashing shape it survives (a falsy scalar, an
+    # empty string) - contributing zero portfolio entries, never raising.
     summary_contract_ok = _tier_summary_contract_valid(maker_summary)
     portfolio = _portfolio(
-        maker_summary if summary_contract_ok else {}, candidate_rows, int(settings["max_markets"])
+        maker_summary if (portfolio_scope or summary_contract_ok) else {},
+        candidate_rows,
+        int(settings["max_markets"]),
     )
     tier_inputs_ok = False
     if portfolio_scope:

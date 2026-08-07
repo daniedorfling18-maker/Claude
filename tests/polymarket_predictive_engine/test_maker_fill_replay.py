@@ -3123,3 +3123,118 @@ def test_wo148_test30b_mixed_portfolio_list_is_not_contract_invalid(tmp_path, mo
         "previous_tier": "seed",
         "tier": "portfolio",
     }
+
+
+def _wo148_zero_transition_fixture(cfg, monkeypatch) -> None:
+    """A steady-state cycle where the current watchlist exactly matches the
+    ledger's last recorded tier for every condition id, so the diff (148.3(6))
+    emits ZERO rows and `append_csv_rows` therefore short-circuits before
+    touching disk (`utils.py:191-192`) - the case the register's Day-after
+    check (2) requires and the case B1's fix round exists to protect, since
+    it makes the subsequent `write_json` state-file write the cycle's first
+    disk write.
+    """
+
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    _wo148_study(cfg, [("0xp1", "tokP1")])
+    _wo148_candidates_and_books(cfg, candidates=[("0xp1", "tokP1")])
+    _seed_tier_events(
+        cfg,
+        [
+            {
+                "event_utc": "2026-07-10T00:00:00Z",
+                "condition_id": "0xp1",
+                "token_id": "tokP1",
+                "previous_tier": "absent",
+                "tier": "portfolio",
+            }
+        ],
+    )
+
+
+def test_wo148_b1_state_write_raising_on_zero_transition_cycle_reports_write_failed(tmp_path, monkeypatch):
+    # B1 (blocker): on a zero-transition cycle, append_csv_rows never touches
+    # disk (rows == []), so write_json(state_path, ...) is the cycle's first
+    # write. A raise there (simulated here; ENOSPC/EROFS/permission on the
+    # real VPS) must be caught and reported "write_failed", exactly like an
+    # append_csv_rows failure - not escape snapshot_official_books.
+    cfg = _wo148_config(tmp_path)
+    _wo148_zero_transition_fixture(cfg, monkeypatch)
+    _seed_tier_state(cfg, generated_at_utc="2026-07-14T12:00:00Z")
+    events_before = _tier_events_path(cfg).read_bytes()
+    state_path = _tier_state_path(cfg)
+    real_write_json = maker_fill_replay.write_json
+
+    def _raise_on_state_path(path, payload):
+        if Path(path) == state_path:
+            raise OSError("simulated state write failure (ENOSPC/EROFS/permission)")
+        return real_write_json(path, payload)
+
+    monkeypatch.setattr(maker_fill_replay, "write_json", _raise_on_state_path)
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)  # must not raise
+
+    assert summary["tier_events_status"] == "write_failed"
+    assert summary["tier_events_written"] == 0
+    assert _tier_events_path(cfg).read_bytes() == events_before
+    assert summary["status"] in {"ok", "partial", "failed"}  # the collector itself still ran
+    snapshot_path = cfg.output_root / "maker_carry" / "official_book_snapshot.json"
+    assert snapshot_path.exists()
+    persisted = read_json(snapshot_path)
+    assert persisted["tier_events_status"] == "write_failed"
+
+
+def test_wo148_b1_state_path_is_a_directory_reports_write_failed(tmp_path, monkeypatch):
+    # B1, second fixture: the state path exists as a directory on disk (the
+    # concrete real-world case named in the audit) instead of being raised
+    # via monkeypatch - same containment, same assertions.
+    cfg = _wo148_config(tmp_path)
+    _wo148_zero_transition_fixture(cfg, monkeypatch)
+    state_path = _tier_state_path(cfg)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.mkdir()  # a directory at the state file's own path
+    events_before = _tier_events_path(cfg).read_bytes()
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)  # must not raise
+
+    assert summary["tier_events_status"] == "write_failed"
+    assert summary["tier_events_written"] == 0
+    assert _tier_events_path(cfg).read_bytes() == events_before
+    assert summary["status"] in {"ok", "partial", "failed"}  # the collector itself still ran
+    assert state_path.is_dir()  # left untouched, never converted into a file
+    snapshot_path = cfg.output_root / "maker_carry" / "official_book_snapshot.json"
+    assert snapshot_path.exists()
+    persisted = read_json(snapshot_path)
+    assert persisted["tier_events_status"] == "write_failed"
+
+
+def test_wo148_n2_malformed_portfolio_contract_raises_under_portfolio_scope_only(tmp_path, monkeypatch):
+    # N2 (register fidelity): §148.6's contract-invalid-summary substitution
+    # ("neither applies under scope=\"portfolio\", where the portfolio-scope
+    # skip fires first") is gated on the SAME `portfolio_scope` boolean the
+    # tranche computation already branches on - so a malformed
+    # maker_carry_study.json (`portfolio: 5`, a truthy non-list scalar) still
+    # raises the pre-existing loud TypeError _portfolio (:427-439) raises on
+    # its raw slice under scope="portfolio", rather than being silently
+    # substituted into a quiet "no_portfolio"/"skipped_portfolio_scope"
+    # artifact. Watchlist scope keeps the substituted, non-raising behaviour
+    # on the identical malformed payload (also covered, parametrized, by
+    # test 27) - proving the gate is scope-specific, not a blanket change.
+    cfg = _wo148_config(tmp_path)
+    _wo148_deny_network(monkeypatch)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: "2026-07-14T12:00:00Z")
+    write_json(
+        cfg.output_root / "maker_carry" / "maker_carry_study.json",
+        {"portfolio": 5, "paper_trading_invoked": False, "live_trading_invoked": False},
+    )
+    _wo148_candidates_and_books(cfg, candidates=[])
+
+    with pytest.raises(TypeError):
+        maker_fill_replay.snapshot_official_books(cfg, scope="portfolio")
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)  # scope="watchlist" (default)
+
+    assert summary["status"] == "no_portfolio"
+    assert summary["tier_events_status"] == "skipped_unreadable_inputs"
+    assert summary["tier_events_written"] == 0

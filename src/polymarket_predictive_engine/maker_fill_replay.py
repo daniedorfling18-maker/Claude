@@ -424,6 +424,125 @@ def _candidate_map(cfg: EngineConfig) -> dict[str, dict[str, str]]:
     return {str(row.get("condition_id") or ""): row for row in rows if row.get("condition_id")}
 
 
+def _valid_stale_reasons(value: Any) -> list[str]:
+    """WO-147 fix round (F8): a stale-map entry is trustworthy only as a
+    list/tuple of `str` reasons.
+
+    Anything else - a bare string (which would otherwise explode into
+    per-character "reasons" if handed straight to `list()`), a dict, a
+    number, or a list/tuple containing a non-str element - is malformed and
+    is treated as carrying NO reasons: not iterated, and handled by the
+    exact same path as an absent or genuinely empty entry ("no reasons for
+    this id"), never silently vanished into a false "kept, nothing to see
+    here".
+    """
+
+    if isinstance(value, (list, tuple)) and all(isinstance(reason, str) for reason in value):
+        return list(value)
+    return []
+
+
+def _watchlist_expired_reasons(
+    row: dict[str, Any], stale_map: dict[str, list[str]], *, as_of: datetime
+) -> list[str]:
+    """WO-147 (147.2): union of stale-map and current-row expiry evidence.
+
+    Calls `maker_carry_study._candidate_staleness_reasons` verbatim - the
+    precedent registered at :585-590 above ("a second implementation would
+    drift from the rule it is meant to describe") - rather than
+    reimplementing date parsing. `row` is a `maker_carry_candidates.csv`
+    row (or an empty/partial stand-in with `condition_id` always populated
+    by the caller, even when the row is otherwise absent). Either reason
+    source is independently sufficient and neither is conditioned on the
+    other; the stale map's positive evidence therefore excludes a market
+    even when the current row's own fields are themselves missing (WO-147
+    test 10 - the 61-market persistent case). A malformed stale-map entry
+    (F8) is validated via `_valid_stale_reasons` rather than iterated
+    directly.
+    """
+
+    from .maker_carry_study import _candidate_staleness_reasons
+
+    condition_id = str(row.get("condition_id") or "").strip()
+    reasons = _valid_stale_reasons(stale_map.get(condition_id))
+    market = {
+        "endDateIso": row.get("end_date_utc"),
+        "question": row.get("question"),
+        "umaResolutionStatus": row.get("uma_resolution_status"),
+    }
+    for reason in _candidate_staleness_reasons(market, as_of=as_of):
+        if reason not in reasons:
+            reasons.append(reason)
+    return reasons
+
+
+def _watchlist_kept_counters(row: dict[str, Any]) -> tuple[bool, bool]:
+    """WO-147 (147.3): which 'kept' diagnostics apply to a non-excluded row.
+
+    Meaningful only once `_watchlist_expired_reasons` returned no reasons for
+    this row - by construction that also means the stale map carries no
+    VALID, non-empty entry for it (per `_valid_stale_reasons`, F8 fix round:
+    an absent id, a genuinely empty `[]`, and a malformed non-list/tuple-of-
+    str entry are all "no reasons for this id" and route through this same
+    kept-counting path rather than any of them silently vanishing), which is
+    the fail-safe precedence rule's own guarantee. A missing/empty/
+    unparseable/non-finite `end_date_utc` cannot itself be read as fresh,
+    and a missing `question` or `uma_resolution_status` cannot itself be
+    read as clean, so each is counted rather than silently assumed live.
+    Reuses `normalize_external_timestamp`; never a second date parser.
+    """
+
+    close_time_unparseable = normalize_external_timestamp(row.get("end_date_utc")) is None
+    missing_fields = not str(row.get("question") or "").strip() or not str(
+        row.get("uma_resolution_status") or ""
+    ).strip()
+    return close_time_unparseable, missing_fields
+
+
+def _watchlist_stale_map(raw_summary: Any, *, as_of: datetime) -> tuple[dict[str, list[str]], str]:
+    """WO-147 (147.2/147.3): the persisted stale map, gated by freshness.
+
+    Fails open toward collecting on every branch - the map returned is
+    EMPTY, never partially trusted, whenever the status is anything but
+    "ok": `raw_summary` missing/unreadable/not-a-dict => "unavailable"; a
+    present dict with no `excluded_stale_condition_ids` key at all, or that
+    key present but `None` (F2 fix round - a valid dict study file that
+    simply never reached the point of writing the key is unmeasured, not a
+    genuinely empty scan, and must not be indistinguishable from "ok") =>
+    "unavailable"; a present-but-non-dict `excluded_stale_condition_ids`, or
+    a present dict any of whose entries is not a list/tuple of `str` (F8 fix
+    round - routed through this SAME "malformed" classification rather than
+    a new status value) => "malformed"; an absent, unparseable, future, or
+    more-than-48h-old `generated_at_utc` => "stale_ignored". A present,
+    genuinely empty `excluded_stale_condition_ids: {}` (a clean scan that
+    found nothing stale) stays "ok". Basis for 48.0h: two times the
+    registered study interval `OPS_MAKER_STUDY_INTRADAY_INTERVAL_SECONDS`
+    default 86400s - one missed study run tolerated, two is not evidence.
+    """
+
+    if not isinstance(raw_summary, dict):
+        return {}, "unavailable"
+    if "excluded_stale_condition_ids" not in raw_summary:
+        return {}, "unavailable"
+    condition_ids = raw_summary.get("excluded_stale_condition_ids")
+    if condition_ids is None:
+        return {}, "unavailable"
+    if not isinstance(condition_ids, dict):
+        return {}, "malformed"
+    validated_condition_ids: dict[str, list[str]] = {}
+    for condition_id, entry in condition_ids.items():
+        if not (isinstance(entry, (list, tuple)) and all(isinstance(reason, str) for reason in entry)):
+            return {}, "malformed"
+        validated_condition_ids[condition_id] = list(entry)
+    study_as_of = parse_timestamp(raw_summary.get("generated_at_utc"))
+    if study_as_of is None:
+        return {}, "stale_ignored"
+    age_hours = (as_of - study_as_of).total_seconds() / 3600.0
+    if age_hours < 0 or age_hours > 48.0:
+        return {}, "stale_ignored"
+    return validated_condition_ids, "ok"
+
+
 def _portfolio(summary: dict[str, Any], candidates: dict[str, dict[str, str]], max_markets: int) -> list[dict[str, Any]]:
     portfolio: list[dict[str, Any]] = []
     for entry in (summary.get("portfolio") or [])[:max_markets]:
@@ -444,7 +563,9 @@ def _recent_book_markets(
     settings: dict[str, Any],
     *,
     exclude: set[str],
-) -> list[dict[str, Any]]:
+    stale_map: dict[str, list[str]] | None = None,
+    as_of: datetime | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Markets whose official-book file was appended within the regime window.
 
     WO-104: Tier-0 markouts need CONTINUOUS book history around trades, but the
@@ -455,13 +576,28 @@ def _recent_book_markets(
     Recency uses file mtime (cheap); the token id comes from the candidate map,
     falling back to the file's last recorded asset id. Read-only collection;
     no gate, sizing, or order path reads it.
+
+    WO-147 (147.2): each candidate is checked against
+    `_watchlist_expired_reasons` before being added to the watchlist -
+    positive evidence of pastness (from `stale_map` or the candidate's own
+    parsed fields) excludes it and is counted under the returned
+    diagnostics' `"expired"` key; every other outcome keeps it, per this
+    collector's registered fail-open direction (:134-138 above).
     """
+    exclusions: dict[str, Any] = {
+        "expired": 0,
+        "close_time_unparseable": 0,
+        "kept_missing_fields": 0,
+        "examples": [],
+    }
     books_dir = cfg.output_root / "maker_carry" / "official_books"
     if not books_dir.exists():
-        return []
+        return [], exclusions
     horizon = float(settings["regime_days"]) * 86400.0
     now = time.time()
     candidates = _candidate_map(cfg)
+    stale_map = stale_map or {}
+    check_as_of = as_of or datetime.now(timezone.utc)
     watchlist: list[dict[str, Any]] = []
 
     def _mtime_desc(path: Path) -> float:
@@ -481,13 +617,28 @@ def _recent_book_markets(
                 continue
         except OSError:
             continue
-        token_id = str(candidates.get(condition_id, {}).get("token_id") or "").strip()
+        row = {**candidates.get(condition_id, {}), "condition_id": condition_id}
+        reasons = _watchlist_expired_reasons(row, stale_map, as_of=check_as_of)
+        if reasons:
+            exclusions["expired"] += 1
+            if len(exclusions["examples"]) < 10:
+                exclusions["examples"].append(
+                    {"condition_id": condition_id, "tranche": "persistent", "reasons": reasons}
+                )
+            continue
+        if not _valid_stale_reasons(stale_map.get(condition_id)):
+            close_time_unparseable, missing_fields = _watchlist_kept_counters(row)
+            if close_time_unparseable:
+                exclusions["close_time_unparseable"] += 1
+            if missing_fields:
+                exclusions["kept_missing_fields"] += 1
+        token_id = str(row.get("token_id") or "").strip()
         if not token_id:
             rows = _read_csv_any(path)
             token_id = str(rows[-1].get("asset_id") or "").strip() if rows else ""
         if token_id:
             watchlist.append({"condition_id": condition_id, "token_id": token_id})
-    return watchlist
+    return watchlist, exclusions
 
 
 def _candidate_seed_markets(
@@ -496,7 +647,9 @@ def _candidate_seed_markets(
     exclude: set[str],
     cap: int,
     skip_tokens: set[str] | None = None,
-) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    stale_map: dict[str, list[str]] | None = None,
+    as_of: datetime | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, int], dict[str, Any]]:
     """Top-ranked study candidates not already on the watchlist (WO-116).
 
     Fresh rewarded markets carry no local book history, so the WO-113
@@ -507,15 +660,44 @@ def _candidate_seed_markets(
     accumulate the required history while still ineligible; the existing
     mtime-based persistent tranche keeps them warm afterwards. Read-only
     collection breadth: no gate, sizing, eligibility, or order path reads it.
+
+    WO-147 (147.2): an expired candidate (per `_watchlist_expired_reasons`)
+    is skipped before ranking, exactly like the other skip reasons below,
+    and counted under `excluded["expired"]` so it surfaces through
+    `candidate_seed_exclusions`. The third return value carries the
+    close_time_unparseable/kept_missing_fields/examples diagnostics (147.3)
+    separately, so `candidate_seed_exclusions`'s existing three-key schema
+    stays exactly what WO-116 registered, plus this WO's "expired".
     """
-    excluded = {"delisted_cooldown": 0, "non_finite_rank": 0, "missing_token": 0}
+    excluded = {"delisted_cooldown": 0, "non_finite_rank": 0, "missing_token": 0, "expired": 0}
+    expiry_diagnostics: dict[str, Any] = {
+        "close_time_unparseable": 0,
+        "kept_missing_fields": 0,
+        "examples": [],
+    }
     if cap <= 0:
-        return [], excluded
+        return [], excluded, expiry_diagnostics
     skip = skip_tokens or set()
+    stale_map = stale_map or {}
+    check_as_of = as_of or datetime.now(timezone.utc)
     ranked: list[tuple[float, float, str, str]] = []
     for condition_id, row in candidates.items():
         if condition_id in exclude:
             continue
+        reasons = _watchlist_expired_reasons(row, stale_map, as_of=check_as_of)
+        if reasons:
+            excluded["expired"] += 1
+            if len(expiry_diagnostics["examples"]) < 10:
+                expiry_diagnostics["examples"].append(
+                    {"condition_id": condition_id, "tranche": "seed", "reasons": reasons}
+                )
+            continue
+        if not _valid_stale_reasons(stale_map.get(condition_id)):
+            close_time_unparseable, missing_fields = _watchlist_kept_counters(row)
+            if close_time_unparseable:
+                expiry_diagnostics["close_time_unparseable"] += 1
+            if missing_fields:
+                expiry_diagnostics["kept_missing_fields"] += 1
         token_id = str(row.get("token_id") or "").strip()
         if not token_id:
             excluded["missing_token"] += 1
@@ -574,6 +756,7 @@ def _candidate_seed_markets(
             for _, _, condition_id, token_id in ranked[:cap]
         ],
         excluded,
+        expiry_diagnostics,
     )
 
 
@@ -1011,9 +1194,13 @@ def snapshot_official_books(cfg: EngineConfig, *, scope: str = "watchlist") -> d
         summary["tier_events_status"] = "skipped_disabled"
         write_json(summary_path, summary)
         return summary
-    maker_summary = read_json(out_root / "maker_carry_study.json", default={}) or {}
-    if not isinstance(maker_summary, dict):
-        maker_summary = {}
+    # WO-147 (147.2): read once, keeping the raw parse result alongside the
+    # dict `_portfolio` below has always consumed, so `_watchlist_stale_map`
+    # can distinguish missing/unreadable/not-a-dict ("unavailable") from a
+    # present dict whose `excluded_stale_condition_ids` is itself malformed,
+    # without a second read of the same file.
+    maker_summary_raw = read_json(out_root / "maker_carry_study.json", default=None)
+    maker_summary = maker_summary_raw if isinstance(maker_summary_raw, dict) else {}
     candidate_rows = _candidate_map(cfg)
     # §148.6 correction 2: `_portfolio` (:426-438) consumes `summary["portfolio"]`
     # via a raw slice, `(summary.get("portfolio") or [])[:max_markets]` - a
@@ -1045,7 +1232,7 @@ def snapshot_official_books(cfg: EngineConfig, *, scope: str = "watchlist") -> d
         # polled from this scope.
         persistent: list[dict[str, Any]] = []
         seeds: list[dict[str, Any]] = []
-        seed_exclusions = {"delisted_cooldown": 0, "non_finite_rank": 0, "missing_token": 0}
+        seed_exclusions = {"delisted_cooldown": 0, "non_finite_rank": 0, "missing_token": 0, "expired": 0}
         # WO-149.1(4): the WO-131 cooldown marker is READ (so a cooling-down
         # token is still skipped here) but never WRITTEN from this scope
         # (see below) - the pulse polls up to 3x as often, and letting it
@@ -1064,8 +1251,18 @@ def snapshot_official_books(cfg: EngineConfig, *, scope: str = "watchlist") -> d
         # WO-104: keep recently-active markets on the watchlist so a persistent or
         # recurring market accumulates continuous Tier-0 book coverage across
         # portfolio churn, bounded by max_markets.
-        persistent = _recent_book_markets(
-            cfg, settings, exclude={str(entry["condition_id"]) for entry in portfolio}
+        markers = _read_delisted_markers(out_root)
+        now_dt = parse_timestamp(generated_at) or datetime.now(timezone.utc)
+        # WO-147 (147.2/147.3): the persisted stale map and its freshness gate,
+        # read against this run's own clock (`now_dt`) - never the max of
+        # observed data timestamps.
+        stale_map, stale_map_status = _watchlist_stale_map(maker_summary_raw, as_of=now_dt)
+        persistent, persistent_exclusions = _recent_book_markets(
+            cfg,
+            settings,
+            exclude={str(entry["condition_id"]) for entry in portfolio},
+            stale_map=stale_map,
+            as_of=now_dt,
         )
         # Always cover the FULL current portfolio (already capped at max_markets),
         # then reserve a separate budget for persistent markets so a full portfolio
@@ -1076,20 +1273,34 @@ def snapshot_official_books(cfg: EngineConfig, *, scope: str = "watchlist") -> d
         # they season toward the WO-113 book-history requirement before selection.
         # Runs even when the portfolio is empty (exactly the starved state it fixes).
         # WO-131: tokens inside their delisted cooldown are not seeded this cycle.
-        markers = _read_delisted_markers(out_root)
-        now_dt = parse_timestamp(generated_at) or datetime.now(timezone.utc)
         skip_tokens = _delisted_skip_tokens(
             markers,
             threshold=int(settings["delisted_skip_threshold"]),
             cooldown_hours=float(settings["delisted_cooldown_hours"]),
             now=now_dt,
         )
-        seeds, seed_exclusions = _candidate_seed_markets(
+        seeds, seed_exclusions, seed_expiry_diagnostics = _candidate_seed_markets(
             candidate_rows,
             exclude={str(entry["condition_id"]) for entry in portfolio}
             | {str(entry["condition_id"]) for entry in persistent},
             cap=max(0, int(settings.get("max_candidate_markets", 0))),
             skip_tokens=skip_tokens,
+            stale_map=stale_map,
+            as_of=now_dt,
+        )
+        # WO-147 (147.2): the portfolio tranche is explicitly NEVER excluded
+        # (WO-116's registration binds here - dropping a portfolio market on
+        # the strength of a possibly-stale study file would blank a
+        # measurement denominator) but positive expiry evidence against it is
+        # still counted for observability.
+        portfolio_observed_not_excluded = 0
+        for entry in portfolio:
+            condition_id = str(entry["condition_id"])
+            observed_row = {**candidate_rows.get(condition_id, {}), "condition_id": condition_id}
+            if _watchlist_expired_reasons(observed_row, stale_map, as_of=now_dt):
+                portfolio_observed_not_excluded += 1
+        watchlist_excluded_expired_examples_raw = (
+            persistent_exclusions["examples"] + seed_expiry_diagnostics["examples"]
         )
         # §148.6 second binding correction, checked first and independently
         # of the resulting watchlist's size: ALL THREE tranche inputs must be
@@ -1109,6 +1320,31 @@ def snapshot_official_books(cfg: EngineConfig, *, scope: str = "watchlist") -> d
         )
         if not tier_inputs_ok:
             summary["tier_events_status"] = "skipped_unreadable_inputs"
+    # WO-147 (147.3): built once, right after both tranches are known, so it
+    # is recorded on EVERY path this scope takes below - including the
+    # no-watchlist early return just below, where "everything got excluded"
+    # is exactly the observability case this WO exists to surface, not a
+    # reason to drop the diagnostic.
+    watchlist_excluded_expired = None
+    watchlist_excluded_expired_examples = None
+    if not portfolio_scope:
+        watchlist_excluded_expired = {
+            "persistent": persistent_exclusions["expired"],
+            "seed": seed_exclusions["expired"],
+            "portfolio_observed_not_excluded": portfolio_observed_not_excluded,
+            "close_time_unparseable": (
+                persistent_exclusions["close_time_unparseable"]
+                + seed_expiry_diagnostics["close_time_unparseable"]
+            ),
+            "kept_missing_fields": (
+                persistent_exclusions["kept_missing_fields"]
+                + seed_expiry_diagnostics["kept_missing_fields"]
+            ),
+            "stale_map_status": stale_map_status,
+        }
+        watchlist_excluded_expired_examples = sorted(
+            watchlist_excluded_expired_examples_raw, key=lambda example: example["condition_id"]
+        )[:10]
     watchlist = portfolio + persistent + seeds
     if not watchlist:
         if tier_inputs_ok:
@@ -1131,6 +1367,9 @@ def snapshot_official_books(cfg: EngineConfig, *, scope: str = "watchlist") -> d
                 "candidate_seed_markets": 0,
             }
         )
+        if watchlist_excluded_expired is not None:
+            summary["watchlist_excluded_expired"] = watchlist_excluded_expired
+            summary["watchlist_excluded_expired_examples"] = watchlist_excluded_expired_examples
         write_json(summary_path, summary)
         return summary
     summary["portfolio_markets"] = len(portfolio)
@@ -1304,6 +1543,14 @@ def snapshot_official_books(cfg: EngineConfig, *, scope: str = "watchlist") -> d
             ),
         }
     )
+    if watchlist_excluded_expired is not None:
+        # WO-147 (147.3): diagnostics only - no gate, sizing, eligibility, or
+        # order surface reads this artifact. `official_book_pulse.json`
+        # (scope="portfolio") never carries these keys; WO-147's logic is
+        # structurally unreachable there (persistent/seed are forced empty
+        # above and this file is not `official_book_snapshot.json`).
+        summary["watchlist_excluded_expired"] = watchlist_excluded_expired
+        summary["watchlist_excluded_expired_examples"] = watchlist_excluded_expired_examples
     if portfolio_scope:
         summary["delisted_marker_write"] = "skipped_portfolio_scope"
     write_json(summary_path, summary)

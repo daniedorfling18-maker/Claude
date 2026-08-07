@@ -424,6 +424,41 @@ CANDIDATE_FIELDS = [
 ]
 
 
+def _validated_page_count(value: Any, *, name: str, ceiling: int) -> int:
+    """WO-147 (147.1): reject anything but a finite positive int <= ceiling.
+
+    `universe_pages` and `page_size` drive the Gamma `/markets` scan's
+    worst-case fan-out (`universe_pages x page_size`) that this WO's
+    `excluded_stale_condition_ids` cap is sized against. Both used to be
+    merged from raw config with no upper bound, so a configured value past
+    the deployed 8/100 would silently raise that true worst case while the
+    200-key cap sat unrevised and false. Strictly tightening: this only ever
+    narrows an unbounded positive integer down to `<= ceiling`, never widens
+    it, and every out-of-range or unusable input - empty, unparseable,
+    non-finite (nan/inf/-inf), zero, negative, or FRACTIONAL (0.5, 0.9,
+    1e-4, "0.5" - anything whose float value is not its own int()) - takes
+    the SAME loud, rejected error path, never a silent `int()`/`max(0,
+    ...)` coercion. A fractional value below 1 is not a smaller, safer
+    scan: `int()` truncates it to `0`, and a `0` here is a scan that covers
+    nothing and reports a clean watchlist indistinguishable from a
+    genuinely clean one, which is the more dangerous failure this
+    validation exists to prevent.
+    """
+
+    numeric = safe_float(value)
+    if (
+        numeric is None
+        or not math.isfinite(numeric)
+        or numeric <= 0
+        or numeric > ceiling
+        or numeric != int(numeric)
+    ):
+        raise ValueError(
+            f"maker_carry_study.{name} must be a positive integer <= {ceiling}, got {value!r}"
+        )
+    return int(numeric)
+
+
 def _settings(cfg: EngineConfig) -> dict[str, Any]:
     raw = cfg.raw.get("maker_carry_study", {}) if isinstance(cfg.raw.get("maker_carry_study"), dict) else {}
     merged = {
@@ -482,6 +517,15 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
     # IPS and the enforced study cannot drift apart.
     merged.update(MAKER_POLICY_DEFAULTS)
     merged.update({k: v for k, v in raw.items() if v is not None})
+    # WO-147 (147.1): validated upper bounds, checked immediately after the
+    # raw-config merge above and before either value is used anywhere (the
+    # scan loop's `limit`/`offset` below). See `_validated_page_count`.
+    merged["universe_pages"] = _validated_page_count(
+        merged["universe_pages"], name="universe_pages", ceiling=8
+    )
+    merged["page_size"] = _validated_page_count(
+        merged["page_size"], name="page_size", ceiling=100
+    )
     # WO-129: these four registered evidence-gate minima are tighten-only.
     # Configuration may demand more evidence, but may never lower (or disable)
     # the registered requirement.
@@ -2651,6 +2695,19 @@ def run_maker_carry_study(cfg: EngineConfig, *, study_trigger: str | None = None
         ),
     }
 
+    # WO-147 (147.1): persist the per-condition stale map `_rewarded_universe`
+    # already computes (`excluded_stale_reasons`) so the collector-side
+    # expiry check (147.2) can read it - today it reaches only
+    # `_portfolio_composition_diff` above and is never written to disk.
+    # Sorted ascending and capped at the first 200 (25% headroom on the
+    # doubly-bounded `universe_pages <= 8` x `page_size <= 100` worst case).
+    _stale_condition_ids_sorted = sorted(stale_diagnostic["excluded_stale_reasons"])
+    excluded_stale_condition_ids = {
+        condition_id: stale_diagnostic["excluded_stale_reasons"][condition_id]
+        for condition_id in _stale_condition_ids_sorted[:200]
+    }
+    excluded_stale_condition_ids_truncated = len(_stale_condition_ids_sorted) > 200
+
     summary.update(
         {
             "status": "ok" if candidates else ("failed" if errors else "no_candidates"),
@@ -2660,6 +2717,8 @@ def run_maker_carry_study(cfg: EngineConfig, *, study_trigger: str | None = None
             "excluded_stale": stale_diagnostic["excluded_stale"],
             "excluded_stale_by_reason": stale_diagnostic["excluded_stale_by_reason"],
             "excluded_stale_examples": stale_diagnostic["excluded_stale_examples"],
+            "excluded_stale_condition_ids": excluded_stale_condition_ids,
+            "excluded_stale_condition_ids_truncated": excluded_stale_condition_ids_truncated,
             "yield_scan_considered_markets": yield_scan["yield_scan_considered_markets"],
             "yield_scan_scored_markets": yield_scan["yield_scan_scored_markets"],
             "yield_scan_selected_markets": yield_scan["yield_scan_selected_markets"],

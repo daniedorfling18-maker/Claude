@@ -6,7 +6,8 @@ import gzip
 import json
 import os
 import re
-from datetime import timedelta
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -778,7 +779,7 @@ def test_wo139_persistent_tranche_is_newest_first_not_condition_id_order(tmp_pat
     os.utime(books / "0xaaa.csv.gz", (now - 20, now - 20))
     os.utime(books / "0xffff.csv.gz", (now - 10, now - 10))
 
-    recent = maker_fill_replay._recent_book_markets(cfg, settings, exclude=set())
+    recent, _ = maker_fill_replay._recent_book_markets(cfg, settings, exclude=set())
 
     assert [row["condition_id"] for row in recent] == ["0xffff", "0xaaa"]
 
@@ -793,7 +794,7 @@ def test_wo139_persistent_tranche_uses_name_to_break_mtime_ties(tmp_path):
     for path in books.glob("*.csv.gz"):
         os.utime(path, (tied_mtime, tied_mtime))
 
-    recent = maker_fill_replay._recent_book_markets(cfg, settings, exclude=set())
+    recent, _ = maker_fill_replay._recent_book_markets(cfg, settings, exclude=set())
 
     assert [row["condition_id"] for row in recent] == ["0xaaa", "0xffff"]
 
@@ -808,12 +809,12 @@ def test_wo139_persistent_tranche_window_uses_evaluation_clock(tmp_path, monkeyp
     os.utime(archive, (archive_mtime, archive_mtime))
 
     monkeypatch.setattr(maker_fill_replay.time, "time", lambda: archive_mtime + 6.9 * 86400)
-    assert [row["condition_id"] for row in maker_fill_replay._recent_book_markets(
-        cfg, settings, exclude=set()
-    )] == ["0xfixed"]
+    recent, _ = maker_fill_replay._recent_book_markets(cfg, settings, exclude=set())
+    assert [row["condition_id"] for row in recent] == ["0xfixed"]
 
     monkeypatch.setattr(maker_fill_replay.time, "time", lambda: archive_mtime + 7.1 * 86400)
-    assert maker_fill_replay._recent_book_markets(cfg, settings, exclude=set()) == []
+    recent, _ = maker_fill_replay._recent_book_markets(cfg, settings, exclude=set())
+    assert recent == []
 
 
 def test_wo139_persistent_tranche_ignores_stat_failure(tmp_path):
@@ -823,7 +824,7 @@ def test_wo139_persistent_tranche_ignores_stat_failure(tmp_path):
     books = cfg.output_root / "maker_carry" / "official_books"
     (books / "0xbroken.csv.gz").symlink_to(books / "missing.csv.gz")
 
-    recent = maker_fill_replay._recent_book_markets(cfg, settings, exclude=set())
+    recent, _ = maker_fill_replay._recent_book_markets(cfg, settings, exclude=set())
 
     assert recent == [{"condition_id": "0xvalid", "token_id": "tokValid"}]
 
@@ -837,7 +838,7 @@ def test_wo139_seed_budget_prioritizes_sizeable_rows_without_shrinking():
         "0xraw": {"token_id": "raw", "net_carry_usd_per_day": "2", "yield_rank": "3"},
     }
 
-    seeds, _ = maker_fill_replay._candidate_seed_markets(rows, exclude=set(), cap=2)
+    seeds, _, _ = maker_fill_replay._candidate_seed_markets(rows, exclude=set(), cap=2)
 
     assert [row["condition_id"] for row in seeds] == ["0xsize", "0xthin"]
     assert len(seeds) == 2
@@ -851,7 +852,7 @@ def test_wo139_tier1_precedes_higher_carry_tier2_and_accepts_blank_risk():
                      "estimate_quality": "book_and_history", "band_eligible": "True", "resolution_risk": ""},
     }
 
-    seeds, _ = maker_fill_replay._candidate_seed_markets(rows, exclude=set(), cap=1)
+    seeds, _, _ = maker_fill_replay._candidate_seed_markets(rows, exclude=set(), cap=1)
 
     assert seeds == [{"condition_id": "0xtier1", "token_id": "tier1"}]
 
@@ -865,7 +866,7 @@ def test_wo139_seed_budget_fills_remainder_in_raw_order_and_keeps_malformed_rows
                    "estimate_quality": "book_and_history", "band_eligible": "True", "resolution_risk": "low"},
     }
 
-    seeds, _ = maker_fill_replay._candidate_seed_markets(rows, exclude=set(), cap=3)
+    seeds, _, _ = maker_fill_replay._candidate_seed_markets(rows, exclude=set(), cap=3)
 
     assert [row["condition_id"] for row in seeds] == ["0xsize", "0xraw1", "0xraw2"]
     assert len(seeds) == len(rows)
@@ -1443,6 +1444,11 @@ def test_wo149_portfolio_scope_polls_only_the_current_portfolio_2_3_4(tmp_path, 
     assert pulse_path.is_file()
     pulse = read_json(pulse_path)
     assert pulse["scope"] == "portfolio"
+    # F9: WO-147's two new diagnostic keys are structurally unreachable
+    # under scope="portfolio" (§147.4's "material non-finding") - the
+    # portfolio pulse must carry NEITHER of them.
+    assert "watchlist_excluded_expired" not in pulse
+    assert "watchlist_excluded_expired_examples" not in pulse
     assert (cfg.output_root / "maker_carry" / "official_book_snapshot.json").read_bytes() == sentinel_bytes
 
 
@@ -3298,3 +3304,819 @@ def test_wo148_n2_malformed_portfolio_contract_raises_under_portfolio_scope_only
     assert summary["status"] == "no_portfolio"
     assert summary["tier_events_status"] == "skipped_unreadable_inputs"
     assert summary["tier_events_written"] == 0
+
+
+# --- WO-147 §147.2/147.3: expired-market exclusion from the watchlist -------
+#
+# Tests (5)-(19) below correspond to the register's enumerated list under
+# "Tests (enumerated)" in docs/POLYMARKET_CODEX_WORK_ORDERS.md (WO-147).
+# `end_date_utc`/`question`/`uma_resolution_status` are the exact
+# `maker_carry_candidates.csv` column names (CANDIDATE_FIELDS) that
+# `_watchlist_expired_reasons` reads via its `endDateIso`/`question`/
+# `umaResolutionStatus` adapter (§147.2).
+
+_NOW = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
+_NOW_ISO = _NOW.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+# §147.3's registered schema for `watchlist_excluded_expired` - exactly these
+# six keys, no more, no fewer. Defined once here (F9) so every assertion
+# against it compares key SETS rather than re-listing the six literals.
+_WATCHLIST_EXCLUDED_EXPIRED_KEYS = {
+    "persistent",
+    "seed",
+    "portfolio_observed_not_excluded",
+    "close_time_unparseable",
+    "kept_missing_fields",
+    "stale_map_status",
+}
+
+
+def _write_maker_carry_study_json(cfg, *, generated_at_utc, portfolio=None, excluded_stale_condition_ids=None):
+    payload: dict[str, Any] = {
+        "generated_at_utc": generated_at_utc,
+        "portfolio": portfolio or [],
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+    if excluded_stale_condition_ids is not None:
+        payload["excluded_stale_condition_ids"] = excluded_stale_condition_ids
+    write_json(cfg.output_root / "maker_carry" / "maker_carry_study.json", payload)
+
+
+def test_wo147_persistent_market_past_close_time_is_excluded_and_absent_from_polls(tmp_path, monkeypatch):
+    # WO-147 test (5): persistent, a fresh (recent, well inside the regime
+    # window) book file, `end_date_utc` 2h before the run's own clock ->
+    # excluded, `watchlist_excluded_expired["persistent"] == 1`, and absent
+    # from `market_polls` - a second, non-expired persistent candidate
+    # confirms the assertion is not vacuous (an empty watchlist would make
+    # "absent from market_polls" trivially true).
+    cfg = _config(tmp_path)
+    raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    raw["maker_fill_replay"].update(
+        {"book_source": "official", "request_pause_seconds": 0, "regime_days": 7, "max_candidate_markets": 0}
+    )
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(raw), encoding="utf-8")
+    cfg = load_config(tmp_path / "config.yaml")
+
+    _write_maker_carry_study_json(cfg, generated_at_utc=_NOW_ISO)
+    write_csv(
+        cfg.output_root / "maker_carry" / "maker_carry_candidates.csv",
+        [
+            {
+                "condition_id": "0xexpired",
+                "token_id": "tokE",
+                "end_date_utc": "2026-07-20T10:00:00Z",  # now - 2h
+                "question": "Will X happen?",
+                "uma_resolution_status": "",
+            },
+            {
+                "condition_id": "0xkept",
+                "token_id": "tokK",
+                "end_date_utc": "2500-01-01T00:00:00Z",
+                "question": "Will Y happen?",
+                "uma_resolution_status": "",
+            },
+        ],
+        fieldnames=["condition_id", "token_id", "end_date_utc", "question", "uma_resolution_status"],
+    )
+    _recent_book_file(cfg, "0xexpired", "tokE")
+    _recent_book_file(cfg, "0xkept", "tokK")
+
+    monkeypatch.setattr(maker_fill_replay.time, "sleep", lambda _: None)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: _NOW_ISO)
+
+    def fake_get(url, params=None, timeout=None):
+        return _Response(
+            {
+                "asset_id": params["token_id"],
+                "timestamp": 2000,
+                "hash": "h1",
+                "bids": [{"price": "0.48", "size": "20"}],
+                "asks": [{"price": "0.52", "size": "20"}],
+            }
+        )
+
+    monkeypatch.setattr(maker_fill_replay.requests, "get", fake_get)
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert summary["status"] == "ok"
+    assert summary["persistent_markets"] == 1
+    assert summary["watchlist_excluded_expired"]["persistent"] == 1
+    polled_ids = {poll["condition_id"] for poll in summary["market_polls"]}
+    assert "0xexpired" not in polled_ids
+    assert polled_ids == {"0xkept"}
+    # F9: exactly the six registered §147.3 keys - no more, no fewer.
+    assert set(summary["watchlist_excluded_expired"]) == _WATCHLIST_EXCLUDED_EXPIRED_KEYS
+
+
+def test_wo147_persistent_market_future_close_time_is_kept(tmp_path):
+    # WO-147 test (6). S4: `end_date_utc`/`question` below are the REAL
+    # `endDateIso`/`question` fields off a Gamma `/markets` payload sanitised
+    # from the real endpoint (tests/fixtures/recorded/gamma_markets_2026-07-
+    # 15.json), not hand-written; `uma_resolution_status` is that SAME
+    # recorded market's own `umaResolutionStatus` value - empty, because the
+    # real 2026-07-15 recording of this market carries none (confirmed by
+    # test_wo92_recorded_api_fixtures.py's own assertion against it).
+    recorded_market = _recorded_fixture("gamma_markets_2026-07-15.json")[0]
+    cfg = _config(tmp_path)
+    settings = maker_fill_replay._settings(cfg)
+    settings["regime_days"] = 7
+    _recent_book_file(cfg, "0xrecorded", "tokRecorded")
+    write_csv(
+        cfg.output_root / "maker_carry" / "maker_carry_candidates.csv",
+        [
+            {
+                "condition_id": "0xrecorded",
+                "token_id": "tokRecorded",
+                "end_date_utc": recorded_market["endDateIso"],
+                "question": recorded_market["question"],
+                "uma_resolution_status": recorded_market.get("umaResolutionStatus") or "",
+            }
+        ],
+        fieldnames=["condition_id", "token_id", "end_date_utc", "question", "uma_resolution_status"],
+    )
+    as_of = datetime(2026, 7, 19, 22, 0, 0, tzinfo=timezone.utc)  # 2h before the recorded close
+
+    watchlist, exclusions = maker_fill_replay._recent_book_markets(
+        cfg, settings, exclude=set(), stale_map={}, as_of=as_of
+    )
+
+    assert [row["condition_id"] for row in watchlist] == ["0xrecorded"]
+    assert exclusions["expired"] == 0
+    assert exclusions["close_time_unparseable"] == 0
+    # The real recorded market's own `umaResolutionStatus` is empty (see the
+    # docstring above), which is itself a missing-field case per §147.3.
+    assert exclusions["kept_missing_fields"] == 1
+
+
+@pytest.mark.parametrize("bad_end_date", ["", "not-a-date", "nan"])
+def test_wo147_persistent_market_unparseable_close_time_is_kept_and_counted(tmp_path, bad_end_date):
+    # WO-147 tests (7)/(8)/(9): missing/unparseable/non-finite `end_date_utc`
+    # keeps the market on the watchlist (fail-open) and increments
+    # `close_time_unparseable`, never `expired`.
+    cfg = _config(tmp_path)
+    settings = maker_fill_replay._settings(cfg)
+    settings["regime_days"] = 7
+    _recent_book_file(cfg, "0xunparseable", "tokU")
+    write_csv(
+        cfg.output_root / "maker_carry" / "maker_carry_candidates.csv",
+        [
+            {
+                "condition_id": "0xunparseable",
+                "token_id": "tokU",
+                "end_date_utc": bad_end_date,
+                "question": "Will X happen?",
+                "uma_resolution_status": "resolved",
+            }
+        ],
+        fieldnames=["condition_id", "token_id", "end_date_utc", "question", "uma_resolution_status"],
+    )
+
+    watchlist, exclusions = maker_fill_replay._recent_book_markets(
+        cfg, settings, exclude=set(), stale_map={}, as_of=_NOW
+    )
+
+    assert [row["condition_id"] for row in watchlist] == ["0xunparseable"]
+    assert exclusions["expired"] == 0
+    assert exclusions["close_time_unparseable"] == 1
+    assert exclusions["kept_missing_fields"] == 0
+
+
+def test_wo147_persistent_market_absent_from_candidates_csv_but_in_stale_map_is_excluded(tmp_path):
+    # WO-147 test (10): the persistent market's own current-row fields are
+    # themselves missing - it is entirely ABSENT from
+    # `maker_carry_candidates.csv` (the real-world 61-market case) - but its
+    # condition id carries positive evidence in the persisted stale map. Per
+    # §147.3's fail-safe precedence rule, the stale map's positive evidence
+    # overrides the current-row absence rather than falling through to the
+    # keep-on-missing-fields branch; this is the only path that catches it.
+    cfg = _config(tmp_path)
+    settings = maker_fill_replay._settings(cfg)
+    settings["regime_days"] = 7
+    _recent_book_file(cfg, "0xabsent", "tokAbsent")
+    # No maker_carry_candidates.csv at all - _candidate_map returns {}.
+
+    watchlist, exclusions = maker_fill_replay._recent_book_markets(
+        cfg,
+        settings,
+        exclude=set(),
+        stale_map={"0xabsent": ["venue_close_time_past"]},
+        as_of=_NOW,
+    )
+
+    assert watchlist == []
+    assert exclusions["expired"] == 1
+    assert exclusions["close_time_unparseable"] == 0
+    assert exclusions["kept_missing_fields"] == 0
+
+
+def test_wo147_missing_study_json_is_unavailable_and_watchlist_matches_baseline(tmp_path, monkeypatch):
+    # WO-147 test (11): `maker_carry_study.json` missing ->
+    # `stale_map_status == "unavailable"`, and the watchlist is unaffected -
+    # a non-expired persistent market stays on it and is polled, exactly the
+    # pre-WO-147 baseline behaviour.
+    cfg = _config(tmp_path)
+    raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    raw["maker_fill_replay"].update(
+        {"book_source": "official", "request_pause_seconds": 0, "regime_days": 7, "max_candidate_markets": 0}
+    )
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(raw), encoding="utf-8")
+    cfg = load_config(tmp_path / "config.yaml")
+    # No maker_carry_study.json written at all.
+    write_csv(
+        cfg.output_root / "maker_carry" / "maker_carry_candidates.csv",
+        [
+            {
+                "condition_id": "0xrecent",
+                "token_id": "tokR",
+                "end_date_utc": "2500-01-01T00:00:00Z",
+                "question": "Will X happen?",
+                "uma_resolution_status": "",
+            }
+        ],
+        fieldnames=["condition_id", "token_id", "end_date_utc", "question", "uma_resolution_status"],
+    )
+    _recent_book_file(cfg, "0xrecent", "tokR")
+
+    monkeypatch.setattr(maker_fill_replay.time, "sleep", lambda _: None)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: _NOW_ISO)
+
+    def fake_get(url, params=None, timeout=None):
+        return _Response(
+            {
+                "asset_id": params["token_id"],
+                "timestamp": 2000,
+                "hash": "h1",
+                "bids": [{"price": "0.48", "size": "20"}],
+                "asks": [{"price": "0.52", "size": "20"}],
+            }
+        )
+
+    monkeypatch.setattr(maker_fill_replay.requests, "get", fake_get)
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert summary["status"] == "ok"
+    assert summary["watchlist_excluded_expired"]["stale_map_status"] == "unavailable"
+    assert summary["watchlist_excluded_expired"]["persistent"] == 0
+    assert {poll["condition_id"] for poll in summary["market_polls"]} == {"0xrecent"}
+
+
+def test_wo147_stale_map_status_malformed_when_condition_ids_is_not_a_dict(tmp_path):
+    # WO-147 test (12): `excluded_stale_condition_ids` present but a list,
+    # not a dict -> "malformed", and the returned map fails open to empty
+    # rather than partially trusting the malformed value.
+    stale_map, status = maker_fill_replay._watchlist_stale_map(
+        {"generated_at_utc": _NOW_ISO, "excluded_stale_condition_ids": ["0xnotadict"]},
+        as_of=_NOW,
+    )
+
+    assert stale_map == {}
+    assert status == "malformed"
+
+
+def test_wo147_stale_map_status_unavailable_when_key_absent_or_none(tmp_path):
+    # F2: a study JSON that is a valid dict but carries NO
+    # `excluded_stale_condition_ids` key at all is an unmeasured scan, not a
+    # genuinely clean one - it must read "unavailable" ((the same status as
+    # missing/unreadable/not-a-dict), not "ok". A present key whose value is
+    # explicitly `None` is the same case and gets the same status.
+    stale_map, status = maker_fill_replay._watchlist_stale_map(
+        {"generated_at_utc": _NOW_ISO},
+        as_of=_NOW,
+    )
+    assert stale_map == {}
+    assert status == "unavailable"
+
+    stale_map, status = maker_fill_replay._watchlist_stale_map(
+        {"generated_at_utc": _NOW_ISO, "excluded_stale_condition_ids": None},
+        as_of=_NOW,
+    )
+    assert stale_map == {}
+    assert status == "unavailable"
+
+
+def test_wo147_stale_map_status_ok_when_condition_ids_is_genuinely_empty(tmp_path):
+    # F2: a present, genuinely empty `excluded_stale_condition_ids: {}` is a
+    # clean scan that found nothing stale - it must stay "ok", not be
+    # conflated with the absent-key/None "unavailable" case above.
+    stale_map, status = maker_fill_replay._watchlist_stale_map(
+        {"generated_at_utc": _NOW_ISO, "excluded_stale_condition_ids": {}},
+        as_of=_NOW,
+    )
+    assert stale_map == {}
+    assert status == "ok"
+
+
+def test_wo147_stale_map_entry_malformed_routes_through_existing_malformed_status(tmp_path):
+    # F8: a malformed per-condition entry - a bare string (which would
+    # explode into per-character "reasons" if ever iterated directly), a
+    # dict, a number, or a list containing a non-str element - is routed
+    # through the SAME "malformed" status the not-a-dict case above uses,
+    # rather than a new status value, and the returned map fails open to
+    # empty exactly like that case.
+    for bad_entry in ("venue_close_time_past", {"reason": "x"}, 5, ["ok", 3]):
+        stale_map, status = maker_fill_replay._watchlist_stale_map(
+            {
+                "generated_at_utc": _NOW_ISO,
+                "excluded_stale_condition_ids": {"0xstale": ["venue_close_time_past"], "0xbad": bad_entry},
+            },
+            as_of=_NOW,
+        )
+        assert stale_map == {}, bad_entry
+        assert status == "malformed", bad_entry
+
+
+def test_wo147_valid_stale_reasons_rejects_malformed_and_normalizes_empty_and_tuple():
+    # F8: `_valid_stale_reasons` is the shared, defensive validator consumed
+    # directly by `_watchlist_expired_reasons` and by the "does this id have
+    # any reasons" checks in `_recent_book_markets`/`_candidate_seed_markets`
+    # - exercised here in isolation against every malformed shape named in
+    # the fix, plus the two well-formed shapes (empty list, tuple of str).
+    assert maker_fill_replay._valid_stale_reasons("venue_close_time_past") == []
+    assert maker_fill_replay._valid_stale_reasons({"reason": "x"}) == []
+    assert maker_fill_replay._valid_stale_reasons(5) == []
+    assert maker_fill_replay._valid_stale_reasons(["ok", 3]) == []
+    assert maker_fill_replay._valid_stale_reasons(None) == []
+    assert maker_fill_replay._valid_stale_reasons([]) == []
+    assert maker_fill_replay._valid_stale_reasons(("venue_close_time_past",)) == ["venue_close_time_past"]
+    assert maker_fill_replay._valid_stale_reasons(["venue_close_time_past"]) == ["venue_close_time_past"]
+
+
+def test_wo147_empty_list_stale_map_entry_is_not_silently_uncounted(tmp_path):
+    # F8: an entry that is an empty list (`[]`) must not silently vanish -
+    # it is handled by the SAME code path as "no reasons for this id" (an
+    # absent id), so the kept-diagnostics counters still fire for it, rather
+    # than the presence of the (empty) key suppressing them. Before the
+    # fix, `if condition_id not in stale_map:` was True only for a genuinely
+    # ABSENT id, so a present-but-empty entry skipped the counters entirely
+    # - "a keep counted by nothing".
+    cfg = _config(tmp_path)
+    settings = maker_fill_replay._settings(cfg)
+    settings["regime_days"] = 7
+    _recent_book_file(cfg, "0xemptyentry", "tokEE")
+    write_csv(
+        cfg.output_root / "maker_carry" / "maker_carry_candidates.csv",
+        [
+            {
+                "condition_id": "0xemptyentry",
+                "token_id": "tokEE",
+                "end_date_utc": "2500-01-01T00:00:00Z",
+                "question": "",
+                "uma_resolution_status": "resolved",
+            }
+        ],
+        fieldnames=["condition_id", "token_id", "end_date_utc", "question", "uma_resolution_status"],
+    )
+
+    watchlist, exclusions = maker_fill_replay._recent_book_markets(
+        cfg, settings, exclude=set(), stale_map={"0xemptyentry": []}, as_of=_NOW
+    )
+
+    assert [row["condition_id"] for row in watchlist] == ["0xemptyentry"]
+    assert exclusions["expired"] == 0
+    assert exclusions["close_time_unparseable"] == 0
+    assert exclusions["kept_missing_fields"] == 1
+
+
+def test_wo147_stale_map_freshness_gate_ok_then_stale_ignored_clock_advance(tmp_path):
+    # WO-147 test (13): the S1-mandated clock-advance pair. The SAME study
+    # file, with `generated_at_utc` fixed at now-47.9h, reads "ok" (and its
+    # stale-map evidence excludes the listed id) when evaluated against the
+    # run clock at "now"; advancing only the RUN clock by 0.2h (to make the
+    # study 48.1h old) flips it to "stale_ignored" and the returned map
+    # fails open to empty.
+    generated_at = _NOW - timedelta(hours=47.9)
+    raw_summary = {
+        "generated_at_utc": generated_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "excluded_stale_condition_ids": {"0xstale": ["venue_close_time_past"]},
+    }
+
+    stale_map, status = maker_fill_replay._watchlist_stale_map(raw_summary, as_of=_NOW)
+    assert status == "ok"
+    assert stale_map == {"0xstale": ["venue_close_time_past"]}
+
+    later = _NOW + timedelta(hours=0.2)
+    stale_map, status = maker_fill_replay._watchlist_stale_map(raw_summary, as_of=later)
+    assert status == "stale_ignored"
+    assert stale_map == {}
+
+
+def test_wo147_seed_tranche_expired_candidate_is_skipped_ranking_unchanged(tmp_path):
+    # WO-147 test (14): golden list matches
+    # test_wo139_seed_budget_prioritizes_sizeable_rows_without_shrinking
+    # exactly (0xsize, 0xthin, 0xraw, cap raised from 2 to 3 to admit all
+    # three), plus one additional expired candidate with the highest raw
+    # carry of the lot - it must be skipped before ranking ever sees it,
+    # rather than displacing or reordering the other three.
+    rows = {
+        "0xthin": {
+            "token_id": "thin", "net_carry_usd_per_day": "10", "yield_rank": "1",
+            "estimate_quality": "thin_book_untrusted", "band_eligible": "True", "resolution_risk": "low",
+        },
+        "0xsize": {
+            "token_id": "size", "net_carry_usd_per_day": "3", "yield_rank": "2",
+            "estimate_quality": "book_and_history", "band_eligible": "True", "resolution_risk": "medium",
+        },
+        "0xraw": {"token_id": "raw", "net_carry_usd_per_day": "2", "yield_rank": "3"},
+        "0xexpired": {
+            "token_id": "expired", "net_carry_usd_per_day": "100", "yield_rank": "0",
+            "end_date_utc": "2020-01-01T00:00:00Z", "question": "Will X happen?", "uma_resolution_status": "",
+        },
+    }
+
+    seeds, excluded, _ = maker_fill_replay._candidate_seed_markets(
+        rows, exclude=set(), cap=3, stale_map={}, as_of=_NOW
+    )
+
+    assert [row["condition_id"] for row in seeds] == ["0xsize", "0xthin", "0xraw"]
+    assert excluded["expired"] == 1
+
+
+def test_wo147_portfolio_tranche_expired_market_still_polled_and_counted(tmp_path, monkeypatch):
+    # WO-147 test (15): the portfolio tranche is explicitly never excluded
+    # (WO-116's registration - dropping it would blank the coverage_ratio
+    # denominator) but its expiry is still counted for observability, and
+    # the collection-window ledger keeps exactly the row it always would.
+    cfg = _config(tmp_path)
+    out = cfg.output_root / "maker_carry"
+    write_json(
+        out / "maker_carry_study.json",
+        {
+            "generated_at_utc": _NOW_ISO,
+            "portfolio": [
+                {
+                    "question": "Will X happen?",
+                    "condition_id": "0xcond",
+                    "size_multiple": 1,
+                    "quote_size_shares": 10,
+                    "quote_distance": 0.01,
+                    "quote_bid_price": 0.49,
+                    "quote_ask_price": 0.51,
+                    "net_carry_usd_per_day": 5.0,
+                }
+            ],
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    write_csv(
+        out / "maker_carry_candidates.csv",
+        [
+            {
+                "condition_id": "0xcond",
+                "token_id": "tok1",
+                "end_date_utc": "2020-01-01T00:00:00Z",
+                "question": "Will X happen?",
+                "uma_resolution_status": "",
+            }
+        ],
+        fieldnames=["condition_id", "token_id", "end_date_utc", "question", "uma_resolution_status"],
+    )
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: _NOW_ISO)
+
+    def fake_get(url, params=None, timeout=None):
+        if url.endswith("/book"):
+            return _Response(
+                {
+                    "asset_id": params["token_id"],
+                    "timestamp": 2000,
+                    "hash": "h1",
+                    "bids": [{"price": "0.48", "size": "20"}],
+                    "asks": [{"price": "0.52", "size": "20"}],
+                }
+            )
+        if url.endswith("/trades"):
+            return _Response([])
+        raise AssertionError(url)
+
+    monkeypatch.setattr(maker_fill_replay.requests, "get", fake_get)
+    monkeypatch.setattr(trade_print_collector.requests, "get", fake_get)
+
+    summary = maker_fill_replay.collect_maker_replay_data(cfg)
+
+    assert summary["status"] == "ok"
+    assert summary["windows_covered"] == 1
+    assert [row["condition_id"] for row in summary["market_windows"]] == ["0xcond"]
+    book_summary = summary["book_snapshot"]
+    assert {poll["condition_id"] for poll in book_summary["market_polls"]} == {"0xcond"}
+    assert book_summary["watchlist_excluded_expired"]["portfolio_observed_not_excluded"] == 1
+
+
+def test_wo147_examples_capped_at_10_sorted_on_a_15_exclusion_fixture(tmp_path, monkeypatch):
+    # WO-147 test (16): 15 expired persistent markets -> the examples list
+    # caps at 10, sorted by condition id - exercised via the no-watchlist
+    # early-return path (every candidate expired, nothing else on the
+    # watchlist), which the diagnostic must still populate.
+    cfg = _config(tmp_path)
+    raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    raw["maker_fill_replay"].update(
+        {"book_source": "official", "request_pause_seconds": 0, "regime_days": 7, "max_candidate_markets": 0}
+    )
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(raw), encoding="utf-8")
+    cfg = load_config(tmp_path / "config.yaml")
+
+    _write_maker_carry_study_json(cfg, generated_at_utc=_NOW_ISO)
+    condition_ids = [f"0x{i:02d}" for i in range(15)]
+    write_csv(
+        cfg.output_root / "maker_carry" / "maker_carry_candidates.csv",
+        [
+            {
+                "condition_id": cid,
+                "token_id": f"tok{cid}",
+                "end_date_utc": "2020-01-01T00:00:00Z",
+                "question": "Will X happen?",
+                "uma_resolution_status": "",
+            }
+            for cid in condition_ids
+        ],
+        fieldnames=["condition_id", "token_id", "end_date_utc", "question", "uma_resolution_status"],
+    )
+    for cid in condition_ids:
+        _recent_book_file(cfg, cid, f"tok{cid}")
+    # Tie every file's mtime to the SAME real wall-clock instant so the
+    # persistent tranche's own internal iteration order (mtime desc, then
+    # filename asc) is deterministic regardless of write-loop timing.
+    now = time.time()
+    books_dir = cfg.output_root / "maker_carry" / "official_books"
+    for cid in condition_ids:
+        os.utime(books_dir / f"{cid}.csv.gz", (now, now))
+
+    monkeypatch.setattr(maker_fill_replay.time, "sleep", lambda _: None)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: _NOW_ISO)
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert summary["status"] == "no_portfolio"
+    assert summary["watchlist_excluded_expired"]["persistent"] == 15
+    examples = summary["watchlist_excluded_expired_examples"]
+    assert len(examples) == 10
+    ids = [example["condition_id"] for example in examples]
+    # F3 fix round: assert the register's actual, weaker guarantee - sorted,
+    # at most 10 (line ~9442's "capped at 10, sorted") - not the stronger
+    # "exactly the 10 lexicographically smallest ids" the old assertion
+    # checked, which held here only because this fixture ties every mtime.
+    # See the non-tied fixture directly below, which proves the stronger
+    # claim is not actually guaranteed by the implementation.
+    assert len(ids) <= 10
+    assert ids == sorted(ids)
+
+
+def test_wo147_examples_sorted_and_capped_is_not_a_tie_artifact_of_equal_mtimes(tmp_path, monkeypatch):
+    # F3: proves the "sorted, at most 10" guarantee just asserted above is
+    # real, and that the STRONGER "exactly the 10 lexicographically smallest
+    # ids" property the old assertion checked was only a tie artifact of
+    # giving every file the identical mtime. Here each of the same 15
+    # expired persistent markets gets a strictly DISTINCT mtime, assigned so
+    # the NEWEST files are the ALPHABETICALLY LARGEST ids (0x14 newest ..
+    # 0x00 oldest, the opposite of a tie): the persistent tranche's own
+    # internal per-tranche examples cap keeps only the first 10 markets it
+    # visits in mtime-desc (newest-first) order - 0x14 down to 0x05 - BEFORE
+    # this function's outer sort ever runs, so the five alphabetically
+    # SMALLEST ids (0x00-0x04) never reach the examples list at all. The
+    # result is still sorted and at most 10 (the register's actual
+    # guarantee) but is emphatically NOT `sorted(condition_ids)[:10]`.
+    cfg = _config(tmp_path)
+    raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    raw["maker_fill_replay"].update(
+        {"book_source": "official", "request_pause_seconds": 0, "regime_days": 7, "max_candidate_markets": 0}
+    )
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(raw), encoding="utf-8")
+    cfg = load_config(tmp_path / "config.yaml")
+
+    _write_maker_carry_study_json(cfg, generated_at_utc=_NOW_ISO)
+    condition_ids = [f"0x{i:02d}" for i in range(15)]
+    write_csv(
+        cfg.output_root / "maker_carry" / "maker_carry_candidates.csv",
+        [
+            {
+                "condition_id": cid,
+                "token_id": f"tok{cid}",
+                "end_date_utc": "2020-01-01T00:00:00Z",
+                "question": "Will X happen?",
+                "uma_resolution_status": "",
+            }
+            for cid in condition_ids
+        ],
+        fieldnames=["condition_id", "token_id", "end_date_utc", "question", "uma_resolution_status"],
+    )
+    for cid in condition_ids:
+        _recent_book_file(cfg, cid, f"tok{cid}")
+    # Strictly increasing mtime with increasing id: 0x00 is the OLDEST file
+    # on disk, 0x14 is the NEWEST - deliberately not tied.
+    now = time.time()
+    books_dir = cfg.output_root / "maker_carry" / "official_books"
+    for index, cid in enumerate(condition_ids):
+        stamp = now - (len(condition_ids) - 1 - index)
+        os.utime(books_dir / f"{cid}.csv.gz", (stamp, stamp))
+
+    monkeypatch.setattr(maker_fill_replay.time, "sleep", lambda _: None)
+    monkeypatch.setattr(maker_fill_replay, "now_utc", lambda: _NOW_ISO)
+
+    summary = maker_fill_replay.snapshot_official_books(cfg)
+
+    assert summary["status"] == "no_portfolio"
+    assert summary["watchlist_excluded_expired"]["persistent"] == 15
+    examples = summary["watchlist_excluded_expired_examples"]
+    ids = [example["condition_id"] for example in examples]
+    assert len(ids) <= 10
+    assert ids == sorted(ids)
+    assert ids != sorted(condition_ids)[:10]
+    assert set(ids) == {f"0x{i:02d}" for i in range(5, 15)}
+
+
+def test_wo147_maker_policy_defaults_byte_identity(tmp_path):
+    # WO-147 test (17): byte-identity - the four MAKER_POLICY_DEFAULTS
+    # thresholds this WO explicitly does not move.
+    from polymarket_predictive_engine.maker_carry_study import MAKER_POLICY_DEFAULTS
+
+    assert MAKER_POLICY_DEFAULTS["maker_min_book_history_hours"] == 48.0
+    assert MAKER_POLICY_DEFAULTS["maker_min_book_snapshots"] == 100
+    assert MAKER_POLICY_DEFAULTS["target_net_usd_per_day"] == 3.33
+    assert MAKER_POLICY_DEFAULTS["max_trusted_reward_share"] == 0.05
+
+
+def test_wo147_candidate_staleness_reasons_called_from_exactly_two_production_sites():
+    # WO-147 test (18): static (A3). Scan rooted
+    # Path(__file__).resolve().parents[2] over ROOT/"src" and "scripts"
+    # ONLY - test files themselves call `_candidate_staleness_reasons` to
+    # exercise it, so an exhaustive scan that also visits "tests"/".github"
+    # fails the exactly-two assertion; the fix restricts the scan to the two
+    # production roots, not raises the count.
+    root = Path(__file__).resolve().parents[2]
+    roots = {"src": root / "src", "scripts": root / "scripts"}
+    call_pattern = re.compile(r"(?<!def )_candidate_staleness_reasons\(")
+
+    visited_files = 0
+    calls_by_root: dict[str, list[str]] = {name: [] for name in roots}
+    for name, scan_root in roots.items():
+        if not scan_root.exists():
+            continue
+        for path in scan_root.rglob("*.py"):
+            if path.relative_to(root).parts[0] == ".claude":
+                continue
+            visited_files += 1
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for match in call_pattern.finditer(text):
+                line_no = text.count("\n", 0, match.start()) + 1
+                calls_by_root[name].append(f"{path.name}:{line_no}")
+
+    assert visited_files > 0
+    assert calls_by_root["scripts"] == []
+    src_calls = calls_by_root["src"]
+    assert len(src_calls) == 2
+    assert sum(1 for site in src_calls if site.startswith("maker_fill_replay.py:")) == 1
+    assert sum(1 for site in src_calls if site.startswith("maker_carry_study.py:")) == 1
+
+
+def test_wo147_kept_missing_fields_counter_is_distinct_from_close_time_unparseable(tmp_path):
+    # WO-147 test (19): a persistent market with `question` missing (no
+    # stale-map entry) is kept and counted under `kept_missing_fields`, not
+    # `close_time_unparseable`; a second persistent market with
+    # `uma_resolution_status` missing (also no stale-map entry) adds to the
+    # SAME counter cumulatively - distinct from, and not conflated with, the
+    # close_time_unparseable counter exercised by tests (7)-(9).
+    cfg = _config(tmp_path)
+    settings = maker_fill_replay._settings(cfg)
+    settings["regime_days"] = 7
+    _recent_book_file(cfg, "0xnoquestion", "tokNQ")
+    _recent_book_file(cfg, "0xnostatus", "tokNS")
+    write_csv(
+        cfg.output_root / "maker_carry" / "maker_carry_candidates.csv",
+        [
+            {
+                "condition_id": "0xnoquestion",
+                "token_id": "tokNQ",
+                "end_date_utc": "2500-01-01T00:00:00Z",
+                "question": "",
+                "uma_resolution_status": "resolved",
+            },
+            {
+                "condition_id": "0xnostatus",
+                "token_id": "tokNS",
+                "end_date_utc": "2500-01-01T00:00:00Z",
+                "question": "Will X happen?",
+                "uma_resolution_status": "",
+            },
+        ],
+        fieldnames=["condition_id", "token_id", "end_date_utc", "question", "uma_resolution_status"],
+    )
+
+    watchlist, exclusions = maker_fill_replay._recent_book_markets(
+        cfg, settings, exclude=set(), stale_map={}, as_of=_NOW
+    )
+
+    assert {row["condition_id"] for row in watchlist} == {"0xnoquestion", "0xnostatus"}
+    assert exclusions["expired"] == 0
+    assert exclusions["close_time_unparseable"] == 0
+    assert exclusions["kept_missing_fields"] == 2
+
+
+# --- F5: behavioural coverage, THROUGH THE ADAPTER, of the shared-predicate
+# --- arms the static call-count test (18) cannot discriminate: a
+# --- reimplementation that dropped `resolution_disputed`, `resolution_
+# --- proposed`, or `title_date_past` from `_watchlist_expired_reasons`'
+# --- adapter would still call `_candidate_staleness_reasons` exactly twice
+# --- from production code and pass test (18) unchanged.
+
+
+def test_wo147_adapter_excludes_on_resolution_disputed():
+    # F5: `uma_resolution_status: "disputed"` reaches
+    # `_candidate_staleness_reasons` via the adapter's `umaResolutionStatus`
+    # field and excludes on `resolution_disputed` alone (venue close and
+    # title date both stay in the future).
+    row = {
+        "condition_id": "0xdisputed",
+        "end_date_utc": "2500-01-01T00:00:00Z",
+        "question": "Will X happen?",
+        "uma_resolution_status": "disputed",
+    }
+
+    reasons = maker_fill_replay._watchlist_expired_reasons(row, {}, as_of=_NOW)
+
+    assert reasons == ["resolution_disputed"]
+
+
+def test_wo147_adapter_excludes_on_resolution_proposed():
+    # F5: the symmetric case for "proposed".
+    row = {
+        "condition_id": "0xproposed",
+        "end_date_utc": "2500-01-01T00:00:00Z",
+        "question": "Will X happen?",
+        "uma_resolution_status": "proposed",
+    }
+
+    reasons = maker_fill_replay._watchlist_expired_reasons(row, {}, as_of=_NOW)
+
+    assert reasons == ["resolution_proposed"]
+
+
+def test_wo147_adapter_excludes_on_title_date_past():
+    # F5: a past-dated title (no explicit year, resolved via the venue
+    # close-time hint - the exact question/pattern
+    # test_past_dated_rewarded_market_is_excluded_before_selection uses in
+    # test_maker_carry_study.py) reaches `_candidate_staleness_reasons` via
+    # the adapter's `question` field and excludes on `title_date_past`
+    # alone (venue close stays in the future, resolution status is empty).
+    row = {
+        "condition_id": "0xpastdated",
+        "end_date_utc": "2026-12-31T00:00:00Z",
+        "question": "Will Iran take military action against a Gulf State on July 9?",
+        "uma_resolution_status": "",
+    }
+
+    reasons = maker_fill_replay._watchlist_expired_reasons(row, {}, as_of=_NOW)
+
+    assert reasons == ["title_date_past"]
+
+
+def test_wo147_adapter_through_recent_book_markets_excludes_all_three_arms(tmp_path):
+    # F5: the same three arms, exercised end-to-end through
+    # `_recent_book_markets` (not just the adapter function directly) so a
+    # reimplementation that dropped an arm anywhere in the call chain -
+    # adapter or caller - is still caught behaviourally.
+    cfg = _config(tmp_path)
+    settings = maker_fill_replay._settings(cfg)
+    settings["regime_days"] = 7
+    rows = [
+        {
+            "condition_id": "0xdisputed2",
+            "token_id": "tokD2",
+            "end_date_utc": "2500-01-01T00:00:00Z",
+            "question": "Will X happen?",
+            "uma_resolution_status": "disputed",
+        },
+        {
+            "condition_id": "0xproposed2",
+            "token_id": "tokP2",
+            "end_date_utc": "2500-01-01T00:00:00Z",
+            "question": "Will X happen?",
+            "uma_resolution_status": "proposed",
+        },
+        {
+            "condition_id": "0xpastdated2",
+            "token_id": "tokT2",
+            "end_date_utc": "2026-12-31T00:00:00Z",
+            "question": "Will Iran take military action against a Gulf State on July 9?",
+            "uma_resolution_status": "",
+        },
+    ]
+    write_csv(
+        cfg.output_root / "maker_carry" / "maker_carry_candidates.csv",
+        rows,
+        fieldnames=["condition_id", "token_id", "end_date_utc", "question", "uma_resolution_status"],
+    )
+    for row in rows:
+        _recent_book_file(cfg, row["condition_id"], row["token_id"])
+
+    watchlist, exclusions = maker_fill_replay._recent_book_markets(
+        cfg, settings, exclude=set(), stale_map={}, as_of=_NOW
+    )
+
+    assert watchlist == []
+    assert exclusions["expired"] == 3
+    reasons_by_id = {example["condition_id"]: example["reasons"] for example in exclusions["examples"]}
+    assert reasons_by_id["0xdisputed2"] == ["resolution_disputed"]
+    assert reasons_by_id["0xproposed2"] == ["resolution_proposed"]
+    assert reasons_by_id["0xpastdated2"] == ["title_date_past"]

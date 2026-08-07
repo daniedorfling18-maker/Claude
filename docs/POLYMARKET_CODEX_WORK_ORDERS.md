@@ -12914,3 +12914,1075 @@ reads and string-compares two fields, which is "reading a result," not
 same two fields from `refresh_governance.py` into `governance_refresh.json`
 would be redundant now that every deploy already republishes them in
 `deploy_acceptance.json`, and is not registered here or anywhere.
+
+## WO-155 — Degraded-state watchdog registration for disk headroom (alarm-only descope) — `queued` (registered 2026-08-07; add-only observability change, NON-FROZEN classification, routed OWNER MERGE per the R6 note, below; no gate, threshold, eligibility, or funding value changes; disk-usage attribution — this WO's original, broader scope — descoped after three admission-gate rounds in which the attribution artifact was the recurring defect source, with attribution itself deferred to `WO-156`, named but not designed here; the carry-path staleness and the uncapped `lock_stale_seconds` ceiling this WO discloses are likewise named, not designed, to `WO-157`)
+
+### Purpose
+
+The triaged finding (independently verified per orchestrator ruling R1) is
+that `corpus_retention_history.csv`'s `disk_used_percent_after` climbed
+84.067% (2026-08-04T23:05:41Z) → 90.826% (2026-08-05T23:21:29Z) → 91.09%
+(2026-08-06T23:38:50Z) while managed-corpus bytes grew only ~35.1 MB
+(1,507,837,894 → 1,542,920,861 B) over the worst of those nights — a 171x gap
+between the observed jump (6.012 GB) and the managed-corpus growth that is
+supposed to explain it.
+
+**This WO builds exactly one thing: one new degraded-state watchdog
+registration, `disk_headroom_critical`, that measures the filesystem
+directly.** v1 (and the orchestrator's approving ruling R3) proposed reading
+`outputs/ops_scheduler/corpus_retention.json`'s
+`disk_projection.disk_used_percent_after`, borrowing the training-harvest
+chain's existing 25h freshness ceiling. **Orchestrator ruling R7 supersedes
+that design entirely.** `_evaluate_disk_headroom` calls its own
+`_DISK_USAGE(cfg.output_root)` (a module-level seam over `shutil.disk_usage`,
+registered below for test injectability), on the watchdog's own already-wired
+per-tick cadence (~300s) **that acquires the watchdog's own runtime lock**,
+and depends on no other job, artifact, or config flag **other than the
+watchdog's own enablement and its own lock state (see Fail-safe, below, for
+both)**. Three reasons, stated with the arithmetic behind each:
+
+- *(a) Detection latency.* The read-based design could go up to 25h between
+  readings (`training_harvest`'s registered ceiling). The measured runway does
+  not tolerate that: remaining headroom to 100% is 8.91pp = 7.925 GB; the worst
+  single observed night was +6.759pp = 6.012 GB (84.067→90.826); the 5-day mean
+  growth rate is +2.016pp/day (this figure is carried from the orchestrator's
+  round-1 telemetry verification, R1, rather than re-derived in this WO's own
+  scope — the underlying 5-day `corpus_retention_history.csv` series is
+  VPS-only and is not itself quoted anywhere in this WO). Dividing
+  headroom by each rate gives **between 1.32 nights (worst observed) and 4.42
+  days (mean)** before exhaustion — a once-daily reading yields only 1-4 alarm
+  cycles of warning before the disk fills. A ~300s reading, ON A CYCLE THAT
+  ACTUALLY ACQUIRES THE WATCHDOG'S OWN RUNTIME LOCK (see Fail-safe, below, for
+  the cycles that do not), is the difference between finding out with hours to
+  spare and finding out with one bad night to spare.
+- *(b) Structural removal of a failure class, and honest disclosure of the one
+  that remains.* Reading the filesystem directly removes dependence on
+  **another producer's** artifact (there is no other producer's artifact to go
+  stale) and moves — but, on the evidence below, does not remove — the
+  single-config-flag fail-open hole latent in the read-based design.
+  `corpus_retention.py`'s `disabled` and `skipped_lock_held` branches both
+  rewrite `corpus_retention.json` with a fresh `generated_at_utc` but
+  **without** a `disk_projection` block — so a design keyed on that field has
+  to choose, for that shape of payload, among three different bootstrap
+  conventions already used elsewhere in this same file for an
+  incomplete/absent reading: absence→healthy, absence→degraded, or
+  absence→unobserved. Getting that choice wrong on a disk alarm — and
+  `collection_hygiene.corpus_retention_enabled: false` is a one-line config
+  change any operator could make for unrelated reasons — is exactly the
+  fail-open risk this WO exists to close for THAT producer's dependence.
+  **But the same class of risk re-appears one level down, inside the
+  watchdog's own carry path, and this WO does not remove it either — it only
+  relocates it:** `degraded_state_watchdog.enabled: false` disables
+  `disk_headroom_critical` exactly as it does every other registration in this
+  file (`_settings`'s `if not settings["enabled"]:` early-return,
+  `degraded_state_watchdog.py:1397-1408`, publishes `"status": "disabled",
+  "evaluations": []` before any evaluator runs) — the one-line config kill did
+  not disappear, it moved from `collection_hygiene.corpus_retention_enabled`
+  to `degraded_state_watchdog.enabled`. And separately, while the watchdog's
+  own `runtime_lock("degraded_state_watchdog", ...)` is held by another
+  process, `_evaluate_disk_headroom` is not invoked at all for as long as the
+  lock is held: the enclosing function's `skipped_lock_held` branch
+  republishes `previous.get("evaluations", [])` — the PRIOR cycle's disk
+  reading, `disk_headroom_critical` included — beside a FRESH
+  `generated_at_utc`, so a stale healthy reading can outlive the real disk
+  state crossing the threshold. See Fail-safe, below, for the full disclosure
+  and the honest latency bound this forces.
+- *(c) No new moving parts.* One syscall per existing tick; no new job, no
+  scheduler-file change, no cadence change, no config path.
+
+**Deferred: disk-usage attribution (not built by this WO, single-root or
+multi-root).** An earlier, broader draft of this WO additionally built a
+read-only per-directory/per-file attribution artifact under `output_root`,
+whose job would have been to confirm-or-exclude `output_root` as the growth
+source. This WO does not build it. The same telemetry this WO is built on
+already shows why attribution is hard to deliver cheaply here, and is the
+reason it is deferred rather than half-delivered: at the most recent verified
+reading, `disk_total_bytes` = 88,944,410,624, `disk_used_bytes_after` =
+81,019,310,080 (91.09%), and `managed_bytes_after` = 1,559,214,121, so
+`(disk_used_bytes_after - managed_bytes_after) / disk_used_bytes_after` =
+**98.08% of used disk sits outside the managed corpus** — the narrower
+5-subtree sum `_managed_bytes` walks. Even a full walk of the whole
+`output_root` tree (a strict superset of those 5 subtrees) could only narrow,
+not close, that gap — so a single-root walk was never going to *confirm* the
+corpus is the cause with confidence, only exclude it in the common case. If
+the growth source is outside `output_root` — plausible on the numbers above —
+an attribution artifact scoped to `output_root` reports "not the corpus" and
+nothing more, which is correct behavior, not a failure, but it means the
+artifact's return on build/maintenance cost is modest today. **Stated
+limitation:** any growth source outside `output_root` is invisible to a
+future artifact of this shape by construction. **Named follow-on (not
+designed here, out of this WO's scope): `WO-156`, bounded disk-growth
+attribution — within `output_root` and across registered roots outside it,
+one successor work order, named but not designed here** — would be the WO to
+build any future confirm-or-exclude scan, whether scoped to `output_root`
+alone or widened across an explicit, reviewed list of other roots; this WO
+does not do that and does not build any scan, single-root or multi-root.
+
+**Forfeiture, stated honestly.** The breakdown artifact this WO does not
+build was the *only* confirm-or-exclude instrument for `output_root` — the
+alarm alone tells a responder the disk is full, never what filled it. Given
+that 98.08% of used disk already sits outside the managed corpus a walk would
+explain, and that such a walk's own natural refresh cadence (86400s, the
+`HARVEST_INTERVAL` this WO does not use) was already only about one snapshot
+ahead of the measured worst case (1.3 nights to exhaustion), this descope
+forfeits little detection value. The alarm's value is reduced, not zeroed, on
+cycles where the watchdog's own lock is held (worst case `lock_stale_seconds`
++ one tick, not ~300s unconditionally). The thing a responder needs paged —
+that the disk is about to fill — is exactly what this WO still delivers, in
+full, at ~300s latency on cycles that acquire the watchdog's own lock, and at
+up to `lock_stale_seconds` + one tick on cycles that do not (see Fail-safe and
+"CLI/scheduler/ledger wiring," below).
+
+This WO does NOT build: any deletion, any retention-cap or collection-policy
+change, any new scheduler cadence (the alarm rides a cadence that is already
+wired — see "CLI/scheduler/ledger wiring," below, for the honest, corrected
+account of which part of this WO's latency question is closed and which part
+is not), any change to any file's
+collection, retention, or DR-archive-exclusion policy, or any disk-usage
+attribution instrument of any kind (single-root or multi-root — see
+"Deferred," above).
+
+### Touch ONLY these files (`git diff --stat` must show exactly these):
+
+- `src/polymarket_predictive_engine/degraded_state_watchdog.py`
+- `tests/polymarket_predictive_engine/test_degraded_state_watchdog.py`
+
+**Explicitly NOT touched** (both were touched by an earlier, broader draft's
+now-deferred disk-usage-attribution design, which this WO does not build —
+see Purpose, above, for the deferral and `WO-156`):
+`src/polymarket_predictive_engine/corpus_retention.py` and
+`tests/polymarket_predictive_engine/test_collection_hygiene.py`. Neither
+`credential_guard.py` nor any conftest is in scope. **The `_DISK_USAGE` seam
+(`degraded_state_watchdog.py`) and its autouse test fixture
+(`test_degraded_state_watchdog.py`) both land inside these same two files —
+a shared `tests/conftest.py` / `tests/polymarket_predictive_engine/conftest.py`
+patch remains explicitly REJECTED** (see the "Tests" section below for the
+reason: it would silence the alarm in every future test anywhere in the
+suite that means to exercise a real disk-pressure condition, with no local
+signal in that test's own file that the alarm has been muted). No CLI,
+scheduler shell script, `ledger_anchor.py`, or config-file change is in
+scope.
+
+**Citation basis.** Every line-number citation in this WO — for
+`degraded_state_watchdog.py`, `runtime_lock.py`, `utils.py`, `dashboard.py`,
+`pyproject.toml`, and both the touched and the explicitly-not-touched test
+files — was verified at registration time to be byte-identical, by sha256,
+to each file's copy at commit `3d103f88` (the commit every citation was
+originally read against) and again at the `origin/main` tip current at
+registration. Ancestry alone does not preserve line numbers; byte-identity
+does — so a builder branching from the current `origin/main` tip resolves
+every anchor in this WO exactly as cited.
+
+### Reads
+
+**None**, for `_evaluate_disk_headroom` itself. `_evaluate_disk_headroom`
+issues its own independent `_DISK_USAGE(cfg.output_root)` call (the
+`shutil.disk_usage` seam, registered below) on every watchdog cycle it is
+actually invoked on — it never opens `corpus_retention.json` or any other
+JSON artifact. (v1's design had the watchdog read `corpus_retention.json`'s
+`disk_projection.disk_used_percent_after`; R7 replaces that read entirely —
+see Purpose, above, for exactly why.) **Decision flagged (not literally
+instructed, added for consistency with the Fail-safe cure below):** this
+"None" is true only of the evaluator function; it is not true of the
+PUBLISHED `disk_headroom_critical` value on every cycle. On a cycle where the
+watchdog's own `runtime_lock("degraded_state_watchdog", ...)` is held by
+another process, `_evaluate_disk_headroom` is not called at all — the
+enclosing `build_degraded_state_watchdog` instead reads its OWN prior output
+back via `read_json(output_path, default={})` (`degraded_state_watchdog.py:1416`)
+and republishes `previous.get("evaluations", [])` (`:1470`) verbatim,
+`disk_headroom_critical`'s entry included. See "Fail-safe," below, for the
+full disclosure of what this means for staleness and latency.
+
+### Writes
+
+`outputs/performance/degraded_state_incidents.csv`,
+`outputs/ops_scheduler/degraded_state_watchdog.json`,
+`outputs/ops_scheduler/degraded_state_watchdog_state.json`, and
+`outputs/ops_scheduler/degraded_state_notification.md` gain rows/fields from
+ONE new registration only. `INCIDENT_FIELDS` (the CSV header) is UNCHANGED —
+do not add a column; the new registration is just a new value in the existing
+`registration_id` column. Idempotency/dedup rule: UNCHANGED — the existing
+`_append_incidents` dedup-by-`incident_id` (`degraded_state_watchdog.py:1194-1202`)
+already governs every registration and now also governs this one; no new
+dedup logic is written.
+
+### New watchdog registration (in `degraded_state_watchdog.py`)
+
+New imports (added as new stdlib imports, alphabetically ordered among the
+existing `hashlib, json, os` block → `hashlib, json, math, os` then `shutil`
+after the `os` import since it sorts after it): `import math` and
+`import shutil`. Neither is currently imported (confirmed: `:9-22`). No change
+to the existing `.utils` import line — `safe_float` is not needed by this
+design.
+
+Add a module constant (unchanged from v1):
+```python
+DISK_USED_PERCENT_CRITICAL_THRESHOLD = 90.0
+```
+Basis: byte-identical to the literal already in `corpus_retention.py:621`
+(`disk_after.total * 0.90`) — this reads the existing number, it does not
+invent or change one. This is a fixed literal; no config path may widen it
+(same convention as `DR_STATUS_MAX_AGE_SECONDS`).
+
+Add a second constant, used consistently as both the evaluation dict's
+`"artifact"` value and the incident's `source_artifact` value (there is no
+file backing this registration — this is the first registration in the file
+that measures live rather than reading a producer's output, and it needs one
+self-documenting label instead of inventing a fake path):
+```python
+DISK_HEADROOM_SOURCE_LABEL = "<syscall> shutil.disk_usage(cfg.output_root)"
+```
+(Confirmed safe: `source_artifact` is display-only everywhere it is
+consumed: the Markdown table cell at `operating_state.py:638`
+(`f"... | \`{_md(row.get('source_artifact'))}\` |"`) and the JS-rendered HTML
+cell at `dashboard.py:628` (`["Source","source_artifact", v=>longText(v, 180)]`,
+which routes through `escapeHtml` at `dashboard.py:198`). Both are confirmed
+display-only by direct read; the label renders literally in both rather than
+being swallowed as a tag or opened as a path.)
+
+**Observability note:** `observed_disk_used_percent` has NO dashboard column
+of its own. `dashboard.py:615-622`'s "Degraded-state watchdog registrations"
+table renders a FIXED column list — `registration_id`, `state`,
+`observed_state`, `consecutive_degraded_observations`,
+`max_consecutive_degraded_observations`, `artifact` — none of which is
+`observed_disk_used_percent`, and this evaluation dict does not populate
+`observed_state` either (its keys are `registration_id`, `artifact`,
+`observed_disk_used_percent`, `observation_token`, `state` — see the function
+body, below). The percentage still reaches a human, but only via the incident
+`reason` string (e.g. "91.09 >= 90.0"), rendered in the SEPARATE "Active
+degraded-state incidents" table's `reason` column (`dashboard.py:626`) — and
+only once an incident is open. On the healthy side, the number is not
+surfaced on the dashboard by this WO at all. This is a disclosed
+observability gap, not a defect this WO introduces a fix for.
+
+**Module-level seam, added directly below these two constants:**
+```python
+_DISK_USAGE = shutil.disk_usage
+```
+This is the injection point that makes the evaluator testable: it calls
+`_DISK_USAGE(cfg.output_root)`, never `shutil.disk_usage(...)` directly, so a
+test can replace `degraded_state_watchdog._DISK_USAGE` with one attribute
+assignment instead of needing to patch `shutil` itself (which would also
+affect every other caller of `shutil.disk_usage` in the process). This seam
+is added only in `degraded_state_watchdog.py` — see "Touch ONLY these files,"
+above, for the file list this stays confined to.
+
+**Six-condition domain guard — coverage table.** The domain guard inside
+`_evaluate_disk_headroom` (below) is ONE `elif` clause
+(`degraded_state_watchdog.py:536-545`) with exactly SIX conditions, all
+fail-closed (`state=incident, percent=None`):
+
+| # | condition | example input that trips it | result |
+|---|---|---|---|
+| 1 | `isinstance(usage.total, bool)` | `total=True` | `state=incident, percent=None` |
+| 2 | `isinstance(usage.used, bool)` | `used=False` | `state=incident, percent=None` |
+| 3 | `not isinstance(usage.total, (int, float))` | `total='100'` (non-numeric) | `state=incident, percent=None` |
+| 4 | `not isinstance(usage.used, (int, float))` | `used='50'` (non-numeric) | `state=incident, percent=None` |
+| 5 | `not math.isfinite(usage.total)` | `total=inf` | `state=incident, percent=None` |
+| 6 | `not math.isfinite(usage.used)` | `used=nan` | `state=incident, percent=None` |
+
+Two further adversarial shapes beyond the six named conditions also fail
+closed, by the same `isinstance` short-circuit (conditions 3/4 catch them
+before `math.isfinite` ever runs on them): `total=Decimal('100')` and
+`total=complex(1, 2)` — both `state=incident, percent=None`.
+
+Test coverage: only conditions 2 and 5 are pinned ahead of this WO's own new
+tests (test 12 exercises condition 2 via `used=False`; test 11 exercises
+condition 5 via `total=inf`). Conditions 3 and 4 are the "non-numeric" branch
+this WO's corrected error-string wording names explicitly (see
+`degraded_condition`/`evaluation_policy`, below, and the error string inside
+the function itself); test 15, below, closes one of those two (condition 3)
+with `total='100'`, per the "at least one" coverage bar this WO holds itself
+to. Conditions 1 and 6 remain untested after this WO: condition 1
+(`isinstance(usage.total, bool)`) is symmetric to condition 2, which IS
+tested, and condition 6 (`not math.isfinite(usage.used)`) is symmetric to
+condition 5, which IS tested — both are confirmed fail-closed by direct
+execution, but neither is itself pinned by a registered test. This residual
+gap is disclosed rather than left silent; closing it is not part of this WO's
+own test list.
+
+Add a new evaluator function `_evaluate_disk_headroom(cfg, state, settings,
+generated_at)`, parallel in shape to the existing evaluators (same
+`(cfg, state, settings, generated_at) -> (evaluation, incidents)` signature
+used at the call site, `:1497`), reading no artifact at all:
+
+```python
+def _evaluate_disk_headroom(
+    cfg: EngineConfig, state: dict[str, Any], settings: Mapping[str, Any], generated_at: str
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    del settings  # fixed 90.0 threshold; no config path widens it (R7)
+    try:
+        usage = _DISK_USAGE(cfg.output_root)
+        error = None
+    except OSError as exc:
+        usage = None
+        error = f"{type(exc).__name__}: {exc}"
+    except Exception as exc:  # noqa: BLE001 - a non-OSError here must not abort the whole watchdog cycle
+        usage = None
+        error = f"{type(exc).__name__}: {exc}"
+    # The domain guard lives on the MEASURED INPUTS, not the computed output.
+    # `round(usage.used / max(usage.total, 1) * 100, 3)` ALWAYS returns an
+    # honest `float` (true division), so a bool/non-finite check on the
+    # computed value would be dead by construction. The real gaps are on
+    # `usage.total`/`usage.used` themselves: `total=inf` is silently absorbed
+    # by `max(usage.total, 1) == inf` into a `0.0`/healthy reading;
+    # `used=False` (a bool, `False == 0`) never trips a bool check unless the
+    # bool check runs on `used` itself; and a non-numeric measurement (e.g. a
+    # mock returning `total='100'`) would otherwise reach the division below
+    # and raise `TypeError` rather than fail closed with a diagnosable
+    # `reason`. All three are closed here, on the inputs, before any
+    # arithmetic (Ruling 3: the error string below is corrected to name the
+    # non-numeric case explicitly, not just non-finite/boolean -- see the
+    # six-condition enumeration above, and test 15, below, which pins this
+    # exact branch):
+    if usage is None:
+        raw_percent = None
+    elif (
+        isinstance(usage.total, bool)
+        or isinstance(usage.used, bool)
+        or not isinstance(usage.total, (int, float))
+        or not isinstance(usage.used, (int, float))
+        or not math.isfinite(usage.total)
+        or not math.isfinite(usage.used)
+    ):
+        raw_percent = None
+        error = error or f"non-finite, non-numeric, or boolean measured input: total={usage.total!r}, used={usage.used!r}"
+    elif usage.total <= 0:
+        raw_percent = None
+        error = error or f"total_bytes={usage.total} <= 0"
+    else:
+        raw_percent = round(usage.used / max(usage.total, 1) * 100, 3)
+    # Retained output-side range check — guards a computed percent landing
+    # outside [0, 100] (e.g. `used > total` from a malformed mock), which the
+    # input-side finiteness checks do not by themselves rule out.
+    numeric_ok = (
+        raw_percent is not None
+        and math.isfinite(raw_percent)
+        and 0.0 <= raw_percent <= 100.0
+    )
+    # Persist None, never a raw non-finite float, on the exact branch this WO
+    # exists to close (outputs/ops_scheduler is telemetry-published and must
+    # parse under a strict RFC-8259 reader).
+    percent = raw_percent if numeric_ok else None
+    over_threshold = numeric_ok and percent >= DISK_USED_PERCENT_CRITICAL_THRESHOLD
+    degraded = (not numeric_ok) or over_threshold
+    if error is not None:
+        reason = f"_DISK_USAGE(cfg.output_root) raised or reported: {error}"
+    elif not numeric_ok:
+        reason = f"computed percent {raw_percent!r} is non-finite or outside [0.0, 100.0]"
+    else:
+        reason = f"{percent} >= {DISK_USED_PERCENT_CRITICAL_THRESHOLD}"
+    anchor, count = _episode_anchor(
+        state, "disk_headroom_critical", "disk_headroom_critical", generated_at, degraded
+    )
+    incidents: dict[str, dict[str, Any]] = {}
+    if degraded:
+        row = _incident(
+            generated_at=generated_at,
+            registration_id="disk_headroom_critical",
+            entity="disk_headroom_critical",
+            source_artifact=DISK_HEADROOM_SOURCE_LABEL,
+            observation_token=generated_at,
+            episode_start=anchor,
+            degraded_state=f"disk_used_percent={percent}",
+            reason=reason,
+            count=count,
+            maximum=0,
+        )
+        incidents[row["incident_id"]] = row
+    return (
+        {
+            "registration_id": "disk_headroom_critical",
+            "artifact": DISK_HEADROOM_SOURCE_LABEL,
+            "observed_disk_used_percent": percent,
+            "observation_token": generated_at,
+            "state": "incident" if degraded else "healthy",
+        },
+        incidents,
+    )
+```
+
+Notable, deliberate departures from every sibling evaluator, called out so a
+reviewer does not mistake them for omissions:
+
+- **There is no `"unobserved"` state for this registration.** Every other
+  evaluator in this file reads a producer's artifact and must handle "the
+  producer hasn't run yet." This evaluator's observation is unconditional —
+  the syscall runs every cycle regardless of any other job's state — so the
+  only two reachable values of `"state"` are `"healthy"` and `"incident"`.
+  This is a direct, deliberate structural consequence of R7, not an oversight.
+- **The observation token is the watchdog's own `generated_at`, not a
+  producer's stamp.** Every sibling evaluator's token is the artifact's own
+  timestamp (so identical producer runs read as "the same" observation).
+  Here, every cycle is a genuinely new observation of the live filesystem, so
+  every token is naturally distinct — this does not break `_episode_anchor`'s
+  dedup, because the anchor is the FIRST token of the current contiguous
+  episode, persisted, not a per-cycle token comparison; the existing
+  `_incident_id` hash is keyed on `(registration_id, entity, episode_start)`,
+  and `episode_start` stays fixed across an unbroken episode regardless of how
+  many distinct tokens observe it.
+- **On a freshly bootstrapped host, `cfg.output_root` reliably already
+  exists by the time this evaluator runs.** `acquire_runtime_lock` (called
+  for the `"degraded_state_watchdog"` lock before the evaluator tuple loop,
+  `:1410-1414`) calls `ensure_dir(path.parent)` where `path.parent =
+  cfg.output_root / "polymarket_runtime"`, and `ensure_dir` uses
+  `mkdir(parents=True, exist_ok=True)` (`utils.py:75-78`) — so `cfg.output_root`
+  is created as a side effect of acquiring the watchdog's own lock, before any
+  evaluator (including this one) is invoked. A `FileNotFoundError` (an
+  `OSError` subtype) from `_DISK_USAGE` is therefore not expected in
+  practice through this call path; it is still caught and treated as degraded
+  (never healthy) as defense-in-depth for the case where `output_root` is
+  deleted, unmounted, or permission-revoked mid-run.
+- **`_DISK_USAGE` is a module-level indirection to `shutil.disk_usage`, not a
+  call to `shutil.disk_usage` inline.** This is the ONLY registration in the
+  file whose measurement is a live syscall rather than a producer's artifact,
+  and it is therefore the only evaluator whose "healthy" branch depends on
+  the AMBIENT REAL STATE of the machine running the test — including the test
+  runner itself. Every pre-existing test in this file that calls
+  `build_degraded_state_watchdog` now also exercises this evaluator; without
+  a seam, that means every such test's pass/fail would depend on the real
+  disk usage of whatever host runs it. The seam is what makes that dependency
+  injectable — see "Fail-safe," below, and the fixture registered at the top
+  of "Tests" for the concrete fix.
+- **The `# noqa: BLE001` comment inside the `except Exception` branch above
+  is documentation for a human reader, not something the repo's configured
+  lint gate enforces.** `pyproject.toml`'s `[tool.ruff.lint]` block (not
+  `[tool.ruff]` itself) sets `select = ["E9", "F63", "F7", "F82", "W605"]`;
+  `BLE001` is not in that list, so `ruff check .` does not flag a missing or
+  mismatched `# noqa: BLE001` comment on this line. The convention costs
+  nothing and is kept, but a builder should not expect CI to catch it if a
+  future edit drops or misspells it.
+
+Append `_evaluate_disk_headroom` to the tuple in `build_degraded_state_watchdog`
+currently reading `for evaluator in (_evaluate_requote, _evaluate_maker_replay,
+_evaluate_scheduler, _evaluate_scheduler_freshness,
+_evaluate_kill_input_staleness, _evaluate_wallet, _evaluate_operating_state):`
+(`:1488-1496`) — add it immediately after `_evaluate_operating_state` (confirmed
+reachable and well-defined by direct read).
+
+Add one entry to `_registrations()` (documentation/reporting list, no
+behavior):
+```python
+{
+    "id": "disk_headroom_critical",
+    "artifact": DISK_HEADROOM_SOURCE_LABEL,
+    "healthy_reachable_states": ["disk_used_percent < 90.0, measured directly every watchdog cycle that acquires the watchdog's own runtime lock"],
+    "degraded_condition": "disk_used_percent >= 90.0, or the measurement is unusable: OSError or any other exception from the syscall, a non-finite, non-numeric, or boolean total_bytes or used_bytes, total_bytes <= 0, or a computed percent out of [0.0, 100.0]",
+    "max_consecutive_degraded_observations": 0,
+    "incident_on_observation": 1,
+    "observation_unit": "watchdog invocation of build_degraded_state_watchdog that acquires the watchdog's own runtime lock (direct disk-usage syscall via the _DISK_USAGE seam; counts INVOCATIONS, not wall-clock cycles -- three calls at an identical as_of increment this by 1 each time, so a manual CLI re-run inflates it and a responder must not read this count as elapsed minutes, e.g. a count of 7 is not necessarily 35 minutes)",
+    "evaluation_policy": "fixed 90.0 threshold identical to corpus_retention.py's own projection literal; measured directly by the watchdog every cycle that acquires the watchdog's own runtime lock, independent of any other job's cadence, enablement, or lock state -- but NOT independent of the watchdog's OWN enablement (degraded_state_watchdog.enabled: false disables this registration exactly as it does every other one) or its OWN lock state (while the watchdog's own runtime_lock is held by another process, the prior cycle's reading is carried forward unevaluated -- see Fail-safe); fail-closed on any exception from the syscall call itself (OSError or otherwise)/non-finite, non-numeric, or boolean input/out-of-domain result; configuration cannot widen the threshold",
+}
+```
+**(`healthy_reachable_states` and `evaluation_policy` are scoped to "every
+watchdog cycle that acquires the watchdog's own runtime lock," and
+`evaluation_policy` carries an explicit "but NOT independent of..." clause —
+both for internal consistency with the Fail-safe paragraph and the Purpose
+(b) disclosure, above; leaving these two machine-readable fields unscoped
+while the prose around them names the carry-path and `enabled: false`
+exposures would leave a surviving sentence contradicting the fix inside this
+WO's own documentation fields. `degraded_condition` and `evaluation_policy`
+name "non-numeric" alongside "non-finite"/"boolean," matching the primary
+evaluator error string and the verbatim Fail-safe paragraph's companion,
+below. `observation_unit` names invocation-counting explicitly and warns a
+responder not to read the count as elapsed minutes.)**
+**`evaluation_policy` reads "from the syscall call itself," matching
+`degraded_condition`'s wording and the Fail-safe paragraph below, rather than
+an unscoped "any exception (OSError or otherwise)."**
+
+Basis for 0-tolerance/immediate incident: matches every other 0-tolerance
+registration already in this table (`ledger_chain_integrity`,
+`disaster_recovery_not_recoverable`, `maker_study_run_failed`,
+`operating_state_slo_breach`, `publication_bridge_unhealthy`,
+`kill_input_stale_live_stage`) — disk exhaustion is not a condition that
+benefits from a multi-cycle tolerance window the way a flaky API preflight
+does. Unchanged from v1.
+
+**Test-suite dependency and its cure:** because this evaluator is
+unconditional, every existing test in `test_degraded_state_watchdog.py` that
+calls `build_degraded_state_watchdog` now also calls
+`_DISK_USAGE(cfg.output_root)`. **On a test-runner host at `>= 90%` real disk
+usage — which is the CURRENT, VERIFIED state of the required PR gate's one
+self-hosted ARM64 runner (91.09%) — that call, if left unguarded, would
+inject a spurious `disk_headroom_critical` incident into every one of those
+tests, and 10 of them FAIL as a result, via four breakage classes: (a)
+`new_incident_count` doubles for any fixture that also opens exactly one
+incident of its own; (b) the incident-CSV row count gains a
+`disk_headroom_critical` row alongside whatever row the test set out to
+create; (c) `active_incidents[0]` index-shift — `degraded_state_watchdog.py:1508`'s
+`sorted(active_by_id.values(), key=lambda row: (row["registration_id"],
+row["entity"]))` sorts `"disk_headroom_critical"` ahead of every
+alphabetically-later `registration_id` (e.g. `"wallet_reconciliation_not_clean"`),
+so any test indexing `active_incidents[0]` by position rather than by
+`registration_id` now reads the disk incident instead; (d) several
+`status == "ok"` fixtures (built deliberately to prove some OTHER
+registration does not trip) now read `"incident"` overall at
+`degraded_state_watchdog.py:1540`'s `"status": "incident" if active else
+"ok"`, because the aggregate status is degraded if ANY registration is
+degraded, and `disk_headroom_critical` is unconditionally degraded on a host
+at `>= 90%`.** This WO therefore DOES require a change to the existing test
+file: the `_DISK_USAGE` module-level seam above plus the autouse fixture
+registered at the top of "Tests," below, together
+remove the dependency on the ambient host from **every pre-existing test in
+this file**, without adding a third touched file and without weakening the
+new registration's own tests (which override the fixture explicitly, per
+test). `tests/polymarket_predictive_engine/test_deploy_acceptance.py` also calls
+`build_degraded_state_watchdog` (the only other caller in `tests/`, confirmed
+by direct grep) and receives **no** fixture from this WO — it is verified
+insensitive to the ambient disk reading at both regimes (passes at the real
+~4% ambient and at a faked 91.09% ambient) because it asserts by
+`registration_id` identity rather than by incident count or list position, so
+it needs no fixture and correctly stays out of this WO's touched-file list.
+
+### Fail-safe (the paragraph in quotes below is verbatim; the numbered companions after it are not)
+
+"`disk_headroom_critical` depends on no artifact and therefore has no
+missing/stale-artifact branch to fail open on: `_evaluate_disk_headroom` calls
+`_DISK_USAGE(cfg.output_root)` (the `shutil.disk_usage` seam) directly on
+every watchdog cycle (~300s), whether or not `corpus_retention` is enabled,
+has ever run, or holds its lock. Any of the following is DEGRADED, never
+healthy: an `OSError` (including a permission error); any OTHER exception
+from the syscall (caught by an explicit `except Exception` clause so it
+cannot escape and abort the watchdog cycle); a measured `total`/`used`
+reading that is non-finite or a `bool` (guarded on the MEASURED INPUTS, where
+the real gaps were, not on the computed percentage, which an honest float
+division can never make non-finite or a `bool`); a `total_bytes <= 0`
+reading; or a computed percentage outside `[0.0, 100.0]`. The only two
+reachable states are `healthy` and `incident` — there is no `unobserved`
+state, because the observation is unconditional. **A genuine plumbing or
+programming error inside the same guarded call (for example, a malformed
+`cfg.output_root`) is caught by the same `except Exception` clause and also
+pages as this incident, with `observed_disk_used_percent: null` and a
+`reason` naming a non-`OSError` exception type — distinguishable from a real
+full-disk reading by that `null` and by the exception name, but a responder
+should read a `null`-percent page on this registration as possibly a code
+bug rather than a full disk.** No gate, sizing, retention, collection, or
+order surface reads this registration's output."
+
+**COMPANION to the paragraph above (the mandated paragraph itself is
+UNEDITED; this is an addition beside it, not inside it):**
+The verbatim paragraph's "directly on every watchdog cycle (~300s), whether or
+not `corpus_retention` is enabled, has ever run, or holds its lock" describes
+`_evaluate_disk_headroom` correctly but overstates what actually reaches the
+published artifact, because it is silent on the watchdog's OWN enablement and
+OWN lock, as opposed to `corpus_retention`'s. Three disclosures, all executed
+against the exact registered code:
+
+1. **Scope.** Read "every watchdog cycle" in the paragraph above as "every
+   watchdog cycle **that acquires the watchdog's own `degraded_state_watchdog`
+   runtime lock**." `build_degraded_state_watchdog` wraps the entire evaluator
+   tuple — this one included — in `runtime_lock(cfg, "degraded_state_watchdog",
+   ...)` (`degraded_state_watchdog.py:1410-1414`). When that lock is held by
+   another process, `if not lock.acquired:` takes the pre-existing
+   `skipped_lock_held` branch (`:1415-1483`), which does not call
+   `_evaluate_disk_headroom` — or any evaluator — at all; it republishes
+   `previous.get("evaluations", [])` (`:1470`), i.e. the PRIOR cycle's
+   `disk_headroom_critical` reading, beside a FRESH top-level
+   `generated_at_utc`. This is a documented, pre-existing property of the
+   file, not something this WO introduces: `_episode_anchor`'s own docstring
+   (`degraded_state_watchdog.py:350-353`, a WO-144 amendment) already states
+   "the lock-held carry path replays the prior cycle's `active_incidents`
+   wholesale rather than re-invoking the evaluators." A stale HEALTHY reading
+   can therefore sit beside a fresh timestamp for as long as the lock is held.
+   **Mitigating this, in part: the carried row's own `observation_token` still
+   names the ORIGINAL cycle it was actually computed on, not the fresh
+   top-level `generated_at_utc` it now sits beside — so the staleness is
+   machine-detectable per-row, by comparing those two fields directly, not
+   only by reading `degraded_state_watchdog_state.json`'s
+   `carry_forward_cycles` (see item 2, below, and the Day-after check's first
+   companion, below).**
+2. **Honest latency bound.** The worst-case detection latency for a disk that
+   crosses 90% while the lock happens to be held is **not** "~300s, full
+   stop." It is `lock_stale_seconds` (the age at which a HELD lock is treated
+   as abandoned and reclaimed) **plus one tick**. `lock_stale_seconds`
+   defaults to 900s, has a floor of 60 (`max(60, ...)`,
+   `degraded_state_watchdog.py:140`), and has **no ceiling** — unlike
+   `notification_cooldown_seconds` four lines below it, which IS
+   ceiling-capped at `min(3600, ...)` (`:144`) — so an operator can widen
+   `degraded_state_watchdog.lock_stale_seconds` in config without limit,
+   directly extending this alarm's own worst case. The only backstop during a
+   held lock is the pre-existing `degraded_state_watchdog_wedged` registration,
+   which fires once `carry_cycles > 3` (`:1421`) — but its `reason`
+   ("watchdog evaluation carried forward for more than 3 consecutive cycles,"
+   `:1430`) never names the disk, or `disk_headroom_critical`, or any
+   registration by name; a responder paged by the wedge alone would not learn
+   that the carried `disk_headroom_critical` reading may be stale, i.e. that a
+   threshold crossing may be going unobserved. **This carry-path staleness and
+   the uncapped `lock_stale_seconds` ceiling are disclosed, not fixed, by this
+   WO — `WO-157`, carry-path staleness and lock-stale ceiling for the
+   degraded-state watchdog, is named here as the successor that would fix
+   them, NOT designed here; any fix there TIGHTENS a registered surface.**
+3. **The config kill moved, it did not disappear.** `degraded_state_watchdog.enabled:
+   false` disables `disk_headroom_critical` exactly as it does every other
+   registration in this file (`_settings`'s enabled check short-circuits to
+   `"status": "disabled", "evaluations": []` before any evaluator runs,
+   `degraded_state_watchdog.py:1397-1408`). The one-line, any-operator
+   fail-open hole Purpose (b) uses to disqualify the read-based design is not
+   closed by this WO; it is relocated from
+   `collection_hygiene.corpus_retention_enabled` to
+   `degraded_state_watchdog.enabled`.
+
+**(Companion, same verbatim constraint):** the paragraph's own enumeration —
+"a measured `total`/`used` reading that is non-finite or a `bool`" — is
+DEGRADED but not exhaustively named: a non-NUMERIC reading (e.g. a mock or a
+future refactor returning `total='100'`) is also degraded by the same `elif`
+guard, on the same terms, and should be read into that list; see the
+six-condition enumeration above and test 15, below.
+
+### CLI/scheduler/ledger wiring
+
+**`disk_headroom_critical` is, by design, decoupled from
+`corpus_retention`/`training_harvest`'s cadence entirely — this is the
+headline consequence of R7, not a footnote.** `build_degraded_state_watchdog`
+already runs every scheduler tick via `run_degraded_state_watchdog()`
+(`run_vps_ops_scheduler.sh:738`, CLI invocation `:752-753`, called from
+`run_safety_pulse` at `:805`, which the main loop calls at `:913` before
+`sleep "$TICK_SECONDS"` at `:914`; `TICK_SECONDS` = 300 `:22`,
+`SAFETY_PULSE_INTERVAL` clamped `<= 300` `:74-83`). Because
+`_evaluate_disk_headroom` measures the filesystem itself rather than reading
+something `corpus_retention` produces, its worst-case detection latency is
+independent of whether `corpus_retention`/`training_harvest` has run
+recently, is enabled, or holds its lock. Zero scheduler-file changes are
+needed for this.
+
+**The honest worst-case bound is `lock_stale_seconds` + one tick, not "~300s,
+full stop."** On every cycle that acquires the watchdog's
+OWN `degraded_state_watchdog` runtime lock, detection latency is indeed
+bounded by the ~300s tick. But while that lock is held by another process,
+`_evaluate_disk_headroom` is not invoked and the prior cycle's reading is
+carried forward under a fresh timestamp (see Fail-safe, above, for the full
+disclosure and the corroborating pre-existing docstring at
+`degraded_state_watchdog.py:350-353`); the true worst case for that window is
+`lock_stale_seconds` (default 900s, floor 60, **no ceiling**,
+config-widenable — `:140`) plus one further ~300s tick before the lock is
+reclaimed as stale and a fresh evaluation runs. The only backstop during that
+window is the pre-existing `degraded_state_watchdog_wedged` registration
+(fires at `carry_cycles > 3`, `:1421`), which never names the disk in its
+`reason`. Zero scheduler-file changes are needed for this either — the bound
+above is a property of the pre-existing lock machinery, not something this WO
+adds or could remove without a broader change to `runtime_lock`'s own
+contract, which is out of this WO's scope — see Fail-safe, above, for the
+full disclosure and the named successor, `WO-157`.
+
+**Detection latency for this WO's sole deliverable is fully closed at ~300s
+only on cycles that acquire the watchdog's own lock; on cycles that do not, it
+is bounded by `lock_stale_seconds` + one tick instead (see the Fail-safe
+companion paragraph's item 2, above, and this section's own correction
+immediately above) — this is a real, narrower latency question this WO does
+not close.** There is no second, slower-refreshing artifact alongside this
+alarm for that alarm's own ~300s clock to be inconsistent with — this WO
+builds no such second artifact.
+
+`disk_headroom_critical` has no artifact to enroll in or exempt from
+`ledger_anchor.py` — there is nothing to anchor.
+
+### Concurrency note
+
+`_evaluate_disk_headroom` runs inside `build_degraded_state_watchdog`'s own
+`runtime_lock("degraded_state_watchdog", ...)`-held section (`:1410-1414`),
+in the SAME evaluator-tuple loop as every sibling evaluator (`:1485-1499`) —
+no new lock is needed or added. This evaluator does NOT need to coordinate
+with `corpus_retention`'s lock at all: `_DISK_USAGE` (the `shutil.disk_usage`
+seam) is an independent read-only syscall against the filesystem, not a read
+of anything `corpus_retention` writes. This decoupling is itself part of what
+R7 fixes — the alarm's correctness no longer depends on `corpus_retention`
+ever running, being enabled, or holding/releasing its own lock. **Decision
+flagged (not literally instructed, added for consistency):** that same
+shared `runtime_lock("degraded_state_watchdog", ...)` section is exactly what
+the watchdog's OWN lock-held carry path (Fail-safe, above) turns on — sharing
+the lock with every sibling evaluator means this evaluator is also skipped,
+along with every sibling, whenever ANY process (not necessarily
+`corpus_retention`) is holding that one lock. See the Fail-safe companion
+paragraph, above, for the full disclosure; it is not repeated here.
+
+### Tests (offline, hand-computed, imitate the existing style in the file)
+
+In `tests/polymarket_predictive_engine/test_degraded_state_watchdog.py`
+(entirely rewritten from v1's 11 tests to match R7's design — no artifact, no
+freshness dimension, no `"unobserved"` state; **the fixture below governs
+every test in this list and every pre-existing test in this file — read it
+first**):
+
+**Fixture (add near the top of the file, module-level, autouse — this is a
+plain function-scoped `@pytest.fixture(autouse=True)` declared at module
+level, never `scope="module"`; a fixture declared `scope="module"`
+that requests `monkeypatch` raises `ScopeMismatch` at collection and errors
+the entire file):**
+```python
+from collections import namedtuple  # was missing; also used by the sweep helper below
+
+_HealthyUsage = namedtuple("Usage", "total used free")
+
+
+@pytest.fixture(autouse=True)
+def _sub_threshold_disk_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """WO-155. `_evaluate_disk_headroom` now runs unconditionally on every
+    test in this file that calls `build_degraded_state_watchdog` and reaches
+    this evaluator (all of them except sub-case 14a, below, whose call finds
+    the watchdog's own lock already held and never invokes the evaluator at
+    all), and each such run calls `_DISK_USAGE(cfg.output_root)` — a real
+    `shutil.disk_usage` syscall by default. Below this fixture, that call
+    would return the AMBIENT REAL disk usage of the machine running the
+    tests, which the required PR gate's self-hosted ARM64 runner currently
+    reports at 91.09%. Without this fixture, every pre-existing test in this
+    file would non-deterministically gain a spurious `disk_headroom_critical`
+    incident on any host at >= 90% used, breaking 10 of them. This fixture
+    pins every pre-existing test to a fixed, healthy, sub-threshold reading,
+    independent of the ambient host. Every `disk_headroom_critical`-specific
+    test below overrides this explicitly, later in the same test body, via
+    its own `monkeypatch.setattr(dsw, "_DISK_USAGE", ...)` call — the later
+    call wins within that test, exactly as pytest's monkeypatch always
+    resolves. This fixture patches the SEAM (`_DISK_USAGE`), never
+    `shutil.disk_usage` directly, and it lives ONLY in this file (see the
+    WO's explicit rejection of a shared-conftest patch, below)."""
+    import polymarket_predictive_engine.degraded_state_watchdog as dsw
+
+    monkeypatch.setattr(
+        dsw, "_DISK_USAGE", lambda path: _HealthyUsage(total=1_000_000, used=100_000, free=900_000)
+    )
+```
+**Explicitly REJECTED alternative, stated so a future edit does not
+"simplify" this into one:** a blanket `shutil.disk_usage` (or `_DISK_USAGE`)
+patch in `tests/conftest.py` or
+`tests/polymarket_predictive_engine/conftest.py`. Both files are shared
+across every test module in the suite (not just this one), and a
+disk-usage patch placed there would silence `disk_headroom_critical` — the
+alarm this WO exists to build — in every *future* test anywhere in the
+suite that means to exercise a real disk-pressure condition, with no local
+signal in that test's own file that the alarm has been muted. The fixture
+above is scoped to `tests/polymarket_predictive_engine/test_degraded_state_watchdog.py`
+only, keeping the touched-file list at exactly TWO.
+
+1. Monkeypatch `degraded_state_watchdog._DISK_USAGE` (the seam; via the same
+   `_HealthyUsage`/`namedtuple("Usage", "total used free")` pattern as the
+   fixture above) to `Usage(total=1_000_000, used=800_000, free=200_000)`
+   (80.0%) -> evaluation `state == "healthy"`; `observed_disk_used_percent ==
+   80.0`; no incident.
+2. `Usage(total=1_000_000, used=900_000, free=100_000)` (exactly 90.0%) ->
+   incident (`>=`, not `>` — hand-verifies the boundary operator).
+3. `Usage(total=1_000_000, used=899_990, free=100_010)` (89.999%) -> healthy,
+   no incident (verifies the boundary from the other side).
+4. Monkeypatch `_DISK_USAGE` to raise `PermissionError("denied")` ->
+   `state == "incident"` (never healthy, never unobserved); `reason` mentions
+   the exception; `observed_disk_used_percent is None` — NOT a raw NaN or
+   sentinel float.
+5. `Usage(total=0, used=0, free=0)` -> incident; `reason` mentions
+   `"total_bytes=0 <= 0"`; `observed_disk_used_percent is None`.
+6. Immediate incident on the FIRST observation, no tolerance window: a single
+   cycle with `Usage(total=1_000_000, used=950_000, free=50_000)` (95.0%) ->
+   `consecutive_degraded_observations == 1` (via `_episode_anchor`'s returned
+   count), `max_consecutive_degraded_observations == 0`; `active_incident_count`
+   includes it; `reason` contains `"95.0"` and `"90.0"`. **(Both
+   `consecutive_degraded_observations` and `max_consecutive_degraded_observations`
+   are read from the INCIDENT row returned by `_incident()`
+   (`degraded_state_watchdog.py:400-401`), NOT from the evaluation dict
+   `_evaluate_disk_headroom` returns — that dict carries no such keys. Several
+   sibling evaluators DO put these fields directly on their evaluation dict
+   [e.g. `:1042-1043`]; a builder transcribing this test by analogy to those
+   would read the evaluation instead of the incident and hit a `KeyError`.)**
+7. Dedup/persistence across TWO consecutive watchdog cycles with DIFFERENT
+   `as_of` timestamps but the SAME mocked 95.0% reading -> exactly one row in
+   `degraded_state_incidents.csv` for `disk_headroom_critical` (existing
+   `incident_id` dedup, not a new mechanism). Comment in the test explaining
+   WHY this differs mechanically from every other registration's dedup test:
+   there is no shared producer token here — each cycle's `observation_token`
+   is a distinct `generated_at` — so what dedups the row is `_episode_anchor`
+   persisting the FIRST token as `episode_start` across the unbroken episode,
+   not token equality.
+8. THIRD cycle, same test, with the mock changed to `Usage(total=1_000_000,
+   used=500_000, free=500_000)` (50.0%) -> `state` returns to `"healthy"`;
+   `active_incident_count` for this registration drops to 0 (the episode
+   clears, matching `_episode_anchor`'s existing clear-on-healthy behavior).
+9. Regression: with the `PermissionError` mock from test 4 (or any
+   `numeric_ok=False` branch) in place, read the raw bytes of the persisted
+   `outputs/ops_scheduler/degraded_state_watchdog.json` and parse them with
+   `json.loads(text, parse_constant=<raise on any non-finite token>)` (stdlib
+   `json.loads` by default silently accepts the `NaN`/`Infinity` tokens it
+   itself never emits unless the source has one — this test simulates a
+   strict RFC-8259 parser by rejecting any constant callback at all) -> parse
+   succeeds; `observed_disk_used_percent` in the parsed dict is exactly
+   `None`, never a float.
+10. `paper_trading_invoked is False` / `live_trading_invoked is False` on the
+    incident-producing payload (top-level `base` dict, asserted once for
+    completeness).
+11. Monkeypatch `_DISK_USAGE` to `Usage(total=float("inf"), used=50,
+    free=0)` -> `state == "incident"` (never healthy); `reason` mentions a
+    non-finite or out-of-domain input; `observed_disk_used_percent is None`.
+    This is the exact input the naive formula's `max(usage.total, 1)` clause
+    would silently swallow into a `0.0`/healthy reading (`max(inf, 1) ==
+    inf`); the input-side domain guard (finite check on `usage.total` before
+    any division) closes it.
+12. Monkeypatch `_DISK_USAGE` to `Usage(total=10, used=False, free=10)` ->
+    `state == "incident"` (never healthy); `observed_disk_used_percent is
+    None`. `used=False` is a `bool`; `False == 0` under Python's numeric
+    equality, so a guard on the *computed* value would never fire (the
+    *computed* value is always an honest `float` from true division, never a
+    `bool`) — the guard instead rejects `isinstance(usage.used, bool)` on the
+    *measured input*, before any arithmetic runs.
+13. Monkeypatch `_DISK_USAGE` to raise `RuntimeError("simulated non-OSError
+    failure")` -> `build_degraded_state_watchdog(cfg, ...)` completes
+    normally (does NOT raise, does NOT abort the watchdog cycle, does NOT
+    skip any sibling evaluator); `disk_headroom_critical`'s evaluation has
+    `state == "incident"`, `observed_disk_used_percent is None`, and `reason`
+    mentions `RuntimeError`. Repeat with `ValueError("embedded null byte")`
+    in the same test (both must be caught by the same `except Exception`
+    clause, since neither is an `OSError`) — a real POSIX `os.statvfs`
+    failure always raises `OSError`, but an in-process mock (including this
+    WO's own sweep helper, and any future refactor) can raise anything. (This
+    is the branch on which the `try` here only wraps the `_DISK_USAGE(...)`
+    call itself, so this test discriminates exceptions raised BY the syscall
+    call; it does not by itself close a separate, narrower gap where
+    `_DISK_USAGE` returning a malformed value without raising — e.g. a plain
+    3-tuple lacking `.total` — would raise `AttributeError` from the guard
+    clause below the `try`, outside it. A second instance of the same class
+    is `Usage(total=10**400, used=50, free=50)`: `math.isfinite(usage.total)`
+    itself raises `OverflowError: int too large to convert to float`, also
+    from the guard clause below the `try`, also outside it, escaping
+    `build_degraded_state_watchdog` the same way the 3-tuple `AttributeError`
+    does. Both are unreachable via the real `shutil.disk_usage`, whose
+    statvfs-derived values are bounded well under `2**64`. No test is added
+    for either narrower gap; both are disclosed here as a text-only
+    wording fix, not a behavior fix.)
+14. **[Carry-path pinning.]** ONE test function with two sub-cases — like
+    test 13, above, which also carries two sub-cases in a single test body —
+    NOT two separate test functions; both sub-cases are hand-computable,
+    both against the exact registered
+    `_evaluate_disk_headroom`/`build_degraded_state_watchdog` code, using the
+    REAL `acquire_runtime_lock`/`release_runtime_lock` functions already
+    imported in this file (no mock of `runtime_lock` itself) — modeled
+    directly on the pre-existing
+    `test_wo129_lock_held_carries_incidents_then_alarms_and_recovers`
+    (`:809-837`), adapted for `disk_headroom_critical` specifically. **Both
+    sub-cases live in ONE test function — this is what keeps the file's
+    collected-test count at 77 (61 pre-existing + 13 tests registered ahead
+    of this WO + this WO's own 2 new standalone tests [14, 15] + 1
+    `_ID_STABILITY_SWEEP` parametrized row) and this WO's own delta at +16 —
+    transcribing 14a/14b as two functions instead collects 78 and a delta of
+    +17, which contradicts this count and is not what this WO specifies.**
+    - **(14a) Fresh host, lock held from the very first cycle:** on a fresh
+      `tmp_path`/`cfg`, BEFORE any `build_degraded_state_watchdog` call, `lock
+      = acquire_runtime_lock(cfg, "degraded_state_watchdog",
+      stale_after_seconds=999999)`. With the lock held, call
+      `build_degraded_state_watchdog(cfg, as_of=...)` ->
+      `result["status"] == "skipped_lock_held"`; `result["evaluations"] ==
+      []`; no `disk_headroom_critical` row anywhere in
+      `result["active_incidents"]` — there is NO disk evaluation at all on a
+      fresh host whose first cycle finds the lock already held.
+      `release_runtime_lock(lock)` at the end of this sub-case.
+    - **(14b) A carried reading is stale, not recomputed, under a fresh
+      timestamp:** on a separate fresh `tmp_path`/`cfg`, with the autouse
+      fixture's `_DISK_USAGE` seam first set to `Usage(total=1_000_000,
+      used=100_000, free=900_000)` (10.0%), call
+      `build_degraded_state_watchdog(cfg, as_of="2026-08-05T00:00:00Z")` ->
+      `observed0`; assert `disk_headroom_critical`'s entry in
+      `observed0["evaluations"]` shows `observed_disk_used_percent == 10.0,
+      state == "healthy"`. Then `lock = acquire_runtime_lock(cfg,
+      "degraded_state_watchdog", stale_after_seconds=999999)`, and WHILE THE
+      LOCK IS HELD, change the seam to `Usage(total=1_000_000, used=950_000,
+      free=50_000)` (95.0% — would be an incident if evaluated) and call
+      `build_degraded_state_watchdog(cfg, as_of="2026-08-05T00:05:00Z")` ->
+      `carried1`. Assert ALL of: `carried1["status"] == "skipped_lock_held"`;
+      `carried1["generated_at_utc"] == "2026-08-05T00:05:00Z"` (a genuinely
+      FRESH top-level timestamp); `carried1["evaluations"] ==
+      observed0["evaluations"]` (the disk entry is carried WHOLESALE,
+      unchanged — still `10.0`/`"healthy"`, not `95.0`/`"incident"`); and no
+      `disk_headroom_critical` row in `carried1["active_incidents"]`. Then
+      `release_runtime_lock(lock)` and call `build_degraded_state_watchdog(cfg,
+      as_of="2026-08-05T00:10:00Z")` -> `recovered` (the seam is STILL at
+      95.0% — nothing else changed): assert `disk_headroom_critical`'s entry
+      in `recovered["evaluations"]` NOW shows `observed_disk_used_percent ==
+      95.0, state == "incident"`, and `recovered["active_incidents"]` now
+      DOES contain a `disk_headroom_critical` row — proving the 10.0/healthy
+      reading carried during the lock-held cycle was genuinely stale (the
+      current mocked disk had already crossed the threshold) and only
+      updates once a cycle actually acquires the lock and re-invokes the
+      evaluator. This pins, hand-computably, the exact behaviour disclosed
+      above: lock held -> the evaluation is carried, not recomputed -> the
+      published reading may be stale while the timestamp is fresh.
+15. **[Non-numeric branch coverage.]**
+    Monkeypatch `_DISK_USAGE` to `Usage(total='100', used=50, free=50)` (a
+    `str` `total` — condition 3 of the six-condition enumeration, above;
+    e.g. a future refactor or a malformed mock that stringifies a value
+    before returning it) -> `state == "incident"`
+    (never healthy); `observed_disk_used_percent is None`; `reason` mentions
+    both `total='100'` and `used=50`, AND explicitly contains the substring
+    `"non-numeric"` — asserting on that substring specifically, not merely
+    on the incident outcome, is what discriminates the corrected error
+    string: the pre-correction wording ("non-finite or boolean measured
+    input") would produce the same `state`/`percent` outcome for this input
+    by accident (a `str` trips the same `elif` regardless of wording), so an
+    assertion that stopped at `state == "incident"` would not actually pin
+    the corrected string and would not fail if a future edit silently
+    reverted it. This closes the coverage gap on conditions 3/4 (the
+    "non-numeric" branch); condition 4 (`used` non-numeric) is symmetric and
+    is not separately re-tested here, per the "at least one" coverage bar.
+
+Add a 14th entry to `_ID_STABILITY_SWEEP` (`test_degraded_state_watchdog.py:1405-1419`),
+with its own sweep helper alongside the existing thirteen (following the
+exact pattern of `_sweep_ledger_chain_integrity` etc., but doing its own
+manual save/restore since `sweep(cfg)` receives no `monkeypatch` fixture —
+confirmed directly, `:1422-1427`). The save/restore target is `dsw._DISK_USAGE`
+(the module-level seam above), not `dsw.shutil.disk_usage` — this WO never
+monkeypatches `shutil.disk_usage` directly anywhere in this file.
+```python
+def _sweep_disk_headroom_critical(cfg: EngineConfig) -> tuple[str, str]:
+    import polymarket_predictive_engine.degraded_state_watchdog as dsw
+    Usage = namedtuple("Usage", "total used free")
+    original = dsw._DISK_USAGE
+    dsw._DISK_USAGE = lambda path: Usage(total=1_000_000, used=960_000, free=40_000)
+    try:
+        ids: list[str] = []
+        for cycle in range(1, 3):
+            result = build_degraded_state_watchdog(cfg, as_of=f"2026-08-02T12:0{cycle}:00Z")
+            incident = next(row for row in result["active_incidents"] if row["registration_id"] == "disk_headroom_critical")
+            ids.append(incident["incident_id"])
+        return ids[0], ids[1]
+    finally:
+        dsw._DISK_USAGE = original
+```
+```python
+_ID_STABILITY_SWEEP = [
+    ("requote_missing_inputs", _sweep_requote_missing_inputs),
+    ...  # thirteen existing entries, unchanged order
+    ("disk_headroom_critical", _sweep_disk_headroom_critical),  # NEW, 14th
+]
+```
+Update the file comment at `:1192-1195` from "all twelve `_incident(` call
+sites (thirteen registrations; the wedge registration is pinned separately
+below...)" to "all thirteen `_incident(` call sites (fourteen registrations;
+the wedge registration is pinned separately below...)".
+
+**Decomposition, kept verbatim (re-verified by direct count against
+`origin/main`):** 12 existing `= _incident(` call sites at
+lines 497, 565, 675, 733, 795, 850, 916, 998, 1023, 1090, 1141 (11 non-wedge)
+plus the wedge at 1422. Of the 11 non-wedge sites, exactly one (`:998`, the
+`for registration_id, relative, healthy in PRODUCER_REGISTRATIONS:` loop
+inside `_immediate_producer_evaluations`; `PRODUCER_REGISTRATIONS` has
+exactly 3 tuples) is a producer-loop site covering 3 registrations from a
+single call site; the other 10 are single-registration sites. **Before this
+WO:** 10 single-registration sites + 1 producer-loop site (covering 3) + 1
+wedge site = 12 call sites; 13 swept registrations (10 + 3, matching
+`_ID_STABILITY_SWEEP`'s existing 13 tuples); 14 total incident-producing
+registrations project-wide (13 swept + wedge). **After this WO's one new
+single-registration site:** 13 call sites (12 + 1); 14 swept registrations
+(13 + 1, the new 14th `_ID_STABILITY_SWEEP` tuple); wedge still pinned
+separately, unchanged. This comment and the list itself must move together —
+updating one without the other leaves a false count or an unindexed
+registration.
+
+No test in this file co-varies clock and value for `disk_headroom_critical`
+the way v1's tests 2/8 did for the freshness dimension, because R7 removes
+that dimension entirely for this registration.
+
+### Scope classification
+
+NON-FROZEN. Basis: this is a pure add-only observability change — one new
+watchdog registration. It touches no gate, threshold, eligibility rule,
+cohort/promotion control, broker, signer, credential, or order-path surface.
+It reuses the EXISTING 90% literal unchanged (does not create or change a
+threshold). The only fixed literal this WO introduces is
+`DISK_USED_PERCENT_CRITICAL_THRESHOLD = 90.0`, with no settings entry,
+matching the `DR_STATUS_MAX_AGE_SECONDS` convention. This mirrors WO-106
+(collector-only, NON-FROZEN, orchestrator-merged) and the explicit split
+drawn in WO-129's own title ("the ... item is a registered evidence gate →
+owner merge; the rest is monitoring-only"). Tighten-only statement: nothing
+here loosens any existing control; no config path can widen the 90.0
+threshold.
+
+[R6 routing note, unchanged: while the independent external reviewer remains
+usage-capped, the PR for this WO routes OWNER MERGE notwithstanding the
+NON-FROZEN classification; the classification itself is unchanged.]
+
+### Do NOT
+
+Do not delete any file. Do not change any retention window, archive cap, or
+`ARCHIVE_EXCLUDED_PREFIXES` value. Do not change what is collected, harvested,
+or archived. Do not touch `cli.py`, `scripts/run_vps_ops_scheduler.sh`,
+`ledger_anchor.py`, `disaster_recovery.py`, `training_harvest.py`,
+`src/polymarket_predictive_engine/corpus_retention.py`,
+`tests/polymarket_predictive_engine/test_collection_hygiene.py`, or any
+config file. Do not add a config key for the 90.0 literal. Do not touch any
+order, signer, credential, or broker path. **Do not have
+`_evaluate_disk_headroom` read `outputs/ops_scheduler/corpus_retention.json`
+or any other JSON artifact** — it must call `_DISK_USAGE(cfg.output_root)`,
+independent of any producer's output (R7 — stated as an explicit negative
+constraint so a future edit cannot quietly drift the design back to the
+read-based one round-1 found broken). **Do not build any disk-usage
+attribution/breakdown artifact of any kind under this WO** — single-root or
+multi-root attribution is deferred entirely (see Purpose); **`WO-156`,
+bounded disk-growth attribution — within `output_root` and across registered
+roots outside it, one successor work order — is named but not designed
+here** (naming/routing only — no design work is done for `WO-156` here or
+anywhere else in this WO). **Do not attempt to close the carry-path
+staleness or the uncapped `lock_stale_seconds` ceiling in this WO either** —
+both are disclosed, not fixed, in Fail-safe and "CLI/scheduler/ledger
+wiring," above; **`WO-157`, carry-path staleness and lock-stale ceiling for
+the degraded-state watchdog, is named as the successor for that fix, NOT
+designed here — any fix there TIGHTENS a registered surface**, on the same
+naming/routing-only basis as `WO-156` above.
+
+### Day-after check
+
+After the next scheduler cycle on the VPS:
+
+**(Kept byte-for-byte VERBATIM from this WO's ancestor draft's Day-after
+check bullet 3, per the orchestrator's explicit instruction — this is the one
+bullet the alarm-only descope does not touch. Two bullets that named fields
+belonging to the removed, deferred attribution artifact are dropped in full
+because both fields no longer exist anywhere in this WO. The historical "N9"
+and "Round-2 Notes" parentheticals below are this bullet's own original
+words, left untouched rather than edited, so that it remains verbatim.)**
+
+- The real filesystem's disk-used percentage is currently `>= 90.0` (N9: most
+  recently verified reading is 91.09% as of 2026-08-06T23:38:50Z, and the
+  trend across the prior five days was strictly upward) — phrased as an
+  inequality rather than a point value so this check cannot go stale the way
+  v1's "currently reported at 90.826" did. Under R7's design this is measured
+  TWICE, independently: once by `corpus_retention.json`'s own
+  `disk_projection.disk_used_percent_after` (unchanged, pre-existing), and
+  once by the watchdog's own live `_DISK_USAGE(cfg.output_root)` reading
+  inside `disk_headroom_critical`'s evaluation. **(Round-2 Notes — name the
+  field, not just the artifact: the watchdog's own reading is published at
+  `outputs/ops_scheduler/degraded_state_watchdog.json` ->
+  `evaluations[registration_id="disk_headroom_critical"].observed_disk_used_percent`
+  — v2 never named which field on this artifact carries the watchdog's own
+  measurement, only the CSV row it produces.)** Both readings should show
+  `>= 90.0` on the same host at roughly the same time, since it is the same
+  disk. Given that, `outputs/performance/degraded_state_incidents.csv` should
+  already show exactly one active row with `registration_id=disk_headroom_critical`
+  within ONE `degraded_state_watchdog` cycle after this change deploys (next
+  scheduler tick, <= ~300s — no longer gated on `corpus_retention`'s own
+  cadence, per R7), and, if `OPS_OWNER_NTFY_TOPIC_URL` is configured, the
+  owner's ntfy channel receives a push naming `disk_headroom_critical` within
+  the existing notification cooldown.
+
+**COMPANION to bullet 3 above (the bullet itself is UNEDITED, kept
+byte-for-byte verbatim per the standing instruction; this is an addition
+beside it):** two qualifications apply to the bullet's "<= ~300s" and to
+reading (a), both executed against the exact registered code, neither
+changing what the day-after operator should actually go check:
+
+1. **The "<= ~300s" bound in the bullet assumes the responder's own
+   `degraded_state_watchdog` cycle acquires the watchdog's own runtime lock.**
+   If it does not — because some other process is holding
+   `runtime_lock("degraded_state_watchdog", ...)` at that moment — the row may
+   not appear for up to `lock_stale_seconds` + one further tick (default
+   900s + ~300s; see Fail-safe, above, for the full disclosure). If the CSV
+   row is missing on the very next tick, check
+   `degraded_state_watchdog_state.json`'s `carry_forward_cycles` before
+   concluding the alarm failed to fire — a nonzero value there means the lock
+   was held, not that `disk_headroom_critical` is broken. A second, per-row
+   signal is also available: compare the evaluation row's own
+   `observation_token` against the artifact's top-level `generated_at_utc` —
+   if the two differ, that row is a carried, not a freshly evaluated, reading
+   (see Fail-safe, above, item 1).
+2. **Reading (a) — `corpus_retention.json`'s own
+   `disk_projection.disk_used_percent_after` — exists only when
+   `corpus_retention` actually ran and acquired its own lock on that cycle.**
+   Its `disabled` (`corpus_retention.py:687`) and `skipped_lock_held`
+   (`:697`) payloads carry no `disk_projection` block at all (this is the
+   very absence Purpose (b) relies on to disqualify the read-based design).
+   If reading (a) is absent on the day-after check, that by itself is not
+   evidence of a problem with THIS WO's alarm — check reading (b), the
+   watchdog's own `observed_disk_used_percent`, independently; it does not
+   depend on `corpus_retention` at all (subject to qualification 1, above).

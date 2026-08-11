@@ -9234,7 +9234,7 @@ invisible at the deployed configuration and only binds if the ceiling is ever
 tightened.
 
 
-## WO-147 — Expired markets on the official-book watchlist: measure first, exclude on positive evidence — `queued` (registered 2026-08-01; collection-side hygiene and observability only; **RE-SCOPED at drafting — the original framing was disproved, see Provenance**; no gate, threshold, eligibility rule, or funding value changes — **exempting the two §147.1 input-validation ceilings (`universe_pages <= 8`, `page_size <= 100`), disclosed as registered, strictly-tightening validation clamps rather than eligibility or funding thresholds; see Scope, below** — → OWNER MERGE after line-audit)
+## WO-147 — Expired markets on the official-book watchlist: measure first, exclude on positive evidence — `done` (2026-08-07, PR #438, `3645adb8`; registered 2026-08-01; collection-side hygiene and observability only; **RE-SCOPED at drafting — the original framing was disproved, see Provenance**; no gate, threshold, eligibility rule, or funding value changes — **exempting the two §147.1 input-validation ceilings (`universe_pages <= 8`, `page_size <= 100`), disclosed as registered, strictly-tightening validation clamps rather than eligibility or funding thresholds; see Scope, below** — routed owner-merge after line-audit, PR merged; **deployment status not independently verified in this amendment — see WO-68's `operating_state.md` for the authoritative, VPS-side check**)
 
 **Provenance — the framing that opened this WO was disproved and is corrected.**
 The orchestrator's brief framed `excluded_stale: 62` (`venue_close_time_past: 61`,
@@ -9590,7 +9590,18 @@ merge" vs WO-141 at `:6655` "collection-only → owner merge"). **Orchestrator
 resolution: all four of WO-146 through WO-149 route to OWNER MERGE.** The
 stricter reading is adopted deliberately — this session's review rounds found
 defects in the orchestrator's own registered text at every round, so orchestrator
-self-merge is not the safe default here.
+self-merge is not the safe default here. **§147.5 discloses a further
+correction here, on the same principle as §148.6's own reconciliation,
+below:**
+§147.5.A LOOSENS one Day-after check requirement — deleting the pre-amendment
+requirement that `excluded_stale_condition_ids` be non-empty whenever
+`excluded_stale > 0`, because the shipped, merged code legitimately produces
+an empty map on a clean, correctly-running cycle whose stale markets all
+carried an empty, missing, or whitespace-only `conditionId`. This is a
+correction to the Day-after check's own formula, not to any of the frozen
+categories named above — it moves no gate, threshold, eligibility rule,
+screen, sizing rule, or funding value — **and it does not change the OWNER
+MERGE routing.**
 
 **Day-after check — the `stale_map_status` clause is re-gated a second time on
 a further round of external review, this time in the opposite direction from
@@ -9606,22 +9617,90 @@ on the study's organic cadence and accepting `"unavailable"` as documented
 and expected until it elapsed — had the direction backwards: after a
 successful deploy, `"unavailable"` can only be a regression, never the
 expected state. That allowance is deleted. After one collector cycle (<= 15
-min): (1) **corrected on further review — non-empty is required only when
-`excluded_stale > 0`, not unconditionally:** `excluded_stale_condition_ids`
-key count — over distinct non-empty stale condition ids, since
-`maker_carry_study.py:843-847` adds a key only when the stale market's
-`conditionId` is non-empty while `excluded_stale` increments once per stale
-market regardless, so marker-count and id-count can legitimately differ
-(safe-noisy: a mismatch here can only produce a false-alarm check failure,
-never mask a missed exclusion) — equals `min(excluded_stale, 200)` exactly;
-when `excluded_stale == 0` (nothing stale in the current scan), `min(0, 200)
-== 0` and the map is legitimately EMPTY — that is a clean day, not a defect,
-and the check must not fail it. Non-empty is required only once
-`excluded_stale > 0`, and the
-exact key-count equality holds unconditionally either way. Additionally,
-`excluded_stale_condition_ids_truncated == (excluded_stale > 200)` holds,
-added on a further round of review to pin the boolean against the same
-threshold as the key-count equality above. (2)
+min): (1) **corrected on further review — the registered truncation formula and
+non-emptiness requirement computed the wrong quantity; both are corrected
+here to match the implementation (§147.5.A):** After one collector cycle:
+`excluded_stale_condition_ids_truncated == (D > 200)`, where `D` is the count
+of distinct `conditionId`s, non-empty after
+`str(market.get("conditionId") or "").strip()`, among this run's stale
+markets (`maker_carry_study.py:923-926`) — **not** `excluded_stale > 200`
+(`excluded_stale` increments once per stale market unconditionally, `:926`;
+`D` is the size of `excluded_stale_reasons`, gaining a key only inside the
+`if condition_id:` guard at `:924-925`) — and the two diverge whenever any
+stale market this run had an empty, whitespace-only, or duplicate
+`conditionId`. (The citation this item previously carried,
+`maker_carry_study.py:843-847`, is a pre-build number for the same
+construct — positional drift only, per §147.4's own rule; at `6840732b` it
+lands inside `_market_url` (`:838-845`) plus two blank lines, and the
+construct itself is at `:923-926` today. Register `:9294` independently
+cites the same construct, also as a pre-build number — deliberately
+deferred to §147.6, see §147.5's own Reconciliation table, below.)
+
+`D` is not itself persisted — the persisted artifact is the already
+sorted-then-capped `excluded_stale_condition_ids` dict
+(`maker_carry_study.py:2704-2709`) — so a day-after reader works from
+`key_count = len(excluded_stale_condition_ids)`, which is **exactly**
+`min(D, 200)` (an equality, not merely `<=`, by construction of the
+`:2705-2708` slice), and should read it as follows:
+- **When `excluded_stale_condition_ids_truncated == False`:** `D = key_count`
+  exactly (because `D <= 200` in this case, so the 200-cap does not bind), so
+  the count of this run's stale markets whose `conditionId` was empty,
+  whitespace-only, or a duplicate of another stale market's id is recoverable
+  **exactly**, as `excluded_stale - key_count` (verified: `5-4=1`, `3-2=1`,
+  `201-200=1`, `250-150=100`).
+- **When `excluded_stale_condition_ids_truncated == True`:** `D > 200`, so `D`
+  itself is not recoverable from the persisted artifact (only
+  `min(D,200)=200` is), and neither is the exact key-less count for that
+  cycle. It is bounded above by `excluded_stale - 201` (since `D >= 201` in
+  this case; verified: 201 distinct + 4 empty gives `excluded_stale - 201 =
+  205 - 201 = 4`, matching the true blind-market count in that constructed
+  case exactly, because `D` there happens to equal its own minimum, 201). Do
+  not treat this bound as an exact count on a truncated cycle.
+- `key_count < 200` unambiguously implies `truncated == False` (because
+  `D = key_count` whenever `key_count < 200`).
+- `truncated == True` unambiguously implies `key_count == 200` (because
+  `D > 200` gives `min(D, 200) = 200`) — the converse direction, omitted from
+  the pre-amendment text, restored here; both merged tests
+  (`test_maker_carry_study.py:578`, `:602`) already exercise it.
+- `key_count == 200` exactly is the one case that stays ambiguous from the
+  artifact alone — "200 distinct ids, no truncation" and "201+ distinct ids,
+  truncated" both produce it — which is exactly what
+  `excluded_stale_condition_ids_truncated` itself exists to disambiguate.
+- **`excluded_stale_condition_ids` legitimately reads EMPTY (`key_count == 0`)
+  even when `excluded_stale > 0`** — every stale market this run had an empty,
+  missing, or whitespace-only `conditionId` (verified: `excluded_stale = 1`,
+  `key_count = 0` on an otherwise clean, correctly-running cycle; also
+  `excluded_stale = 3`, `key_count = 0` with one empty, one whitespace-only,
+  and one missing-key market). When `excluded_stale == 0` the map is
+  legitimately EMPTY too (`min(0,200)=0`) — that is a clean day, not a
+  defect, and the check must not fail either case. **This is not a defect.**
+  A prior form of this check required non-emptiness whenever
+  `excluded_stale > 0` — **that requirement is deleted here. This is a
+  disclosed LOOSENING of this Day-after check** — see the disclosure
+  performed in WO-147's own Scope paragraph, above — because it stops
+  flagging a state (an all-empty population of stale `conditionId`s) that the
+  old text flagged as a failure and that the shipped code produces on an
+  ordinary, correct input. What replaces it — the recoverable count above, on
+  non-truncated cycles — is strictly more informative than a bare
+  non-emptiness test on the cycles where it is computable at all, and does
+  not accept any state a *real* defect would produce as innocuous: a genuine
+  defect (the map failing to gain a key for a market whose `conditionId`
+  genuinely was distinct and non-empty) still shows up as a nonzero
+  `excluded_stale - key_count` on a non-truncated cycle.
+
+Both `excluded_stale` and `key_count` (`len(excluded_stale_condition_ids)`)
+are already-persisted summary fields; this correction adds **no new artifact
+key** — a day-after reader computes the recoverable count, when computable,
+from the two keys already persisted.
+
+**Fail-safe sentence:** every divergence above is safe-noisy, never
+unsafe-silent — every stale market, whatever its `conditionId` shape, was
+still excluded from the universe by the `continue` at
+`maker_carry_study.py:937` (immediately below the stale-reasons branch opened
+at `:922`), regardless of what its diagnostic entry looks like. No gate,
+threshold, eligibility, or collection-breadth behavior is affected; only the
+Day-after check's own formula and its checkable structure move, to match code
+that already does the right thing. (2)
 `watchlist_excluded_expired.
 stale_map_status == "ok"` is **required immediately after deploy
 acceptance** — no wait, no documented-unavailable exception; anything other
@@ -9824,6 +9903,240 @@ dispatchable:
   gap was closed when §151.1 merged with PR #427, and §151.1's own scheduler
   citations (`:841-856`, `:635`) were derived *after* WO-149's merge and
   resolve against the current tree.
+
+### 147.5 — correct WO-147's day-after truncation formula to the
+implementation's semantics; §147.5.B removed entirely (added 2026-08-11,
+post-merge register correction; WO-147 merged as PR #438; the registered
+Day-after invariant diverges from the shipped, merged code — see Cause)
+
+**Cause.** The WO-147 line audit found that the shipped, merged code and the
+registered Day-after invariant compute `excluded_stale_condition_ids_truncated`
+differently, and they diverge on a real input shape. The audit ruled the
+**implementation** the more truthful of the two and queued this amendment to
+move the **register**, not the code. Re-verified independently this session by
+re-reading `maker_carry_study.py` at `6840732b` and by executing the real
+function against eight adversarial fixtures (all-empty-id, missing-key,
+whitespace-only, at-the-cap, past-the-cap, and duplicate-`conditionId`
+fixtures, in addition to the original 201-market and 150-market shapes).
+
+**THE DESCOPE — §147.5.B is removed from this amendment entirely.** The
+guard-description secondary item has produced blockers across prior review
+rounds, and there is no defect behind it — it is pure description of shipped
+behaviour. Its content ("these two guards are tautological because of
+stale-map key normalisation") is provenance for an **already-queued,
+separately-tracked code work order** that fixes the underlying
+key-normalisation asymmetry (`_watchlist_stale_map`, `maker_fill_replay.py`,
+never normalises keys, while `_watchlist_expired_reasons` strips before
+lookup). Registering a description of a bug about to be fixed, inside a
+register-only amendment that must build nothing, is incoherent; folding it
+into that fix's own provenance is not. **§147.5 keeps only 147.5.A.**
+
+147.5.B — *[gap: the guard-description secondary item is moved out entirely,
+as provenance for the queued stale-map key-normalisation code WO (placeholder
+`WO-<n>`, not assigned here). Nothing is registered under 147.5.B.]*
+
+#### 147.5.A — the corrected invariant (the only item in §147.5)
+
+**The two code anchors, re-verified at `6840732b`:**
+
+- **The per-stale-market counter increment** — `maker_carry_study.py:923-926`:
+  ```
+  condition_id = str(market.get("conditionId") or "").strip()
+  if condition_id:
+      excluded_stale_reasons[condition_id] = list(stale_reasons)
+  excluded_stale += 1
+  ```
+  `excluded_stale` increments **once per stale market, unconditionally** — the
+  `if condition_id:` guard is not in its path.
+- **The key-add, guarded on a non-empty-after-`.strip()` `conditionId`** — same
+  block: `excluded_stale_reasons[condition_id] = list(stale_reasons)` executes
+  **only** inside `if condition_id:`, where `condition_id` is already
+  `str(market.get("conditionId") or "").strip()`. A stale market whose
+  `conditionId` is missing, empty, **or whitespace-only** (non-empty *raw*, but
+  `.strip()` reduces it to `""`, which is falsy) increments `excluded_stale` but
+  adds no key.
+- **The truncation flag itself** — `maker_carry_study.py:2704-2709`:
+  ```
+  _stale_condition_ids_sorted = sorted(stale_diagnostic["excluded_stale_reasons"])
+  excluded_stale_condition_ids = {
+      condition_id: stale_diagnostic["excluded_stale_reasons"][condition_id]
+      for condition_id in _stale_condition_ids_sorted[:200]
+  }
+  excluded_stale_condition_ids_truncated = len(_stale_condition_ids_sorted) > 200
+  ```
+  `truncated` is computed from `len(_stale_condition_ids_sorted)` — call this `D`,
+  the count of **distinct condition ids, non-empty after `.strip()`**, collected
+  in `excluded_stale_reasons` — never from `excluded_stale`. `D <= excluded_stale`
+  always, with equality only when every stale market this run had a distinct,
+  non-empty `conditionId`.
+
+**The arithmetic, independently re-executed this session** (throwaway fixtures
+built against the same `_config`/`_market`/`_fake_requests` helpers
+`test_maker_carry_study.py` already defines, run through the real
+`run_maker_carry_study`):
+
+| fixture | `excluded_stale` | `key_count` | `truncated` | old formula (`excluded_stale>200`) |
+|---|---|---|---|---|
+| 200 distinct + 1 empty `conditionId` (201 stale total) | 201 | 200 | `False` | `True` — **mismatch** |
+| 201 distinct + 4 empty (205 stale total) | 205 | 200 | `True` | `True` — agrees here, but hides 4 blind markets |
+| 150 distinct + 100 empty (250 stale total) | 250 | 150 | `False` | `True` — **mismatch** |
+| 1 stale, empty `conditionId` | 1 | 0 | `False` | `False` |
+| 1 stale, missing `conditionId` key | 1 | 0 | `False` | `False` |
+| 1 stale, whitespace-only `conditionId` (`"   "`) | 1 | 0 | `False` | `False` |
+| 4 distinct non-empty + 1 empty (5 stale total) | 5 | 4 | `False` | `False` |
+| 2 distinct non-empty + 1 duplicate of one of them (3 stale total) | 3 | 2 | `False` | `False` |
+
+The first and third rows are divergences on the registered formula. This is not
+a hypothetical: an empty `conditionId` requires no malformed input, only an
+ordinary one, and the duplicate-`conditionId` route reaches the same divergence
+class with no empty field at all.
+
+**Corrected register text (replaces `docs/POLYMARKET_CODEX_WORK_ORDERS.md`'s
+Day-after check item (1) paragraph, `:9609-9624` as registered before this
+amendment — PERFORMED in the parent text above by this same commit, not merely
+declared here, per S8 A4 / the performed-not-declared rule at `:9670-9673`):**
+
+> After one collector cycle: `excluded_stale_condition_ids_truncated == (D > 200)`,
+> where `D` is the count of distinct `conditionId`s, non-empty after
+> `str(market.get("conditionId") or "").strip()`, among this run's stale markets
+> (`maker_carry_study.py:923-926`) — **not** `excluded_stale > 200`
+> (`excluded_stale` increments once per stale market unconditionally, `:926`; `D`
+> is the size of `excluded_stale_reasons`, gaining a key only inside the
+> `if condition_id:` guard at `:924-925`) — and the two diverge whenever any
+> stale market this run had an empty, whitespace-only, or duplicate
+> `conditionId`.
+>
+> `D` is not itself persisted — the persisted artifact is the already
+> sorted-then-capped `excluded_stale_condition_ids` dict
+> (`maker_carry_study.py:2704-2709`) — so a day-after reader works from
+> `key_count = len(excluded_stale_condition_ids)`, which is **exactly**
+> `min(D, 200)` (an equality, not merely `<=`, by construction of the
+> `:2705-2708` slice). `key_count < 200` unambiguously implies `truncated ==
+> False`; `truncated == True` unambiguously implies `key_count == 200`;
+> `key_count == 200` exactly is the one case that stays ambiguous from the
+> artifact alone. On a non-truncated cycle the key-less count is recoverable
+> **exactly** as `excluded_stale - key_count`; on a truncated cycle it is only
+> bounded above, by `excluded_stale - 201`.
+>
+> **`excluded_stale_condition_ids` legitimately reads EMPTY (`key_count == 0`)
+> even when `excluded_stale > 0`** — every stale market this run had an empty,
+> missing, or whitespace-only `conditionId`. **This is not a defect.** A prior
+> form of this check required non-emptiness whenever `excluded_stale > 0` —
+> **that requirement is deleted here. This is a disclosed LOOSENING of this
+> Day-after check** — see the disclosure performed in WO-147's own Scope
+> paragraph, above — because it stops flagging a state that the old text
+> flagged as a failure and that the shipped code produces on an ordinary,
+> correct input. A genuine defect (the map failing to gain a key for a market
+> whose `conditionId` genuinely was distinct and non-empty) still shows up as
+> a nonzero `excluded_stale - key_count` on a non-truncated cycle, so the
+> loosening accepts no state a real defect would produce as innocuous.
+>
+> **Fail-safe sentence:** every divergence above is safe-noisy, never
+> unsafe-silent — every stale market, whatever its `conditionId` shape, was
+> still excluded from the universe by the `continue` at
+> `maker_carry_study.py:937` (immediately below the stale-reasons branch opened
+> at `:922`), regardless of what its diagnostic entry looks like. No gate,
+> threshold, eligibility, or collection-breadth behavior is affected; only the
+> Day-after check's own formula and its checkable structure move, to match code
+> that already does the right thing.
+>
+> (The citation this item previously carried, `maker_carry_study.py:843-847`,
+> is a pre-build number for the same construct — positional drift only, per
+> §147.4's own rule; at `6840732b` it lands inside `_market_url` (`:838-845`)
+> plus two blank lines, and the construct itself is at `:923-926` today.
+> Register `:9294` independently cites the same construct, also as a pre-build
+> number — deliberately deferred to §147.6, see Reconciliation, below.)
+
+**Falsifiability** (what observation would falsify this check): it fails if, on
+a production cycle, `excluded_stale_condition_ids_truncated` disagrees with
+`D > 200` as recomputed by hand from the raw Gamma payload for that cycle (not
+generally recoverable after the fact on a truncated cycle, which is why the
+exact recoverable count is defined only for non-truncated cycles above); on a
+non-truncated cycle, it additionally fails — as a regression to investigate,
+not a hard stop — if the recomputed key-less count (`excluded_stale -
+key_count`) is persistently nonzero or trending upward across cycles with no
+corresponding rise in genuinely empty/whitespace/duplicate `conditionId`s in
+the underlying Gamma data.
+
+**Reconciliation — every register/test site touching this formula, with an
+explicit status for each; row 5 is split into two rows and row 10 is new:**
+
+| # | site | content | disposition |
+|---|---|---|---|
+| 1 | register `:9609` (pre-amendment, item (1)) | `truncated == (excluded_stale > 200)` | **superseded** — replaced by the corrected paragraph above |
+| 2 | register `:9609-9624` (pre-amendment, the whole item (1) paragraph) | truncation clause + key-count clause + non-emptiness clause | **superseded in full** — replaced by the corrected paragraph above |
+| 3 | register `:9612` citation (pre-amendment) | `maker_carry_study.py:843-847` | **corrected inline** — `:843-847` is a pre-build number for the same construct, positional drift only, per §147.4's own rule; corrected to `:923-926` |
+| 4 | register `:9297-9299` | §147.1's key description (no formula stated) | **unchanged** — carries no formula to correct |
+| 5a | register `:9478-9480` | test (1) prose: "3 stale + 2 clean → `excluded_stale == 3`, map has exactly the 3 ids sorted ascending, truncated False" | **corrected inline** — identical under-qualification to test (2)'s, same root cause: → "(1) 3 stale, **each with a distinct non-empty `conditionId`,** + 2 clean → `excluded_stale == 3`, map has exactly the 3 ids sorted ascending, truncated False." |
+| 5b | register `:9480-9481` | test (2) prose: "201 stale → exactly 200 keys, truncated True, the 200 lexicographically smallest" | **corrected inline** — "(2) **201 stale markets, each with a distinct non-empty `conditionId`,** → exactly 200 keys, truncated True, the 200 lexicographically smallest." |
+| 6 | test `test_maker_carry_study.py:564` | test (1), 3 stale + 2 clean, all non-empty distinct ids | **unchanged** — re-run this session, PASSED; correct under both formulas (`D=3`) |
+| 7 | test `test_maker_carry_study.py:578` | test (2), 201 stale fed ascending, all non-empty distinct ids | **unchanged** — re-run this session, PASSED; correct under both formulas (`D=201>200`) |
+| 8 | test `test_maker_carry_study.py:602` | F4: same 201-market population fed **descending**, pinning sort-before-cap | **unchanged** — re-run this session, PASSED; its fixture is all-distinct-non-empty (`D=201>200`), so `True` is correct under the corrected formula exactly as under the old one |
+| 9 | (repo-wide) | any consumer of `excluded_stale_condition_ids_truncated` outside `maker_carry_study.py` | **confirmed absent** — repo-wide grep, zero hits; this correction moves no funding, gate, or eligibility surface |
+| 10 | register `:9294` (§147.1) | cites `maker_carry_study.py:844-846` for the same `excluded_stale_reasons` construct | **deliberately deferred to §147.6** — a pre-build number, correct today at `:923-926`; noted here so this table reads as exhaustive rather than silently incomplete |
+
+**Touched-file list:** exactly `docs/POLYMARKET_CODEX_WORK_ORDERS.md`. No source
+file, no test file. WO-147's own registered "Touch ONLY these files" list
+(`maker_carry_study.py`, `maker_fill_replay.py`, `test_maker_carry_study.py`,
+`test_maker_fill_replay.py`) is unaffected by this amendment — 147.5.A touches
+none of them.
+
+### Tests (enumerated) — §147.5
+
+- **147.5.A (day-after formula):** **none, and the gap is registered rather than
+  hidden.** Builds nothing; this is a Day-after check text correction, not a
+  code change. No fixture anywhere in the repository exercises an
+  empty/whitespace/duplicate-`conditionId` stale market: the three merged tests
+  that pin adjacent semantics (`test_maker_carry_study.py:564`, `:578`, `:602`)
+  are all constructed from distinct, non-empty condition ids (re-verified this
+  session by reading each fixture's construction and by re-running all
+  three — PASSED). So the corrected formula's newly-registered semantics —
+  `truncated == (D>200)`; `key_count<200 => truncated False`; `truncated==True
+  => key_count==200`; the recoverable count on non-truncated cycles; and "an
+  empty map with `excluded_stale>0` is legitimate" — are pinned by the existing
+  suite only insofar as `D == excluded_stale` holds on all three merged
+  fixtures, so no existing test discriminates the two formulas. **The
+  corrected formula and its Day-after reading therefore land UNPINNED by any
+  test in this repository.** A three-case fixture (`excluded_stale=1/
+  key_count=0`; `excluded_stale=5/key_count=4`; a duplicate id) is queued as a
+  named test-only follow-on work order (placeholder `WO-<n>`, not assigned
+  here, per the same non-invented-number convention used elsewhere in this
+  register) rather than built here, to preserve this amendment's register-only
+  status.
+
+### Scope note — §147.5
+
+No gate, threshold, eligibility rule, screen, sizing rule, funding value, or
+deployed config value moves, **except the Day-after loosening disclosed in
+147.5.A** (performed, per S8 A4, in WO-147's own Scope paragraph above) — a
+correction to the Day-after check's own formula, not to any of the named
+categories. §147.5 now carries only 147.5.A; it is pure register text with that
+one disclosed exception, and touches no source or test file. §147.5.B (the
+guard-description secondary item) is removed from this amendment entirely — see
+"THE DESCOPE" above; it is not registered here, under any name or number.
+
+### Day-after check — §147.5
+
+147.5.A **is** the Day-after check correction; it replaces WO-147's §147.3
+Day-after item (1) paragraph in place, with no new artifact field and no new
+check — both `excluded_stale` and `key_count` are already-persisted fields;
+see the falsifiability statement above.
+
+### Open question — §147.5 (informational, out of scope here)
+
+`maker_carry_study.py` citations elsewhere in §147.1-§147.4 have also drifted
+since §147.4's own pre-build "eleven citations, unaffected" sweep
+(`:9694-9699` as registered before this amendment) — discovered incidentally
+while verifying 147.5.A's anchors, and independently re-verified this session.
+Example: §147.3's `excluded_stale_examples` cap citation, registered at `:9444`
+as `maker_carry_study.py:850`, resolves today into the unrelated
+`_quote_prices` signature (`def _quote_prices(` at `:848`; `:850` is
+`distance: float,`); the real cap (`if len(excluded_examples) < 10:`) is at
+`:929`. This is the same positional-drift class as the citation this amendment
+fixes, on a different construct, and is evidence for a dedicated
+citation-refresh sweep of `maker_carry_study.py`'s §147.1-§147.3 anchors as its
+own small follow-on (candidate §147.6) — deliberately not folded into this
+amendment's scope.
 
 ## WO-148 — Make seed-to-eligible conversion measurable: a tier-assignment event ledger — `queued` (registered 2026-08-01; measurement-only sidecar; changes no selection behaviour; enrolment deliberately deferred, see 148.4 → OWNER MERGE after line-audit; **first dispatch 2026-08-03 ESCALATED without building** — `registered-ancestry: c26cd7f ancestor-of c26cd7f PASS` recorded at dispatch (the build branch was cut at the then-`origin/main` tip and carries zero commits); 148.5's own re-verify-and-stop instruction fired, because WO-149's merge added a fourth, scheduled caller under `scope="portfolio"` that the registered caller set predates; **not dispatchable again until §148.6 merges**)
 

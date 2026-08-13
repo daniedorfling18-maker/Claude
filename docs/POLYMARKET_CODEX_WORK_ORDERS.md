@@ -10138,7 +10138,7 @@ citation-refresh sweep of `maker_carry_study.py`'s §147.1-§147.3 anchors as it
 own small follow-on (candidate §147.6) — deliberately not folded into this
 amendment's scope.
 
-## WO-148 — Make seed-to-eligible conversion measurable: a tier-assignment event ledger — `queued` (registered 2026-08-01; measurement-only sidecar; changes no selection behaviour; enrolment deliberately deferred, see 148.4 → OWNER MERGE after line-audit; **first dispatch 2026-08-03 ESCALATED without building** — `registered-ancestry: c26cd7f ancestor-of c26cd7f PASS` recorded at dispatch (the build branch was cut at the then-`origin/main` tip and carries zero commits); 148.5's own re-verify-and-stop instruction fired, because WO-149's merge added a fourth, scheduled caller under `scope="portfolio"` that the registered caller set predates; **not dispatchable again until §148.6 merges**)
+## WO-148 — Make seed-to-eligible conversion measurable: a tier-assignment event ledger — `done` (2026-08-07, PR #439, `98d87e7e`; registered 2026-08-01; measurement-only sidecar; changes no selection behaviour; enrolment deliberately deferred, see 148.4; routed owner-merge after line-audit, PR merged; **first dispatch 2026-08-03 ESCALATED without building** — `registered-ancestry: c26cd7f ancestor-of c26cd7f PASS` recorded at dispatch (the build branch was cut at the then-`origin/main` tip and carries zero commits); 148.5's own re-verify-and-stop instruction fired, because WO-149's merge added a fourth, scheduled caller under `scope="portfolio"` that the registered caller set predates; **§148.6 merged 2026-08-05 (PR #431, `f4a4d128`), and the build then proceeded and merged 2026-08-07 (PR #439, `98d87e7e`)**; **deployment status not independently verified in this amendment — see WO-68's `operating_state.md` for the authoritative, VPS-side check**)
 
 **Provenance.** An analyst could not compute the seed-to-eligible conversion rate
 at all. Verified cause: tier assignment is recomputed from scratch every
@@ -10226,10 +10226,13 @@ the run clock per S1. (4) `resync = True` when the state file is missing,
 unreadable, not a dict, `generated_at_utc` absent/unparseable, age negative, or
 age > **21600.0** (6.0h). (5) Emit one row per condition id whose current tier
 differs from its last tier, with `previous_tier = "unknown"` if `resync`.
-(6) **Idempotency:** `previous_tier` derives from the ledger's own last row, so
-re-running with no tier change emits **zero** rows, and a crash between the
-append and the state write leaves a stale state file that the next cycle
-re-diffs harmlessly. There is no dedup key and none is needed — the emit
+(6) **Idempotency:** Both a caught state-write failure — reported as
+`write_failed` (§148.7.2, cause 2) with `tier_events_written` carrying the
+true count already appended — and an uncaught interruption between the two
+writes leave the prior state file in place; in either case the next cycle
+re-diffs harmlessly, because `previous_tier` derives from the events CSV's
+own last row (`:990-1016`), never from the state file (`:1021`, read only to
+compute `resync`). There is no dedup key and none is needed — the emit
 condition IS the dedup.
 
 **Basis for 6.0h:** `OPS_TRADE_PRINTS_INTERVAL_SECONDS` default 900s
@@ -10260,7 +10263,12 @@ transition.** Every numeric read uses `safe_float` followed by an explicit
 `utils.py:373-379`). `append_csv_rows` raising → caught,
 `tier_events_status = "write_failed"`, state not written, and
 `snapshot_official_books` continues — **a measurement sidecar must never stop the
-collector.**
+collector.** *A second, distinct cause is registered at §148.7.2: the
+state-file write itself may raise after a successful append, reported under
+the same literal with `tier_events_written` reflecting the true, possibly
+non-zero, count already on disk. A reader may NOT infer "nothing was
+appended" from the literal `write_failed` alone — `tier_events_written` must
+be read alongside it.*
 
 ### 148.4 — Ledger enrolment: the choice, made deliberately and disclosed
 
@@ -11103,6 +11111,378 @@ them a second implementation. None of these facts feed any registered check:
 per the ruling above, no CSV-to-status join is conclusive with today's
 artifacts, so this framing is retained purely as background for the owner's
 own eyeballing, never as an automated signal.
+
+### 148.7 — close two register gaps WO-148's audits exposed; the register
+under-describes what already-merged code does in both cases (added
+2026-08-12, post-merge register correction; WO-148 merged as PR #439; both
+gaps found on the already-shipped, merged code — see Cause)
+
+**Cause.** The WO-148 line audit found two places where the shipped, merged
+code does something the register's text does not fully capture: one where
+the code does MORE than the register states (§148.7.2 — `write_failed`
+covers two causes, and both leave the prior state file in place for a
+harmless re-diff), and one where the register's own governing scope rule is
+stated in a way that reads, at the point a reader first meets it, as broader
+than it is (§148.7.3). Both are register amendments, not code findings —
+§148.7 builds nothing.
+
+**A third item — four `.exists()`-only input-contract collapses — is removed
+from this amendment entirely.** It is the only item that required a code
+change, and §148.7 must build nothing; it is split out as its own
+placeholder work order, below, and is not registered here under any name,
+section, or test number.
+
+#### 148.7.1 — *[gap: split out to a placeholder `WO-<n>`, not assigned here
+— the `.exists()`-only input-contract tightening. §148.7.2 and §148.7.3 keep
+their existing numbers rather than renumbering. Nothing is registered under
+148.7.1.]*
+
+#### 148.7.2 — `tier_events_status: "write_failed"` no longer implies "zero
+rows appended"; both failure causes leave the prior state file in place for
+a harmless re-diff, and the register is corrected to say so
+
+**§148.3's A2 (register lines `:10260-10263`), quoted exactly:** *"`append_csv_rows`
+raising → caught, `tier_events_status = "write_failed"`, state not written, and
+`snapshot_official_books` continues — a measurement sidecar must never stop the
+collector."* This states the literal for **one** cause; it never mentions
+`tier_events_written`, and the register nowhere states that `write_failed`
+implies zero rows. The gap is real: the WO-148 blocker fix (B1, built and
+merged) correctly reuses the same closed-domain literal for a second, distinct
+cause, verified directly in the shipped code at the current tip, `046c6830`
+(code files here are byte-identical to `6840732b`, the commit these anchors
+were drafted against — confirmed by blob-hash comparison across the merge):
+
+- **Cause 1 (original, unchanged):** `maker_fill_replay.py:1056-1066` —
+  `append_csv_rows` raises → `"tier_events_written": 0` (hardcoded; correct,
+  since nothing reached disk).
+- **Cause 2 (B1 fix, not yet reflected in the register):** `maker_fill_replay.py:1078-1103`
+  — the state-file `write_json` call raises (state path exists as a directory,
+  ENOSPC, EROFS, permission) **after** `append_csv_rows` already succeeded →
+  `"tier_events_written": len(event_rows)` and
+  `"tier_event_burst": len(event_rows) > _TIER_EVENT_BURST_THRESHOLD`
+  (`_TIER_EVENT_BURST_THRESHOLD = 200`, `:908`) — the true, possibly non-zero,
+  count of rows that landed on disk before the state write failed.
+
+**Reuse is the only in-domain option.** §148.5 (register lines `:10287-10289`)
+enumerates `tier_events_status`'s six members and attributes the last three to
+§148.6 (added when the sole-writer premise was falsified); **§148.6** (register
+lines `:10476-10479`) closes the domain at exactly six and states "any other
+value is a build defect, not a new member." A seventh literal for cause 2 is
+therefore not available; the register must instead disambiguate the existing
+one.
+
+**Register text (appended to §148.3's A2, `:10263`, and replacing §148.3(6)'s
+idempotency sentence, `:10229-10232`, in place — both performed in the parent
+text above by this same commit, not merely declared here, per S8 A4 / the
+performed-not-declared rule at `:9749-9752`):**
+
+> *A second, distinct cause is registered at §148.7.2: the state-file write
+> itself may raise after a successful append, reported under the same literal
+> with `tier_events_written` reflecting the true, possibly non-zero, count
+> already on disk. A reader may NOT infer "nothing was appended" from the
+> literal `write_failed` alone — `tier_events_written` must be read alongside
+> it.*
+>
+> *(6) **Idempotency:** Both a caught state-write failure — reported as
+> `write_failed` (§148.7.2, cause 2) with `tier_events_written` carrying the
+> true count already appended — and an uncaught interruption between the two
+> writes leave the prior state file in place; in either case the next cycle
+> re-diffs harmlessly, because `previous_tier` derives from the events CSV's
+> own last row (`:990-1016`), never from the state file (`:1021`, read only to
+> compute `resync`).*
+
+**Reconciliation — every register site stating or implying a `write_failed`
+semantic, with an explicit status for each:**
+
+| # | site | content | disposition |
+|---|---|---|---|
+| 1 | `:10260-10263` (§148.3 A2) | "`append_csv_rows` raising → caught... state not written" | **corrected inline** — the second-cause disclosure above is appended at `:10263` |
+| 2 | `:10229-10232` (§148.3(6)) | "a crash between the append and the state write leaves a stale state file that the next cycle re-diffs harmlessly" | **corrected inline** — broadened to cover both causes by the Idempotency text above; re-verified this session by execution: a two-cycle run with the state write raising on cycle 1 (append succeeds, 2 rows appended) leaves the state file byte-identical to its pre-cycle content; cycle 2 (state write restored) reports `ok`, `tier_events_written == 0`, and the events file is unchanged — confirming the re-diff is harmless under the CAUGHT cause too, not only an uncaught kill |
+| 3 | `:10347-10349` (§148.5 test (10)) | "`append_csv_rows` monkeypatched to raise → `write_failed`, state not written, return otherwise unchanged" | **unchanged in itself** (still a correct, still-passing test of cause 1) — flagged as covering cause 1 only; cause 2 is separately pinned by registered test (31), below |
+| 4 | `:10287-10289` (§148.5, enumeration) / `:10476-10479` (§148.6, closure) | `{"ok","read_failed","write_failed","skipped_portfolio_scope","skipped_unreadable_inputs","skipped_disabled"}` | **unchanged** — correctly cited; no seventh member is added. The six-member literal is enumerated at §148.5 (`### 148.5 — Summary keys`, `:10285`) at `:10287-10289`, which attributes the last three members to §148.6; the domain-closure sentence ("any other value is a build defect, not a new member") sits at `:10476-10479`, inside **§148.6** (nearest `^#` heading above `:10478` is `:10426`), not §148.5 — §148.5 never states the closure itself |
+| 5 | `:10397-10401` (§148.5 Day-after (1)/(2)) | genesis/second-cycle numeric requirements | **unchanged** — see Day-after check below for the direction check |
+| 6 | `:10480` (five zero values under skip statuses) | `tier_events_written: 0` etc. under the three skip statuses | **unchanged** — unaffected; those are skip paths, not `write_failed` |
+
+**Note, confirmed by execution this session:** §148.3's A2 clause ("state not
+written") stays literally TRUE under cause 2 — the state write is exactly what
+raised, so nothing was written (`write_json` is atomic: a temp-file write
+followed by `os.replace`; a raised exception inside it means the destination
+path was never touched) — so A2 is **extended** by this amendment's
+disclosure, not superseded; only `:10229-10232`'s idempotency sentence
+(reconciliation row 2, above) needed correcting.
+
+**Day-after checks that read `tier_events_written` (both already registered,
+§148.5's Day-after check, `:10397-10401`):** *(1)* `tier_events_written >= 1` on
+the first cycle (genesis); *(2)* on the second cycle, `tier_events_written == 0`
+if the watchlist did not change (the register's own words: *"A `tier_events_written`
+that equals the watchlist size on every cycle means the diff is not working and
+the WO is REVERTED, not tuned"*). **Direction check:** neither numeric
+requirement changes. Under `write_failed`, `tier_events_status` is not `"ok"`,
+so Day-after (1) already fails and forces investigation regardless of this
+amendment; Day-after (2)'s `tier_events_written == 0` on an unchanged
+watchlist is unaffected because cause 2 with an unchanged watchlist produces
+`len(event_rows) == 0` (`append_csv_rows` short-circuits before disk on an
+empty rows list, `utils.py:191-192`, verified) — nothing to diff, hence
+nothing appended before any state-write failure. This amendment adds no new
+failure path and loosens neither check; it only removes an incorrect
+inference ("write_failed implies zero rows") a reader could otherwise draw.
+
+**Fail-safe sentence (148.7.2):** unchanged in substance from §148.3's existing
+one ("a measurement sidecar must never stop the collector") — this item adds no
+new failure path and changes no code; it only corrects two register sites that,
+read together, would let a reader believe `write_failed` always means zero rows
+on disk, which the shipped code (cause 2) already contradicts.
+
+**Touched-file list:** exactly `docs/POLYMARKET_CODEX_WORK_ORDERS.md`.
+
+#### 148.7.3 — §148.6's condition (1) reads scope-blind at first encounter;
+register the disambiguation where a reader first meets it, and restate
+what the code actually does under `scope="portfolio"`
+
+**The most serious defect this section corrects, restated as found, not
+softened.** An earlier drafting pass asserted, of `tier_inputs_ok` under
+`scope="portfolio"`: *"that value is never consulted, because the
+portfolio-scope skip (`skipped_portfolio_scope`, `:1186`) already governs that
+path."* **This is FALSE.** Verified by reading `maker_fill_replay.py` at the
+current tip, `046c6830` (byte-identical to `6840732b`, the commit these
+anchors were drafted against): `tier_inputs_ok` is assigned exactly twice —
+
+- `:1227`, `tier_inputs_ok = False` (initializer, at function-body scope, before
+  the `if portfolio_scope:` branch at `:1228`);
+- `:1316`, inside the `else:` of that same `if portfolio_scope:` (i.e., only
+  under `scope="watchlist"`), `tier_inputs_ok = (summary_contract_ok and
+  candidates_csv_path.exists() and books_dir.exists())`.
+
+— and it is **read three times**: `:1321` (`if not tier_inputs_ok:`, inside the
+same `else:`), `:1350` (`if tier_inputs_ok:`, inside the `if not watchlist:`
+early-return block, reached under both scopes when the watchlist is empty), and
+**`:1378`** (`if tier_inputs_ok:`, at plain function-body indentation — reached
+under **both** scopes whenever the watchlist is non-empty, which is the WO-148
+write site itself). `:1186` (`summary["tier_events_status"] = "skipped_portfolio_scope"`)
+assigns a **status label only**; it gates nothing and sits nowhere near `:1378`
+or `:1350`.
+
+**So the portfolio-scope suppression of the ledger write rests entirely on
+`tier_inputs_ok` keeping its `False` initializer from `:1227`, because nothing
+under `scope="portfolio"` (`:1228-1249`) ever reassigns it — not on any check
+at the write site itself.**
+
+**The mutation experiment confirming this**, re-run this session: `:1227`
+changed from `tier_inputs_ok = False` to `tier_inputs_ok = True`, `__pycache__`
+cleared, the four named tests re-run:
+
+```
+BASELINE (unmodified :1227): test17 test18 test19 test22 -> 4 passed (plus test32 unaffected -> 5/5)
+MUTANT   (:1227 -> True):    test17 test18 test19 test22 -> 4 failed
+   test17: AssertionError: assert 'ok' == 'skipped_portfolio_scope'
+   test19: assert not _tier_state_path(cfg).exists()  ->  assert not True
+```
+Restored immediately after (`git diff --stat` on the worktree confirmed no
+residual change).
+
+**Corrected statement of what the code does:** *"Under `scope="portfolio"` the
+ledger write at `:1382`, guarded by `if tier_inputs_ok:` at `:1378` (and the
+empty-watchlist variant at `:1357`, guarded by `:1350`), is suppressed because
+`tier_inputs_ok` retains its `False` initializer from `:1227`, never being
+reassigned outside the watchlist branch at `:1250`-`:1322`; `:1186` assigns the
+status label only and gates nothing. The write statements sit immediately
+inside their guard blocks — `:1382` four lines below `:1378`, and `:1357`
+seven lines below `:1350`, with the WO-148 write-site comment between in each
+case. Any future edit that initializes `tier_inputs_ok` truthy, or that
+computes it outside the `else:` at `:1250`, re-enables the portfolio-scope
+write and the spurious churn §148.6 exists to prevent — pinned against exactly
+that regression by tests 17, 18, 19, and 22."*
+
+**The separate, TRUE half of the earlier claim, kept:** the contract-substitution
+half of §148.6's second correction (a malformed `portfolio` field silently
+replaced by `{}` under watchlist scope) is gated at `:1223` on `(portfolio_scope or
+summary_contract_ok)` — under `scope="portfolio"`, the raw `maker_summary` is
+always passed through unsubstituted, preserving `_portfolio`'s pre-existing
+loud `TypeError` on a truthy non-list `portfolio` value. Verified by execution:
+`snapshot_official_books(cfg, scope="portfolio")` with `portfolio: 5` raises
+`TypeError`; the identical fixture under `scope="watchlist"` instead returns
+`tier_events_status == "skipped_unreadable_inputs"`, no exception.
+
+**Why the loud failure is right under portfolio scope.** `scope="portfolio"`'s
+own skip (`skipped_portfolio_scope`) already makes a contract check
+unnecessary there — the collector never reaches the tier-event write site
+under that scope regardless of the summary's shape — so substituting a
+controlled `{}` would solve a problem that does not exist on that path, at the
+cost of silently swallowing a genuinely malformed `maker_carry_study.json` that
+`_portfolio` itself is already registered to fail loudly on. Raising is the
+conservative, tighten-nothing direction, and is what shipped.
+
+**The operational consequence of that loud failure, made checkable.** A
+`TypeError` raised at the call site itself (`cli.py:445`,
+`pulse_summary = snapshot_official_books(cfg, scope="portfolio")`, inside the
+`snapshot-official-books-pulse` command block, `:441-453`) never reaches that
+command's own local status-check (`:447-453`; `:446` is `_print(pulse_summary)`,
+which also never runs on this path) — it propagates uncaught up to `cli.py`'s
+top-level `try/except Exception` (`:343`/`:820-822`), which prints
+`"ERROR: ..."` to stderr and returns exit code **2**. The scheduler's
+`book_pulse` job (`run_vps_ops_scheduler.sh:688-712`) records this via
+`stamp_status book_pulse "$CODE"` at `:710`, so the failure is observable in
+`status.json` (`OUT_DIR`/`status.json`, `:149`) by name. **Disclosed in the
+same breath: because the pulse runs on a 300-second cadence
+(`BOOK_PULSE_INTERVAL`, default 300 at `:61`, clamped to `[300,900]` at
+`:64/66/68`), a malformed `maker_carry_study.json` (a truthy non-list
+`portfolio` field) makes every 300-second pulse cycle fail this way until the
+file is fixed — it does not retry into success, and it does not disable
+itself; it fails loudly, every cycle, on the same cadence, until the
+underlying file is corrected.**
+
+**Reconciliation — the register's own scoping statement, stated once where a
+reader does not yet see it, plus a second, previously-unnamed instance of the
+same gap:**
+
+| # | site | content | disposition |
+|---|---|---|---|
+| 1 | `:10570-10572` (condition (1) opening) | *"Absent, unreadable, unparseable, or contract-invalid summary, OR a missing candidates CSV, OR a missing `official_books` directory — checked first, regardless of the resulting watchlist's size."* Read alone, names no scope. | **corrected inline** — the disambiguating sentence below is added directly to condition (1)'s own paragraph |
+| 2 | `:10565-10568` | *"The success contract this correction requires is therefore for ALL THREE tranche inputs, not the study summary alone..."* — a second, previously-unnamed scope-blind statement in the same paragraph family | **corrected inline** — same disambiguating cross-reference added |
+| 3 | `:10674-10676` | *"...and, as throughout this section, neither applies under `scope="portfolio"`, where the portfolio-scope skip fires first."* — the sentence that actually governs, appearing **103 lines** after `:10572` (`10675-10572=103`) | **unchanged in substance — still correct and still governs; now cross-referenced explicitly from condition (1) itself, rather than left as the only place the limit is stated in full** (`:10500-10502` and `:10522-10525` already scope the correction to `scope="watchlist"`, both appearing before condition (1) at `:10570` — but neither is attached to condition (1) itself, which is the actual gap this item closes) |
+
+**Register text (disambiguation, added at condition (1)'s own paragraph,
+`:10570`):** *"Condition (1) above, like condition (2), like the 'ALL THREE
+tranche inputs' framing a few lines above it (`:10565-10568`), and like every
+other rule in this section, applies only under `scope="watchlist"` — never
+under `scope="portfolio"`, where the portfolio-scope skip fires first and
+neither condition is reached (restated in full at `:10674-10676`, below). This
+is stated here, at condition (1) itself, rather than left to the later 'as
+throughout this section' sentence alone, because a reader encountering
+condition (1) in isolation would otherwise have no signal, attached to
+condition (1) itself, that it is scope-limited. The two earlier sentences that
+do scope this correction to `scope="watchlist"` (`:10500-10502`,
+`:10522-10525`) are not attached to condition (1), which is the gap this
+addition closes. Under `scope="portfolio"`, a truthy non-list, non-string
+`portfolio` value in `maker_carry_study.json` is passed through unsubstituted
+and raises `_portfolio`'s pre-existing `TypeError` — a loud, pre-existing
+failure this section deliberately does not soften, because that scope's own
+`skipped_portfolio_scope` skip already makes the contract check this section
+adds unnecessary on that path. That `TypeError` propagates out of
+`snapshot-official-books-pulse` to the CLI's top-level handler
+(`cli.py:820-822`, exit code 2), is recorded by name via `stamp_status
+book_pulse` in `status.json`, and — because the pulse runs every 300
+seconds — recurs on every subsequent pulse cycle until the malformed summary
+is fixed, rather than resolving itself."*
+
+**Fail-safe sentence (148.7.3), split by falsifier name:** a build defect
+under `scope="portfolio"` falls into one of two directions, pinned by
+different tests:
+- **The loosening** — a substitution applied where none is registered (e.g.
+  widening `:1223`'s gate so a malformed summary is silently replaced by `{}`
+  under portfolio scope too) — would silently swallow a genuinely malformed
+  `maker_carry_study.json`, must not happen, and is pinned by test **(32)**:
+  applying exactly that mutation (`:1223` narrowed from `maker_summary if
+  (portfolio_scope or summary_contract_ok) else {}` to `maker_summary if
+  summary_contract_ok else {}`) leaves tests 17, 18, 19, and 22 **all still
+  passing**, and only test (32) fails, with `Failed: DID NOT RAISE TypeError`.
+- **The regression** — a recomputed or re-derived `tier_inputs_ok` (e.g.
+  hoisting or truthifying its `:1227` initializer) — would crash-free but
+  silently re-enable the portfolio-scope ledger write, and is pinned by tests
+  **17, 18, 19, and 22**: all four fail when `:1227`'s `False` initializer is
+  changed to `True`, and all four pass on the unmodified tree.
+
+Neither falsifier covers the other's direction (17/18/19/22 all pass under the
+`:1223` substitution defect; test (32) is unaffected by the `:1227` mutation's
+own class of defect). The register's own fix here is disambiguation of
+already-correct code, not a new check.
+
+**Touched-file list:** exactly `docs/POLYMARKET_CODEX_WORK_ORDERS.md`.
+
+### Tests (enumerated) — §148.7
+
+§148.5 already enumerates sixteen tests, (1)-(16) (`:10338-10349`ff), and
+§148.6 appended (17)-(30) to that same list (`:10803-10805`, `:11074`, copying
+§148.6's own model sentence). This amendment appends **(31)** and **(32)** to
+that same list, and none of the existing numbers move:
+
+- **148.7.2 (`write_failed` two-cause reuse):** the discriminating test for cause
+  2 is already present and merged, and is registered here by number:
+
+  **(31)** `test_wo148_b1_state_write_raising_on_genesis_cycle_reports_true_event_count_and_burst`
+  (`tests/polymarket_predictive_engine/test_maker_fill_replay.py:3218-3275`) —
+  PASSED. Asserts `tier_events_written == 205` (the true, hand-counted append
+  total: `5 portfolio + 200 seed + 0 persistent`) alongside
+  `tier_events_status == "write_failed"` on a state-write failure that follows a
+  successful, non-empty append. **What would falsify it:** if a state-write
+  failure after a successful append instead reported `tier_events_written == 0`,
+  or reported any status other than `write_failed`, or reported a burst flag
+  disagreeing with `len(event_rows) > 200`.
+
+- **148.7.3 (scope disambiguation, `tier_inputs_ok` restatement):** the
+  discriminating test is already present and merged, and is registered here by
+  number:
+
+  **(32)** `test_wo148_n2_malformed_portfolio_contract_raises_under_portfolio_scope_only`
+  (`tests/polymarket_predictive_engine/test_maker_fill_replay.py:3278-3306`) —
+  PASSED. Asserts `pytest.raises(TypeError)` under `scope="portfolio"` and
+  `tier_events_status == "skipped_unreadable_inputs"` under `scope="watchlist"`,
+  on the identical `{"portfolio": 5}` fixture. **What would falsify it:** if the
+  `scope="portfolio"` call instead returned normally (silently swallowing the
+  malformed summary), or if the `scope="watchlist"` call raised instead of
+  returning a controlled skip status.
+
+  Additionally, tests **(17)**, **(18)**, **(19)**, and **(22)** (already
+  registered in §148.6, `:10807-10856`) are the tests this amendment's
+  `tier_inputs_ok` restatement is pinned against — re-run this session against
+  both the unmodified tree (5/5 incl. test 32 passed) and the `tier_inputs_ok`-
+  init mutant (4/4 failed; test 32 unaffected by this mutation class, per the
+  split fail-safe sentence above). No new test is needed for them.
+
+### Scope note — §148.7
+
+No gate, threshold, eligibility rule, sizing rule, funding value, or selection
+behavior moves in either item. 148.7.2 and 148.7.3 change no code and no test —
+they correct the register to match code that is already merged and covered by
+tests (17)-(22) and the two now-numbered tests (31)-(32). The item that would
+have required a code change (the four `.exists()`-only input-contract
+collapses) is removed from this amendment entirely. Per §148.6's own precedent
+(`:10365-10395`, WO-148's Scope paragraph): neither correction here is a new
+selection behaviour, and neither changes the OWNER MERGE routing inherited
+from that paragraph. This amendment does not touch WO-148's own Scope
+paragraph text; it only inherits that paragraph's routing, as the sentence
+above states. WO-148's own **"Touch ONLY these files"** list (`:10178-10180`)
+stands exactly as registered; this amendment adds none — it edits only the
+register.
+
+### Day-after check — §148.7
+
+148.7.2 adds no new Day-after obligation; it clarifies how to read a field
+(`tier_events_written`) the existing Day-after checks already name — see the
+direction check under 148.7.2 above, which confirms neither check's numeric
+requirement moves. 148.7.3 adds none — it is a scope-scoped code restatement, not
+a new production observable; the operational consequence disclosed above (a
+malformed `maker_carry_study.json` failing every 300s pulse cycle) is already
+observable via `stamp_status book_pulse`'s exit-code history in `status.json` and
+via `official_book_pulse.json` itself failing to update, both pre-existing
+observables this amendment does not add to.
+
+### Note (informational; not part of this amendment) — §148.7
+
+All citations touched by this amendment resolve exactly at the current tip,
+`046c6830`: `:1056-1066`, `:1078-1103`, `:1186`, `:1223`, `:1227`,
+`:1228-1322`, `:1250`, `:1316`, `:1321`, `:1350`, `:1357`, `:1378`, `:1382`,
+`:3218-3275`, `:3278-3306` (code — byte-identical to `6840732b`, the SHA these
+anchors were drafted against, confirmed by blob-hash comparison across the
+merge), and register `:10260-10263`, `:10229-10232`, `:10347-10349`,
+`:10287-10289`, `:10476-10479`, `:10397-10401`, `:10480`, `:10565-10572`,
+`:10674-10676` (register lines — shifted **+313** from the SHA these anchors
+were drafted against, `6840732b`, because PR #441's own §147.5 registration
+landed upstream of WO-148's heading in the interim; the named constructs are
+byte-identical, only the line numbers moved). The citation list carries two
+layers of its own provenance, both kept rather than the more recent one
+displacing the older: an earlier drafting pass dropped `:1315` and added
+`:1316` for the `tier_inputs_ok` assignment site; separately, `:9974-9975`/
+`:10166` (pre-refresh numbering) were each extended by one line to
+`:9974-9976`/`:10163-10166` to include the full enumeration line and the full
+closure sentence respectively (now `:10287-10289`/`:10476-10479` at the
+current tip), and `:1357`/`:1382`, the write statements themselves, were
+added. By contrast, §148.6's **own** pre-build citations elsewhere in its text
+(e.g. `:769-770`, `:744`, `:1033`, `:1044`, `:967`, `:764`, `:756-758`, `:759`,
+`:426-438`) still carry numbers from before WO-148 was built, and none of them
+is touched by this amendment. That is a distinct, later citation-refresh sweep
+(a §148.8-class amendment, by analogy with §147.6 for WO-147), deliberately
+out of scope here.
 
 ## WO-149 — The replay join has no contemporaneous book state for 23% of prints, so every maker economic number is unvalidated model output — `done` (2026-08-02, PR #422; registered 2026-08-01; new scheduler job + registered watchdog freshness entry + a keyword-only scope on the sole official-book collector, routed owner-merge after two independent line-audits covering disjoint halves; **`max_book_state_lag_seconds` stays 1800 — no tolerance is loosened**; one lint fix round for an `F821` the offline suite could not see, because `from __future__ import annotations` makes the annotation unevaluated; **DEPLOY PENDING, and this is the binding one for the campaign** — `run_book_pulse` never fires on the VPS, so no `official_book_pulse.json` is produced and `M-B`'s `mb1_tier0_coverage_sufficient` stays `false`. Merging this WO did not move M-B; deploying it is what will)
 

@@ -12002,6 +12002,2270 @@ vs. widened-on-schedule) shape this test currently proves is retired along
 with the tolerance it measures. This is part of the same sixth-file scope
 above, not a seventh file.
 
+## WO-152 — A starvation incident that cannot name what starved it — `queued` (registered 2026-08-12 from measured VPS telemetry; scheduler status surface + watchdog incident record; adds no gate, moves no ceiling, changes no job's interval, timeout, or ordering → OWNER MERGE after line-audit)
+
+**Provenance — measured, not inferred.** Two watchdog incidents fired overnight
+2026-08-02 and again the night before, in the same order. The measured gaps
+differ by night — 885s (14m45s) on 2026-08-02, 390s (6m30s) on 2026-08-01 — so
+neither is described as "~15 minutes" for both. Ages are printed at the ledger's
+own precision, because the ledger's `reason` string is built with
+`round(age_seconds, 3)` (`degraded_state_watchdog.py:683`) and a citation that
+rounds further is not the ledger's text:
+
+```
+2026-08-02T22:27:37Z scheduler_completion_freshness trade_prints  measured age 1387.615 seconds > 1200s
+    incident_id degraded_b58e47dfc4de7a53bbd6a2db  observation_token 2026-08-02T22:04:29.384575+00:00
+2026-08-02T22:42:22Z operating_state_slo_breach     row: scheduler_overrun_cycles       (885s later)
+```
+
+```
+2026-08-01T22:21:37Z scheduler_completion_freshness trade_prints  measured age 1265.51 seconds > 1200s
+    incident_id degraded_ceada8dc08120eab0fe019f5  observation_token 2026-08-01T22:00:31.489665+00:00
+2026-08-01T22:28:07Z operating_state_slo_breach     row: scheduler_overrun_cycles       (390s later)
+```
+
+`ops_scheduler/status.json` at 2026-08-03T03:27:53Z explains the first one:
+
+| job | interval | timeout | registered freshness ceiling | last measured duration |
+|---|---|---|---|---|
+| `trade_prints` | 900s | 300s | **1200s** | 117.2s |
+| `training_harvest` | 86400s | 1800s | 90000s | **762.1s** |
+
+The ops scheduler is a serial loop (`scripts/run_vps_ops_scheduler.sh`,
+`TICK_SECONDS=300` at `:22`). `trade_prints` therefore has `1200 - 900 = `**`300s`**
+of total slack for scheduler drag, and the nightly harvest held the loop for
+**762.1s** — 2.5x that slack, under a timeout allowance of 1800s, which is 6x it.
+`trade_prints` missed a cycle, its completion age crossed 1200s, and
+`scheduler_overrun_cycles` breached on the next operating-state run.
+`training_harvest_anchor_tail` stamps the same 762.1s window; it is one pass, two
+rows. Both alerts are TRUE, and nothing is broken inside either job.
+
+**The defect this WO fixes is not the contention. It is that nothing can name
+it, and the reason is structural.** `stamp_status`
+(`scripts/run_vps_ops_scheduler.sh:138`, dict rebuild `:180-201`) writes a job's
+record **only when the job finishes**: `started_at_utc` and `duration_seconds`
+are both arguments to the completion stamp (`:143`, `:182-183`). So while a job
+holds the loop, `status.json` still describes that job's *previous* run. At
+22:27:37Z — the moment the watchdog raised the incident — `training_harvest` had
+started at 22:22:21Z and would not stamp until 22:35:03Z, so the artifact the
+watchdog was reading **contained no evidence that `training_harvest` was running
+at all.** That is why the 22:27Z episode took a hand-correlation of three
+artifacts across two branches, done after the fact. This WO creates the evidence
+so that correlation is no longer necessary going forward.
+
+**Out of scope, registered explicitly (this is a descope, not an oversight).**
+The 22:42:22Z `operating_state_slo_breach` row above — and every row like it,
+including the 15 such rows in the 03:00-04:00Z window on 2026-08-01 and the
+single 03:38:17Z row on 2026-08-02 (both counted directly from
+`origin/vps-telemetry`'s mirror this session) — is produced by
+`_evaluate_slos_and_pushes` (`degraded_state_watchdog.py:1050`, called `:1504`),
+which this WO lists DO-NOT-TOUCH (see Touch ONLY, below).
+`_evaluate_slos_and_pushes`'s output has no `in_flight_since_utc`-keyed occupancy
+concept, and this WO's attribution mechanism attaches keys only inside
+`_evaluate_scheduler_freshness`. **`operating_state_slo_breach` is therefore
+unattributable by this WO's mechanism, and no claim in this WO should be read
+as promising otherwise.** (An earlier draft of this WO characterised a pair of
+`operating_state_slo_breach` rows near ~03:40Z on both nights as a "second
+daily episode" this WO would settle; that characterisation was wrong on the
+facts — both cited rows are `operating_state_slo_breach` on entity
+`operating_state_slo`, and the 2026-08-01T03:55:33Z one is the 59th and last row
+of a continuously latched run of that same registration beginning
+2026-08-01T00:02:02Z, whose largest internal gap is 326s and which is followed by
+an 18.5-hour gap to the next such row at 2026-08-01T22:28:07Z — a counter series,
+not a discrete freshness incident — and is deleted here rather than repeated.)
+`HARVEST_INTERVAL=86400` (`run_vps_ops_scheduler.sh:26`) means the harvest holds
+the loop once per day; nothing in this WO implies a second nightly
+harvest-contention window.
+
+**Explicitly NOT in this WO**, so the duplicate set stays enumerable by
+inspection: no freshness ceiling moves; no interval, timeout, or job ordering
+changes; no job's invocation, exit-code handling, or skip classification changes;
+the serial loop stays serial (WO-149's `book_pulse` mutual exclusivity with
+`trade_prints` depends on it); **no attribution of `operating_state_slo_breach`
+or any entity outside `_evaluate_scheduler_freshness`'s own jobs**; and **no
+behavioural remedy for the contention itself is specified here.** Those belong
+to §152.1 below, which is registered as a follow-on and is **not part of this
+build**.
+
+**Confirmed since (2026-08-04) — §152.1's prediction, not this WO's own
+evidence.** The falsifiable prediction in §152.1 below — that merging WO-149's
+`book_pulse` into the same serial loop would add a nightly `book_pulse`
+freshness incident alongside the existing `trade_prints` pair, at the same
+nightly-harvest window — is now CONFIRMED on two separate nights, both
+independently re-verified this session against `origin/vps-telemetry`:
+
+- **2026-08-04, one watchdog observation at 23:04:44Z:** `book_pulse`
+  (`observation_token` `2026-08-04T22:48:49.556121+00:00`, measured age
+  `954.444` seconds over its `900s` ceiling, `degraded_f326466a86f036e6f978c45e`)
+  and `trade_prints` (`observation_token` `2026-08-04T22:42:48.853688+00:00`,
+  measured age `1315.146` seconds over its `1200s` ceiling,
+  `degraded_30b1090328fa74f77f89adad`).
+- **2026-08-05, two separate watchdog observations, 313s apart, in the opposite
+  order:** `trade_prints` detected at 23:14:22Z (`observation_token`
+  `2026-08-05T22:50:32.707912+00:00`, measured age `1429.292` seconds,
+  `degraded_4262bdaba8a783dbf7f6423f`) and `book_pulse` detected at 23:19:35Z
+  (`observation_token` `2026-08-05T23:03:40.376208+00:00`, measured age
+  `954.624` seconds, `degraded_054ae17ce60107145084066e`).
+
+**Detection is not crossing, and the difference is what makes the two nights
+different shapes.** A job crosses its ceiling at `observation_token + ceiling`;
+it is DETECTED at the first watchdog observation at or after that instant. On
+2026-08-04 `trade_prints` crossed at `23:02:48.853688Z` and `book_pulse` at
+`23:03:49.556121Z`, and one single observation (23:04:44Z) was the first to
+follow both — hence one incident row pair with one `detected_at_utc`. On
+2026-08-05 `trade_prints` crossed at `23:10:32.707912Z` and `book_pulse` at
+`23:18:40.376208Z`, 488s apart, with an observation between them — hence two
+rows 313s apart. Neither `23:04:44Z` nor `23:19:35Z` is a crossing instant. The
+Execution fixtures section below derives all four crossings and all five
+observation instants from one registered model.
+
+This is the exact two-job signature this WO's Writes §2 attribution must
+resolve to a single `attributed_to` (predicted, and now execution-confirmed on
+the fixtures below: `"training_harvest"`) once built — measured provenance for
+the mechanism to explain, not output of it. The Aug-5 pair additionally shows
+the shape a SINGLE hold can take across cycles: two victims can go stale in
+different watchdog observations, in either order, and correct attribution must
+still name the same holder for both — see the cross-cycle test under Execution
+Fixture B. It does not change §152.1's status as a follow-on not built here, and
+it does not move any ceiling: every incident cited above is true, and the remedy
+for the underlying contention is still out of scope (§152.1).
+
+### Writes §1 — the scheduler records that a job is in flight
+
+Add one shell function, `mark_in_flight <job_name> <started_at>`, and call it
+immediately after each job's own `*_STARTED_AT` stamp is taken, passing that
+job's stamp as the second argument. It performs a read-modify-write of
+`ops_scheduler/status.json` that sets **only**
+`jobs[<job_name>]["in_flight_since_utc"]` to the given UTC ISO-8601 stamp,
+preserving every other key on that job's record and every other job's record
+whenever the existing file is missing, empty, or parses as JSON — and when it
+exists but does NOT parse (corrupt), the write is skipped entirely and the
+corrupt file is left byte-for-byte untouched (see below) — using the same
+temp-file-plus-`os.replace` atomic write `stamp_status` already uses
+(registered by WO-120, WO-120 atomic-write rationale now at
+`run_vps_ops_scheduler.sh:206-209`, and the reason it is non-negotiable: a torn
+write to this file wipes all job history and silently disarms both scheduler
+watchdog registrations).
+
+```sh
+# mark_in_flight's shell wrapper - bridges the shell call site to the Python
+# body's JOB/STARTED_AT env vars, the SAME way stamp_status already bridges its
+# own five positional args (JOB="$1" ... STARTED_AT="${4:-}" at :143).
+#
+# Both parameters take an explicit ${n:-} default. The scheduler runs `set -u`
+# (:18) and every `set -e` in it is inside a job subshell (:386, :416, :449,
+# :638, :668, :704, :723, :784), never in the main loop - so a bare "$2" on a
+# one-argument call does not fail the function, it TERMINATES THE SCHEDULER.
+mark_in_flight() {
+  MARK_JOB="${1:-}"
+  MARK_STAMP="${2:-}"
+  if [ -z "$MARK_JOB" ] || [ -z "$MARK_STAMP" ]; then
+    log "mark_in_flight: empty job name or start stamp (job='${MARK_JOB}' started_at='${MARK_STAMP}'); no marker written, job proceeds unmarked"
+    return 0
+  fi
+  JOB="$MARK_JOB" STARTED_AT="$MARK_STAMP" OUT_DIR="$OUT_DIR" python - <<'PY' || log "mark_in_flight: status.json marker write FAILED for $MARK_JOB; job proceeds unmarked"
+import json, os, sys
+from pathlib import Path
+path = Path(os.environ["OUT_DIR"]) / "status.json"
+if path.exists():
+    text = path.read_text(encoding="utf-8")
+    if text.strip():
+        try:
+            payload = json.loads(text)
+        except Exception:
+            # Existing, non-empty, but unparseable: SKIP the write rather than
+            # replace the file wholesale. Exiting non-zero routes through the
+            # wrapper's own `|| log` above, which logs and returns 0 without
+            # creating a temp file or touching the corrupt file.
+            sys.exit(1)
+    else:
+        payload = {}
+else:
+    payload = {}
+jobs = payload.setdefault("jobs", {})
+job_name = os.environ["JOB"]
+record = jobs.get(job_name)
+record = record if isinstance(record, dict) else {}
+record["in_flight_since_utc"] = os.environ["STARTED_AT"]
+jobs[job_name] = record
+tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+os.replace(tmp_path, path)
+PY
+  return 0
+}
+```
+
+**Why the two defaults and the explicit `log` are registered, not stylistic.**
+The fail-safe below promises that "a `mark_in_flight` that fails must not abort
+or skip the job it was about to mark — it logs and proceeds." A wrapper written
+as `JOB="$1" STARTED_AT="$2" ...` cannot keep either half of that promise:
+
+- With `set -u` and no `${2:-}`, a **one-argument** call — the signature earlier
+  drafts of this WO registered, and the one any future call site whose
+  `*_STARTED_AT` variable is unset would produce — makes the shell exit at the
+  expansion. Executed this session under `dash`, `sh` and `bash` with `set -u`:
+  the two-argument call returns 0 and writes the marker; the one-argument call
+  prints `2: parameter not set` and the shell **terminates** (exit 2 under
+  `dash`/`sh`, 1 under `bash`), with no statement after the call ever reached.
+  The scheduler runs under `#!/usr/bin/env sh`, so this is the production shell
+  family. Killing the ops scheduler to avoid losing one telemetry field is the
+  exact inversion of the registered fail-safe.
+- With no `||` clause, a failing python child leaves **no log line at all**. The
+  main loop is `set -u` only, so the job does proceed — but silently, and a
+  silently-degraded attribution surface is undetectable, which defeats the one
+  disclosure direction this WO has.
+
+**Why the corrupt-input branch skips the write rather than replacing the file,
+stated so the judgement is auditable.** An existing-but-unparseable
+`status.json` could instead be replaced wholesale, the same way a fresh or
+empty file is handled — that was this WO's own behaviour through five earlier
+drafts, and it is byte-identical to the shipped `stamp_status` precedent
+(`:180-201`) that this WO does not modify. But replacing a corrupt file
+destroys every OTHER job's stamps and the watchdog's freshness inputs for
+every entity, not just the one being marked, while skipping the write loses
+only this one job's `in_flight_since_utc` attribution for this one cycle. That
+is the same direction as this WO's own registered fail-safe philosophy —
+"losing an attribution field is strictly better than losing a job run" — and
+it is strictly LESS destructive than the shipped `stamp_status` precedent, at
+the cost of one branch in a wrapper this WO already authors. `stamp_status`
+itself is unchanged (do not touch it); this discipline applies only to the new
+`mark_in_flight` wrapper.
+
+Both branches, plus the corrupt-input branch, were executed this session
+against the wrapper exactly as registered above, under `dash`, `sh` and
+`bash`, for seven cases: two-argument success (marker written, every other key
+on that job's record and every other job's record preserved byte-for-byte);
+one-argument call; explicit empty second argument; no arguments; an
+unwritable `OUT_DIR` (python raises, the `|| log` fires); a missing or
+zero-byte `status.json` (valid JSON written, no leftover temp file); and an
+existing `status.json` whose content is non-empty but not valid JSON (`sys.exit(1)`,
+the `|| log` fires, no temp file created, the corrupt file's bytes unchanged).
+All seven return 0, all seven log when they do not write, and in none of them
+does the shell exit.
+
+**Correction to an earlier draft's signature and call-site set.** An earlier
+draft of this WO registered the signature as `mark_in_flight <job_name>` (one
+argument) while asserting the body above, verbatim, reads `os.environ["JOB"]`
+AND `os.environ["STARTED_AT"]` (two variables) — with no wrapper that supplies
+`STARTED_AT`. That body is correct; the one-argument call site is not
+implementable from it, and `maker_study_intraday` additionally has NO
+`*_STARTED_AT` variable anywhere in the scheduler to supply even if the wrapper
+existed. Both defects are cured together here: the wrapper takes the stamp
+explicitly as its second argument (exactly the pattern `stamp_status` already
+uses for its own fourth argument), and a new `MAKER_STUDY_STARTED_AT` stamp is
+added at the job's start site.
+
+**`stamp_status` is NOT modified.** It already rebuilds `jobs[job_name]` as a
+fresh dict (`:180-201`), carrying forward only the counter fields it reads
+through `count()` (plus `last_success_utc`, read directly at `:186`), so the
+completion stamp drops `in_flight_since_utc` as a side effect of what it already
+does — **the marker's absence after completion is permanent by construction of
+this wholesale rebuild, for every job, on every completion, success or failure
+alike.** Re-verified this session: the dict literal at `:180-201` carries no
+`in_flight_since_utc` key in either its success or failure path (there is only
+one path — the dict is built once, unconditionally, from `count()`-derived
+counters and the `now`/`exit_code` values). Clearing the marker therefore
+requires no new code and cannot diverge from the completion path. A build that
+finds itself editing `stamp_status` has misread this and must stop and escalate.
+
+**The same wholesale rebuild is also why the marker SURVIVES a hold.**
+`jobs[job_name] = {...}` assigns one key of the `jobs` mapping and touches no
+other. The only jobs stamped while a long job holds the loop are the three
+safety-lane entities the hold-start pulse runs (`maker_safety_refresh`,
+`executor_ops_monitor`, `degraded_state_watchdog` — `:734`, `:749`, `:769`), so
+`jobs["training_harvest"]["in_flight_since_utc"]` is provably untouched by every
+pulse of the hold. Those pulses are simultaneously the ONLY reason the watchdog
+runs at all while the loop is held, which is what makes this mechanism
+observable in the first place. Both halves are load-bearing and both are
+properties of code this WO does not change.
+
+Call sites: exactly the 8 jobs in `MARKED_JOBS` (Writes §2).
+`grep -n "STARTED_AT=" scripts/run_vps_ops_scheduler.sh` returns exactly **10**
+assignments: `:143, :384, :414, :447, :570, :666, :702, :721, :746, :782`.
+Of those 10, `:143` is `stamp_status`'s own parameter bridge (not a `date`
+stamp) — subtracting it leaves **9** `date`-stamp `*_STARTED_AT` sites. Of
+those 9, `:721`/`:746` serve the safety lane (`MAKER_SAFETY_STARTED_AT` and the
+shared `PULSE_STARTED_AT`), which is not in `MARKED_JOBS` — subtracting both
+leaves **7** marked-job stamps (`:384, :414, :447, :570, :666, :702, :782`). So
+**7 of the 8 marked jobs already have a `*_STARTED_AT` assignment to reuse; the
+8th (`maker_study_intraday`) gets ONE NEW stamp line as part of this WO's own
+scope: 7 pre-existing + 1 new = 8.** Once that line is added, the universal —
+"each marked at the point its own `*_STARTED_AT` stamp is taken" — holds by
+construction, not by discovery. Re-verified against `origin/main` this session:
+
+| job | `*_STARTED_AT` line (pre-existing) | `mark_in_flight` call (new — insert immediately after) |
+|---|---|---|
+| `governance_refresh` | `:384` | `mark_in_flight governance_refresh "$GOVERNANCE_STARTED_AT"` |
+| `clv_snapshot` | `:414` | `mark_in_flight clv_snapshot "$CLV_STARTED_AT"` |
+| `locked_card_refresh` | `:447` | `mark_in_flight locked_card_refresh "$CARD_STARTED_AT"` |
+| `training_harvest` | `:570` | `mark_in_flight training_harvest "$HARVEST_STARTED_AT"` |
+| `maker_study_intraday` | **NONE — new** `MAKER_STUDY_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)` inserted at the job's start site (currently `:636`, the `log "maker_study_intraday: starting (training_harvest_age=...)"` line) | `mark_in_flight maker_study_intraday "$MAKER_STUDY_STARTED_AT"` |
+| `trade_prints` | `:666` | `mark_in_flight trade_prints "$PRINTS_STARTED_AT"` |
+| `book_pulse` | `:702` (enabled path only — **not** the skip-path stamp at `:697`) | `mark_in_flight book_pulse "$BOOK_PULSE_STARTED_AT"` |
+| `ledger_anchor` | `:782` | `mark_in_flight ledger_anchor "$LEDGER_ANCHOR_STARTED_AT"` |
+
+A job that returns early on a skip path (for example `run_book_pulse`'s
+`OPS_BOOK_PULSE_ENABLED=0` branch, which stamps at `:697` and returns at `:699`
+before `BOOK_PULSE_STARTED_AT` is set at `:702`) is **not** marked, because it
+never held the loop.
+
+**Why a surviving marker has more than one cause.** The ONLY way a marker
+survives past its `IN_FLIGHT_STALE_AFTER_SECONDS` bound is not exclusively "the
+scheduler process itself died between marking and stamping" — a transient
+`stamp_status` write failure (non-zero exit, no retry path exists at that call
+site) leaves the marker in place with the scheduler **alive** and the run
+**completed**, for as long as that job's own next successful completion is away
+(up to ~24h for `training_harvest`). For the 5 bounded jobs this is handled by
+`IN_FLIGHT_STALE_AFTER_SECONDS`; for the 3 previously-unbounded jobs it required
+the orphan-detection bound registered in Writes §2, because a surviving marker
+on one of THOSE three had no bound to survive past at all. The core phrase
+"marked, never stamped" already covers both causes for a bounded job; only a
+parenthetical naming the scheduler's own death as the *sole* cause needed
+widening, and the unbounded jobs needed their own bound (below).
+
+### Writes §2 — the watchdog attributes a stale window to the job that held the loop, or discloses that it could not
+
+**Scope.** `MARKED_JOBS` is `REGISTERED_JOB_FRESHNESS_MAX_SECONDS`'s 11 keys
+(`degraded_state_watchdog.py:56-73`, re-counted this session: exactly 11) minus
+the 3 safety-lane entities (`executor_ops_monitor`, `degraded_state_watchdog`,
+`maker_safety_refresh`) — 8 jobs. `_attribute_starvation` is called **only**
+when `job_name in MARKED_JOBS`; that call-site guard is load-bearing
+(`DRAG_BUDGET_SECONDS` and `IN_FLIGHT_STALE_AFTER_SECONDS` are keyed on
+`MARKED_JOBS`'s 8-and-5 members respectively and raise `KeyError` for anything
+else — execution-confirmed this session for all three safety-lane names).
+Safety-lane starvation carries **no** attribution keys and produces **no**
+sidecar row; its evaluation row is unchanged from `main`.
+
+```python
+# _attribute_starvation and its constant tables - registered verbatim.
+MARKED_JOBS = frozenset({
+    "governance_refresh", "clv_snapshot", "locked_card_refresh",
+    "training_harvest", "maker_study_intraday", "trade_prints",
+    "book_pulse", "ledger_anchor",
+})
+UNBOUNDED_MARKED_JOBS = frozenset({"maker_study_intraday", "locked_card_refresh", "ledger_anchor"})
+IN_FLIGHT_STALE_AFTER_SECONDS = {
+    "governance_refresh": 4200, "clv_snapshot": 5400,
+    "training_harvest": 27600, "trade_prints": 3000, "book_pulse": 480,
+}
+# An ORPHAN bound for the 3 jobs above with no scheduler-enforced due-cadence to
+# overrun WHILE RUNNING. Each value is that job's OWN existing
+# REGISTERED_JOB_FRESHNESS_MAX_SECONDS ceiling (degraded_state_watchdog.py
+# :59, :61, :71) - READ here, never changed. The bound's purpose is orphan
+# DETECTION (a run that has outlived its own freshness ceiling has already
+# raised its own incident, so treating its marker as still-live evidence past
+# that point is never justified), not runtime modelling - the three jobs
+# genuinely have no scheduler timeout to model.
+ORPHAN_BOUND_SECONDS = {
+    "locked_card_refresh": 46800, "maker_study_intraday": 90000, "ledger_anchor": 93600,
+}
+DRAG_BUDGET_SECONDS = {
+    "governance_refresh": 3600, "clv_snapshot": 3600, "locked_card_refresh": 3600,
+    "training_harvest": 3600, "maker_study_intraday": 3600,
+    "trade_prints": 300, "book_pulse": 600, "ledger_anchor": 50400,
+}
+
+def _attribute_starvation(job_name, jobs, window_start, window_end):
+    # The threshold is the VICTIM's drag budget, keyed on job_name - never the
+    # holder's. See "Attribution states" below: this is the WO's single
+    # registered definition of the candidate predicate.
+    drag_budget = DRAG_BUDGET_SECONDS[job_name]
+    occupants, unmeasurable, candidates = [], [], []
+    for other in sorted(MARKED_JOBS - {job_name}):
+        marker_raw = str(_mapping(jobs.get(other)).get("in_flight_since_utc") or "").strip()
+        if not marker_raw:
+            continue
+        marker_dt = _parse_stamp(marker_raw)
+        if marker_dt is None:
+            unmeasurable.append(other)
+            continue
+        # An explicit future-dated branch BEFORE the clamp. A marker after
+        # window_end is evidence of a clock or write defect, not evidence about
+        # occupancy - it must fold into occupancy_unmeasurable, not silently
+        # vanish via max(0.0, ...) and read as "evidence complete".
+        if marker_dt > window_end:
+            unmeasurable.append(other)
+            continue
+        # EVERY marked job has a bound to survive past: bounded jobs from
+        # IN_FLIGHT_STALE_AFTER_SECONDS, the 3 previously-unbounded jobs from
+        # their own ORPHAN_BOUND_SECONDS ceiling.
+        bound = IN_FLIGHT_STALE_AFTER_SECONDS.get(other, ORPHAN_BOUND_SECONDS.get(other))
+        marker_age = (window_end - marker_dt).total_seconds()
+        if marker_age > bound:
+            unmeasurable.append(other)
+            continue
+        overlap = max(0.0, (window_end - max(marker_dt, window_start)).total_seconds())
+        source = "in_flight_unbounded" if other in UNBOUNDED_MARKED_JOBS else "in_flight"
+        if overlap >= 2.0:
+            occupants.append({"job": other, "overlap_seconds": round(overlap, 3), "source": source})
+        if overlap >= drag_budget:
+            candidates.append(other)
+    occupants.sort(key=lambda row: (-row["overlap_seconds"], row["job"]))
+    unmeasurable = sorted(unmeasurable)
+    if unmeasurable:
+        state, attributed_to = "holder_unmeasurable", ""
+    elif len(candidates) == 1:
+        state, attributed_to = "attributed", candidates[0]
+    elif not candidates:
+        state, attributed_to = "insufficient_to_explain", ""
+    else:
+        state, attributed_to = "multiple_candidates", ""
+    return {"attribution_state": state, "attributed_to": attributed_to,
+            "drag_budget_seconds": drag_budget, "occupants": occupants,
+            "occupancy_unmeasurable": unmeasurable}
+```
+
+**Attribution states.** Exactly four. **In all four, the threshold an overlap is
+compared against is the STARVED job's own `drag_budget_seconds` — the victim's,
+keyed on `job_name` — never the holder's.** That is what the code does
+(`drag_budget = DRAG_BUDGET_SECONDS[job_name]`, compared at
+`if overlap >= drag_budget`), it is the only reading this WO registers, and a
+build that keys the comparison on `other` will fail Tests 9 and 10:
+- `attributed` — exactly one candidate whose overlap with the victim's stale
+  window meets or exceeds **the victim's** `drag_budget_seconds`;
+- `insufficient_to_explain` — no candidate does, and none is unmeasurable;
+- `holder_unmeasurable` — at least one other marked job's marker is present but
+  unparseable, future-dated, or stale-past-bound; the computation stops there
+  rather than guessing past a hole in the evidence;
+- `multiple_candidates` — more than one candidate meets the victim's drag
+  budget; a tie is recorded, not hidden.
+
+The reported `drag_budget_seconds` field is therefore always the victim's
+budget, which is why Test 9 reports `300` (`trade_prints`') and Test 10 reports
+`600` (`book_pulse`') for the very same holder and the very same overlap.
+
+**In-flight staleness bounds** (per marked, bounded job; the 3
+`UNBOUNDED_MARKED_JOBS` carry no *runtime* bound because they have no
+scheduler-enforced due-cadence to overrun while genuinely running —
+`reward-epoch-sample` is untimed (`:644`), the locked-card chain is untimed, and
+`push_vps_anchor.sh` is untimed best-effort (`:786`, all three re-verified this
+session, no `timeout` wrapper on any) — but per the orphan-detection table
+below, they now DO carry a bound):
+
+| job | `IN_FLIGHT_STALE_AFTER_SECONDS` | basis (re-derived and re-verified this session) |
+|---|---|---|
+| `governance_refresh` | 4200 | 3 timeout-wrapped children per run (`run_governance_refresh`, `:387,:388,:389`) × worst case: `GOVERNANCE_TIMEOUT` default 1500s (`:85`) + 300s (`operating-state`) + 300s (`dashboard render`) = 2100s, ×2 slack = **4200**. |
+| `clv_snapshot` | 5400 | 3 timeout-wrapped children per run (`run_clv_snapshot`, `:417,:418,:419`) × `CLV_TIMEOUT` default 900s (`:86`) = 2700s worst case, ×2 slack = **5400**. |
+| `trade_prints` | 3000 | 5 timeout-wrapped children per run (`run_trade_prints`, `:669,:672,:673,:676,:679`) × `OPS_TRADE_PRINTS_TIMEOUT_SECONDS` default 300s (`:50`) = 1500s worst case, ×2 slack = **3000**. |
+| `book_pulse` | 480 | 1 timeout-wrapped child per run (`run_book_pulse`, `:705`) × `BOOK_PULSE_TIMEOUT` default 240s (`:62`) = 240s worst case, ×2 slack = **480**. |
+| `training_harvest` | **27600** | `REGISTERED_MAX_DEADLINE_SECONDS` hard-caps the deadline at 21600s (`training_harvest.py:31`, applied `:148-151`); the skip condition is `elapsed_before >= deadline and not step.mandatory_tail` (`:241`), so `corpus_retention` and `anchor_ledgers` (`mandatory_tail=True`, `:123-134`) are always attempted even past deadline; the shell wraps the harvest child in **no** `timeout` (`run_vps_ops_scheduler.sh:583-588`) — so worst case is `21600 (deadline) + 1800 (one last ordinary step already in flight when the deadline check trips, HARVEST_TIMEOUT default) + 2×1800 (both mandatory tails, same per-step timeout) = 27000s`, **+600s additive slack — the only additive row in this table** (the other four rows above are ×2 multiplicative) `= 27600`. |
+
+**Every derivation above uses the env DEFAULT for its timeout, and that is safe
+in one direction only because the relevant knobs are clamped downward-only.**
+Configuration can tighten these bounds' premises but cannot widen them:
+`BOOK_PULSE_TIMEOUT` is forced to `≤ 240` (`:69`), `SAFETY_PULSE_INTERVAL` to
+`≤ 300` (`:83`), `MAKER_SAFETY_INTERVAL` to `≤ 900` (`:82`), and
+`HARVEST_RETRY_INTERVAL` into `[900, 3600]` (`:36-37`). `GOVERNANCE_TIMEOUT`,
+`CLV_TIMEOUT` and `OPS_TRADE_PRINTS_TIMEOUT_SECONDS` carry no such clamp, so a
+raised value there would invalidate the corresponding `×2 slack` derivation; the
+build must not add a clamp (that would move a registered surface) but a future
+WO wanting these bounds to be configuration-proof is where that belongs.
+
+**Orphan-detection bounds** (per marked, previously-unbounded job; these are NOT
+runtime bounds, they are the point past which a surviving marker stops being
+evidence that the job is genuinely still running, because the job would already
+have raised its own freshness incident):
+
+| job | `ORPHAN_BOUND_SECONDS` | basis |
+|---|---|---|
+| `locked_card_refresh` | 46800 | its OWN `REGISTERED_JOB_FRESHNESS_MAX_SECONDS` ceiling (`degraded_state_watchdog.py:59`) — read, not changed. |
+| `maker_study_intraday` | 90000 | its OWN ceiling (`:61`) — read, not changed. |
+| `ledger_anchor` | 93600 | its OWN ceiling (`:71`) — read, not changed. |
+
+**Why the orphan table is required.** Two registered sentences in an earlier
+draft claimed a stale-past-bound marker "can only ever push the outcome toward
+`holder_unmeasurable`, never toward a wrong `attributed_to`" and that a marker
+is "never treated as an infinitely long run." Both were false for the 3
+previously-unbounded jobs, because skipping the bound check meant their markers
+were NEVER "stale-past-bound" by construction, so they never entered
+`unmeasurable`, and an orphaned 30-day-old marker on, for example,
+`locked_card_refresh` was emitted as a confident, named `attributed_to`.
+Execution-confirmed this session, before the cure:
+
+```
+orphan locked_card_refresh aged 30d, real holder unmarked
+  -> attribution_state == "attributed", attributed_to == "locked_card_refresh"
+```
+
+and after the cure (Test 28, below):
+
+```
+orphan locked_card_refresh aged 30d, real holder unmarked
+  -> attribution_state == "holder_unmeasurable", attributed_to == "", occupancy_unmeasurable == ["locked_card_refresh"]
+orphan locked_card_refresh aged 3h (comfortably inside its own 46800s ceiling)
+  -> attribution_state == "attributed", attributed_to == "locked_card_refresh"   (normal in-bound behaviour unaffected)
+```
+
+A marker older than its bound (runtime bound for the 5, orphan bound for the 3)
+means the scheduler died mid-hold, a transient stamp-write failure left it in
+place, or (for the 3) the job has already outlived its own freshness ceiling;
+either way it is recorded as `occupancy_unmeasurable` and contributes no
+occupancy — never treated as an infinitely long run, which would attribute
+every subsequent incident to the same job forever.
+
+**Drag-budget derivation** (`DRAG_BUDGET_SECONDS = ceiling - interval`;
+re-derived and re-verified against `origin/main` this session — every ceiling
+from `degraded_state_watchdog.py:56-73`, every interval from its current
+`OPS_*_INTERVAL_SECONDS` env-default in `run_vps_ops_scheduler.sh`):
+
+| job | ceiling | interval | drag budget |
+|---|---|---|---|
+| `governance_refresh` | 25200 (`:57`) | 21600 (`:23`) | 3600 |
+| `clv_snapshot` | 32400 (`:58`) | 28800 (`:24`) | 3600 |
+| `locked_card_refresh` | 46800 (`:59`) | 43200 (`:25`) | 3600 |
+| `training_harvest` | 90000 (`:60`) | 86400 (`:26`) | 3600 |
+| `maker_study_intraday` | 90000 (`:61`) | 86400 (`:38`) | 3600 |
+| `trade_prints` | 1200 (`:62`) | 900 (`:49`) | 300 |
+| `book_pulse` | 900 (`:68`) | 300 (`:61`) | 600 |
+| `ledger_anchor` | 93600 (`:71`) | 43200 (`:98`) | 50400 |
+
+**Anchor correction inside this table.** The `book_pulse` ceiling row cites
+`:68`. An earlier draft cited `:69` in this same table, inside a section that
+asserted it had "re-derived and re-verified... every ceiling from
+`degraded_state_watchdog.py:56-73`" — a false anchor inside a
+claimed-re-verified table. At `origin/main`, `:68` is `"book_pulse": 15 * 60,`
+and `:69` is `"executor_ops_monitor": 15 * 60,` — both evaluate to 900, which is
+why the error was silent (the VALUE was right, the ANCHOR was not). Re-verified
+this session directly against the source file.
+
+For every `other` marked job whose in-flight marker overlaps the starved job
+`J`'s stale window by at least **`J`'s own** drag budget, `other` is a
+candidate. Overlap reporting threshold is `>= 2.0` seconds in the `occupants`
+list. **The basis for that floor, restated on its true premise.** An earlier
+draft justified it by contrast with "`main`'s completed-run 1.0s stamp-rounding
+floor" and called the `multiple_candidates` tie behaviour "exactly as `main`'s
+occupancy-tie convention already does." Both appeals were checked this session
+and are FALSE: `grep -rn --include='*.py' "occupancy\b" src/ scripts/ tests/`,
+and the same for `occupancy_tie`, `drag_budget`, and `in_flight`, all return
+**zero** hits anywhere in `src/`, `scripts/`, or `tests/`; `grep -rn occupancy
+docs/` returns zero; and `grep -c overlap
+src/polymarket_predictive_engine/degraded_state_watchdog.py` also returns zero.
+There is no occupancy logic, no tie convention, and no 1.0s floor anywhere in
+the codebase to appeal to — both sentences are DELETED and the floor is restated
+on its TRUE, verified premise instead: every marker in this WO is stamped with
+`date -u +%Y-%m-%dT%H:%M:%SZ` — second-resolution, no fractional component
+(re-verified this session at all 9 `date`-stamp `*_STARTED_AT` sites, the 7
+marked-job sites plus the 2 safety-lane sites, plus the new
+`MAKER_STUDY_STARTED_AT` site this WO adds). A real, nonzero overlap between two
+second-resolution timestamps is therefore always an integer number of seconds,
+at minimum `1.0`; the `2.0`s reporting floor is a deliberate small margin ABOVE
+that provable minimum, chosen so the `occupants` list is not cluttered with
+degenerate one-second overlaps produced purely by tick-boundary alignment rather
+than a genuine hold. This is a design choice stated on its own terms, not a
+precedent this codebase does not have. The value itself (`>= 2.0`) is unchanged.
+
+**Self-state — is the starved job itself showing crash evidence?**
+
+```python
+# _starved_job_self_state - registered verbatim
+def _starved_job_self_state(job_name, jobs, previous):
+    record = _mapping(jobs.get(job_name))
+    try:
+        exit_code = int(record.get("last_exit_code", 1))
+    except (TypeError, ValueError):
+        exit_code = 1
+    raw_failed = record.get("failed_cycles_total")
+    try:
+        current_failed = int(raw_failed) if raw_failed is not None else None
+    except (TypeError, ValueError):
+        current_failed = None
+    if current_failed is None:
+        advanced = True
+    else:
+        try:
+            previous_failed = int(previous.get("failed_cycles_total_observed", current_failed))
+        except (TypeError, ValueError):
+            previous_failed = current_failed
+        advanced = current_failed > previous_failed
+    return ("crash_evident" if (exit_code != 0 or advanced) else "no_self_failure_evidence"), current_failed
+```
+
+Missing or malformed `failed_cycles_total` (absent key, `None`, non-numeric)
+folds into `crash_evident` via `advanced = True` — matching `last_exit_code`'s
+existing fail-alarming treatment, not a fail-silent default. A malformed
+cycle's `current_failed` persists as `None`; the NEXT cycle's comparison
+degrades to "not advanced" rather than raising, by the same `except
+(TypeError, ValueError)` guard.
+
+**Consequence for the fixtures, registered so it is not rediscovered.** Because
+absence of the key is the fail-ALARMING branch, a fixture that omits
+`failed_cycles_total` cannot exercise `no_self_failure_evidence` at all — it
+returns `crash_evident` for a victim that is provably not crashing, which tests
+the default rather than the victim. The Execution fixtures below therefore carry
+the `stamp_status` counter/classification family on every record whose self-state
+any registered test reads.
+
+**Persistence.** `failed_cycles_total_observed` is written into
+`next_jobs[job_name]` for **every** one of the 11
+`REGISTERED_JOB_FRESHNESS_MAX_SECONDS` entities, every cycle — the loop at
+`degraded_state_watchdog.py:625` (`for job_name, maximum in
+REGISTERED_JOB_FRESHNESS_MAX_SECONDS.items():`) is unconditional, re-verified
+this session; `next_jobs[job_name]` is currently built at `:657-663` with five
+keys (`last_success_utc`, `first_unobserved_at_utc`, `age_seconds`,
+`maximum_age_seconds`, `currently_stale`) and this WO adds
+`failed_cycles_total_observed` as a sixth, for every entity — stale, fresh,
+marked, or not — using the SAME int-or-`None` coercion rule
+`_starved_job_self_state`'s `current_failed` uses, applied to that entity's own
+current `failed_cycles_total`, decoupled from whether the enum itself is
+computed this cycle.
+
+**Sidecar — the versioned attribution ledger.** New attribution keys are
+additionally appended to `performance/scheduler_attribution_v1.csv`. Its path is
+derived, not assumed: a new module constant
+
+```python
+ATTRIBUTION_LEDGER = "performance/scheduler_attribution_v1.csv"
+```
+
+sits beside the existing `INCIDENT_LEDGER = "performance/degraded_state_incidents.csv"`
+(`degraded_state_watchdog.py:28`), and `sidecar_path` is computed exactly the way
+`ledger_path` already is at `:1385`:
+
+```python
+sidecar_path = cfg.output_root / ATTRIBUTION_LEDGER
+```
+
+**Which rows the sidecar takes — BOTH predicates, and both are required.** A row
+is written to the sidecar if and only if
+
+1. it is a member of `_append_incidents`'s returned `new` list — **the dedup
+   rule**: once per episode, ever, never more; AND
+2. it carries this WO's attribution keys — equivalently
+   `registration_id == "scheduler_completion_freshness"`, the only registration
+   inside which `_attribute_starvation` is ever called — **the row-SELECTION
+   rule**.
+
+Both are registered because neither implies the other and dropping either one
+breaks the sidecar in a different direction:
+
+- Without (1), a write keyed on "whenever a row carries `attribution_state`"
+  fires on every cycle an episode stays active. Over this WO's own Fixture B
+  hold that is a duplicate row per watchdog cycle for one incident identity.
+- Without (2), the sidecar takes every incident type in the cycle, because `new`
+  is **type-mixed by construction**. `active = sorted(active_by_id.values(),
+  key=...)` (`degraded_state_watchdog.py:1508`) aggregates all seven evaluators
+  (`:1488-1496`) plus `_immediate_producer_evaluations` (`:1501`) plus
+  `_evaluate_slos_and_pushes` (`:1504`), and `new = _append_incidents(ledger_path,
+  active)` (`:1509`) returns rows from that whole set. In the lock-held path
+  (`:1435`) `active` is carried forward from `previous["active_incidents"]`
+  (`:1420`) plus a `degraded_state_watchdog_wedged` row (`:1434`), none of which
+  carry attribution keys. Nothing raises on the way out, because
+  `append_csv_rows` fills an absent key with `""` (`utils.py:198`) — so the
+  failure mode is silent blank rows, not an error.
+  Measured against the real ledger this session
+  (`origin/vps-telemetry` `6c032fe6f89aa7e16072d234231ba947f3e128f9`,
+  `telemetry/outputs/performance/degraded_state_incidents.csv`, 839 rows —
+  this append-only ledger's historical rows are stable across the branch's
+  force-pushes even though its total keeps growing; an earlier drafting
+  session's read found 837): **746 rows are `operating_state_slo_breach`**
+  (unchanged) and **55** are `scheduler_completion_freshness` (837/53 read
+  earlier), so 784 of 839 real rows would land in the
+  sidecar with every attribution column blank. **15** real cycles have a
+  `scheduler_completion_freshness` row co-appearing at the same `detected_at_utc`
+  with a different `registration_id` (for example `2026-07-29T13:47:04Z` with
+  `operating_state_slo_breach`, and `2026-07-15T08:00:38Z` with
+  `scheduler_nonzero_exit`), so those cycles mix both kinds in one `new` list and
+  a per-cycle predicate cannot separate them either. A sidecar 94% full of blank
+  rows would also directly contradict this WO's own registered exclusions above
+  and in the Day-after check.
+
+`_append_attribution` is called with exactly the SAME `new` list, at both call
+sites that already compute it (`:1435` lock-held cycle, `:1509` ordinary cycle),
+and applies predicate (2) itself so neither call site has to.
+
+**Header, primitive, containment — the three required additions.**
+
+1. **Literal field list.** `append_csv_rows` (`utils.py:180-201`; the header
+   comparison and `raise ValueError` at `:184-190`, re-verified this session)
+   **raises `ValueError`** when the on-disk header differs from the requested
+   `fieldnames`. This sidecar's header is therefore registered explicitly, not
+   left implicit:
+   ```python
+   SCHEDULER_ATTRIBUTION_FIELDS = [
+       "incident_id", "detected_at_utc", "entity", "observation_token",
+       "attribution_state", "attributed_to", "drag_budget_seconds",
+       "occupants", "occupancy_unmeasurable", "occupancy_error",
+   ]
+   ```
+   Ten fields. `incident_id` is the join key back to the main ledger row (same
+   value, `_incident_id`, `:328-330`); `occupants` and `occupancy_unmeasurable`
+   are lists — `utils.py`'s existing `serialize_value` (`:268-275`, re-verified
+   this session) already JSON-encodes any `list`/`dict` value generically before
+   writing, so no new serialization code is needed for this.
+
+   **`occupancy_error` is in this list for a specific reason.** The fail-safe
+   below promises that when the attribution computation raises, the incident is
+   still emitted "with `attributed_to: null` and `occupancy_error` carrying the
+   exception class name", and Test 15 asserts `occupancy_error == "RuntimeError"`.
+   `INCIDENT_FIELDS` is frozen at 14 (`:94-108`) and this WO does not touch it,
+   and `csv.DictWriter(..., extrasaction="ignore")` (`utils.py:194`) silently
+   DROPS any key not in the requested `fieldnames` — so without this entry the
+   field's only home would be `degraded_state.json`'s `active_incidents` /
+   `new_incidents` (`:1471-1472` / `:1509`), which is rewritten every cycle. An
+   attribution failure would then leave no append-only trace at all, in the one
+   disclosure direction this WO has. `grep -rn "occupancy_error" src/ scripts/
+   tests/` returns zero hits at `origin/main`, confirming there is no other
+   existing home for it.
+2. **Named write primitive.** `append_csv_rows` — the SAME primitive
+   `_append_incidents` already uses for the main ledger, not
+   `append_csv_rows_matching_existing_header`. This sidecar is a genuinely
+   fixed-schema, append-only, WO-61-style ledger (see the enrollment bullet in
+   Touch ONLY, below); a header mismatch must raise, exactly like the main
+   ledger, rather than silently drop columns.
+3. **Failure containment.** The sidecar write is a SEPARATE step from
+   `_append_incidents`, running after it and before the owner notification
+   (`_notification`, called at `:1439` in the lock-held path and `:1510` in the
+   ordinary path). An unguarded raise there would abort the cycle AFTER the
+   main-ledger append but BEFORE the owner is notified of incidents already
+   recorded — silently suppressing a notification for a real, ledgered
+   incident. Both call sites therefore wrap the sidecar write:
+   ```python
+   try:
+       _append_attribution(sidecar_path, new)
+   except Exception:
+       pass  # the sidecar is additive evidence; its failure must never
+             # suppress the owner notification for incidents already
+             # appended to the main ledger by the call above.
+   ```
+   placed immediately after `new = _append_incidents(...)` and before the
+   `notification = _notification(...)` call, at both `:1435` and `:1509`.
+
+**Permanent-absence statement.** `_append_incidents` (`:1194-1202`) dedups
+against `incident_id`s already present in the target ledger; `incident_id` is
+episode-stable (`_incident_id(registration_id, entity, episode_start)`,
+`:328-330`, and for a scheduler-freshness row, `episode_start = observation_token
+= that job's last_success_utc string`, `:680-681`, re-verified this session —
+byte-stable for the whole contiguous episode). If a lock-held evaluation cycle
+(`:1435`) is the FIRST cycle to append a given episode's row to the **main**
+ledger — whether because attribution was not yet computed for that cycle, or
+because the row was carried forward from a pre-WO artifact or a truncated
+ledger with no attribution keys at all — that `incident_id` now exists in the
+main ledger permanently, is excluded from `new` on every subsequent cycle
+(including the ordinary cycle where attribution IS present), and the sidecar
+write keyed on `new` never fires for it. This is a permanent absence by
+construction of the dedup, for any incident whose first appearance in the main
+ledger predates attribution being computed for it — not a transient gap a
+later cycle closes. Nothing in this WO reads or heals that sidecar gap after
+the fact.
+
+### Execution fixtures — registered
+
+This section is registered specification. Tests 9, 10, 11, 12, 17, 20, 22 and 29
+below assert against the fixture bodies here, and the Day-after check names the
+signature they demonstrate. No number in this section is chosen and then
+justified: the producibility model comes first, and every timestamp is derived
+from it by arithmetic stated in full.
+
+#### The producibility model
+
+Four consecutive review rounds proved a hand-synthesized fixture
+scheduler-impossible, each time by a different margin. The cause was the method,
+not the arithmetic. The fixtures below are instead derived from a model of the
+scheduler's own loop, registered here, whose only inputs are the source at the
+SHA named in the Ordering section and the real incident ledger. The model is
+then TESTED for reproduction against both real nights before any number is
+registered.
+
+**M1 — the hard floor: a harvest marker is more than 300s after `book_pulse`'s
+last completion, unconditionally.** In the loop body, the harvest due-check
+(`if training_harvest_retry_ready; then`, `:857`) PRECEDES the `trade_prints`
+check (`:895`) and the `book_pulse` check (`:901`). A harvest start therefore
+cannot occur in the same iteration in which `book_pulse` ran; it occurs in a
+strictly later one. Every such gap decomposes as
+
+```
+(tail of iteration N after book_pulse returns) + 300 + (head of iteration N+1 before :857)
+```
+
+where 300 is `sleep "$TICK_SECONDS"` at `:914` with `TICK_SECONDS` defaulting to
+300 at `:22`, and both bracketed terms are non-negative. So the gap is **> 300s
+for every possible run, with no assumption about durations.** This is why the
+markers two earlier drafts registered — 299.443879s and 299.623792s after
+`book_pulse`'s own recorded completion — were impossible, and impossible by less
+than one mandatory `sleep`.
+
+**M2 — the tail is not free: `run_safety_pulse` at `:913` is unconditional.** It
+is the last statement of the loop body before the sleep, it is not inside any
+`if`, and it runs `run_degraded_state_watchdog` (`:805` → def at `:738`), which
+runs four sequential children:
+`timeout 120 python -m polymarket_predictive_engine.cli executor-ops-monitor`
+(`:747`), `... degraded-state-watchdog` (`:753`), `... operating-state` (`:755`),
+and `timeout 120 python scripts/render_polymarket_dashboard.py` (`:757`). The
+composite is what `stamp_status degraded_state_watchdog ... "$PULSE_STARTED_AT"`
+(`:769`, with `PULSE_STARTED_AT` taken at `:746`) records as `duration_seconds`.
+
+**`origin/vps-telemetry` is a single parentless force-pushed snapshot commit,
+and it does not sit still.** Confirmed this session
+(`git log --oneline <SHA> -- telemetry/outputs/ops_scheduler/status.json`
+returns exactly one line at every SHA cited below) — and OBSERVED, not merely
+possible: the branch force-pushed past every commit named below at least
+THREE separate times over the course of drafting this one WO, including once
+again in the middle of writing this very paragraph. Any one commit named in
+this subsection should be assumed already unreachable by the time this WO is
+dispatched or read again. What survives across every snapshot is the three
+STRUCTURAL facts below, not the specific commit, the specific figure it
+happened to record, or which of two arithmetically-admissible marker pairs
+looks better supported on any single read — a re-read of whichever snapshot
+is live at read time re-establishes the three structural facts; it does NOT
+reliably re-establish a ranking between the two marker pairs (see the
+honest accounting below and M5's revised discussion).
+
+**The marker is measured, not derived.** `HARVEST_STARTED_AT=$(date -u
++%Y-%m-%dT%H:%M:%SZ)` (`:570`) is the SAME variable this WO's own Writes §1
+passes to `mark_in_flight` immediately after; `stamp_status training_harvest
+... "$HARVEST_STARTED_AT"` (`:619`) writes it into `started_at_utc` inside
+`stamp_status`'s dict literal (`:182`, def at `:138`). So
+`jobs["training_harvest"]["started_at_utc"]` on any night `training_harvest`
+holds the loop *is* the marker this WO's fixtures need, recorded by code this
+WO does not touch, in an artifact this WO's own citations already read.
+Recovered this session from `origin/vps-telemetry`'s object store (both hold
+windows independently confirmed by their `duration_seconds` and
+`last_success_utc`, which bracket the real watchdog detections):
+
+```
+27fc8de8  training_harvest.started_at_utc = 2026-08-04T22:54:01+00:00
+          duration_seconds = 766.736 -> last_success 2026-08-04T23:06:47.736123+00:00
+          hold [22:54:01Z .. 23:06:47.736Z] contains the real detection 23:04:44Z
+cf4afaa3  training_harvest.started_at_utc = 2026-08-05T23:08:52+00:00
+          duration_seconds = 816.996 -> last_success 2026-08-05T23:22:28.996229+00:00
+          hold [23:08:52Z .. 23:22:28.996Z] contains BOTH real detections 23:14:22Z and 23:19:35Z
+```
+
+**Registered markers: `2026-08-04T22:54:01Z` and `2026-08-05T23:08:52Z`,
+cited to `27fc8de87c989b8161982fd3a7184c23a7823c4b` and
+`cf4afaa3bcb3211dfc226ec599442842edcb61b6` respectively.** The Execution
+Fixtures below carry these values verbatim, along with the rest of
+`training_harvest`'s own recorded state (the recovered record, below). The
+model (M1-M4, above) is RETAINED — not because it produces the marker anymore,
+but because it
+*predicts* the measured marker's interval from an independently measured
+input, and because M8 bounds how far a future re-derivation's error could
+move an attribution outcome (which, per the sweep below, is: not at all,
+across a wide margin).
+
+**The mandatory-tail composite `b` (`degraded_state_watchdog.duration_seconds`)
+is the model's prediction check, and it is measured, not inferred.**
+Registered here in full:
+
+| measurement | source |
+|---|---|
+| **12.272** | `27fc8de87c989b8161982fd3a7184c23a7823c4b` (`generated_at_utc 2026-08-05T02:55:13.272184+00:00`) — the SAME commit that supplies the Fixture A marker above |
+| **12.088** | `90d930cdf47fc67a2e6ec13cb0fcdc223baef6dc` (`generated_at_utc 2026-08-07T15:55:46.088362+00:00`, recovered this session from the object store) |
+| **13.065** | `d5c9915feec43e17aab1eb7a3094b8dbdb1e37b8` (`generated_at_utc 2026-08-08T05:26:15.064814+00:00`) |
+| **12.13** | `6c032fe6f89aa7e16072d234231ba947f3e128f9` (`generated_at_utc 2026-08-08T06:25:50.129766+00:00`) |
+
+**These four readings of `b` are NOT directly comparable to `T`, and no split
+or ranking between them is registered.** `b`'s own construction carries up to
+1s of `PULSE_STARTED_AT` truncation slack: `date -u +%Y-%m-%dT%H:%M:%SZ`
+truncates the true fork instant DOWN to the whole second, so
+`b = pulse_end − PULSE_STARTED_AT` overstates the true elapsed pulse time by
+`frac(the true fork instant)`, an amount that varies snapshot to snapshot and
+is not itself measured. The comparable quantity is
+`X = b − frac(book_pulse completion)` (book_pulse's own completion timestamp
+being the best available proxy for the true fork instant, since the two are
+separated only by the sub-second pre-pulse tail below). Re-derived this
+session over the 25 clean reachable snapshots (`book_pulse` completing in the
+same loop iteration as the pulse, i.e. `PULSE_STARTED_AT` within 1s of
+`floor(book_pulse's last_success_utc)`; snapshots predating `book_pulse`'s
+existence and snapshots where `book_pulse` last ran a full iteration earlier
+excluded):
+
+```
+b : n=25  min 11.880  max 13.065  mean 12.3418  sigma 0.3242
+X : n=25  min 11.6724 max 12.2910 mean 12.0188  sigma 0.1429
+```
+
+**The entire apparent ~1.2s spread in `b` is the truncation, not variance in
+`T`.** The four readings above collapse under `X` to `11.9798 / 12.0155 /
+12.1339 / 12.0150` — a 0.15s spread — and are registered as CONSISTENT, not
+split. `13.065` (`X = 12.1339`) is the tightest of the four in the sense of
+putting the highest floor under `T`; none of the four, under the corrected
+relation `T = X + c` (below), excludes any interval a future
+re-derivation might land in.
+
+The `12.088`-generation artifact records one complete real iteration tail:
+
+```
+trade_prints            started_at 2026-08-07T15:53:09Z  duration 127.929  -> last_success 15:55:16.929196
+book_pulse              started_at 2026-08-07T15:55:16Z  duration  18.072  -> last_success 15:55:34.072464
+degraded_state_watchdog started_at 2026-08-07T15:55:34Z  duration  12.088  -> last_success 15:55:46.088362
+executor_ops_monitor    started_at 2026-08-07T15:55:34Z  duration   2.587  -> last_success 15:55:36.586969
+maker_safety_refresh    started_at 2026-08-07T15:47:24Z  duration  15.821  -> last_success 15:47:39.821432
+```
+
+Two STRUCTURAL facts follow from those five rows, each re-establishable from
+any snapshot. First, `executor_ops_monitor` and `degraded_state_watchdog`
+share one `started_at_utc` (`15:55:34Z`) because both are stamped against the
+same `PULSE_STARTED_AT` (`:746`) — this would FAIL if the two children were
+stamped independently, and it reproduces at `d5c9915f` (both
+`2026-08-08T05:26:02+00:00`). Second, `book_pulse`'s own stamp lands at
+`15:55:34.072464` and `PULSE_STARTED_AT` is `15:55:34Z`, so **the tail between
+a `book_pulse` completion and the mandatory pulse is sub-second** — but how
+far under one second varies by snapshot, and this WO has now measured it
+THREE times, so the WEAKEST of the three is what is registered, not the
+tightest: on the artifact printed just above (the `12.088`-generation
+snapshot), `book_pulse`'s completion at `15:55:34.072464` against a truncated
+`PULSE_STARTED_AT` of `15:55:34Z` bounds that night's tail below **`0.93 s`**
+— the loosest of the three, and this is the figure this WO leads with; at
+`6c032fe6f89aa7e16072d234231ba947f3e128f9`
+(`generated_at_utc 2026-08-08T06:25:50.129766+00:00`), `book_pulse`'s
+completion at `06:25:38.115039` against `06:25:38Z` bounds a second night's
+tail below `0.885 s`; at `d5c9915f`
+(`generated_at_utc 2026-08-08T05:26:15.064814+00:00`), `book_pulse`'s
+completion at `05:26:02.931087` against `05:26:02Z` bounds a third night's
+tail below `0.069 s`, the tightest of the three. **Registered range: under
+1 s, observed between `0.069 s` and `0.93 s`** — leading with `0.93 s`,
+because registering only the tightest of three observations on the same
+recurring measurement is the cherry-pick this WO's own standards forbid.
+Third, `maker_safety_refresh` last ran eight minutes earlier, so it did NOT
+fire in this pulse — the ordinary case, and the case M9 requires of both
+fixtures.
+
+**`T_floor`, checked explicitly — and an earlier draft's derivation was
+itself wrong, corrected below.** An earlier draft read `T_floor`
+directly off the mandatory-tail COMPOSITE's own lowest measured value via
+`T = a + b + c` (`a` = the pre-pulse tail just discussed, `b` = the composite,
+`c` = the residual head before `:857`, M5's ~twenty forks), reasoning that
+`a, c >= 0` makes `T >= b` unconditionally. **That double-counts.** `a` ends
+at the TRUE instant of the `date` fork at `:746` — the same instant that is
+what "bounds that night's tail below 0.93s" measures — and `b` STARTS at
+`floor()` of that SAME instant. So `a` and `b` share the interval
+`[PULSE_STARTED_AT, true fork instant]`, whose length is in `[0, 1)`, and
+`T >= b` does not follow from `a, c >= 0` alone. It is also refuted on its own
+terms: `b`'s own reachable measured floor is `11.880` (six of the 25 clean
+readings above sit below the old `12.088` figure), so "read directly off
+the composite's own lowest measured value" was never even true of the full
+recovered sample, only of the four readings an earlier draft happened to
+have taken.
+
+**The corrected relation is `T = X + c`** (the truncation-corrected
+composite `X = b − frac(book_pulse completion)`, plus the same unmeasured
+residual head `c`), and `T_floor` is now the measured SHARED interval floor
+`11.623792`, obtained directly by inverting BOTH recorded markers (measured)
+against `marker = floor(book_pulse_completion + 300 + T)` — not derived from
+the composite at all, and cited to the SAME `27fc8de8`/`cf4afaa3` commits
+already cited above. `11.623792` is a STRICTLY LOWER floor than either the old
+composite-derived figure or `X`'s own measured minimum (`11.6724`), so it
+WIDENS the admissible marker interval rather than narrowing it. M8, below,
+re-sweeps the envelope at this corrected floor (and at a further, deliberately
+extreme one) and finds zero outcome flips in either sweep.
+
+**What this artifact does NOT do: it does not verify the pulse model's
+internal structure.** `stamp_status` builds `started_at_utc`,
+`duration_seconds` and `last_success_utc` from the same `now` (`:157`, `:183`,
+`:186`), so `started_at_utc + duration_seconds == last_success_utc` is an
+ARITHMETIC IDENTITY of `stamp_status`'s own field construction — bounded only
+by `round(x, 3)` at `0.0005 s` — for every job on every night, whether or not
+that job has anything to do with the safety pulse. Re-verified this session at
+`d5c9915f` across the 10 jobs that carry both `started_at_utc` and
+`duration_seconds`, of 13 stamped (`locked_card_refresh`,
+`maker_study_intraday` and `scheduler` carry `started_at_utc: ""` /
+`duration_seconds: null` and cannot exercise this identity at all — the
+universal claim is vacuously true for those three, not verified by them),
+including `clv_snapshot`, `governance_refresh`, `ledger_anchor` and
+`trade_prints`, which have nothing to do with the pulse: every residual is
+sub-millisecond, worst case `0.000416 s`. A check that cannot fail evidences
+nothing, and no claim of
+microsecond-level verification of "the pulse model's internal structure" is
+registered here.
+
+Call the whole pre-marker cost `T = X + c` (`X` the truncation-corrected
+mandatory-tail composite, `c` the residual head before `:857`). Then
+`T >= T_floor = 11.623792` (measured, corrected relation above) and
+
+```
+marker_true  >=  book_pulse_completion + 300 + 11.623792
+```
+
+**M3 — the pulse period is `P = 313.000s`, derived from the ledger alone.**
+`wait_with_safety_pulses` initialises `LAST_SAFETY_PULSE=0` (`:816`), so its
+first `[ $((NOW_EPOCH - LAST_SAFETY_PULSE)) -ge "$SAFETY_PULSE_INTERVAL" ]` test
+(`:819`) passes immediately — **a safety pulse fires at hold start.**
+`LAST_SAFETY_PULSE` is then re-stamped AFTER the pulse returns (`:822`), so the
+period is `SAFETY_PULSE_INTERVAL` (300, clamped `≤ 300` at `:83`) plus the
+pulse's own duration plus at most one `SAFETY_POLL_SECONDS` (5, clamped `≤ 5` at
+`:84`) of poll granularity. Two independent measurements from the ledger give the
+same value:
+
+```
+(a)  2026-08-05T23:19:35Z - 2026-08-05T23:14:22Z                        = 313.000000 s
+(b)  age(trade_prints, 1429.292) - age(book_pulse, 954.624)             = 474.668296 s
+     (book_pulse token - trade_prints token) - 313
+       = (23:03:40.376208 - 22:50:32.707912) - 313 = 787.668296 - 313   = 474.668296 s
+```
+
+(b) is the stronger of the two: it predicts the Aug-5 `trade_prints` age from the
+Aug-5 `book_pulse` age and the period alone, and it lands to 1e-6 s. So
+**`P = 313.000s`**, i.e. 300 + ~13.0s of pulse duration and poll granularity —
+independently consistent with M2's two measurements of that duration, 12.088 and
+12.272.
+
+**M4 — the hold-start overhead `H`, derived from the ledger, on both nights.**
+Detections in one hold land at `marker_true + delta + 313k`, where `delta` is the
+offset from `HARVEST_STARTED_AT` (`:570`) to the watchdog child's own
+`now_utc()` inside the hold's FIRST pulse. Measured off `book_pulse`'s own
+completion, `H := 300 + T + delta`:
+
+```
+Aug-4 : H = age(book_pulse, 954.443879) - 2 x 313 = 328.443879 s
+Aug-5 : H = age(book_pulse, 954.623792) - 2 x 313 = 328.623792 s
+Aug-5 : H = age(trade_prints, 1429.292088) - 1 x 313 - 787.668296 = 328.623792 s
+```
+
+Two independent nights, and two independent victims on one of them, agree to
+**0.179913 s**. That agreement is the model's reproduction test, and it passes.
+
+**M5 — the model's prediction matches the measured marker, once correctly
+truncated.** With `T` set to the measured composite reading `12.272`
+(cited to `27fc8de87c989b8161982fd3a7184c23a7823c4b` — the SAME commit
+already cited above for Fixture A's measured marker and `training_harvest`
+record):
+
+```
+Fixture A predicted : 2026-08-04T22:48:49.556121 + 300 + 12.272 = 2026-08-04T22:54:01.828121
+Fixture B predicted : 2026-08-05T23:03:40.376208 + 300 + 12.272 = 2026-08-05T23:08:52.648208
+```
+
+`mark_in_flight` writes `date -u +%Y-%m-%dT%H:%M:%SZ` — a TRUNCATION of the
+true instant DOWN to the whole second, never a rounding. Truncating both
+predictions:
+
+```
+Fixture A : floor(22:54:01.828121) = 2026-08-04T22:54:01Z
+Fixture B : floor(23:08:52.648208) = 2026-08-05T23:08:52Z
+```
+
+**Both match the measured markers EXACTLY.** The model — built from the
+loop's own source and the incident ledger alone, with no fixture-specific
+fitting — predicts, from one independently measured input, precisely the
+value `training_harvest.started_at_utc` records on both nights. This is the
+model's reproduction test, run against the measured marker rather than against
+itself, and it passes. This check uses the raw composite `b = 12.272`, the
+same quantity the model's original construction always used as `T`'s stand-in
+for this exact comparison; the truncation correction (`X = b − frac(book_pulse
+completion)`) and the corrected relation (`T = X + c`) are a separate, more
+precise refinement, used below only where the sharper bound matters — deriving
+`T_floor` for M8's envelope. It is not needed to observe that the raw
+composite already reproduces both measured markers here.
+
+**Correction to every earlier draft's own arithmetic, stated so it is not
+repeated.** Earlier drafts of this WO computed the same predicted instants
+above and then ROUNDED them up to the next whole second (`22:54:02Z`,
+`23:08:53Z`) instead of truncating them down — the exact inverse of what
+`date -u +%Y-%m-%dT%H:%M:%SZ` actually does at `:570`. That rounding error,
+not a genuine modelling ambiguity, is why every earlier round registered a
+marker pair one second later than the one `training_harvest.started_at_utc`
+actually records, and why the "which pair is better supported" discussion
+that occupied earlier drafting rounds was answering a question the
+model's own arithmetic had already answered correctly, if truncated instead
+of rounded. The both-pairs-admissible discussion and the withdrawal passage
+an earlier draft carried here are deleted in full — there is no choice left
+to make once the marker is measured and the model's truncated
+prediction matches it.
+
+**M6 — `delta = 17s`, a consequence and not a fit.** Anchoring the chain on each
+night's real detections and stepping back by `P`:
+
+```
+Aug-4 chain : 22:54:18Z (k=0), 22:59:31Z (k=1), 23:04:44Z (k=2, the real detection)
+              delta = 22:54:18 - 22:54:01 = 17 s
+Aug-5 chain : 23:09:09Z (k=0), 23:14:22Z (k=1, real), 23:19:35Z (k=2, real)
+              delta = 23:09:09 - 23:08:52 = 17 s
+```
+
+The SAME `delta` on both nights, against three real detection instants — the
+chain instants themselves are UNCHANGED from every earlier draft, because the
+measured marker moved one second earlier while `delta` moved one second later,
+leaving `marker + delta` (the `k=0` instant) exactly where it was. `delta`
+covers everything from the marker up to the second child at `:753`, whose
+`now_utc()` becomes the incident's `detected_at_utc`: the background fork at
+`:583-588`, `wait_with_safety_pulses`'s entry (`:590`, `:814-819`), the
+`seconds_since_stamp maker_safety_refresh` substitution (`:801`), the
+`executor-ops-monitor` child (`:747`), its `stamp_status` (`:749`), and the
+watchdog CLI's own start-up to `_as_of_stamp` (`:1382`).
+
+**Where `delta` is NOT measured, stated plainly, because this is the one place the
+model rests on something no artifact records.** Taken together `T` and `delta`
+must satisfy `T + delta = H - 300`, so with the measured, SHARED `T` interval
+`[11.623792, 12.443879)` the implied `delta_true` is `(16.0, 16.820]s` on
+the Aug-4 anchor; intersecting both nights gives `(16.18, 16.82]s` (was
+registered as `15.0-15.8 s` when the marker was still treated as the OLD,
+one-second-late pair). On an IDLE loop the M2 artifact
+prices `delta`'s named constituents at roughly a third of that: the
+`executor-ops-monitor` child at `2.587 s`, plus one `stamp_status` python child
+and the watchdog CLI's own start-up. The residual — about eleven seconds,
+scaling with `delta_true`'s slightly larger range — is the harvest child
+spinning up python and reaching out to
+Gamma/CLOB on the same one- or two-vCPU host while those pulse children run,
+which is precisely the condition the M2 artifact was NOT measured under (its
+pulse is the top-of-loop `:913` pulse with no long job holding). That
+contention is real and expected but unmeasured, and it is the ONLY unmeasured
+quantity in this model. It does not enter any registered number: the markers
+are measured directly, and M8 bounds what a wrong `T` could move for a
+future re-derivation. **This WO is self-settling on that one unmeasured
+quantity after a single real hold**, once built: comparing
+`jobs["training_harvest"]["in_flight_since_utc"]` (this WO's own new marker)
+against the `generated_at` of that hold's FIRST pulse's `degraded_state.json`
+gives `delta_true` directly, from exactly the pair this WO's own mechanism
+produces — no separate instrumentation is needed to close this residual.
+
+**M7 — the model explains why the two nights have different shapes, and the
+explanation is checkable.** Crossings are `observation_token + ceiling`:
+
+| night | victim | crosses at | first chain detection at/after it | ledger's `detected_at_utc` |
+|---|---|---|---|---|
+| 08-04 | `trade_prints` (1200s) | 23:02:48.853688Z | 23:04:44Z | 23:04:44Z |
+| 08-04 | `book_pulse` (900s) | 23:03:49.556121Z | 23:04:44Z | 23:04:44Z |
+| 08-05 | `trade_prints` (1200s) | 23:10:32.707912Z | 23:14:22Z | 23:14:22Z |
+| 08-05 | `book_pulse` (900s) | 23:18:40.376208Z | 23:19:35Z | 23:19:35Z |
+
+On Aug-4 both crossings fall inside the single interval `(22:59:31Z, 23:04:44Z]`
+and no chain detection separates them — so the pair is necessarily ONE
+observation, which is exactly what the ledger records. On Aug-5 `trade_prints`
+crosses after the `k=0` detection (hence is absent from it) and `book_pulse`
+crosses after the `k=1` detection (hence is absent from that one too) — so the
+pair is necessarily TWO observations, 313s apart, in the opposite order to
+Aug-4's simultaneous pair. Both shapes are predictions of the model, not
+observations fed back into it.
+
+**M8 — what the one measured input can and cannot move (the honest residual).**
+`T` decomposes as `T = X + c`, where `X = b − frac(book_pulse
+completion)` is the truncation-corrected mandatory-tail composite and `c` is
+the residual head before `:857` (M5's ~twenty forks) — NOT `T = a + b + c` as
+an earlier draft registered, which double-counted the interval `[PULSE_STARTED_AT,
+true fork instant]` shared between `a` (the pre-pulse tail) and `b` (the
+composite, which starts at `floor()` of that same instant). Both floors below
+are taken from measurement rather than guessed: `T_floor = 11.623792` (the
+measured SHARED interval floor obtained by inverting BOTH recorded markers
+against `marker = floor(book_pulse_completion + 300 + T)`, cited to
+the same `27fc8de8`/`cf4afaa3` commits already cited above) and
+`delta_floor = 1.587` (the `executor-ops-monitor` child's measured floor,
+`2.587`, truncation-corrected by the same up-to-1s the composite itself
+carries, since `executor_ops_monitor` is ALSO stamped against the truncated
+`PULSE_STARTED_AT`). The admissible marker interval is
+`(book_pulse_completion + 300 + T_floor, book_pulse_completion + H - delta_floor)`.
+The printed marker can therefore be anywhere in
+
+```
+Fixture A : 2026-08-04T22:54:01Z ... 2026-08-04T22:54:16Z
+Fixture B : 2026-08-05T23:08:52Z ... 2026-08-05T23:09:07Z
+```
+
+Re-swept this session against the real `_attribute_starvation`, every one of
+those 16 whole-second values on both fixtures:
+
+- Fixture A's `overlap_seconds` moves within `[628.0, 643.0]` — every value is
+  at or above `book_pulse`'s 600s budget AND `trade_prints`' 300s budget, and
+  Tests 9 and 10 stay `attributed` / `training_harvest` and stay IDENTICAL to
+  each other;
+- Fixture B Cycle A's moves within `[315.0, 330.0]` — every value at or above
+  `trade_prints`' 300s budget, so Test 29's Cycle A stays `attributed`;
+- Fixture B Cycle B's moves within `[628.0, 643.0]` for both victims;
+- the marker age never rises above 643s, against `training_harvest`'s 27600s
+  in-flight bound, so no `holder_unmeasurable` branch comes near being taken.
+
+**A second, deliberately extreme sweep, re-executed this session at
+`T_floor = 10.0, delta_floor = 0.0`:** marker range widens to
+`2026-08-04T22:53:59Z ... 2026-08-04T22:54:18Z` (Fixture A) and
+`2026-08-05T23:08:50Z ... 2026-08-05T23:09:09Z` (Fixture B), 20 values
+each; `overlap_seconds` moves within `[626.0, 645.0]` / `[313.0, 332.0]`; and
+**zero** `attribution_state`/`attributed_to` outcomes flip anywhere in either
+sweep.
+
+So a re-measurement of the mandatory tail moves the registered
+`overlap_seconds` literals and NOTHING else. A builder who re-derives the marker
+recomputes those literals by the same single subtraction
+`window_end - in_flight_since_utc`; the asserted attribution STATES and
+`attributed_to` values do not move anywhere in the admissible interval. This is
+registered as the model's residual, not hidden in it.
+
+**M9 — one further derived constraint the fixtures must honour:
+`run_maker_safety_refresh` fired in NO pulse of either chain.**
+`run_safety_pulse` runs it FIRST, before the watchdog, when
+`seconds_since_stamp maker_safety_refresh >= MAKER_SAFETY_INTERVAL` (900,
+clamped `≤ 900` at `:82`) — five more sequential timeout-wrapped children
+(`:724-731`) run synchronously (`:732` has no `&`). Had it fired inside any pulse
+of either chain, that pulse's period would exceed 313s and `delta` would exceed
+16s. Aug-5's two real detections are exactly 313s apart and `H` reproduces to
+0.18s across the two nights, so it fired in none of them. The fixtures'
+`maker_safety_refresh` rows are set inside the interval that makes this true.
+
+#### Execution Fixture A — 2026-08-04, same-observation pair
+
+`generated_at_utc` is the real `detected_at_utc` of both incidents. The
+`trade_prints` and `book_pulse` `last_success_utc` values are VERBATIM the
+ledger's own `observation_token`s — real, to the microsecond, and exactly what
+`_evaluate_scheduler_freshness` reads as `last_success_utc` (`:628`) and reports
+as `observation_token` / `episode_start` (`:646`, `:680-681`).
+`training_harvest`'s ENTIRE record — `last_run_utc`, `last_success_utc`,
+`last_exit_code`, `runs_total`, `failed_cycles_total`, `skipped_cycles_total`,
+`consecutive_skipped_cycles`, `skipped_intentional_total`,
+`consecutive_skipped_intentional`, `skipped_overrun_total`,
+`consecutive_skipped_overrun`, `skip_kind`, `skipped_intentional`,
+`skipped_overrun` — is read VERBATIM from `origin/vps-telemetry`
+`59982de3db99d2b00635fb444e7221488ee42c75`
+(`generated_at_utc 2026-08-04T12:29:27.666683+00:00`, the state that persists
+into the Aug-4 hold since `training_harvest` stamps once a day), except
+`in_flight_since_utc`, which is read from `27fc8de87c989b8161982fd3a7184c23a7823c4b`
+(measured) — the fixture is RECORDED, not derived.
+
+```json
+{
+  "mode": "vps_ops_scheduler",
+  "generated_at_utc": "2026-08-04T23:04:44+00:00",
+  "paper_trading_invoked": false,
+  "live_trading_invoked": false,
+  "jobs": {
+    "training_harvest": {
+      "last_run_utc": "2026-08-03T22:49:52.902533+00:00",
+      "last_success_utc": "2026-08-03T22:49:52.902533+00:00",
+      "in_flight_since_utc": "2026-08-04T22:54:01Z",
+      "last_exit_code": 0,
+      "runs_total": 34,
+      "failed_cycles_total": 14,
+      "skipped_cycles_total": 11,
+      "consecutive_skipped_cycles": 0,
+      "skipped_intentional_total": 0,
+      "consecutive_skipped_intentional": 0,
+      "skipped_overrun_total": 11,
+      "consecutive_skipped_overrun": 0,
+      "skip_kind": "none",
+      "skipped_intentional": false,
+      "skipped_overrun": false
+    },
+    "trade_prints": {
+      "last_run_utc": "2026-08-04T22:42:48.853688+00:00",
+      "last_success_utc": "2026-08-04T22:42:48.853688+00:00",
+      "last_exit_code": 0,
+      "runs_total": 2604,
+      "failed_cycles_total": 2,
+      "skipped_cycles_total": 0,
+      "consecutive_skipped_cycles": 0,
+      "skip_kind": "none",
+      "skipped_intentional": false,
+      "skipped_overrun": false
+    },
+    "book_pulse": {
+      "last_run_utc": "2026-08-04T22:48:49.556121+00:00",
+      "last_success_utc": "2026-08-04T22:48:49.556121+00:00",
+      "last_exit_code": 0,
+      "runs_total": 289,
+      "failed_cycles_total": 0,
+      "skipped_cycles_total": 0,
+      "consecutive_skipped_cycles": 0,
+      "skip_kind": "none",
+      "skipped_intentional": false,
+      "skipped_overrun": false
+    },
+    "governance_refresh":      {"last_run_utc": "2026-08-04T19:54:01+00:00", "last_success_utc": "2026-08-04T19:54:01+00:00", "last_exit_code": 0, "failed_cycles_total": 0},
+    "clv_snapshot":            {"last_run_utc": "2026-08-04T17:54:01+00:00", "last_success_utc": "2026-08-04T17:54:01+00:00", "last_exit_code": 0, "failed_cycles_total": 0},
+    "locked_card_refresh":     {"last_run_utc": "2026-08-04T14:54:01+00:00", "last_success_utc": "2026-08-04T14:54:01+00:00", "last_exit_code": 0, "failed_cycles_total": 0},
+    "maker_study_intraday":    {"last_run_utc": "2026-08-04T12:54:01+00:00", "last_success_utc": "2026-08-04T12:54:01+00:00", "last_exit_code": 0, "failed_cycles_total": 0},
+    "ledger_anchor":           {"last_run_utc": "2026-08-04T14:54:01+00:00", "last_success_utc": "2026-08-04T14:54:01+00:00", "last_exit_code": 0, "failed_cycles_total": 0},
+    "maker_safety_refresh":    {"last_run_utc": "2026-08-04T22:53:31+00:00", "last_success_utc": "2026-08-04T22:53:31+00:00", "last_exit_code": 0, "failed_cycles_total": 0},
+    "executor_ops_monitor":    {"last_run_utc": "2026-08-04T23:04:42+00:00", "last_success_utc": "2026-08-04T23:04:42+00:00", "last_exit_code": 0, "failed_cycles_total": 0},
+    "degraded_state_watchdog": {"last_run_utc": "2026-08-04T22:59:44+00:00", "last_success_utc": "2026-08-04T22:59:44+00:00", "last_exit_code": 0, "failed_cycles_total": 0}
+  }
+}
+```
+
+**Where every value comes from.**
+
+- `trade_prints` / `book_pulse` `last_success_utc` and `generated_at_utc`: read
+  verbatim from the incident ledger.
+- `training_harvest.in_flight_since_utc = 2026-08-04T22:54:01Z`: read verbatim
+  from `27fc8de8` — MEASURED, not derived; the model (M1-M5) predicts
+  this exact value from an independent input and is retained for that reason,
+  not as this value's source.
+- `training_harvest.last_run_utc = last_success_utc =
+  2026-08-03T22:49:52.902533+00:00`, `runs_total = 34`,
+  `failed_cycles_total = 14`: read verbatim from `59982de3` — the
+  `training_harvest` state that persists, unchanged, from the prior day's
+  completion until the Aug-4 hold's own completion overwrites it. Consistent
+  with, and independently confirmed by, the retry predicate:
+  `training_harvest_retry_ready` (`:307-310`) is the AND of
+  `seconds_since_success_stamp >= HARVEST_INTERVAL` (86400) and
+  `seconds_since_attempt_stamp >= HARVEST_RETRY_INTERVAL`. Executed this
+  session against the REAL shell functions (`OPS_SCHEDULER_LIBRARY_ONLY=1`
+  sourcing of the unmodified script with a fixed-clock `date` shim, using this
+  exact recorded `last_success_utc`): `not_ready` at `22:42:48Z` (succ_age
+  85976), `not_ready` at `22:48:49Z` (86337) — confirming `book_pulse` ran
+  BEFORE the harvest was due, per M1 — `not_ready` at `22:49:51Z` (86399),
+  `READY` from `22:49:52Z` (86400), `READY` at the marker `22:54:01Z` (86649),
+  `READY` at `22:59:31Z` (86979) and at `generated_at_utc` `23:04:44Z`
+  (87292, shell-truncated; the watchdog's own precise age at this instant is
+  `87291.097s`, Test 20 below). The attempt-stamp AND-term never gates this:
+  with no stamp file `seconds_since_attempt_stamp` returns `999999999`
+  (`:291-293`), and modelled from a real prior attempt ~24h earlier it is
+  far above `HARVEST_RETRY_INTERVAL`'s 1800s default and above its clamped
+  3600s ceiling. `:866-867`'s source comment ("*measured: runs_total 32,
+  failed_cycles_total 14*") is restated for what it is: a DATED measurement
+  taken at some earlier point in this branch's history, not this fixture
+  night's own counter — `runs_total` at the fixture's own instant is `34`
+  (`59982de3`), confirmed independently against `d5c9915f`'s later read
+  (`runs_total 38`) and this session's own re-read at the current tip
+  (`runs_total` continuing to climb). `runs_total` itself is read by no
+  registered code path and its literal value is not load-bearing;
+  `failed_cycles_total` is the counter that matters for any claim, and it is
+  `14` at every read this WO has taken, including `59982de3`.
+- `trade_prints.failed_cycles_total: 2` and `book_pulse.failed_cycles_total: 0`:
+  CONSTRUCTED, and constructed for a stated discriminating purpose. No
+  recovered snapshot pins these two counters at the exact hold instant
+  (`23:04:44Z`) itself — the nearest recovered reads, `27fc8de8`/`cf4afaa3`,
+  are hours later (`02:55:13Z`/`02:59:38Z` the following day), by which point
+  both jobs show `failed_cycles_total 0`, consistent with but not proof of
+  the values at the hold instant — so these two remain constructed rather than
+  read. They are chosen so Test 11 probes the victim rather than the
+  fail-alarming default: a nonzero counter with no advance (2) and a zero
+  counter (0) must BOTH resolve `no_self_failure_evidence`, from opposite
+  sides. Any pair of non-advancing integers gives the same outcome; these two
+  are registered so the expectation is a literal. (An earlier draft justified
+  this construction by "no historical `status.json` snapshot exists for
+  either night... a single commit touches `status.json` in that branch's
+  entire history" — FALSE per-branch-history, corrected in the producibility
+  model above: `origin/vps-telemetry` is a sequence of parentless commits
+  each preserving one complete body, and 41 are reachable in this repository's
+  object store this session. The two specific counters above remain
+  constructed regardless, because no recovered commit happens to sit at the
+  exact hold instant.)
+- The five remaining marked jobs' `last_success_utc`: derived from a constraint
+  the marker depends on. M1's decomposition assumes NO other job ran in
+  iteration N+2's head before `:857`; if one had, the marker would be that job's
+  duration later and the whole chain would shift. Each of these values is
+  therefore set so the job is not due at the marker, with its own duration
+  allowance on top, and shifted one second earlier to keep the same round-number
+  margins against the corrected marker: `governance_refresh` age 10800s + at
+  most 2100s of run against a 21600s interval; `clv_snapshot` 18000 + 2700 vs
+  28800; `locked_card_refresh` 28800 + 2400 vs 43200; `maker_study_intraday`
+  36000 vs 86400; `ledger_anchor` 28800 + 600 vs 43200. All five clear their
+  intervals with margin, and all five are far inside their own freshness
+  ceilings.
+- The three safety-lane rows: derived intervals, and their derivation is the
+  reason they are no longer round placeholders. Every pulse re-stamps them, so
+  across a 643s hold all three MUST have completions inside the hold; a fixture
+  that dates them before the marker is not producible. `executor_ops_monitor` is
+  stamped at `:749`, inside the same pulse as, and strictly before, the watchdog
+  child at `:753` that sets `generated_at_utc` — so its value lies in
+  `(pulse-3 start 23:04:28Z, 23:04:44Z)` and `23:04:42Z` is registered.
+  `degraded_state_watchdog` is stamped at `:769`, only AFTER all four children —
+  so at `generated_at_utc`, inside pulse 3's second child, the newest COMPLETED
+  such stamp is pulse 2's, in `(22:59:31Z, 23:04:28Z)`, and `22:59:44Z` is
+  registered. `maker_safety_refresh` must satisfy M9: younger than 900s at the
+  last pulse start of the chain (23:04:28Z), so later than `22:49:28Z`, and not
+  itself due at hold start; `22:53:31Z` is registered, 657s old at the last
+  pulse. Any value inside each stated interval gives identical outcomes: all
+  three stay far inside their ceilings, and all three raise `KeyError` if
+  `_attribute_starvation` is ever called for them (Test 24), so no registered
+  assertion reads them.
+- `started_at_utc`, `duration_seconds` and `detail` are deliberately OMITTED
+  rather than invented. `started_at_utc` has exactly one reader anywhere in the
+  watchdog — `degraded_state_watchdog.py:549` (inside `_evaluate_scheduler`,
+  def `:526`), which reads `job.get("last_run_utc") or
+  job.get("started_at_utc") or _stamp(job)` — a fallback consulted only when
+  `last_run_utc` is absent, and every record in this and the other Execution
+  fixtures supplies `last_run_utc`. So omitting `started_at_utc` is safe in
+  effect, not merely unread; `duration_seconds` and `detail` genuinely have no
+  reader at all. A fixture number that nothing reads is still permanent
+  specification once registered.
+
+**Executed this session against the registered-verbatim `_attribute_starvation`
+above, importing the REAL `_mapping` and `_parse_stamp` from
+`degraded_state_watchdog.py` at `origin/main`:**
+
+- **Test 9** — `trade_prints` stale, `window_start = 2026-08-04T22:42:48.853688+00:00`,
+  `window_end = 2026-08-04T23:04:44+00:00`: `attribution_state == "attributed"`,
+  `attributed_to == "training_harvest"`, `overlap_seconds == 643.0`,
+  `drag_budget_seconds == 300`, `occupancy_unmeasurable == []`.
+  Arithmetic: `23:04:44 - 22:54:01 = 643.0`, and `643.0 >= 300`.
+- **Test 10** — `book_pulse` stale, `window_start = 2026-08-04T22:48:49.556121+00:00`,
+  same `window_end`: `attribution_state == "attributed"`,
+  `attributed_to == "training_harvest"`, `overlap_seconds == 643.0`,
+  `drag_budget_seconds == 600`, `occupancy_unmeasurable == []`.
+  Identical `overlap_seconds` to Test 9, for the reason in the overlap footnote
+  below; `643.0 >= 600`.
+- **Test 20** (self-exclusion) — `_attribute_starvation("training_harvest", jobs, ...)`:
+  no OTHER `MARKED_JOBS` entity carries an active marker in this fixture, so
+  `attribution_state == "insufficient_to_explain"`, `occupants == []`,
+  `attributed_to == ""`. `training_harvest`'s OWN age at `generated_at_utc` is
+  `87291.1s` (precise: `87291.097s`) against its own `90000s` ceiling — margin
+  `2708.9s`, still FRESH. This is a clean, deliberate self-exclusion probe, and
+  its result does not depend on whether `training_harvest` itself is stale,
+  since the algorithm excludes `job_name` from the search
+  (`MARKED_JOBS - {job_name}`) unconditionally.
+- **Test 11** — `_starved_job_self_state` with no persisted baseline:
+  `trade_prints` → `("no_self_failure_evidence", 2)`; `book_pulse` →
+  `("no_self_failure_evidence", 0)`.
+
+**And the fixture was driven through the REAL `_evaluate_scheduler_freshness`
+(`degraded_state_watchdog.py:592`) at `generated_at_utc`.** It emits exactly two
+incidents and they are the real ledger's rows, byte-for-byte:
+
+```
+degraded_f326466a86f036e6f978c45e  book_pulse    token 2026-08-04T22:48:49.556121+00:00
+   scheduler job book_pulse has no successful completion within 900 seconds; measured age 954.444 seconds
+degraded_30b1090328fa74f77f89adad  trade_prints  token 2026-08-04T22:42:48.853688+00:00
+   scheduler job trade_prints has no successful completion within 1200 seconds; measured age 1315.146 seconds
+```
+
+Same `incident_id`s, same `observation_token`s, same ages, same `reason`
+strings as `origin/vps-telemetry`'s mirror. All nine other entities evaluate
+`fresh`. That is the reproduction the fixture exists to provide.
+
+#### Execution Fixture B — 2026-08-05, cross-observation pair
+
+Same derivation, anchored to the Aug-5 pair, whose shape no other registered test
+covers: one hold, two watchdog cycles, two different newly-stale victims, in the
+opposite order to Aug-4's simultaneous pair. The body is the snapshot at Cycle
+B's `generated_at_utc`. Delta from Fixture A — only the changed values; every
+key not listed carries over unchanged:
+
+```json
+{
+  "generated_at_utc": "2026-08-05T23:19:35+00:00",
+  "jobs": {
+    "training_harvest": {
+      "last_run_utc": "2026-08-04T23:06:47.736123+00:00",
+      "last_success_utc": "2026-08-04T23:06:47.736123+00:00",
+      "in_flight_since_utc": "2026-08-05T23:08:52Z",
+      "runs_total": 35
+    },
+    "trade_prints": {
+      "last_run_utc": "2026-08-05T22:50:32.707912+00:00",
+      "last_success_utc": "2026-08-05T22:50:32.707912+00:00"
+    },
+    "book_pulse": {
+      "last_run_utc": "2026-08-05T23:03:40.376208+00:00",
+      "last_success_utc": "2026-08-05T23:03:40.376208+00:00"
+    },
+    "governance_refresh":   {"last_success_utc": "2026-08-05T20:08:52+00:00"},
+    "clv_snapshot":         {"last_success_utc": "2026-08-05T18:08:52+00:00"},
+    "locked_card_refresh":  {"last_success_utc": "2026-08-05T15:08:52+00:00"},
+    "maker_study_intraday": {"last_success_utc": "2026-08-05T13:08:52+00:00"},
+    "ledger_anchor":        {"last_success_utc": "2026-08-05T15:08:52+00:00"}
+  }
+}
+```
+
+`training_harvest.in_flight_since_utc = 2026-08-05T23:08:52Z` is read verbatim
+from `cf4afaa3bcb3211dfc226ec599442842edcb61b6` — MEASURED. Its
+`last_run_utc`/`last_success_utc`/`runs_total` are read verbatim from
+`27fc8de87c989b8161982fd3a7184c23a7823c4b` — the SAME commit that
+supplies Fixture A's measured marker, being the snapshot taken immediately
+after the Aug-4 hold completed; that state persists unchanged into the Aug-5
+due-boundary check below. `failed_cycles_total` is unchanged from Fixture A's
+`14` (both `59982de3` and `27fc8de8` read `14`, so nothing in this WO's
+recovered evidence shows it moving between the two nights). `skipped_cycles_total`
+and its four sibling counters are likewise unchanged from Fixture A's corrected
+values — both `59982de3` and `27fc8de8` read `11`/`0`/`0`/`11`/`0` for
+`skipped_cycles_total`/`skipped_intentional_total`/`consecutive_skipped_intentional`/
+`skipped_overrun_total`/`consecutive_skipped_overrun` — so Fixture B inherits
+the correction with no separate override needed in the delta above.
+
+The three safety-lane rows are the only records whose values differ BETWEEN the
+two cycles, because every pulse re-stamps them. Both cycles' values are
+registered, each derived exactly as Fixture A's were:
+
+| entity | Cycle A snapshot (`generated_at_utc` 23:14:22Z) | Cycle B snapshot (`generated_at_utc` 23:19:35Z) | derived interval |
+|---|---|---|---|
+| `executor_ops_monitor` | 2026-08-05T23:14:20Z | 2026-08-05T23:19:33Z | stamped at `:749`, same pulse, strictly before the `:753` child |
+| `degraded_state_watchdog` | 2026-08-05T23:09:22Z | 2026-08-05T23:14:35Z | stamped at `:769`, so the newest COMPLETED one is the PREVIOUS pulse's |
+| `maker_safety_refresh` | 2026-08-05T23:08:22Z | 2026-08-05T23:08:22Z | M9: younger than 900s at the chain's last pulse start (23:19:19Z), so later than 23:04:19Z |
+
+Consistent with the retry predicate, executed this session against the REAL
+shell functions with this exact recorded `last_success_utc`
+(`2026-08-04T23:06:47.736123+00:00`): `not_ready` at `22:50:32Z` (succ_age
+85425), `not_ready` at `23:03:40Z` (86213) — confirming `book_pulse` ran
+BEFORE the harvest was due — `not_ready` at `23:06:46Z` (86399), `READY` from
+`23:06:47Z` (86400), `READY` at the marker `23:08:52Z` (86525) and at every
+later cited instant (`23:09:09Z` 86542, `23:14:22Z` 86855, `23:19:35Z` 87168,
+shell-truncated; the watchdog's own precise ages at the two cycle instants are
+`86854.264s` and `87167.264s`, below).
+
+**Cycle A — `window_end = 2026-08-05T23:14:22+00:00`, the real `detected_at_utc`
+of the `trade_prints` incident; only `trade_prints` is stale yet:**
+
+- `_attribute_starvation("trade_prints", jobs, window_start=2026-08-05T22:50:32.707912+00:00, window_end=2026-08-05T23:14:22+00:00)`
+  → `attribution_state == "attributed"`, `attributed_to == "training_harvest"`,
+  `overlap_seconds == 330.0`, `drag_budget_seconds == 300`,
+  `occupancy_unmeasurable == []`. Arithmetic: `23:14:22 - 23:08:52 = 330.0`, and
+  `330.0 >= 300`.
+
+**Cycle B — `window_end = 2026-08-05T23:19:35+00:00`, the real `detected_at_utc`
+of the `book_pulse` incident, 313s later; `trade_prints` is RE-EVALUATED (still
+stale, same episode, same `observation_token`, hence the SAME `incident_id` under
+`_incident_id`'s episode-stable hashing) and `book_pulse` is now newly stale
+too:**
+
+- `_attribute_starvation("trade_prints", jobs, same window_start, window_end=2026-08-05T23:19:35+00:00)`
+  → `attributed`, `training_harvest`, `overlap_seconds == 643.0`,
+  `drag_budget_seconds == 300`, `occupancy_unmeasurable == []`.
+- `_attribute_starvation("book_pulse", jobs, window_start=2026-08-05T23:03:40.376208+00:00, window_end=2026-08-05T23:19:35+00:00)`
+  → `attributed`, `training_harvest`, `overlap_seconds == 643.0`,
+  `drag_budget_seconds == 600`, `occupancy_unmeasurable == []`.
+
+`training_harvest`'s own age is `86854.264s` at Cycle A and `87167.264s` at
+Cycle B, both under its `90000s` ceiling (margins `3145.736s` and
+`2832.736s`) — no self-incident at either cycle.
+
+**Driven through the REAL `_evaluate_scheduler_freshness` at both cycles**, the
+fixture emits the real ledger's rows and nothing else:
+
+```
+window_end 23:14:22Z : degraded_4262bdaba8a783dbf7f6423f  trade_prints  measured age 1429.292 seconds
+window_end 23:19:35Z : degraded_054ae17ce60107145084066e  book_pulse    measured age  954.624 seconds
+                       degraded_4262bdaba8a783dbf7f6423f  trade_prints  measured age 1742.292 seconds
+```
+
+The `trade_prints` `incident_id` is byte-identical across the two cycles while
+its measured age grows — the episode-stability property the sidecar's dedup rule
+depends on, observed rather than asserted. Both cited ids and both ages match
+`origin/vps-telemetry`'s mirror exactly.
+
+#### Overlap footnote — the identical-overlap qualification, and where `window_start` and `window_end` come from
+
+**Where the window comes from.** `_attribute_starvation`'s `window_end` is the
+watchdog's own `observed_at`, i.e. `_parse_stamp(generated_at)` (`:619`) — the
+same string that becomes the incident's `detected_at_utc`. Its `window_start` is
+the victim's `observation_token`, which `_evaluate_scheduler_freshness` sets one
+of two ways (`:641-653`): when the job has a parseable `last_success_utc`,
+`observation_token = last_success` and the victim's state is `stale`; when it
+does not, `observation_token = first_unobserved_at_utc` and the state is
+`stale_unobserved`. Both fixtures above are entirely in the first case.
+
+**Why Tests 9 and 10 land on an identical `overlap_seconds`, and the
+qualification that makes the claim true.** The overlap is
+`max(0.0, (window_end - max(marker_dt, window_start)).total_seconds())`. In both
+fixtures each victim's `window_start` — its own `last_success_utc` — PRECEDES the
+harvest marker, so `max(marker_dt, window_start)` collapses to `marker_dt` for
+every victim, and the overlap reduces to `window_end - marker` — one value for
+one hold, independent of which victim is being attributed. That is why Test 9 and
+Test 10 report the same `643.0` while reporting different
+`drag_budget_seconds` (300 and 600 — the VICTIMS' budgets).
+
+**This does NOT generalize to a `stale_unobserved` victim.** There,
+`window_start` is `first_unobserved_at_utc`, which is set to `generated_at` on
+the first cycle a job has no parseable success stamp (`:649-650`) and can
+therefore POSTDATE the marker. When it does, `max(marker_dt, window_start)`
+collapses to `window_start` instead, and the overlap becomes
+`window_end - first_unobserved` — a different, possibly zero, value, and the
+identical-overlap property fails. Nothing in this WO extends the identical-overlap
+claim past the `stale` case both fixtures exercise, and a build must not assert
+equal overlaps for a mixed `stale` / `stale_unobserved` cycle.
+
+### In-flight staleness bound — legacy single-value framing removed
+
+The prior single flat "2100 seconds, basis: largest registered timeout +
+TICK_SECONDS" framing (the WO's first draft) is superseded by the per-job
+`IN_FLIGHT_STALE_AFTER_SECONDS` table above (plus the `ORPHAN_BOUND_SECONDS`
+table for the 3 previously-unbounded jobs) — a single flat bound across 8 jobs
+with drag budgets ranging 300s-50400s was already known to be too tight for the
+slower jobs and too loose for `book_pulse`.
+
+### The fail-safe that governs the whole WO
+
+**Attribution is strictly additive to an incident and can never prevent,
+suppress, downgrade, delay, or de-duplicate one.** The `stale` decision, the
+`age_seconds` arithmetic, the `maximum` comparison, the incident id, the episode
+anchor, and the `count`/`maximum` fields are all computed before any of this runs
+and stay **byte-identical** to `main` (re-verified this session:
+`_evaluate_scheduler_freshness` at `:592-700` already computes and returns all
+of these today, unattributed; this WO's changes are additive within that same
+function body, inserted between the existing `if not stale: continue` and
+`_incident(...)` call at `:673-687`). If the attribution computation raises for
+any reason, the incident is still emitted, with `attributed_to: null` and
+`occupancy_error` carrying the exception class name, in both the main ledger row
+and — because `occupancy_error` is a registered member of
+`SCHEDULER_ATTRIBUTION_FIELDS` — the sidecar. A watchdog that cannot explain an
+incident must still raise it. **Recorded so it is not re-derived:**
+`attributed_to: null` renders as the empty string `""` in the sidecar CSV
+(`serialize_value` returns `""` for `None`) — the SAME rendering the three
+no-candidate attribution states already produce. This is not a defect: the
+raise path remains distinguishable from a no-candidate outcome via
+`occupancy_error` (populated only on the raise path) and `attribution_state`
+(populated only on the non-raise path). A future-dated marker (`in_flight_since_utc` after
+`window_end`) is treated conservatively — folded into `occupancy_unmeasurable`
+rather than yielding a negative "overlap," per the explicit branch registered in
+Writes §2 (an earlier draft stated this in the fail-safe while the algorithm
+silently clamped it to zero and read the result as "evidence complete"; the two
+now agree, execution-verified).
+
+On the scheduler side the marker is **write-only telemetry**: no job's execution,
+scheduling decision, exit code, skip classification, or timeout depends on it,
+and a `mark_in_flight` that fails must not abort or skip the job it was about to
+mark — **it logs and proceeds**, because losing an attribution field is strictly
+better than losing a job run. The registered wrapper in Writes §1 delivers that
+in all three failure directions — missing argument, empty argument, and a
+non-zero python child — each with a log line and a zero return, executed under
+`dash`, `sh` and `bash`.
+
+Nothing here marks a market measured, changes any M-A/M-B/M-C predicate or
+`maker_min_*` threshold, opens or enables any order path, touches a credential or
+signer surface, or loosens any gate, ceiling, or eligibility rule.
+
+### Ordering / rebase-reverify
+
+This section existed in the WO's third draft and was silently dropped by the
+fourth; it is restored here and generalized to the now-larger anchor surface.
+This WO carries well over a hundred line-number citations (not "roughly 50" —
+an earlier draft's count was off by about 3x and conflated a citation count
+with a file enumeration), and the FILE count is stated against this
+enumeration rather than asserted separately. **THIRTEEN files are cited:**
+
+1. `scripts/run_vps_ops_scheduler.sh` — touched
+2. `src/polymarket_predictive_engine/degraded_state_watchdog.py` — touched
+3. `src/polymarket_predictive_engine/training_harvest.py` — cited only (`:31`,
+   `:123-134`, `:148-151`, `:241`, behind `training_harvest`'s 27600s bound)
+4. `src/polymarket_predictive_engine/ledger_anchor.py` — touched
+5. `src/polymarket_predictive_engine/utils.py` — cited only, and
+   **load-bearingly**: `append_csv_rows`'s header comparison and
+   `raise ValueError` (`:184-190`) is the entire reason this WO registers a
+   literal sidecar header; `extrasaction="ignore"` (`:194`) is the reason
+   `occupancy_error` had to be added to `SCHEDULER_ATTRIBUTION_FIELDS`; the
+   absent-key-becomes-`""` behaviour (`:198`) is why a missing row-selection
+   predicate fails silently; and `serialize_value` (`:268-275`) is why the two
+   list-valued columns need no new serialization code. An earlier draft of this
+   section named five items, counted them as five when the list held six, and
+   omitted this file entirely — exempting exactly the anchors the sidecar's
+   correctness rests on from this section's own binding rule.
+6. `polymarket_predictive_config.example.yaml` — touched (`:347-350` the
+   `ledger_anchor.ledger_globs` block, `:404` the insertion point)
+7. `tests/test_polymarket_vps_docker.py` — touched
+8. `tests/polymarket_predictive_engine/test_degraded_state_watchdog.py` — touched
+9. `tests/polymarket_predictive_engine/test_wo92_clock_boundaries.py` — cited
+   only, and it must stay byte-identical: `:126` and `:132` call
+   `_evaluate_scheduler_freshness` directly (Test 19, and the A9 enumeration)
+10. `tests/polymarket_predictive_engine/test_ledger_anchor.py` — cited only:
+    `test_deployed_config_covers_every_default_ledger_enrollment` (`:446`, its
+    mechanism comment `:447-452`, its assertion `:460`) is the pre-existing test
+    that governs the sidecar's enrollment, and it must keep passing
+11. `src/polymarket_predictive_engine/corpus_retention.py` — cited only: the
+    `DEFAULT_LEDGER_REGISTRY` import (`:25`), `_ledger_patterns` (`:250-259`),
+    `_protected`'s predicate (`:262`, `:268`, hard exclusion at `:272`), and the
+    published `protected_ledger_patterns` field (`:680`) — the enrollment
+    bullet's third blast-radius fact rests on these anchors.
+12. `tests/polymarket_predictive_engine/test_training_harvest.py` — cited only:
+    `:291` sets `OPS_SCHEDULER_LIBRARY_ONLY` and is the 15th tree-wide
+    occurrence behind Test 8's `14`/`15` counts.
+13. `src/polymarket_predictive_engine/disaster_recovery.py` — cited only:
+    `undeclared_missing`'s filter (`:1085-1088`) is the reason the enrollment
+    bullet's claim that WO-127's restore-boundary logic is not engaged holds.
+
+Every one of these citations was re-located in a clean detached checkout of
+`origin/main` at **`046c6830`** ("docs: register §147.5 ...", #441) in THIS
+drafting session — not carried forward from any earlier session's claim, and
+re-confirmed unchanged from the `6840732b` export earlier drafting rounds read against,
+since `git diff 6840732b..046c6830 --stat` touches only
+`docs/POLYMARKET_CODEX_WORK_ORDERS.md`. Three anchors an earlier round supplied
+were off by one or two lines and are corrected in this draft from the source:
+`LAST_SAFETY_PULSE=0` is `:816`; the four safety-pulse children are
+`:747, :753, :755, :757`; and `active = sorted(...)` is
+`degraded_state_watchdog.py:1508`. Two more, found and fixed in an earlier
+drafting session: the `stamp_status degraded_state_watchdog` call is `:769`,
+not `:767` (`:767` is a `log` line inside the preceding
+`if [ "$WATCHDOG_CODE" -ne 0 ]` branch); and `seconds_since_stamp
+maker_safety_refresh` is `:801`, not `:798` (`:798` is a comment line) — both
+are the same class of error, citing a nearby conditional/comment line rather
+than the line that actually performs the described action. A fresh sweep this
+drafting session of every remaining citation describing an action ("stamped
+at", "recorded at", "fires at", "taken at")
+found no further instance of that class: `stamp_status maker_safety_refresh`
+(`:734`) and `stamp_status executor_ops_monitor` (`:749`) are both the actual
+call lines, and `LAST_SAFETY_PULSE=0` (`:816`), its comparison (`:819`) and its
+re-stamp (`:822`) are all the actual statements, not neighbouring branches or
+comments.
+
+**Binding rule for dispatch.** Every line-number citation in this WO is
+ADVISORY, not authoritative: it is a re-verified pointer into the tree at the
+SHA cited in this section, offered to save the builder a search. **The anchor
+TEXT quoted alongside each citation governs.** If the WO is dispatched from a
+branch whose tip has moved past this SHA — whether from an unrelated merge
+landing first, or from a rebase — the builder MUST re-locate every cited line
+by its quoted text (a `grep -n` for the exact snippet shown, not a raw
+line-number read) before editing, and must STOP and escalate if a cited
+snippet no longer exists verbatim rather than editing "near" where the old
+number pointed. Two anchors have already drifted once purely from unrelated
+upstream commits landing between drafting and audit (`stamp_status`'s def: an
+earlier draft's `:130` → `:138`; its WO-120 comment: `:200-204` → `:206-209`)
+with no edit ever made to `run_vps_ops_scheduler.sh` itself in between —
+line-number drift from OTHER work orders' merges is the normal case for a
+scheduler/watchdog WO with a multi-day gate history, not the exception. The
+`:69`/`:68` mix-up corrected in the drag-budget table above, introduced by a
+draft that asserted it had re-verified that very table, shows that even a
+re-verification pass can introduce a fresh drift if it re-checks the VALUE
+without re-checking the ANCHOR against the quoted text. Re-verify the whole
+citation set again immediately before the build starts, not only at draft time.
+
+### A9 — every caller of every changed unit
+
+`_evaluate_scheduler_freshness` (`degraded_state_watchdog.py:592`) has exactly
+three call sites, all enumerated by
+`grep -rn "_evaluate_scheduler_freshness" --include=*.py src/ scripts/ tests/`
+(re-run this session, 4 matches: the `def` plus these 3):
+
+- `src/polymarket_predictive_engine/degraded_state_watchdog.py:1492` — the
+  production evaluator tuple.
+- `tests/polymarket_predictive_engine/test_wo92_clock_boundaries.py:126` and
+  `:132` — the WO-92 clock-boundary tests, asserting on the `inside`/`outside`
+  evaluation and the returned incidents (re-verified this session: both lines
+  call `degraded_state_watchdog._evaluate_scheduler_freshness(...)` directly).
+  Both must keep passing **unmodified**; if either needs an edit, the change
+  is not additive and the build stops and escalates.
+
+`stamp_status` is unchanged, so its call sites are not in scope. `mark_in_flight`
+is new, so it has no pre-existing callers; its call sites are exactly the 8 in
+the Writes §1 table, and the build must assert that the set of marked jobs
+equals `MARKED_JOBS`.
+
+`DEFAULT_LEDGER_REGISTRY`'s consumers are enumerated in the enrollment bullet
+below, because a new entry there is read by more than the anchor path: the
+anchor path itself (`_settings`/`_registry`), the pre-existing enrollment test,
+`_collect_manifest`, `disaster_recovery.py`'s `ARCHIVE_EXCLUDED_PREFIXES` check,
+and `corpus_retention.py`, which imports the constant directly
+(`corpus_retention.py:25`) and is not on the anchor path at all.
+
+**A3.** This WO registers no "scan all callers/files" rule; the enumerations
+above are fixed lists, not scans.
+
+### Touch ONLY these files (`git diff --stat` must show exactly these six)
+
+- `scripts/run_vps_ops_scheduler.sh` — `mark_in_flight` (a 2-argument wrapper
+  with `${1:-}`/`${2:-}` defaults, an empty-argument branch, and an explicit
+  `|| log`), its 8 call sites, and the new `MAKER_STUDY_STARTED_AT` stamp line
+  only. `stamp_status`, every interval and timeout literal, `TICK_SECONDS`, the
+  job ordering, `run_safety_pulse` and `wait_with_safety_pulses` stay
+  byte-identical.
+- `src/polymarket_predictive_engine/degraded_state_watchdog.py` — the body of
+  `_evaluate_scheduler_freshness` (additive insertion only, between the
+  existing `if not stale: continue` and `_incident(...)` call) plus the new
+  module-private `_attribute_starvation` / `_starved_job_self_state` /
+  `_append_attribution` helpers, `MARKED_JOBS`, `UNBOUNDED_MARKED_JOBS`,
+  `DRAG_BUDGET_SECONDS`, `IN_FLIGHT_STALE_AFTER_SECONDS`,
+  `ORPHAN_BOUND_SECONDS`, `SCHEDULER_ATTRIBUTION_FIELDS`, `ATTRIBUTION_LEDGER`,
+  the `sidecar_path` derivation beside the existing `ledger_path` at `:1385`,
+  and the containment try/except at both `_append_incidents` call sites only.
+  Every other evaluator, `REGISTERED_JOB_FRESHNESS_MAX_SECONDS`, the
+  registration block, `INCIDENT_FIELDS`, and `_incident`/`_append_incidents`
+  themselves stay byte-identical.
+- `src/polymarket_predictive_engine/ledger_anchor.py` — one new entry in
+  `DEFAULT_LEDGER_REGISTRY`
+  (`{"glob": "performance/scheduler_attribution_v1.csv", "mode": "append_only"}`,
+  inserted immediately after the `performance/degraded_state_incidents.csv`
+  entry at `:86`) and nothing else.
+- `polymarket_predictive_config.example.yaml` — the MATCHING entry
+  (`- {glob: performance/scheduler_attribution_v1.csv, mode: append_only}`)
+  inserted in the `ledger_anchor.ledger_globs` list immediately after the
+  `performance/degraded_state_incidents.csv` entry at `:404`, and nothing else.
+
+  **Why the registry entry alone is not sufficient, and why this WO touches six
+  files rather than five.** `_settings` merges the config over the code defaults
+  with `merged.update(...)` (`ledger_anchor.py:325-340`), so an explicit
+  `ledger_globs` list in the config **replaces `DEFAULT_LEDGER_REGISTRY`
+  wholesale** — the example config supplies one at `:350`, **40 entries today,
+  41 after this WO's edit**, against the code default's **32 entries today, 33
+  after**. A code-default enrollment absent from the config is therefore
+  silently inert in production. That mechanism is not inferred: it is the
+  stated reason a pre-existing test exists,
+  `test_deployed_config_covers_every_default_ledger_enrollment`
+  (`tests/polymarket_predictive_engine/test_ledger_anchor.py:446`, mechanism
+  comment `:447-452`, assertion `:460`), which pins the deployed config as a
+  mode-matched superset of the code default. Executed this session in a clean
+  `origin/main` checkout: with the registry entry alone,
+  `pytest tests/polymarket_predictive_engine/test_ledger_anchor.py` gives
+  **1 failed, 23 passed** — a pre-existing test on the required PR gate, broken
+  by a file this WO would not otherwise have touched — and the effective
+  config-driven registry still does NOT contain
+  `performance/scheduler_attribution_v1.csv`, so the enrollment creates none of
+  the WO-61 tamper evidence it claims. With BOTH edits: **24 passed**, and the
+  effective registry contains the sidecar at `mode: append_only`.
+
+  **Registered residual limit, stated rather than papered over.** These two
+  edits make the enrollment effective for any config DERIVED from
+  `polymarket_predictive_config.example.yaml`. They cannot make it effective for
+  a hand-maintained config on the VPS that carries its own `ledger_globs` list:
+  that file is not in this repository and this WO cannot edit it. If the
+  deployed config is not derived from the example, the sidecar remains
+  unanchored until the same entry is added there, and no claim of tamper
+  evidence over it holds. The Day-after check below does not depend on the
+  enrollment.
+
+  **Three facts that bound the enrollment's blast radius, all verified by
+  execution this session.** A registry glob with no matching file is
+  anchor-safe: `_collect_manifest` (`ledger_anchor.py:431-446`) emits
+  `{"status": "missing_at_anchor", "byte_length": 0, "prefix_sha256": ""}` and
+  does not raise, confirmed against a temporary output root containing only the
+  new glob — so enrolling the sidecar before the build creates it cannot break
+  an anchor run. `performance/` is outside `ARCHIVE_EXCLUDED_PREFIXES`
+  (`= ("polymarket_training/",)`, `ledger_anchor.py:101`), and the
+  `undeclared_missing` check that reads it (`disaster_recovery.py:1085-1088`,
+  filtering on `relative.startswith(ARCHIVE_EXCLUDED_PREFIXES)`) can therefore
+  never select `performance/scheduler_attribution_v1.csv` — the WO-127
+  restore-boundary logic in `disaster_recovery.py` is not engaged by this
+  entry. And `corpus_retention.py` also reads `DEFAULT_LEDGER_REGISTRY`
+  directly (`:25`), through `_ledger_patterns` (`:250-259`) called from
+  `_protected` (`:262`, predicate at `:268`) and again to build the published
+  `protected_ledger_patterns` telemetry field (`:680`) — executed this session
+  in two worktrees, this WO's two edits take the *explicit* glob-enrollment of
+  the sidecar path from absent to present on both the code-default path (32
+  patterns -> 33, not explicitly matched -> matched) and the config path (40 ->
+  41, not explicitly matched -> matched). The *pruning* outcome does not
+  change: `_protected` (`:272`) already returns `True` for anything under
+  `performance/` via its hard namespace exclusion, with or without the glob
+  match, so `corpus_retention` was never going to prune this sidecar either
+  way. The only observable delta is that `protected_ledger_patterns` (`:680`),
+  a published WO-71 telemetry field, gains one more string. Direction
+  TIGHTENS (disclosure only; no protection this WO's edits could remove).
+- `tests/test_polymarket_vps_docker.py`
+- `tests/polymarket_predictive_engine/test_degraded_state_watchdog.py`
+
+**Do NOT touch** `REGISTERED_JOB_FRESHNESS_MAX_SECONDS` (any entry, in either
+direction — `ORPHAN_BOUND_SECONDS` and `DRAG_BUDGET_SECONDS` READ from it but
+never write to it), `PUSH_STATUS_MAX_SECONDS`, `INCIDENT_FIELDS` (frozen at 14,
+`:94-108`), `_evaluate_operating_state` (`:883`), `_evaluate_slos_and_pushes`
+(`:1050`, produces `operating_state_slo_breach`, out of scope per the Provenance
+section above), any interval or timeout literal, any env clamp, or
+`tests/polymarket_predictive_engine/test_wo92_clock_boundaries.py`.
+
+**Fresh-branch requirement.** Registration proceeds from a fresh branch cut off
+current `origin/main` at build-dispatch time. The parked branch
+`claude/register-wo152-scheduler-attribution` (tip `f11f664c`, confirmed NOT an
+ancestor of `origin/main` via `git merge-base --is-ancestor` again this session)
+carries this WO's first draft and is a citation SOURCE only for that drafting
+history — it is **never** merged into, rebased onto, or built from.
+
+### Tests (enumerated)
+
+**Which of the following were execution-verified before a build exists.**
+`_append_attribution`'s body, `mark_in_flight`'s eight real call sites, and the
+new `MAKER_STUDY_STARTED_AT` stamp do not exist on `origin/main` today, so
+Tests 1-5, 15, 16, 21 and 30 could not be run as tests this session — their
+MECHANISMS were instead executed directly (the shell wrapper extracted
+verbatim, the sidecar's two row-selection predicates, the `occupancy_error`
+round-trip, the header-mismatch raise) and are cited as such below. Every
+other numbered test was run against the real, unmodified `origin/main`
+functions this session, as stated inline.
+
+Scheduler side:
+
+1-5. `mark_in_flight` sets only `in_flight_since_utc` and preserves every other
+   key on that job's record and every other job's record; `mark_in_flight`
+   followed by `stamp_status` clears the marker on success AND on failure;
+   missing, empty, AND CORRUPT (existing but unparseable) `status.json` are
+   three distinct cases and must be asserted separately: missing and empty both
+   produce valid JSON with no leftover temp file (the two cases with nothing in
+   the existing file to lose); a corrupt existing file — non-empty text that
+   `json.loads` rejects — SKIPS the marker write, logs, returns 0, and leaves
+   the corrupt file byte-for-byte untouched, rather than being replaced
+   wholesale (see the corrupt-input paragraph in Writes §1); every job with a
+   work path in `MARKED_JOBS` is marked, asserted against the constant rather
+   than a hand-copied list (this now requires the new `MAKER_STUDY_STARTED_AT`
+   line to exist, or the assertion fails honestly rather than passing
+   vacuously); `run_book_pulse` with `OPS_BOOK_PULSE_ENABLED=0` does not mark.
+   The corrupt-input case, executed this session against the registered
+   wrapper under `dash`, `sh` and `bash`: rc 0 in all three, a log line naming
+   `mark_in_flight` emitted, the calling shell alive (a statement after the
+   call executes), no temp file created, and the corrupt file's bytes
+   unchanged — differentiated from the missing/empty cases, which still write.
+
+6-7. **`mark_in_flight`'s three failure directions, under the production shell
+   family.** Source the scheduler library-only and call the wrapper (a) with one
+   argument, (b) with an explicit empty second argument, and (c) with a python
+   child that cannot write. Assert in every case: the function returns 0, the
+   calling shell is STILL RUNNING (a statement after the call executes and its
+   output is observed), and a log line naming `mark_in_flight` was emitted.
+   Run under `sh` with `set -u`. Executed this session for all three cases under
+   `dash`, `sh` and `bash`: the wrapper as registered passes all three, and the
+   two-argument-with-bare-`"$2"` form an earlier draft registered fails (a)
+   fatally — `2: parameter not set`, shell exit 2, nothing after the call
+   reached.
+
+Watchdog side:
+
+8. `grep -c "OPS_SCHEDULER_LIBRARY_ONLY" tests/test_polymarket_vps_docker.py`
+   == `14`; tree-wide
+   (`grep -rn "OPS_SCHEDULER_LIBRARY_ONLY" --include='*.py' tests/ | wc -l`)
+   == `15` (the 15th occurrence is
+   `tests/polymarket_predictive_engine/test_training_harvest.py:291`, a
+   different test file using the same library-only sourcing idiom). Re-verified
+   this session, and additionally: those 14 occurrences sit in exactly **14
+   distinct test functions, enumerated here**:
+   `test_long_scheduler_job_wait_keeps_safety_pulse_live`,
+   `test_failed_training_harvest_rearms_after_bounded_retry_backoff`,
+   `test_deploy_forced_governance_refresh_is_not_counted_as_scheduler_overrun`,
+   `test_ops_scheduler_disabled_seasonal_card_records_intentional_skip`,
+   `test_ops_scheduler_card_refresh_enabled_by_default_preflights_odds`,
+   `test_ops_scheduler_rotates_oversized_log`,
+   `test_ops_scheduler_log_rotation_is_noop_when_small_or_disabled`,
+   `test_wo117_offset_env_nonnumeric_value_does_not_kill_the_scheduler`,
+   `test_wo117_window_tolerance_boundary_semantics`,
+   `test_wo120_corrupt_stamp_keeps_job_schedulable`,
+   `test_wo120_stamp_status_leaves_no_temp_file_and_valid_json`,
+   `test_book_pulse_interval_and_timeout_env_clamps`,
+   `test_book_pulse_overrun_leaves_last_success_empty_with_numeric_duration_and_recovers`,
+   `test_book_pulse_disabled_stamps_intentional_skip_at_exit_zero`.
+   The "14" is the count of tests in `test_polymarket_vps_docker.py` that
+   follow the established library-only source-and-call pattern
+   (`test_polymarket_vps_docker.py:1063-1078`) — the precedent this WO's own
+   watchdog-side tests extend, not a count of `_evaluate_scheduler_freshness`
+   call sites (that count is 3, see A9).
+9. Execution Fixture A, `trade_prints` stale, window
+   `[2026-08-04T22:42:48.853688+00:00, 2026-08-04T23:04:44+00:00]`:
+   `attribution_state == "attributed"`, `attributed_to == "training_harvest"`,
+   `overlap_seconds == 643.0`, `drag_budget_seconds == 300`,
+   `occupancy_unmeasurable == []`. `643.0` is `window_end - in_flight_since_utc`
+   for the measured marker.
+10. Execution Fixture A, `book_pulse` stale, window
+    `[2026-08-04T22:48:49.556121+00:00, 2026-08-04T23:04:44+00:00]`:
+    `attribution_state == "attributed"`, `attributed_to == "training_harvest"`,
+    `overlap_seconds == 643.0`, `drag_budget_seconds == 600`,
+    `occupancy_unmeasurable == []`. Tests 9 and 10 land on identical
+    `overlap_seconds` and different `drag_budget_seconds` — the budget is the
+    VICTIM's — for the reason set out in the overlap footnote of the Execution
+    fixtures section, which also states the `stale_unobserved` case in which the
+    identical-overlap property does NOT hold.
+11. `_starved_job_self_state` replay against Execution Fixture A: `trade_prints`
+    (`failed_cycles_total = 2`, no persisted baseline) ->
+    `("no_self_failure_evidence", 2)`; `book_pulse`
+    (`failed_cycles_total = 0`, no baseline) ->
+    `("no_self_failure_evidence", 0)`. Both execution-verified this session
+    against the registered-verbatim function and the fixture body above. Note
+    what this test is FOR: with the key absent the function returns
+    `crash_evident` by its own deliberate fail-alarming rule, which tests the
+    default rather than the victim — so the fixture must carry the counter, and
+    the assertion is `no_self_failure_evidence` in both directions (nonzero but
+    not advancing, and zero).
+12. **Execution Fixture C — safety-lane freshness margins (this test's own
+    fixture, registered here).** A `status.json` in which all 11
+    `REGISTERED_JOB_FRESHNESS_MAX_SECONDS` entities have a parseable
+    `last_success_utc` and `last_exit_code: 0`, with the three safety-lane rows
+    at `executor_ops_monitor` `2026-08-03T03:25:00+00:00`,
+    `degraded_state_watchdog` `2026-08-03T03:26:30+00:00`,
+    `maker_safety_refresh` `2026-08-03T03:20:00+00:00`, and the remaining eight
+    set so they are fresh throughout (`governance_refresh`
+    `2026-08-03T00:38:00+00:00`, `clv_snapshot` `2026-08-02T22:38:00+00:00`,
+    `locked_card_refresh` and `ledger_anchor` `2026-08-02T19:38:00+00:00`,
+    `training_harvest` `2026-08-02T22:35:03+00:00`, `maker_study_intraday`
+    `2026-08-02T17:38:00+00:00`, `trade_prints` `2026-08-03T03:35:00+00:00`,
+    `book_pulse` `2026-08-03T03:36:00+00:00`). Run 1 at
+    `as_of = 2026-08-03T03:27:00Z` establishes the baseline. Run 2 re-uses that
+    same fixture at `as_of = 2026-08-03T03:38:00Z` (11 minutes later). Margin
+    arithmetic against the real evaluator's strict `stale = age_seconds >
+    maximum` (`:656`): `executor_ops_monitor` age 780.0s, margin 120.0s;
+    `degraded_state_watchdog` age 690.0s, margin 210.0s;
+    `maker_safety_refresh` age 1080.0s, margin 2520.0s. All three stay fresh, so
+    `new_incident_count == 0`. Counterfactual: at `as_of = 2026-08-03T03:42:00Z`,
+    ages 1020.0 and 930.0 push `executor_ops_monitor` and
+    `degraded_state_watchdog` over their 900s ceilings and
+    `new_incident_count == 2` — confirming 03:38:00Z, not 03:42:00Z, is the
+    correct fixture value. All three instants were run through the REAL
+    `_evaluate_scheduler_freshness` this session and every age, margin and count
+    above is its output. **What this test does NOT assert:** it has no sidecar
+    clause, because all three of its subject entities are safety-lane entities
+    and are excluded from attribution by the `job_name in MARKED_JOBS` call-site
+    guard regardless of staleness — so no attribution keys and no sidecar row
+    exist for any of them under any outcome (Test 24 is the executable form of
+    that exclusion).
+13. **Two-overlapping-holders tie-breaking.** Two different `MARKED_JOBS`
+    entities both carry an active marker whose overlap with the SAME victim's
+    stale window meets or exceeds **the victim's** drag budget. Clean synthetic
+    fixture (not real-telemetry-anchored — this test only needs to exercise the
+    tie-break logic, not reproduce a real night): victim `trade_prints`,
+    `window_start = T0 = 2026-08-06T00:00:00Z`,
+    `window_end = T0 + 4000s = 2026-08-06T01:06:40Z`; both
+    `training_harvest.in_flight_since_utc` AND `clv_snapshot.in_flight_since_utc`
+    set to `T0` (at `window_start`, so both collapse to `overlap == 4000.0`,
+    well within `training_harvest`'s 27600s bound and `clv_snapshot`'s 5400s
+    bound). The threshold both must clear is **`trade_prints`' own 300s drag
+    budget** — not their own 3600s budgets; the code reads
+    `DRAG_BUDGET_SECONDS[job_name]` where `job_name` is the victim, and
+    `4000.0 >= 300` for both. Both are therefore candidates for the SAME
+    `trade_prints` incident: `attribution_state == "multiple_candidates"`,
+    `attributed_to == ""`, `drag_budget_seconds == 300`, `occupants` contains
+    both at the SAME `overlap_seconds == 4000.0`, sorted
+    `(-overlap_seconds, job)` — a tie on overlap breaks alphabetically, so
+    `clv_snapshot` sorts before `training_harvest`. Execution-verified this
+    session against the registered algorithm with these exact inputs.
+14. **Exact-boundary overlap assertion.** `overlap_seconds` set to EXACTLY the
+    victim's own `drag_budget_seconds` (not one cent over) must still count as a
+    candidate, since the comparison is `overlap >= drag_budget`, not `>`.
+    Fixture: victim `book_pulse` (budget 600), holder `training_harvest` (bound
+    27600, comfortably not exercised), `window_end = 2026-08-06T02:00:00Z`,
+    `window_start = window_end - 600s = 2026-08-06T01:50:00Z`,
+    `training_harvest.in_flight_since_utc` set to `window_start` exactly (so
+    `overlap == 600.0` exactly, `max(marker_dt, window_start)` collapsing to
+    `window_start`): `attribution_state == "attributed"`,
+    `attributed_to == "training_harvest"`. A companion case with the SAME marker
+    moved 1ms later (`overlap == 599.999`) resolves
+    `attribution_state == "insufficient_to_explain"` (no other candidate
+    exists) — the boundary is genuinely `>=`, not rounded. Both cases
+    execution-verified this session.
+15. **The fail-safe differential-execution test.** Monkeypatch
+    `_attribute_starvation` to raise `RuntimeError("boom")` for one stale job in
+    an otherwise-normal cycle. Assert: the incident row for that job is STILL
+    emitted (not suppressed), with `attributed_to: null` and
+    `occupancy_error == "RuntimeError"`; the `stale` decision, `age_seconds`,
+    `maximum`, `incident_id`, and `episode_start` on that SAME row are
+    unchanged from what they would be with attribution computed successfully
+    (byte-identical up to the attribution keys) — proving the raise is
+    contained to the additive portion only. `occupancy_error` has a durable home
+    because it is a registered member of `SCHEDULER_ATTRIBUTION_FIELDS`; assert
+    it survives a round-trip through `append_csv_rows` rather than being dropped
+    by `extrasaction="ignore"`.
+16. **Attribution-raising non-suppression, sidecar side (companion to 15).**
+    Under the SAME raising scenario as Test 15, assert the sidecar write is ALSO
+    skipped cleanly for that row (via the containment try/except registered in
+    Writes §2) without aborting the cycle's owner notification — i.e., every
+    OTHER incident in the same cycle still reaches `_notification`, and the
+    raising row's absence from the sidecar is the ONLY effect, not a cycle-wide
+    failure.
+17. **The predicted post-WO-149 two-job signature (§152.1's confirmed case).**
+    Satisfied directly by Tests 9 and 10 above (Execution Fixture A is exactly
+    this signature, derived from the real Aug-4 incident pair and shown to
+    re-emit both real ledger rows through the real evaluator) — no separate
+    test registered; the fixture rebuild converged onto this exact scenario, so
+    duplicating it as a second synthetic test would add no coverage.
+18. **The empty-`jobs`-mapping early return.**
+    `_attribute_starvation("trade_prints", {}, window_start, window_end)` — every
+    `other in MARKED_JOBS - {job_name}` finds `jobs.get(other)` is `None`,
+    `_mapping(None) == {}`, `.get("in_flight_since_utc")` is falsy, so every
+    entity is skipped via `continue`. Result: `occupants == []`,
+    `occupancy_unmeasurable == []`, `attribution_state ==
+    "insufficient_to_explain"`, `attributed_to == ""`. Execution-verified this
+    session.
+19. **`test_wo92_clock_boundaries.py` passing unmodified.** Enumerated CI
+    check, not a new scenario: the file at
+    `tests/polymarket_predictive_engine/test_wo92_clock_boundaries.py` (its two
+    calls into `_evaluate_scheduler_freshness` at `:126`/`:132`, re-verified
+    this session) must pass with ZERO lines changed. This is the executable
+    form of the A9 requirement above.
+20. Self-exclusion: `_attribute_starvation` called for `training_harvest`
+    against itself against Execution Fixture A (no other `MARKED_JOBS` entity
+    carries an active marker in that fixture): `attribution_state ==
+    "insufficient_to_explain"`, `occupants == []`, `attributed_to == ""`. See
+    Execution Fixture A's own note: `training_harvest`'s own age at
+    `generated_at_utc` is 87291.1s (precise: 87291.097s) against its 90000s
+    ceiling, so this is a
+    clean deliberate probe rather than a side effect of a fixture that
+    incidentally pushed the holder past its own ceiling.
+21. **The sidecar dedup mapping.** A cycle with 3 active scheduler-freshness
+    incidents, of which only 1 is new this cycle (the other 2 already exist in
+    the main ledger from a prior lock-held cycle): assert `_append_attribution`
+    is called with a list of length exactly 1 — the SAME `new` list
+    `_append_incidents` returned — never the full `active` list of 3.
+22. **Provenance/citation integrity.** Every incident id, `detected_at_utc`,
+    `observation_token`, and measured age cited anywhere in this WO matches
+    `origin/vps-telemetry`'s mirror of
+    `telemetry/outputs/performance/degraded_state_incidents.csv` byte-for-byte
+    at registration time. The scope is these SIX rows, enumerated so the test
+    cannot silently omit one — an earlier draft's scope named only "the Aug-2,
+    Aug-4, and Aug-5 rows" while the Provenance section also cited the Aug-1
+    pair, so the test failed on the WO's own text:
+
+    | id | `detected_at_utc` | entity | `observation_token` | measured age |
+    |---|---|---|---|---|
+    | `degraded_ceada8dc08120eab0fe019f5` | 2026-08-01T22:21:37Z | `trade_prints` | 2026-08-01T22:00:31.489665+00:00 | 1265.51 |
+    | `degraded_b58e47dfc4de7a53bbd6a2db` | 2026-08-02T22:27:37Z | `trade_prints` | 2026-08-02T22:04:29.384575+00:00 | 1387.615 |
+    | `degraded_30b1090328fa74f77f89adad` | 2026-08-04T23:04:44Z | `trade_prints` | 2026-08-04T22:42:48.853688+00:00 | 1315.146 |
+    | `degraded_f326466a86f036e6f978c45e` | 2026-08-04T23:04:44Z | `book_pulse` | 2026-08-04T22:48:49.556121+00:00 | 954.444 |
+    | `degraded_4262bdaba8a783dbf7f6423f` | 2026-08-05T23:14:22Z | `trade_prints` | 2026-08-05T22:50:32.707912+00:00 | 1429.292 |
+    | `degraded_054ae17ce60107145084066e` | 2026-08-05T23:19:35Z | `book_pulse` | 2026-08-05T23:03:40.376208+00:00 | 954.624 |
+
+    The ages are compared as the ledger's own `reason`-string text, which is
+    built with `round(age_seconds, 3)` (`:683`) — so `1265.51`, not `1265.5`,
+    and `1387.615`, not `1387.6`. Every row above was recomputed from
+    `detected_at_utc - observation_token` this session and matches the ledger's
+    string exactly. A documentation-integrity check, not a new runtime
+    behaviour; the two `operating_state_slo_breach` rows cited in the Provenance
+    section (2026-08-01T22:28:07Z and 2026-08-02T22:42:22Z, both on entity
+    `operating_state_slo`, reason `SLO rows breached, unknown, or missing:
+    scheduler_overrun_cycles`) are in scope for the same check.
+23. *(withdrawn — see the withdrawal note after Test 30. The surviving slots are
+    NOT renumbered.)*
+24. Calling `_attribute_starvation` for each of the 3 safety-lane entities
+    raises `KeyError` (uncaught); the registered `job_name in MARKED_JOBS`
+    call-site guard means this is never reached in production. Re-verified
+    this session for all three names against the current tree.
+25. Missing `failed_cycles_total` and `failed_cycles_total = "garbage"` both
+    resolve `crash_evident`; `3` against a persisted baseline of `2` with
+    `exit 0` also resolves `crash_evident`; and the control case `3` against a
+    baseline of `3` with `exit 0` resolves `no_self_failure_evidence` (no false
+    alarm on a genuinely steady job). All four execution-verified this session.
+26. A synthetic `training_harvest` marker aged exactly 26000s at `window_end`,
+    with a `trade_prints` stale window comfortably containing it: under the
+    registered 27600s bound, `attribution_state == "attributed"`,
+    `attributed_to == "training_harvest"`, `overlap_seconds == 26000.0`; under a
+    24000s bound, `attribution_state == "holder_unmeasurable"` — the two bounds
+    discriminate on this exact fixture. Re-executed this session against the
+    algorithm above.
+27. **Future-dated marker discriminator.** `training_harvest.in_flight_since_utc`
+    set to a value strictly AFTER `window_end` (one day after). Without the
+    explicit branch this produced `attribution_state ==
+    "insufficient_to_explain"` — an affirmative "evidence complete" claim on a
+    clock-defective marker; with the branch registered in Writes §2,
+    execution-verified this session: `attribution_state ==
+    "holder_unmeasurable"`, `attributed_to == ""`, `occupancy_unmeasurable ==
+    ["training_harvest"]`.
+28. **Orphan-bound discriminator for `UNBOUNDED_MARKED_JOBS`.** Two cases, both
+    execution-verified this session: (a) `locked_card_refresh.in_flight_since_utc`
+    aged 30 days, real holder unmarked — without the orphan bound:
+    `attribution_state == "attributed"`, `attributed_to ==
+    "locked_card_refresh"` (a confident WRONG attribution on an orphan); with
+    it: `attribution_state == "holder_unmeasurable"`, `attributed_to == ""`,
+    `occupancy_unmeasurable == ["locked_card_refresh"]`. (b) The SAME job aged 3
+    hours (comfortably inside its own 46800s ceiling) with a real victim:
+    `attribution_state == "attributed"`, `attributed_to ==
+    "locked_card_refresh"`, `source == "in_flight_unbounded"` — confirming the
+    bound does not disturb normal, in-bound attribution for these three jobs.
+29. **Cross-cycle consistency (Execution Fixture B).**
+    `_attribute_starvation("trade_prints", ...)` called once at Cycle A's
+    `window_end` (`2026-08-05T23:14:22+00:00`) and again at Cycle B's
+    (`2026-08-05T23:19:35+00:00`) — same fixture, same holder, 313s apart:
+    `attributed_to == "training_harvest"` in BOTH calls, with `overlap_seconds`
+    growing `330.0 -> 643.0` as the hold continues and `attributed_to`
+    unchanged. `_attribute_starvation("book_pulse", ...)` at Cycle B:
+    `attributed_to == "training_harvest"` also, `overlap_seconds == 643.0`,
+    `drag_budget_seconds == 600` — the SAME holder named for a victim that only
+    became measurable mid-hold. The assertion this test registers: for one
+    continuous hold spanning multiple watchdog cycles, every marked job's
+    freshness incident that names an `attributed_to` at all names the SAME one,
+    and a victim that becomes stale mid-hold is attributed consistently with
+    victims that were already stale. Execution-verified this session against
+    both cycles.
+30. **The sidecar's row-SELECTION predicate.** A cycle whose `new` list mixes
+    registrations — one `scheduler_completion_freshness` row carrying attribution
+    keys, one `operating_state_slo_breach` row carrying none, and one
+    `degraded_state_watchdog_wedged` row carrying none — must produce exactly
+    ONE sidecar row, the freshness one. Assert the sidecar file has 1 data row
+    and that its `entity` is the freshness row's. This is the discriminating
+    test for the second predicate registered in Writes §2: an implementation
+    keyed on `row in new` alone writes 3 rows, two of them blank in every
+    attribution column, because `append_csv_rows` fills absent keys with `""`
+    (`utils.py:198`) rather than raising. Real-ledger scale of the failure it
+    prevents: 784 of 839 rows in `origin/vps-telemetry`'s mirror (read at
+    `6c032fe6`, this session) are not `scheduler_completion_freshness`, and 15
+    real cycles mix a freshness row with another registration at the same
+    `detected_at_utc`.
+
+**Withdrawal note — a slot that was never a test.** An earlier draft of this WO
+carried a Test 23 reserved for an "inertness" item inherited from a review
+round's "verified clean" list. That list named the item ALONGSIDE the test range
+rather than within it: it was a NOTE about this WO being inert, not a test, and it was
+already discharged in the fail-safe section above ("write-only telemetry",
+"strictly additive", and the A9 enumeration). No test was ever specified for it
+and none is owed. Slot 23 is therefore WITHDRAWN rather than reserved, because a
+registered test whose expectation cannot be reproduced is an admission failure
+outright and cannot be admitted flagged — registration makes the number
+permanent specification. Surviving slots 24-30 keep their numbers so every
+citation of them elsewhere in this WO stays valid.
+
+### Day-after check
+
+**Scoped to `scheduler_completion_freshness` incidents only.** At the next
+`training_harvest` window (~22:20-23:2xZ), every `scheduler_completion_freshness`
+incident for `trade_prints` and/or `book_pulse` carries `attributed_to:
+"training_harvest"` with `source: "in_flight"` and an `overlap_seconds`
+consistent with that run's stamped duration — matching the exact signature
+Execution Fixtures A and B demonstrate. If a hold spans more than one watchdog
+cycle (the Aug-5 shape), `attributed_to` names the SAME holder across every
+cycle of that hold, per Test 29. **The pass REQUIRES the sidecar CSV row
+specifically** — the `attribution_state` / `attributed_to` columns of
+`performance/scheduler_attribution_v1.csv` (one row per new incident
+identity). The same keys on the corresponding `degraded_state.json`
+`new_incidents` row are corroboration only, never sufficient alone: the
+sidecar write is contained by `except Exception: pass` (Writes §2), so a
+sidecar write failing on every cycle forever would leave the json path
+healthy and an "either suffices" check passing while the append-only,
+ledger-anchored, tamper-evidenced artifact this WO exists to create stays
+permanently empty — the one production state in which this WO's own stated
+purpose is silently defeated while its own day-after check reports success.
+Requiring the sidecar row specifically closes that gap. If any cycle instead
+returns `insufficient_to_explain` /
+`holder_unmeasurable` / `multiple_candidates`, the sidecar row discloses which
+and why — which says the holder is not cleanly resolvable among the registered
+jobs and points a follow-on somewhere new. **`operating_state_slo_breach`
+incidents are explicitly excluded from this check — they are out of scope for
+this WO (see Provenance) and carry no attribution keys and no sidecar row under
+any outcome.** All in-scope outcomes are informative; the current state, where
+the question cannot be asked of `scheduler_completion_freshness` incidents at
+all, is not.
+
+**The explicit blind-code falsifier.** The check FAILS if a
+`scheduler_completion_freshness` row appears for `trade_prints` or `book_pulse`
+in `degraded_state_incidents.csv` with no corresponding row in
+`scheduler_attribution_v1.csv` and no `attribution_state` key on the
+`degraded_state.json` `new_incidents` row for that incident — that is what
+today's blind state looks like, and it is exactly the state this check must
+distinguish from a built, working mechanism — **or** a
+`scheduler_completion_freshness` row with no corresponding sidecar row,
+whatever the json shows, so the falsifier agrees with the pass rule above,
+which requires the sidecar row specifically and does not accept the json row
+as a substitute.
+
+**UNRUN, not passed, on a quiet night.** If no `training_harvest` window
+overlaps either victim going stale — neither `trade_prints` nor `book_pulse`
+crosses its freshness ceiling that night — no `scheduler_completion_freshness`
+incident exists to attribute, and this check has nothing to evaluate. Record
+it as UNRUN for that night, not as passed: a night with no incident to
+attribute proves nothing about whether attribution works, and it must not be
+read as informative silence.
+
+### 152.1 — Follow-on, NOT part of this build: the contention is structural and will get worse on the next deploy
+
+Registered now so it is not rediscovered, and deliberately separated so WO-152's
+build stays small enough that its own duplicate set is enumerable by inspection.
+
+WO-149's `run_book_pulse` is merged and joins the same serial loop, mutually
+exclusive with `trade_prints`, at `interval 300s` with a **900s** registered
+ceiling (`degraded_state_watchdog.py:68`; an earlier draft cited `:69`, which is
+`executor_ops_monitor`, not `book_pulse` — the values coincide at 900 so the
+error was silent) — a drag budget of `900 - 300 = 600s`. Its registered headroom
+argument budgets for *"two consecutive missed pulses at the measured 1.16-1.18x
+scheduler drag (2 x ~354s = ~708s) with ~192s headroom"*. That budget assumes
+ordinary per-tick drag. **A 762.1s single-job occupancy exceeds it outright**, so
+the prediction on record was that deploying WO-149 would add a nightly
+`book_pulse` freshness incident alongside the existing pair, at the same nightly
+window. **Confirmed twice** — 2026-08-04 (one watchdog observation, both jobs)
+and 2026-08-05 (two separate observations, 313s apart, opposite order) — see
+Provenance, above.
+
+**The occupancy has not shrunk since — the literal, snapshot-specific figures
+keep moving, but the structural claim survives every re-read.**
+`origin/vps-telemetry`'s object store this session recovers NINE distinct
+`training_harvest` runs by `started_at_utc`, each recovered from a parentless
+snapshot commit: `662.070 / 762.127 / 751.903 / 766.736 / 816.996 /
+767.804 / 724.246 / 929.695 / 788.363` seconds — all nine recovered from the
+object store over this WO's drafting life, the ninth (`788.363s`, run started
+`2026-08-12T00:44:13Z`) still the most recent as of this session's own fresh
+fetch of the current tip, `2992aabd1e695851e69f0abce55b45a108649fde`
+(`generated_at_utc 2026-08-12T05:28:37.993289+00:00` — the branch does not sit
+still). At that current tip: `book_pulse.duration_seconds = 30.973`,
+`trade_prints.duration_seconds = 52.617`, `failed_cycles_total` still 14, and
+`training_harvest` itself is unchanged since the ninth run (`started_at_utc
+2026-08-12T00:44:13+00:00`, `duration_seconds 788.363` — the same run, not a
+tenth). The LITERAL figures are pinned as a RANGE rather than a single
+superseded literal, because new runs keep arriving between drafting rounds and
+a tenth is not far off. The STRUCTURAL claim only strengthens across all nine:
+every single one exceeds both victims' drag budgets outright (the SMALLEST,
+`662.070s`, still clears `trade_prints`' `300s` budget by more than 2x and
+`book_pulse`'s `600s` budget outright), and neither victim is itself slow: the
+whole 900s/1200s shortfall remains the holder's on every measured night.
+
+The structural statement, for whoever builds the remedy: for a job in a serial
+loop, `drag_budget = ceiling - interval`, and the loop can honour every
+registered ceiling only if the largest single-job occupancy is below the
+smallest drag budget among the jobs it can delay. Today that occupancy ranges
+`662.070s-929.695s` across nine measured nights (most recently `788.363s`,
+still current at `2992aabd`) against `trade_prints`'s `300s` and
+`book_pulse`'s `600s`. **The
+remedy must
+not be to raise a ceiling** — the incidents report truth, and raising a
+ceiling to silence a true alert is a gate loosening. Candidate directions, none
+registered here: bound a long job's per-pass occupancy; give the harvest its own
+loop with a lock preserving the registered mutual exclusivity; or publish the
+intervals and timeouts into `status.json` so the incompatibility is computable
+offline and visible at deploy rather than nightly. Each needs its own WO, its own
+admission pass, and evidence from WO-152's attribution.
+
 ## WO-154 — Current maker-carry portfolio members must always be MEASURED, not merely yield-ranked, by `_yield_first_shortlist` — `queued` (registered 2026-08-05; touches the maker-carry study's selection surface → OWNER MERGE after line-audit; measurement-coverage fix that nonetheless changes WHICH markets can occupy the sized portfolio versus today — owner must ratify this framing at registration, not only the code; v3 — the v1 draft's S8 admission gate returned NOT ADMISSIBLE with 5 blockers (B1-B5) and 6 non-blocking findings (N1-N6); the v2 redraft's second S8 admission pass returned NOT ADMISSIBLE on exactly two items (B-v2-A, B-v2-B) plus 3 non-blocking findings (N-v2-1..3); all fixed here per both gates' rulings)
 
 **Provenance.** A class-X trace (2026-08-05) found the maker-carry portfolio

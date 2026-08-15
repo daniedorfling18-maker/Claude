@@ -391,3 +391,26 @@ def test_incomplete_label_key_wins_even_when_the_label_is_also_dirty() -> None:
     rejected = join_clean_settled_predictions([prediction], [both_wrong])[1]
 
     assert rejected[0]["reason"] == "label key is incomplete"
+
+
+def test_multi_defect_label_row_reports_the_highest_precedence_cause() -> None:
+    """Precedence must hold WITHIN a row, not just across rows.
+
+    A single label that is both non-all_valid and carries an invalid settlement
+    used to exit at the horizon branch, so _record_drop never saw the
+    higher-ranked settlement reason and no reordering of labels.csv could
+    surface it. Statement order must not be able to override the precedence
+    table.
+    """
+    prediction = {
+        "market_id": "m1", "token_id": "t1", "prediction_timestamp": "2026-01-01T00:00:00Z",
+        "model_probability": "0.7", "market_midpoint": "0.5",
+    }
+    both_wrong = {
+        "market_id": "m1", "token_id": "t1", "prediction_timestamp": "2026-01-01T00:00:00Z",
+        "target": "", "horizon": "h24", "resolution_quality": "clean_settlement",
+    }
+
+    rejected = join_clean_settled_predictions([prediction], [both_wrong])[1]
+
+    assert rejected[0]["reason"] == "label is not a clean binary settlement"

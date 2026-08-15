@@ -180,20 +180,29 @@ def _label_index(
         # the earlier branch, incomplete_pairs never populated, and a complete
         # prediction for the same market/token reported a timestamp mismatch.
         # The declared ordering has to be the executed ordering.
+        # EVERY applicable predicate is evaluated and _LABEL_DROP_PRECEDENCE
+        # arbitrates. Short-circuiting on the first failing check made the
+        # declared precedence a lie three separate times: whichever branch
+        # happened to sit earliest won, regardless of its rank, so a row with
+        # more than one defect reported the wrong producer. Control flow must
+        # not be able to contradict the precedence table - the only way to
+        # guarantee that is to stop encoding priority in statement order.
+        reasons: list[str] = []
         if not all(key):
-            _record_drop(dropped, key, "label key is incomplete")
+            reasons.append("label key is incomplete")
             # A label missing only its timestamp still registers its pair, so
             # without this the join would report a timestamp MISMATCH and send
             # the operator to change the join key, when the actual fault is a
             # malformed label producer.
             if key[0] and key[1]:
                 incomplete_pairs.add((key[0], key[1]))
-            continue
         if row.get("horizon", "all_valid") not in {"", "all_valid"}:
-            _record_drop(dropped, key, "label horizon is not all_valid")
-            continue
+            reasons.append("label horizon is not all_valid")
         if _label_target(row) is None:
-            _record_drop(dropped, key, "label is not a clean binary settlement")
+            reasons.append("label is not a clean binary settlement")
+        if reasons:
+            for reason in reasons:
+                _record_drop(dropped, key, reason)
             continue
         index[key] = row
     return index, dropped, pairs, incomplete_pairs

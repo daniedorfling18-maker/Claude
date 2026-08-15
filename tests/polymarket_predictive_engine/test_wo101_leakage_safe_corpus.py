@@ -803,3 +803,43 @@ def test_stratification_can_be_disabled_without_changing_legacy_selection() -> N
     selected, meta = historical_backfill_module._stratified_take(corpus, requested=10, max_share_per_family=1.0)
     assert meta["quota_met"] is True
     assert len(selected) == 10
+
+
+def test_candle_series_are_caught_by_name_not_by_duration() -> None:
+    """The duration floor cannot identify candles, measured against the real feed.
+
+    "XRP Up or Down - August 15, 6:00AM-6:15AM ET" is a FIFTEEN MINUTE market
+    whose startDate is the listing time a day earlier, so close-minus-start
+    reads 24.1 hours and clears any sane duration floor. startDate is when the
+    market was listed, not when its event window opens. The venue names its own
+    candle series with the window length, and that is the reliable signal.
+    """
+    candle = {
+        "id": "c1",
+        "closed": True,
+        "question": "XRP Up or Down - August 15, 6:00AM-6:15AM ET",
+        "startDate": "2026-08-14T10:08:59Z",
+        "closedTime": "2026-08-15T10:14:00Z",
+        "events": [{"series": [{"slug": "xrp-up-or-down-15m"}]}],
+    }
+
+    # The duration heuristic alone is fooled, exactly as it was in production.
+    assert historical_backfill_module._market_duration_hours(candle) > 24.0
+
+    reason = historical_backfill_module._excluded_population(
+        candle,
+        min_duration_hours=6.0,
+        excluded_domains=historical_backfill_module.DEFAULT_EXCLUDED_RESOLUTION_DOMAINS,
+    )
+    assert reason == "sub_hourly_candle_series"
+
+
+def test_series_slug_is_the_family_key() -> None:
+    """Measured on the live feed: 100/100 markets carry a series slug and 0/100
+    carry a category, so keying on category alone never bound anything."""
+    fixture = {"events": [{"series": [{"slug": "dota-2"}]}], "category": ""}
+    assert historical_backfill_module._market_family(fixture) == "series:dota-2"
+
+    # A one-off question with no series - the shape the study actually trades.
+    one_off = {"slug": "will-enzo-fernandez-stay-at-chelsea", "events": []}
+    assert historical_backfill_module._market_family(one_off).startswith("slug:")

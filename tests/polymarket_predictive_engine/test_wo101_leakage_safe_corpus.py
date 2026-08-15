@@ -678,3 +678,128 @@ def test_future_quote_enters_only_after_clock_advances() -> None:
     assert reason == "future_observation"
     assert after is not None
     assert accepted == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Corpus stratification.
+#
+# Measured 2026-08-15 against origin/vps-telemetry @ 0ae83704: the resolved
+# corpus held 1000 markets whose top resolution sources were ligue2 (131),
+# MLB (118), flashscore (78), ATP (69), PGA (69) and setkacup (66), plus
+# sub-hourly "Up or Down" crypto candles — and it shared ZERO condition ids
+# with the 40 markets the study was quoting. Because the fetch takes the most
+# recently closed markets, and fixtures/candles resolve continuously while a
+# macro question resolves once, that sampling rule can never reach the traded
+# population. Every directional statistic computed on it was measuring a
+# different universe from the one being traded.
+# ---------------------------------------------------------------------------
+
+_STRATA_BASE = datetime(2026, 8, 14, tzinfo=timezone.utc)
+
+
+def _strata_market(index: int, *, category: str, source: str, duration_hours: float) -> dict:
+    close = _STRATA_BASE - timedelta(minutes=index)
+    return {
+        "id": f"m{index}",
+        "conditionId": f"0x{index:04x}",
+        "closed": True,
+        "question": f"question {index}",
+        "category": category,
+        "resolutionSource": source,
+        "startDate": (close - timedelta(hours=duration_hours)).isoformat().replace("+00:00", "Z"),
+        "closedTime": close.isoformat().replace("+00:00", "Z"),
+    }
+
+
+def _measured_corpus_shape() -> list[dict]:
+    """A corpus mirroring the real composition measured on 2026-08-15."""
+    markets: list[dict] = []
+    index = 0
+    for source, count in (
+        ("https://www.ligue2.fr/", 131),
+        ("https://www.mlb.com/scores", 118),
+        ("https://www.flashscore.com/", 78),
+        ("https://www.atptour.com/en/scores/current", 69),
+        ("https://www.pgatour.com/", 69),
+        ("https://setkacup.com", 66),
+    ):
+        for _ in range(count):
+            markets.append(_strata_market(index, category="sports", source=source, duration_hours=3.0))
+            index += 1
+    for _ in range(150):
+        markets.append(_strata_market(index, category="crypto", source="https://data.chain.link/", duration_hours=5 / 60))
+        index += 1
+    for category, count in (("politics", 40), ("geopolitics", 35), ("macro", 30), ("culture", 20)):
+        for _ in range(count):
+            markets.append(_strata_market(index, category=category, source="https://www.reuters.com/", duration_hours=720.0))
+            index += 1
+    return markets
+
+
+def test_per_fixture_sport_and_subhourly_candles_are_excluded() -> None:
+    excluded = historical_backfill_module.DEFAULT_EXCLUDED_RESOLUTION_DOMAINS
+    kwargs = {"min_duration_hours": 6.0, "excluded_domains": excluded}
+
+    fixture = _strata_market(1, category="sports", source="https://setkacup.com", duration_hours=3.0)
+    assert historical_backfill_module._excluded_population(fixture, **kwargs).startswith("per_fixture_sport")
+
+    # www. prefixes and sub-paths must not defeat the domain match.
+    ligue2 = _strata_market(2, category="sports", source="https://www.ligue2.fr/calendrier", duration_hours=3.0)
+    assert historical_backfill_module._excluded_population(ligue2, **kwargs).startswith("per_fixture_sport")
+
+    candle = _strata_market(3, category="crypto", source="https://data.chain.link/", duration_hours=5 / 60)
+    assert historical_backfill_module._excluded_population(candle, **kwargs) == "sub_duration_floor"
+
+    tradeable = _strata_market(4, category="geopolitics", source="https://www.reuters.com/", duration_hours=720.0)
+    assert historical_backfill_module._excluded_population(tradeable, **kwargs) == ""
+
+
+def test_stratified_take_reaches_the_traded_population() -> None:
+    """The regression this exists to prevent: a corpus that is 100% sport."""
+    corpus = _measured_corpus_shape()
+
+    recency_only = sorted(corpus, key=historical_backfill_module._market_close_dt, reverse=True)[:200]
+    recency_families = {historical_backfill_module._market_family(m) for m in recency_only}
+    assert recency_families == {"sports"}, "precondition: recency-only sampling returns sport alone"
+
+    eligible = [
+        market
+        for market in corpus
+        if not historical_backfill_module._excluded_population(
+            market,
+            min_duration_hours=6.0,
+            excluded_domains=historical_backfill_module.DEFAULT_EXCLUDED_RESOLUTION_DOMAINS,
+        )
+    ]
+    selected, meta = historical_backfill_module._stratified_take(
+        eligible, requested=200, max_share_per_family=0.15
+    )
+
+    families = {historical_backfill_module._market_family(m) for m in selected}
+    assert "sports" not in families
+    assert "crypto" not in families
+    assert families == {"politics", "geopolitics", "macro", "culture"}
+    assert meta["composition"]["politics"] == 30
+    # Every family is capped, so no single population can crowd out the rest.
+    assert max(meta["composition"].values()) <= meta["per_family_cap"]
+
+
+def test_stratified_take_reports_an_unfilled_quota_rather_than_hiding_it() -> None:
+    """A short corpus is a finding about the venue, not a silent shortfall."""
+    thin = [
+        _strata_market(i, category="politics", source="https://www.reuters.com/", duration_hours=720.0)
+        for i in range(5)
+    ]
+    selected, meta = historical_backfill_module._stratified_take(thin, requested=200, max_share_per_family=1.0)
+
+    assert len(selected) == 5
+    assert meta["selected_markets"] == 5
+    assert meta["requested_markets"] == 200
+    assert meta["quota_met"] is False
+
+
+def test_stratification_can_be_disabled_without_changing_legacy_selection() -> None:
+    corpus = _measured_corpus_shape()
+    selected, meta = historical_backfill_module._stratified_take(corpus, requested=10, max_share_per_family=1.0)
+    assert meta["quota_met"] is True
+    assert len(selected) == 10

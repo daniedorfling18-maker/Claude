@@ -62,10 +62,41 @@ historical_backfill:
   # depth in months, at 1000/day in weeks. ~10 extra key-less Gamma pages/day.
   max_closed_markets: 1000
   page_size: 100
+  # 2026-08-15: raised from the 25 default. Stratification excludes the large
+  # majority of recently-closed markets, so the scan must page deeper to fill
+  # the quota than it did to fill a plain recency slice.
+  max_pages: 60
   request_timeout_seconds: 30
   request_pause_seconds: 0.1
   gamma_query_params: {}
   max_age_days: 365
+  # Corpus stratification. Measured 2026-08-15: the unstratified corpus held
+  # 1000 markets (ligue2 131, MLB 118, flashscore 78, ATP 69, PGA 69, setkacup
+  # 66, plus sub-hourly crypto candles) and shared ZERO condition ids with the
+  # 40 markets actually being quoted. Fixtures and candles resolve continuously
+  # while a macro question resolves once, so "most recently closed" can never
+  # reach the traded population, and every directional statistic computed on
+  # that corpus was measuring a different universe from the one being traded.
+  corpus_stratification:
+    enabled: true
+    # Excludes sub-hourly "Up or Down" candles - a coin flip by construction,
+    # and the population that pinned the corpus base rate at exactly 0.5000.
+    min_market_duration_hours: 6.0
+    # Per-fixture sports: priced against the sharpest books in the world, so a
+    # directional result there says nothing about this venue's own markets.
+    excluded_resolution_domains:
+      - setkacup.com
+      - ligue2.fr
+      - mlb.com
+      - flashscore.com
+      - atptour.com
+      - pgatour.com
+      - slstat.com
+      - uefa.com
+      - wtatennis.com
+      - ekstraklasa.org
+    # No single continuously-resolving family may crowd out the rest.
+    max_share_per_family: 0.15
 # 2026-07-09: public data-API executed-trade prints (price/size/aggressor side)
 # for the markets the websocket collector already tracks. Free, key-less.
 # Signed flow is training substrate for WO-33; collection only, never trades.

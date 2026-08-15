@@ -305,3 +305,27 @@ def test_a_model_probability_copied_from_the_midpoint_is_not_currently_diagnosed
     assert len(joined) == 1
     assert joined[0]["model_probability"] == joined[0]["market_probability"] == 0.55
     assert joined[0]["model_probability_source"] != joined[0]["market_probability_source"]
+
+
+def test_incomplete_label_key_is_not_reported_as_a_timestamp_mismatch(tmp_path: Path) -> None:
+    """A malformed label producer must not look like a bad join key.
+
+    A label missing only its prediction_timestamp still registers its
+    (market_id, token_id) pair, so the mismatch branch would claim the label
+    exists at a different instant - sending the operator to change the join key
+    when the actual fault is upstream of it.
+    """
+    cfg = _cfg(tmp_path, minimum_rows=4)
+    prediction, label = _row_pair(
+        market_id="market-1", token_id="token-01", target=1,
+        model_probability=0.7, market_probability=0.5, question="Some question",
+    )
+    label["prediction_timestamp"] = ""  # malformed producer, pair still present
+
+    write_csv(cfg.output_root / "polymarket_predictions" / "predictions.csv", [prediction], list(prediction))
+    write_csv(cfg.output_root / "polymarket_training" / "labels.csv", [label], list(label))
+
+    payload = build_family_calibration_scorecard(cfg)
+
+    assert payload["clean_settled_joined_rows"] == 0
+    assert payload["rejected_join_reasons"] == {"label key is incomplete": 1}

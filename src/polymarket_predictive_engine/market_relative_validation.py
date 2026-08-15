@@ -131,7 +131,12 @@ def _label_target(row: Mapping[str, Any]) -> int | None:
 
 def _label_index(
     label_rows: Iterable[Mapping[str, Any]],
-) -> tuple[dict[tuple[str, str, str], Mapping[str, Any]], dict[tuple[str, str, str], str], set[tuple[str, str]]]:
+) -> tuple[
+    dict[tuple[str, str, str], Mapping[str, Any]],
+    dict[tuple[str, str, str], str],
+    set[tuple[str, str]],
+    set[tuple[str, str]],
+]:
     """Index clean settled labels, and retain WHY each dropped label was dropped.
 
     A label can fail to reach the index for three quite different reasons, and
@@ -146,6 +151,7 @@ def _label_index(
     index: dict[tuple[str, str, str], Mapping[str, Any]] = {}
     dropped: dict[tuple[str, str, str], str] = {}
     pairs: set[tuple[str, str]] = set()
+    incomplete_pairs: set[tuple[str, str]] = set()
     for row in label_rows:
         key = (str(row.get("market_id", "")), str(row.get("token_id", "")), str(row.get("prediction_timestamp", "")))
         if key[0] and key[1]:
@@ -158,9 +164,15 @@ def _label_index(
             continue
         if not all(key):
             dropped.setdefault(key, "label key is incomplete")
+            # A label missing only its timestamp still registers its pair, so
+            # without this the join would report a timestamp MISMATCH and send
+            # the operator to change the join key, when the actual fault is a
+            # malformed label producer.
+            if key[0] and key[1]:
+                incomplete_pairs.add((key[0], key[1]))
             continue
         index[key] = row
-    return index, dropped, pairs
+    return index, dropped, pairs, incomplete_pairs
 
 
 def _unit_key(row: Mapping[str, Any]) -> str:
@@ -184,7 +196,7 @@ def join_clean_settled_predictions(
     label_rows: Iterable[Mapping[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Join prediction rows to clean settled labels without using label columns as features."""
-    labels, dropped_labels, labelled_pairs = _label_index(label_rows)
+    labels, dropped_labels, labelled_pairs, incomplete_pairs = _label_index(label_rows)
     joined: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
 
@@ -198,6 +210,8 @@ def join_clean_settled_predictions(
             # timestamp-key or label-quality problem to corpus coverage.
             if key in dropped_labels:
                 reason = dropped_labels[key]
+            elif (key[0], key[1]) in incomplete_pairs:
+                reason = "label key is incomplete"
             elif (key[0], key[1]) in labelled_pairs:
                 reason = "label exists for market and token but not at this prediction_timestamp"
             else:

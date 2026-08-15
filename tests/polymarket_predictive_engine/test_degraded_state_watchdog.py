@@ -11,14 +11,24 @@ import pytest
 from polymarket_predictive_engine.cli import COMMANDS
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.degraded_state_watchdog import (
+    ATTRIBUTION_LEDGER,
+    IN_FLIGHT_STALE_AFTER_SECONDS,
     INCIDENT_LEDGER,
     LEGACY_WALLET_REGISTRATION_ID,
+    MARKED_JOBS,
     REGISTERED_JOB_FRESHNESS_MAX_SECONDS,
     REGISTERED_MAXIMA,
+    SCHEDULER_ATTRIBUTION_FIELDS,
     WALLET_HEALTHY_STATES,
     WALLET_REGISTRATION_ID,
+    _append_attribution,
+    _attribute_starvation,
+    _evaluate_scheduler_freshness,
+    _incident_id,
+    _parse_stamp,
     _registrations,
     _settings,
+    _starved_job_self_state,
     build_degraded_state_watchdog as _build_degraded_state_watchdog,
 )
 from polymarket_predictive_engine.ledger_anchor import (
@@ -1570,3 +1580,516 @@ def test_maker_replay_insufficient_coverage_registration_is_unchanged_field_for_
         "observation_unit": "distinct maker replay",
         "evaluation_policy": "registered zero-coverage predicate with no-opportunity exemption",
     }
+
+
+# ---------------------------------------------------------------------------
+# WO-152 — scheduler-starvation attribution ledger.
+#
+# Execution Fixture A is RECORDED, not derived: the trade_prints / book_pulse
+# last_success_utc values and generated_at_utc are verbatim the real incident
+# ledger's observation_tokens and detected_at_utc, training_harvest's record is
+# read verbatim from origin/vps-telemetry 59982de3, and its in_flight_since_utc
+# from 27fc8de8.
+# ---------------------------------------------------------------------------
+
+
+def _wo152_fixture_a() -> dict:
+    return {
+        "mode": "vps_ops_scheduler",
+        "generated_at_utc": "2026-08-04T23:04:44+00:00",
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+        "jobs": {
+            "training_harvest": {
+                "last_run_utc": "2026-08-03T22:49:52.902533+00:00",
+                "last_success_utc": "2026-08-03T22:49:52.902533+00:00",
+                "in_flight_since_utc": "2026-08-04T22:54:01Z",
+                "last_exit_code": 0,
+                "runs_total": 34,
+                "failed_cycles_total": 14,
+                "skipped_cycles_total": 11,
+                "consecutive_skipped_cycles": 0,
+                "skipped_intentional_total": 0,
+                "consecutive_skipped_intentional": 0,
+                "skipped_overrun_total": 11,
+                "consecutive_skipped_overrun": 0,
+                "skip_kind": "none",
+                "skipped_intentional": False,
+                "skipped_overrun": False,
+            },
+            "trade_prints": {
+                "last_run_utc": "2026-08-04T22:42:48.853688+00:00",
+                "last_success_utc": "2026-08-04T22:42:48.853688+00:00",
+                "last_exit_code": 0,
+                "runs_total": 2604,
+                "failed_cycles_total": 2,
+                "skipped_cycles_total": 0,
+                "consecutive_skipped_cycles": 0,
+                "skip_kind": "none",
+                "skipped_intentional": False,
+                "skipped_overrun": False,
+            },
+            "book_pulse": {
+                "last_run_utc": "2026-08-04T22:48:49.556121+00:00",
+                "last_success_utc": "2026-08-04T22:48:49.556121+00:00",
+                "last_exit_code": 0,
+                "runs_total": 289,
+                "failed_cycles_total": 0,
+                "skipped_cycles_total": 0,
+                "consecutive_skipped_cycles": 0,
+                "skip_kind": "none",
+                "skipped_intentional": False,
+                "skipped_overrun": False,
+            },
+            "governance_refresh": {"last_run_utc": "2026-08-04T19:54:01+00:00", "last_success_utc": "2026-08-04T19:54:01+00:00", "last_exit_code": 0, "failed_cycles_total": 0},
+            "clv_snapshot": {"last_run_utc": "2026-08-04T17:54:01+00:00", "last_success_utc": "2026-08-04T17:54:01+00:00", "last_exit_code": 0, "failed_cycles_total": 0},
+            "locked_card_refresh": {"last_run_utc": "2026-08-04T14:54:01+00:00", "last_success_utc": "2026-08-04T14:54:01+00:00", "last_exit_code": 0, "failed_cycles_total": 0},
+            "maker_study_intraday": {"last_run_utc": "2026-08-04T12:54:01+00:00", "last_success_utc": "2026-08-04T12:54:01+00:00", "last_exit_code": 0, "failed_cycles_total": 0},
+            "ledger_anchor": {"last_run_utc": "2026-08-04T14:54:01+00:00", "last_success_utc": "2026-08-04T14:54:01+00:00", "last_exit_code": 0, "failed_cycles_total": 0},
+            "maker_safety_refresh": {"last_run_utc": "2026-08-04T22:53:31+00:00", "last_success_utc": "2026-08-04T22:53:31+00:00", "last_exit_code": 0, "failed_cycles_total": 0},
+            "executor_ops_monitor": {"last_run_utc": "2026-08-04T23:04:42+00:00", "last_success_utc": "2026-08-04T23:04:42+00:00", "last_exit_code": 0, "failed_cycles_total": 0},
+            "degraded_state_watchdog": {"last_run_utc": "2026-08-04T22:59:44+00:00", "last_success_utc": "2026-08-04T22:59:44+00:00", "last_exit_code": 0, "failed_cycles_total": 0},
+        },
+    }
+
+
+_WO152_FIXTURE_A_END = "2026-08-04T23:04:44+00:00"
+_WO152_TRADE_PRINTS_TOKEN = "2026-08-04T22:42:48.853688+00:00"
+_WO152_BOOK_PULSE_TOKEN = "2026-08-04T22:48:49.556121+00:00"
+
+
+def _wo152_window(token: str, end: str = _WO152_FIXTURE_A_END):
+    return _parse_stamp(token), _parse_stamp(end)
+
+
+def test_wo152_fixture_a_trade_prints_attributes_to_training_harvest() -> None:
+    """WO-152 Test 9. The threshold is the VICTIM's drag budget (300s)."""
+    start, end = _wo152_window(_WO152_TRADE_PRINTS_TOKEN)
+    out = _attribute_starvation("trade_prints", _wo152_fixture_a()["jobs"], start, end)
+
+    assert out["attribution_state"] == "attributed"
+    assert out["attributed_to"] == "training_harvest"
+    assert out["drag_budget_seconds"] == 300
+    assert out["occupancy_unmeasurable"] == []
+    assert out["occupants"] == [{"job": "training_harvest", "overlap_seconds": 643.0, "source": "in_flight"}]
+
+
+def test_wo152_fixture_a_book_pulse_same_overlap_different_victim_budget() -> None:
+    """WO-152 Test 10. Same holder, same 643.0s overlap, the victim's own 600s budget."""
+    start, end = _wo152_window(_WO152_BOOK_PULSE_TOKEN)
+    out = _attribute_starvation("book_pulse", _wo152_fixture_a()["jobs"], start, end)
+
+    assert out["attribution_state"] == "attributed"
+    assert out["attributed_to"] == "training_harvest"
+    assert out["drag_budget_seconds"] == 600
+    assert out["occupancy_unmeasurable"] == []
+    assert out["occupants"][0]["overlap_seconds"] == 643.0
+
+
+def test_wo152_fixture_a_reproduces_both_real_ledger_rows(tmp_path: Path) -> None:
+    """WO-152 Tests 9/10/17 end-to-end, plus the failed_cycles_total_observed persistence.
+
+    The two incident ids, observation_tokens and measured ages below are the
+    real ledger's, byte-for-byte.
+    """
+    cfg = _cfg(tmp_path)
+    write_json(cfg.output_root / "ops_scheduler" / "status.json", _wo152_fixture_a())
+    state: dict = {}
+
+    evaluation, incidents = _evaluate_scheduler_freshness(cfg, state, {}, _WO152_FIXTURE_A_END)
+
+    assert len(incidents) == 2
+    by_entity = {row["entity"]: row for row in incidents.values()}
+
+    prints = by_entity["trade_prints"]
+    assert prints["incident_id"] == "degraded_30b1090328fa74f77f89adad"
+    assert prints["observation_token"] == _WO152_TRADE_PRINTS_TOKEN
+    assert prints["reason"] == "scheduler job trade_prints has no successful completion within 1200 seconds; measured age 1315.146 seconds"
+    assert prints["attributed_to"] == "training_harvest"
+    assert prints["drag_budget_seconds"] == 300
+
+    pulse = by_entity["book_pulse"]
+    assert pulse["incident_id"] == "degraded_f326466a86f036e6f978c45e"
+    assert pulse["observation_token"] == _WO152_BOOK_PULSE_TOKEN
+    assert pulse["reason"] == "scheduler job book_pulse has no successful completion within 900 seconds; measured age 954.444 seconds"
+    assert pulse["attributed_to"] == "training_harvest"
+    assert pulse["drag_budget_seconds"] == 600
+
+    assert sum(1 for row in evaluation["jobs"] if row["state"] == "fresh") == 9
+    # Persisted for every registered entity, stale or fresh, marked or not.
+    assert set(state["scheduler_freshness"]) == set(REGISTERED_JOB_FRESHNESS_MAX_SECONDS)
+    assert all("failed_cycles_total_observed" in row for row in state["scheduler_freshness"].values())
+    assert state["scheduler_freshness"]["training_harvest"]["failed_cycles_total_observed"] == 14
+
+
+def test_wo152_self_state_reads_the_victim_not_the_default() -> None:
+    """WO-152 Test 11. The fixture carries the counter, so this tests the victim."""
+    jobs = _wo152_fixture_a()["jobs"]
+    assert _starved_job_self_state("trade_prints", jobs, {}) == ("no_self_failure_evidence", 2)
+    assert _starved_job_self_state("book_pulse", jobs, {}) == ("no_self_failure_evidence", 0)
+
+
+def test_wo152_self_state_fails_alarming_on_missing_or_malformed_counter() -> None:
+    """WO-152 Test 25. Absence is the fail-ALARMING branch, not a fail-silent default."""
+    assert _starved_job_self_state("j", {"j": {"last_exit_code": 0}}, {})[0] == "crash_evident"
+    assert _starved_job_self_state("j", {"j": {"last_exit_code": 0, "failed_cycles_total": "garbage"}}, {})[0] == "crash_evident"
+    advanced = _starved_job_self_state("j", {"j": {"last_exit_code": 0, "failed_cycles_total": 3}}, {"failed_cycles_total_observed": 2})
+    assert advanced == ("crash_evident", 3)
+    steady = _starved_job_self_state("j", {"j": {"last_exit_code": 0, "failed_cycles_total": 3}}, {"failed_cycles_total_observed": 3})
+    assert steady == ("no_self_failure_evidence", 3)
+
+
+def test_wo152_two_holders_tie_is_recorded_not_hidden() -> None:
+    """WO-152 Test 13. Both clear the VICTIM's 300s budget, not their own 3600s ones."""
+    start = _parse_stamp("2026-08-06T00:00:00Z")
+    end = start + timedelta(seconds=4000)
+    jobs = {
+        "training_harvest": {"in_flight_since_utc": start.isoformat()},
+        "clv_snapshot": {"in_flight_since_utc": start.isoformat()},
+    }
+
+    out = _attribute_starvation("trade_prints", jobs, start, end)
+
+    assert out["attribution_state"] == "multiple_candidates"
+    assert out["attributed_to"] == ""
+    assert out["drag_budget_seconds"] == 300
+    # A tie on overlap breaks alphabetically.
+    assert [row["job"] for row in out["occupants"]] == ["clv_snapshot", "training_harvest"]
+    assert {row["overlap_seconds"] for row in out["occupants"]} == {4000.0}
+
+
+def test_wo152_candidate_boundary_is_inclusive() -> None:
+    """WO-152 Test 14. `overlap >= drag_budget`, not `>`."""
+    end = _parse_stamp("2026-08-06T02:00:00Z")
+    start = end - timedelta(seconds=600)
+
+    exact = _attribute_starvation("book_pulse", {"training_harvest": {"in_flight_since_utc": start.isoformat()}}, start, end)
+    assert exact["attribution_state"] == "attributed"
+    assert exact["attributed_to"] == "training_harvest"
+    assert exact["occupants"][0]["overlap_seconds"] == 600.0
+
+    short = _attribute_starvation(
+        "book_pulse",
+        {"training_harvest": {"in_flight_since_utc": (start + timedelta(milliseconds=1)).isoformat()}},
+        start,
+        end,
+    )
+    assert short["attribution_state"] == "insufficient_to_explain"
+    assert short["occupants"][0]["overlap_seconds"] == 599.999
+
+
+def test_wo152_empty_jobs_mapping_is_insufficient_not_a_raise() -> None:
+    """WO-152 Test 18."""
+    start, end = _wo152_window(_WO152_TRADE_PRINTS_TOKEN)
+    out = _attribute_starvation("trade_prints", {}, start, end)
+
+    assert out == {
+        "attribution_state": "insufficient_to_explain",
+        "attributed_to": "",
+        "drag_budget_seconds": 300,
+        "occupants": [],
+        "occupancy_unmeasurable": [],
+    }
+
+
+def test_wo152_holder_is_excluded_from_its_own_attribution() -> None:
+    """WO-152 Test 20. `MARKED_JOBS - {job_name}` is unconditional."""
+    start, end = _wo152_window("2026-08-03T22:49:52.902533+00:00")
+    out = _attribute_starvation("training_harvest", _wo152_fixture_a()["jobs"], start, end)
+
+    assert out["attribution_state"] == "insufficient_to_explain"
+    assert out["attributed_to"] == ""
+    assert out["occupants"] == []
+
+
+def test_wo152_marker_past_its_bound_is_unmeasurable_not_an_infinite_run() -> None:
+    """WO-152 Test 26. The 27600s and 24000s bounds discriminate on this fixture."""
+    end = _parse_stamp("2026-08-06T12:00:00Z")
+    start = end - timedelta(seconds=30000)
+    jobs = {"training_harvest": {"in_flight_since_utc": (end - timedelta(seconds=26000)).isoformat()}}
+
+    in_bound = _attribute_starvation("trade_prints", jobs, start, end)
+    assert in_bound["attribution_state"] == "attributed"
+    assert in_bound["attributed_to"] == "training_harvest"
+    assert in_bound["occupants"][0]["overlap_seconds"] == 26000.0
+
+    tightened = dict(IN_FLIGHT_STALE_AFTER_SECONDS, training_harvest=24000)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr("polymarket_predictive_engine.degraded_state_watchdog.IN_FLIGHT_STALE_AFTER_SECONDS", tightened)
+        out_of_bound = _attribute_starvation("trade_prints", jobs, start, end)
+    assert out_of_bound["attribution_state"] == "holder_unmeasurable"
+    assert out_of_bound["occupancy_unmeasurable"] == ["training_harvest"]
+
+
+def test_wo152_future_dated_marker_folds_into_unmeasurable() -> None:
+    """WO-152 Test 27. A clock/write defect must not read as "evidence complete"."""
+    end = _parse_stamp("2026-08-06T12:00:00Z")
+    start = end - timedelta(seconds=3000)
+    jobs = {"training_harvest": {"in_flight_since_utc": (end + timedelta(days=1)).isoformat()}}
+
+    out = _attribute_starvation("trade_prints", jobs, start, end)
+
+    assert out["attribution_state"] == "holder_unmeasurable"
+    assert out["attributed_to"] == ""
+    assert out["occupancy_unmeasurable"] == ["training_harvest"]
+
+
+def test_wo152_orphan_bound_covers_the_previously_unbounded_jobs() -> None:
+    """WO-152 Test 28. Without the orphan bound an aged marker was a confident WRONG name."""
+    end = _parse_stamp("2026-08-06T12:00:00Z")
+    start = end - timedelta(seconds=3000)
+
+    orphan = _attribute_starvation("trade_prints", {"locked_card_refresh": {"in_flight_since_utc": (end - timedelta(days=30)).isoformat()}}, start, end)
+    assert orphan["attribution_state"] == "holder_unmeasurable"
+    assert orphan["attributed_to"] == ""
+    assert orphan["occupancy_unmeasurable"] == ["locked_card_refresh"]
+
+    live = _attribute_starvation("trade_prints", {"locked_card_refresh": {"in_flight_since_utc": (end - timedelta(hours=3)).isoformat()}}, start, end)
+    assert live["attribution_state"] == "attributed"
+    assert live["attributed_to"] == "locked_card_refresh"
+    assert live["occupants"][0]["source"] == "in_flight_unbounded"
+
+
+def test_wo152_unparseable_marker_folds_into_unmeasurable() -> None:
+    """WO-152, the third occupancy_unmeasurable path registered in Writes §2."""
+    end = _parse_stamp("2026-08-06T12:00:00Z")
+    start = end - timedelta(seconds=3000)
+
+    out = _attribute_starvation("trade_prints", {"training_harvest": {"in_flight_since_utc": "not-a-timestamp"}}, start, end)
+
+    assert out["attribution_state"] == "holder_unmeasurable"
+    assert out["occupancy_unmeasurable"] == ["training_harvest"]
+
+
+def test_wo152_safety_lane_entities_are_never_attributed() -> None:
+    """WO-152 Test 24. The `job_name in MARKED_JOBS` call-site guard is load-bearing."""
+    end = _parse_stamp("2026-08-06T12:00:00Z")
+    start = end - timedelta(seconds=3000)
+
+    assert set(REGISTERED_JOB_FRESHNESS_MAX_SECONDS) - set(MARKED_JOBS) == {
+        "executor_ops_monitor",
+        "degraded_state_watchdog",
+        "maker_safety_refresh",
+    }
+    for entity in ("executor_ops_monitor", "degraded_state_watchdog", "maker_safety_refresh"):
+        with pytest.raises(KeyError):
+            _attribute_starvation(entity, {}, start, end)
+
+
+def _wo152_fixture_b() -> dict:
+    """Execution Fixture B — the Aug-5 cross-observation pair.
+
+    One hold, two watchdog cycles, two different newly-stale victims, in the
+    opposite order to Aug-4's simultaneous pair. Stated in the WO as a delta
+    from Fixture A; every key not listed carries over unchanged.
+    """
+    fixture = _wo152_fixture_a()
+    fixture["generated_at_utc"] = "2026-08-05T23:19:35+00:00"
+    jobs = fixture["jobs"]
+    jobs["training_harvest"].update(
+        {
+            "last_run_utc": "2026-08-04T23:06:47.736123+00:00",
+            "last_success_utc": "2026-08-04T23:06:47.736123+00:00",
+            "in_flight_since_utc": "2026-08-05T23:08:52Z",
+            "runs_total": 35,
+        }
+    )
+    jobs["trade_prints"].update(
+        {"last_run_utc": "2026-08-05T22:50:32.707912+00:00", "last_success_utc": "2026-08-05T22:50:32.707912+00:00"}
+    )
+    jobs["book_pulse"].update(
+        {"last_run_utc": "2026-08-05T23:03:40.376208+00:00", "last_success_utc": "2026-08-05T23:03:40.376208+00:00"}
+    )
+    for job, stamp in (
+        ("governance_refresh", "2026-08-05T20:08:52+00:00"),
+        ("clv_snapshot", "2026-08-05T18:08:52+00:00"),
+        ("locked_card_refresh", "2026-08-05T15:08:52+00:00"),
+        ("maker_study_intraday", "2026-08-05T13:08:52+00:00"),
+        ("ledger_anchor", "2026-08-05T15:08:52+00:00"),
+    ):
+        jobs[job]["last_success_utc"] = stamp
+    return fixture
+
+
+def test_wo152_one_hold_names_one_holder_across_cycles() -> None:
+    """WO-152 Test 29. Cross-cycle consistency over a single continuous hold."""
+    jobs = _wo152_fixture_b()["jobs"]
+    prints_token = _parse_stamp("2026-08-05T22:50:32.707912+00:00")
+    cycle_a = _parse_stamp("2026-08-05T23:14:22+00:00")
+    cycle_b = _parse_stamp("2026-08-05T23:19:35+00:00")
+
+    first = _attribute_starvation("trade_prints", jobs, prints_token, cycle_a)
+    second = _attribute_starvation("trade_prints", jobs, prints_token, cycle_b)
+
+    assert first["attributed_to"] == second["attributed_to"] == "training_harvest"
+    assert first["occupants"][0]["overlap_seconds"] == 330.0
+    assert second["occupants"][0]["overlap_seconds"] == 643.0
+
+    # A victim that only became measurable mid-hold names the SAME holder.
+    late = _attribute_starvation("book_pulse", jobs, _parse_stamp("2026-08-05T23:03:40.376208+00:00"), cycle_b)
+    assert late["attributed_to"] == "training_harvest"
+    assert late["occupants"][0]["overlap_seconds"] == 643.0
+    assert late["drag_budget_seconds"] == 600
+
+
+def test_wo152_attribution_raise_never_suppresses_the_incident(tmp_path: Path) -> None:
+    """WO-152 Test 15. A watchdog that cannot explain an incident must still raise it."""
+    cfg = _cfg(tmp_path)
+    write_json(cfg.output_root / "ops_scheduler" / "status.json", _wo152_fixture_a())
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr("polymarket_predictive_engine.degraded_state_watchdog._attribute_starvation", _boom)
+        _, raised = _evaluate_scheduler_freshness(cfg, {}, {}, _WO152_FIXTURE_A_END)
+    _, clean = _evaluate_scheduler_freshness(cfg, {}, {}, _WO152_FIXTURE_A_END)
+
+    assert set(raised) == set(clean)
+    for incident_id, row in raised.items():
+        reference = clean[incident_id]
+        assert row["attributed_to"] is None
+        assert row["occupancy_error"] == "RuntimeError"
+        assert "attribution_state" not in row
+        # Byte-identical up to the attribution keys: the raise is contained to
+        # the additive portion only.
+        shared = set(row) & set(reference) - {"attributed_to", "occupancy_error"}
+        assert {key: row[key] for key in shared} == {key: reference[key] for key in shared}
+
+    # occupancy_error has a durable home: it survives append_csv_rows rather
+    # than being dropped by extrasaction="ignore".
+    sidecar = cfg.output_root / ATTRIBUTION_LEDGER
+    _append_attribution(sidecar, list(raised.values()))
+    written = read_csv_rows(sidecar)
+    assert len(written) == 2
+    assert {row["occupancy_error"] for row in written} == {"RuntimeError"}
+    # attributed_to: null renders as the empty string, the same rendering the
+    # three no-candidate attribution states already produce.
+    assert {row["attributed_to"] for row in written} == {""}
+
+
+def test_wo152_sidecar_failure_never_suppresses_the_owner_notification(tmp_path: Path) -> None:
+    """WO-152 Test 16. The containment try/except around the sidecar write.
+
+    NOTE (build discrepancy, reported for a ruling): Test 16 as registered
+    describes the SAME raising scenario as Test 15, but a raising
+    _attribute_starvation is contained inline and still produces a sidecar row
+    carrying occupancy_error — which is precisely what Test 15 asserts. The
+    failure the containment try/except actually guards is a raising
+    _append_attribution, which is what this test exercises.
+    """
+    cfg = _cfg(tmp_path)
+    write_json(cfg.output_root / "ops_scheduler" / "status.json", _wo152_fixture_a())
+    # A pre-existing sidecar with a foreign header makes append_csv_rows raise.
+    sidecar = cfg.output_root / ATTRIBUTION_LEDGER
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    sidecar.write_text("not,the,registered,header\n1,2,3,4\n", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        _append_attribution(sidecar, [{"registration_id": "scheduler_completion_freshness", "incident_id": "x"}])
+
+    result = build_degraded_state_watchdog(cfg, as_of=_WO152_FIXTURE_A_END)
+
+    # The cycle completed: incidents were ledgered and the owner notification
+    # was produced despite the sidecar being unwritable.
+    assert result["status"] == "incident"
+    ledgered = read_csv_rows(cfg.output_root / INCIDENT_LEDGER)
+    assert {row["entity"] for row in ledgered} >= {"trade_prints", "book_pulse"}
+    assert (cfg.output_root / "ops_scheduler" / "degraded_state_notification.md").exists()
+
+
+def test_wo152_sidecar_takes_only_new_freshness_rows(tmp_path: Path) -> None:
+    """WO-152 Tests 21 and 30. Both predicates, and both are required.
+
+    `new` is type-mixed by construction, so a write keyed on membership alone
+    writes blank-columned rows for every other registration; append_csv_rows
+    fills an absent key with "" rather than raising, so that failure is silent.
+    """
+    cfg = _cfg(tmp_path)
+    sidecar = cfg.output_root / ATTRIBUTION_LEDGER
+    freshness = {
+        "registration_id": "scheduler_completion_freshness",
+        "incident_id": "degraded_aaa",
+        "detected_at_utc": "2026-08-06T00:00:00Z",
+        "entity": "trade_prints",
+        "observation_token": "2026-08-05T23:00:00Z",
+        "attribution_state": "attributed",
+        "attributed_to": "training_harvest",
+        "drag_budget_seconds": 300,
+        "occupants": [{"job": "training_harvest", "overlap_seconds": 900.0, "source": "in_flight"}],
+        "occupancy_unmeasurable": [],
+    }
+    mixed = [
+        freshness,
+        {"registration_id": "operating_state_slo_breach", "incident_id": "degraded_bbb", "entity": "operating_state_slo"},
+        {"registration_id": "degraded_state_watchdog_wedged", "incident_id": "degraded_ccc", "entity": "degraded_state_watchdog"},
+    ]
+
+    written = _append_attribution(sidecar, mixed)
+
+    assert len(written) == 1
+    rows = read_csv_rows(sidecar)
+    assert len(rows) == 1
+    assert rows[0]["entity"] == "trade_prints"
+    assert rows[0]["attributed_to"] == "training_harvest"
+    # The two list-valued columns need no new serialization code.
+    assert json.loads(rows[0]["occupants"])[0]["job"] == "training_harvest"
+    assert list(rows[0]) == SCHEDULER_ATTRIBUTION_FIELDS
+
+    # The dedup rule: the sidecar takes the SAME `new` list _append_incidents
+    # returned, so an episode already in the main ledger never re-appears.
+    assert _append_attribution(sidecar, []) == []
+    assert len(read_csv_rows(sidecar)) == 1
+
+
+def test_wo152_safety_lane_margins_produce_no_incident(tmp_path: Path) -> None:
+    """WO-152 Test 12 — Execution Fixture C. No sidecar clause: all three
+    subjects are safety-lane entities, excluded from attribution regardless of
+    staleness."""
+    cfg = _cfg(tmp_path)
+    fixture = {
+        "generated_at_utc": "2026-08-03T03:27:00Z",
+        "jobs": {
+            "executor_ops_monitor": {"last_success_utc": "2026-08-03T03:25:00+00:00", "last_exit_code": 0},
+            "degraded_state_watchdog": {"last_success_utc": "2026-08-03T03:26:30+00:00", "last_exit_code": 0},
+            "maker_safety_refresh": {"last_success_utc": "2026-08-03T03:20:00+00:00", "last_exit_code": 0},
+            "governance_refresh": {"last_success_utc": "2026-08-03T00:38:00+00:00", "last_exit_code": 0},
+            "clv_snapshot": {"last_success_utc": "2026-08-02T22:38:00+00:00", "last_exit_code": 0},
+            "locked_card_refresh": {"last_success_utc": "2026-08-02T19:38:00+00:00", "last_exit_code": 0},
+            "ledger_anchor": {"last_success_utc": "2026-08-02T19:38:00+00:00", "last_exit_code": 0},
+            "training_harvest": {"last_success_utc": "2026-08-02T22:35:03+00:00", "last_exit_code": 0},
+            "maker_study_intraday": {"last_success_utc": "2026-08-02T17:38:00+00:00", "last_exit_code": 0},
+            "trade_prints": {"last_success_utc": "2026-08-03T03:35:00+00:00", "last_exit_code": 0},
+            "book_pulse": {"last_success_utc": "2026-08-03T03:36:00+00:00", "last_exit_code": 0},
+        },
+    }
+    write_json(cfg.output_root / "ops_scheduler" / "status.json", fixture)
+
+    _evaluate_scheduler_freshness(cfg, {}, {}, "2026-08-03T03:27:00Z")
+    _, quiet = _evaluate_scheduler_freshness(cfg, {}, {}, "2026-08-03T03:38:00Z")
+    assert quiet == {}
+
+    # Counterfactual: 03:42:00Z, not 03:38:00Z, is where the two 900s ceilings trip.
+    _, late = _evaluate_scheduler_freshness(cfg, {}, {}, "2026-08-03T03:42:00Z")
+    assert {row["entity"] for row in late.values()} == {"executor_ops_monitor", "degraded_state_watchdog"}
+
+
+def test_wo152_provenance_ages_recompute_from_their_own_anchors() -> None:
+    """WO-152 Test 22. A documentation-integrity check on the six cited rows.
+
+    The ages are the ledger's own reason-string text, built with
+    round(age_seconds, 3) — so 1265.51, not 1265.5.
+    """
+    registered = [
+        ("degraded_ceada8dc08120eab0fe019f5", "2026-08-01T22:21:37Z", "trade_prints", "2026-08-01T22:00:31.489665+00:00", 1265.51),
+        ("degraded_b58e47dfc4de7a53bbd6a2db", "2026-08-02T22:27:37Z", "trade_prints", "2026-08-02T22:04:29.384575+00:00", 1387.615),
+        ("degraded_30b1090328fa74f77f89adad", "2026-08-04T23:04:44Z", "trade_prints", "2026-08-04T22:42:48.853688+00:00", 1315.146),
+        ("degraded_f326466a86f036e6f978c45e", "2026-08-04T23:04:44Z", "book_pulse", "2026-08-04T22:48:49.556121+00:00", 954.444),
+        ("degraded_4262bdaba8a783dbf7f6423f", "2026-08-05T23:14:22Z", "trade_prints", "2026-08-05T22:50:32.707912+00:00", 1429.292),
+        ("degraded_054ae17ce60107145084066e", "2026-08-05T23:19:35Z", "book_pulse", "2026-08-05T23:03:40.376208+00:00", 954.624),
+    ]
+
+    for incident_id, detected_at, entity, token, age in registered:
+        measured = (_parse_stamp(detected_at) - _parse_stamp(token)).total_seconds()
+        assert round(measured, 3) == age, f"{entity} {token}"
+        assert _incident_id("scheduler_completion_freshness", entity, token) == incident_id

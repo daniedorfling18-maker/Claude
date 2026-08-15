@@ -1607,3 +1607,115 @@ def test_websocket_collector_fails_closed_on_socket_error(tmp_path, monkeypatch)
     assert "TimeoutError" in result["reason"]
     summary = read_json(cfg.output_root / "polymarket_websocket" / "websocket_summary.json")
     assert summary["status"] == "error"
+
+
+# ---------------------------------------------------------------------------
+# Markout drain.
+#
+# Measured 2026-08-15 against flow_toxicity.csv: of 475 markets carrying trade
+# prints, 299 had ZERO markout coverage and 0 of those 299 were on the current
+# websocket target list, while 32 of the 47 fully-covered markets were still on
+# it. The list holds ~110 tokens and is rebuilt from rotating selectors, but
+# trade_prints.csv keeps every print forever - so a token's forward prices stop
+# the instant it rotates off, and 126,622 of 200,000 markout price points were
+# permanently uncomputable as a result.
+# ---------------------------------------------------------------------------
+
+
+def _drain_cfg(tmp_path, **settings):
+    from polymarket_predictive_engine.config import EngineConfig
+
+    return EngineConfig(
+        raw={
+            "paths": {"output_root": str(tmp_path / "outputs")},
+            "websocket_market_data": {"markout_drain_margin_minutes": 10.0, **settings},
+            "flow_toxicity": {"markout_horizon_minutes": 5},
+        },
+        path=tmp_path / "cfg.yaml",
+    )
+
+
+def _write_prints(cfg, rows):
+    from polymarket_predictive_engine.utils import write_csv
+
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        rows,
+        ["trade_id", "market", "asset_id", "side", "price", "size", "timestamp", "market_slug", "title", "outcome"],
+    )
+
+
+def _print_row(token, *, minutes_ago, market="mkt-1"):
+    from datetime import datetime, timedelta, timezone
+
+    stamp = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
+    return {
+        "trade_id": f"t-{token}-{minutes_ago}",
+        "market": market,
+        "asset_id": token,
+        "side": "BUY",
+        "price": "0.5",
+        "size": "10",
+        "timestamp": stamp.isoformat().replace("+00:00", "Z"),
+        "market_slug": "slug",
+        "title": "question",
+        "outcome": "Yes",
+    }
+
+
+def test_markout_drain_retains_a_token_that_still_owes_a_forward_price(tmp_path):
+    from polymarket_predictive_engine import websocket_collector as wc
+
+    cfg = _drain_cfg(tmp_path)
+    _write_prints(cfg, [_print_row("token-recent", minutes_ago=1)])
+
+    drained = wc._markout_drain_rows(cfg, cfg.raw["websocket_market_data"], selected=[])
+
+    assert [row["asset_id"] for row in drained] == ["token-recent"]
+    assert drained[0]["target_reason"] == "markout_drain"
+
+
+def test_markout_drain_releases_a_token_once_its_horizon_has_passed(tmp_path):
+    """5m horizon + 10m margin = 15m window. A print older than that is settled."""
+    from polymarket_predictive_engine import websocket_collector as wc
+
+    cfg = _drain_cfg(tmp_path)
+    _write_prints(cfg, [_print_row("token-old", minutes_ago=60)])
+
+    assert wc._markout_drain_rows(cfg, cfg.raw["websocket_market_data"], selected=[]) == []
+
+
+def test_markout_drain_never_evicts_an_existing_target(tmp_path):
+    """The drain is appended BEYOND the cap - it is collection, not selection."""
+    from polymarket_predictive_engine import websocket_collector as wc
+
+    cfg = _drain_cfg(tmp_path)
+    _write_prints(cfg, [_print_row("token-drain", minutes_ago=1)])
+    selected = [{"token_id": "token-a", "asset_id": "token-a"}, {"token_id": "token-b", "asset_id": "token-b"}]
+
+    out = wc._with_markout_drain(cfg, cfg.raw["websocket_market_data"], selected)
+
+    assert [row["asset_id"] for row in out[:2]] == ["token-a", "token-b"], "existing targets must be untouched"
+    assert out[2]["asset_id"] == "token-drain"
+    assert len(out) == 3
+
+
+def test_markout_drain_does_not_duplicate_an_already_selected_token(tmp_path):
+    from polymarket_predictive_engine import websocket_collector as wc
+
+    cfg = _drain_cfg(tmp_path)
+    _write_prints(cfg, [_print_row("token-a", minutes_ago=1)])
+    selected = [{"token_id": "token-a", "asset_id": "token-a"}]
+
+    assert wc._with_markout_drain(cfg, cfg.raw["websocket_market_data"], selected) == selected
+
+
+def test_markout_drain_is_bounded_and_disablable(tmp_path):
+    from polymarket_predictive_engine import websocket_collector as wc
+
+    cfg = _drain_cfg(tmp_path, max_markout_drain_assets=2)
+    _write_prints(cfg, [_print_row(f"token-{i}", minutes_ago=1) for i in range(6)])
+    assert len(wc._markout_drain_rows(cfg, cfg.raw["websocket_market_data"], selected=[])) == 2
+
+    off = _drain_cfg(tmp_path, markout_drain_enabled=False)
+    assert wc._markout_drain_rows(off, off.raw["websocket_market_data"], selected=[]) == []

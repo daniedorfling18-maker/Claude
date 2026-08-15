@@ -1523,6 +1523,19 @@ external_feeds:
   feeds: []
 websocket_market_data:
   url: wss://ws-subscriptions-clob.polymarket.com/ws/market
+  # Markout drain. Measured 2026-08-15: of 475 markets carrying trade prints,
+  # 299 had ZERO markout coverage and NONE of those 299 were on the websocket
+  # target list, while 32 of the 47 fully-covered markets still were. The list
+  # holds ~110 tokens and is rebuilt each run from rotating selectors, but
+  # trade_prints.csv keeps every print - so forward prices stop the instant a
+  # token rotates off and 126,622 of 200,000 markout price points were
+  # permanently uncomputable. A token now stays subscribed for the markout
+  # horizon plus a margin after its LAST print, purely to take the observation
+  # it already owes. Appended BEYOND the selection cap: it can never displace a
+  # liquidity, position or priority target, and no gate reads it.
+  markout_drain_enabled: true
+  markout_drain_margin_minutes: 10.0
+  max_markout_drain_assets: 64
   # Keep enough raw + normalised quote history for several days of ask-to-future-bid
   # repricing labels. Message retention protects the socket capture; feature
   # retention protects the actual model training substrate if raw messages roll.

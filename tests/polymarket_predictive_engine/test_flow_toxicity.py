@@ -223,3 +223,76 @@ def test_absolute_floor_blocks_one_sided_market_the_percentile_would_de_veto(tmp
     assert float(target["toxicity_score"]) < 0.9  # percentile alone would clear it
     assert str(target["toxic_blocked"]).lower() == "true"  # absolute floor blocks
     assert "raw_imbalance" in target["toxicity_block_reasons"]
+
+
+def test_wallet_markouts_are_published_for_wallets_off_the_leaderboard(tmp_path):
+    """The market-axis table can only ever see 100 wallets; this one sees all of them.
+
+    Measured 2026-08-15: of 475 markets scored from 200,000 fills, 176 had
+    markout coverage but only 16 produced a smart-fill markout - because
+    _top_wallets resolves "smart" to the latest leaderboard snapshot capped at
+    100 wallets, and the mirror holds 2 snapshots naming the same 100. A wallet
+    with real forward markout that is not on that list was invisible.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)  # only "smart1" is on the leaderboard
+    # Price rises after every trade, so a BUY marks out positive.
+    _features(cfg, "tok-a", [(0, 0.50), (10_000, 0.70)])
+    trades = [
+        {"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0},
+        {"market": "0xa", "asset_id": "tok-a", "wallet": "unranked9", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1},
+    ]
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        trades,
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+    assert set(rows) == {"smart1", "unranked9"}, "a wallet off the leaderboard must still be measured"
+    assert rows["smart1"]["on_current_leaderboard"] == "True"
+    assert rows["unranked9"]["on_current_leaderboard"] == "False"
+    # Both bought before the same rise, so both mark out positive and equally.
+    assert float(rows["unranked9"]["markout_mean_total"]) > 0
+    assert float(rows["unranked9"]["markout_mean_total"]) == float(rows["smart1"]["markout_mean_total"])
+    assert summary["wallets_scored"] == 2
+    assert summary["paper_trading_invoked"] is False
+
+
+def test_wallet_markout_windows_split_so_a_ranking_cannot_validate_itself(tmp_path):
+    """Ranking and evaluation windows must not share fills.
+
+    A wallet ranked on the same fills used to judge it is circular by
+    construction. The split is at the median fill time, and a wallet present in
+    only one window is reported as such rather than silently scored.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _features(cfg, "tok-a", [(0, 0.50), (10_000, 0.70)])
+    trades = [
+        {"market": "0xa", "asset_id": "tok-a", "wallet": "early", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0},
+        {"market": "0xa", "asset_id": "tok-a", "wallet": "early", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1},
+        {"market": "0xa", "asset_id": "tok-a", "wallet": "late", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 100},
+        {"market": "0xa", "asset_id": "tok-a", "wallet": "late", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 101},
+    ]
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        trades,
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    # Each wallet's fills land wholly on one side of the median, so neither can
+    # be ranked and judged on the same data.
+    assert int(rows["early"]["fills_ranking_window"]) == 2
+    assert int(rows["early"]["fills_evaluation_window"]) == 0
+    assert int(rows["late"]["fills_ranking_window"]) == 0
+    assert int(rows["late"]["fills_evaluation_window"]) == 2
+    # Neither wallet is judgeable, and the summary says so rather than implying
+    # a usable sample.
+    assert summary["wallets_in_both_windows"] == 0
+    assert summary["wallets_scored"] == 2

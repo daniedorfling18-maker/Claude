@@ -725,6 +725,96 @@ def _position_priority_rows(cfg: EngineConfig, settings: dict[str, Any], *, max_
     return position_tokens(cfg)[:slot_cap]
 
 
+def _markout_drain_rows(
+    cfg: EngineConfig,
+    settings: dict[str, Any],
+    selected: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Tokens that still owe a forward price before their markouts can be computed.
+
+    Measured 2026-08-15 against `flow_toxicity.csv`: of 475 markets carrying trade
+    prints, 299 had ZERO markout coverage and **0 of those 299** were on the
+    current websocket target list, while 32 of the 47 fully-covered markets were
+    still on it. The target list holds ~110 tokens and is rebuilt every run from
+    rotating selectors, but `trade_prints.csv` is an append-only ledger that keeps
+    every print. So the moment a token rotates off, its forward prices stop - and
+    a markout needs a price at `trade.stamp + markout_horizon`, which makes every
+    print in that final window permanently uncomputable. 126,622 of 200,000 price
+    points were missing for this reason.
+
+    A token therefore stays on the collection list for the markout horizon plus a
+    margin after its LAST print, purely so the observation it already owes can be
+    taken. This is a collection drain, not a trading signal: no gate, sizing or
+    eligibility surface reads it, and it is appended BEYOND `max_assets` so it can
+    never evict a liquidity, position or priority target.
+    """
+
+    if not _boolish(settings.get("markout_drain_enabled", True)):
+        return []
+    horizon_minutes = float(
+        settings.get(
+            "markout_drain_horizon_minutes",
+            (cfg.raw.get("flow_toxicity", {}) or {}).get("markout_horizon_minutes", 5),
+        )
+    )
+    margin_minutes = float(settings.get("markout_drain_margin_minutes", 10.0))
+    max_drain = int(settings.get("max_markout_drain_assets", 64) or 0)
+    if max_drain <= 0:
+        return []
+    window_seconds = (horizon_minutes + margin_minutes) * 60.0
+
+    now_stamp = parse_timestamp(now_utc())
+    if now_stamp is None:
+        return []
+    cutoff = now_stamp.timestamp() - window_seconds
+
+    selected_ids = {_token_id(row) for row in selected if _token_id(row)}
+    latest: dict[str, tuple[float, dict[str, Any]]] = {}
+    for row in read_csv_rows(cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"):
+        token = str(row.get("asset_id") or row.get("token_id") or "").strip()
+        if not token or token in selected_ids:
+            continue
+        stamp = parse_timestamp(row.get("timestamp") or row.get("collected_at_utc"))
+        if stamp is None:
+            continue
+        seconds = stamp.timestamp()
+        if seconds < cutoff:
+            continue
+        current = latest.get(token)
+        if current is None or seconds > current[0]:
+            latest[token] = (seconds, row)
+
+    drained: list[dict[str, Any]] = []
+    for token, (_, row) in sorted(latest.items(), key=lambda item: -item[1][0]):
+        drained.append(
+            {
+                "token_id": token,
+                "asset_id": token,
+                "market_id": str(row.get("market") or ""),
+                "market_slug": str(row.get("market_slug") or ""),
+                "question": str(row.get("title") or ""),
+                "outcome": str(row.get("outcome") or ""),
+                "family": "",
+                "category": "",
+                "target_reason": "markout_drain",
+            }
+        )
+        if len(drained) >= max_drain:
+            break
+    return drained
+
+
+def _with_markout_drain(
+    cfg: EngineConfig,
+    settings: dict[str, Any],
+    selected: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Append the drain BEYOND the selection cap so it can never displace a target."""
+
+    drained = _markout_drain_rows(cfg, settings, selected)
+    return [*selected, *drained] if drained else selected
+
+
 def _with_position_targets(
     cfg: EngineConfig,
     settings: dict[str, Any],
@@ -732,9 +822,11 @@ def _with_position_targets(
     *,
     max_assets: int,
 ) -> list[dict[str, Any]]:
+    # Every _liquidity_target_rows return path funnels through here, so the
+    # markout drain is applied once, at the end, on the finished selection.
     position_rows = _position_priority_rows(cfg, settings, max_assets=max_assets)
     if not position_rows:
-        return selected[:max_assets]
+        return _with_markout_drain(cfg, settings, selected[:max_assets])
     out: list[dict[str, Any]] = []
     seen_by_id: dict[str, dict[str, Any]] = {}
     for row in position_rows + selected:
@@ -749,7 +841,7 @@ def _with_position_targets(
         seen_by_id[token_id] = row
         if len(out) >= max_assets:
             break
-    return out
+    return _with_markout_drain(cfg, settings, out)
 
 
 def _merge_target_metadata(existing: dict[str, Any], incoming: dict[str, Any]) -> None:

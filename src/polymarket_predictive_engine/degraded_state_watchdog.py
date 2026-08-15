@@ -26,6 +26,9 @@ WORK_ORDER = "WO-78+WO-83+WO-84+WO-85+WO-86+WO-121+WO-129"
 OUTPUT_FILE = "ops_scheduler/degraded_state_watchdog.json"
 STATE_FILE = "ops_scheduler/degraded_state_watchdog_state.json"
 INCIDENT_LEDGER = "performance/degraded_state_incidents.csv"
+# WO-152: write-only attribution sidecar. Strictly additive to the main ledger
+# above - it never gates, suppresses, delays, or de-duplicates an incident.
+ATTRIBUTION_LEDGER = "performance/scheduler_attribution_v1.csv"
 NOTIFICATION_BODY = "ops_scheduler/degraded_state_notification.md"
 WALLET_REGISTRATION_ID = "wallet_reconciliation_not_clean"
 LEGACY_WALLET_REGISTRATION_ID = "wallet_reconciliation_partial"
@@ -107,6 +110,78 @@ INCIDENT_FIELDS = [
     "paper_trading_invoked",
     "live_trading_invoked",
 ]
+
+# WO-152: the attribution sidecar's header, registered explicitly rather than
+# left implicit. append_csv_rows compares the on-disk header against these
+# fieldnames and raises ValueError on a mismatch, so this list is the schema.
+# occupancy_error earns its slot: INCIDENT_FIELDS is frozen at 14 and
+# csv.DictWriter(..., extrasaction="ignore") silently drops anything outside
+# the requested fieldnames, so without this entry a contained attribution
+# failure would leave no append-only trace at all.
+SCHEDULER_ATTRIBUTION_FIELDS = [
+    "incident_id",
+    "detected_at_utc",
+    "entity",
+    "observation_token",
+    "attribution_state",
+    "attributed_to",
+    "drag_budget_seconds",
+    "occupants",
+    "occupancy_unmeasurable",
+    "occupancy_error",
+]
+
+# WO-152: REGISTERED_JOB_FRESHNESS_MAX_SECONDS' 11 keys minus the 3 safety-lane
+# entities. Safety-lane starvation carries no attribution keys and produces no
+# sidecar row; the `job_name in MARKED_JOBS` call-site guard is load-bearing,
+# because the two tables below are keyed on these members and raise KeyError
+# for anything else.
+MARKED_JOBS = frozenset(
+    {
+        "governance_refresh",
+        "clv_snapshot",
+        "locked_card_refresh",
+        "training_harvest",
+        "maker_study_intraday",
+        "trade_prints",
+        "book_pulse",
+        "ledger_anchor",
+    }
+)
+UNBOUNDED_MARKED_JOBS = frozenset({"maker_study_intraday", "locked_card_refresh", "ledger_anchor"})
+# Runtime bounds: worst-case in-flight duration per job, derived from that
+# job's own timeout-wrapped children (env DEFAULTS, safe in one direction only
+# because the relevant knobs are clamped downward-only).
+IN_FLIGHT_STALE_AFTER_SECONDS = {
+    "governance_refresh": 4200,
+    "clv_snapshot": 5400,
+    "training_harvest": 27600,
+    "trade_prints": 3000,
+    "book_pulse": 480,
+}
+# An ORPHAN bound for the 3 jobs above with no scheduler-enforced due-cadence to
+# overrun WHILE RUNNING. Each value is that job's OWN existing
+# REGISTERED_JOB_FRESHNESS_MAX_SECONDS ceiling (:59, :61, :71) - READ here,
+# never changed. The bound's purpose is orphan DETECTION (a run that has
+# outlived its own freshness ceiling has already raised its own incident, so
+# treating its marker as still-live evidence past that point is never
+# justified), not runtime modelling.
+ORPHAN_BOUND_SECONDS = {
+    "locked_card_refresh": 46800,
+    "maker_study_intraday": 90000,
+    "ledger_anchor": 93600,
+}
+# ceiling - interval, per job.
+DRAG_BUDGET_SECONDS = {
+    "governance_refresh": 3600,
+    "clv_snapshot": 3600,
+    "locked_card_refresh": 3600,
+    "training_harvest": 3600,
+    "maker_study_intraday": 3600,
+    "trade_prints": 300,
+    "book_pulse": 600,
+    "ledger_anchor": 50400,
+}
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -589,6 +664,124 @@ def _evaluate_scheduler(
     )
 
 
+def _attribute_starvation(
+    job_name: str,
+    jobs: Mapping[str, Any],
+    window_start: datetime,
+    window_end: datetime,
+) -> dict[str, Any]:
+    """Name the job that held the serial ops loop across a victim's stale window.
+
+    WO-152. Strictly additive evidence: the caller has already decided the
+    incident. Four outcomes only - see the registered attribution states.
+    """
+
+    # The threshold is the VICTIM's drag budget, keyed on job_name - never the
+    # holder's. This is the WO's single registered definition of the candidate
+    # predicate.
+    drag_budget = DRAG_BUDGET_SECONDS[job_name]
+    occupants: list[dict[str, Any]] = []
+    unmeasurable: list[str] = []
+    candidates: list[str] = []
+    for other in sorted(MARKED_JOBS - {job_name}):
+        marker_raw = str(_mapping(jobs.get(other)).get("in_flight_since_utc") or "").strip()
+        if not marker_raw:
+            continue
+        marker_dt = _parse_stamp(marker_raw)
+        if marker_dt is None:
+            unmeasurable.append(other)
+            continue
+        # An explicit future-dated branch BEFORE the clamp. A marker after
+        # window_end is evidence of a clock or write defect, not evidence about
+        # occupancy - it must fold into occupancy_unmeasurable, not silently
+        # vanish via max(0.0, ...) and read as "evidence complete".
+        if marker_dt > window_end:
+            unmeasurable.append(other)
+            continue
+        # EVERY marked job has a bound to survive past: bounded jobs from
+        # IN_FLIGHT_STALE_AFTER_SECONDS, the 3 previously-unbounded jobs from
+        # their own ORPHAN_BOUND_SECONDS ceiling.
+        bound = IN_FLIGHT_STALE_AFTER_SECONDS.get(other, ORPHAN_BOUND_SECONDS.get(other))
+        marker_age = (window_end - marker_dt).total_seconds()
+        if marker_age > bound:
+            unmeasurable.append(other)
+            continue
+        overlap = max(0.0, (window_end - max(marker_dt, window_start)).total_seconds())
+        source = "in_flight_unbounded" if other in UNBOUNDED_MARKED_JOBS else "in_flight"
+        if overlap >= 2.0:
+            occupants.append({"job": other, "overlap_seconds": round(overlap, 3), "source": source})
+        if overlap >= drag_budget:
+            candidates.append(other)
+    occupants.sort(key=lambda row: (-row["overlap_seconds"], row["job"]))
+    unmeasurable = sorted(unmeasurable)
+    if unmeasurable:
+        state, attributed_to = "holder_unmeasurable", ""
+    elif len(candidates) == 1:
+        state, attributed_to = "attributed", candidates[0]
+    elif not candidates:
+        state, attributed_to = "insufficient_to_explain", ""
+    else:
+        state, attributed_to = "multiple_candidates", ""
+    return {
+        "attribution_state": state,
+        "attributed_to": attributed_to,
+        "drag_budget_seconds": drag_budget,
+        "occupants": occupants,
+        "occupancy_unmeasurable": unmeasurable,
+    }
+
+
+def _starved_job_self_state(
+    job_name: str,
+    jobs: Mapping[str, Any],
+    previous: Mapping[str, Any],
+) -> tuple[str, int | None]:
+    """Is the starved job itself showing crash evidence? WO-152.
+
+    Missing or malformed failed_cycles_total folds into crash_evident via
+    advanced = True - matching last_exit_code's existing fail-alarming
+    treatment, not a fail-silent default.
+    """
+
+    record = _mapping(jobs.get(job_name))
+    try:
+        exit_code = int(record.get("last_exit_code", 1))
+    except (TypeError, ValueError):
+        exit_code = 1
+    raw_failed = record.get("failed_cycles_total")
+    try:
+        current_failed = int(raw_failed) if raw_failed is not None else None
+    except (TypeError, ValueError):
+        current_failed = None
+    if current_failed is None:
+        advanced = True
+    else:
+        try:
+            previous_failed = int(previous.get("failed_cycles_total_observed", current_failed))
+        except (TypeError, ValueError):
+            previous_failed = current_failed
+        advanced = current_failed > previous_failed
+    return ("crash_evident" if (exit_code != 0 or advanced) else "no_self_failure_evidence"), current_failed
+
+
+def _append_attribution(path: Path, incidents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Append WO-152 attribution rows for the freshness incidents in `new`.
+
+    Both registered predicates apply. The caller passes the SAME `new` list
+    _append_incidents returned - that is the dedup rule (once per episode,
+    ever). This function applies the row-SELECTION rule itself, so neither call
+    site has to: `new` is type-mixed by construction, and without the
+    registration filter every incident type in the cycle would land here with
+    every attribution column blank.
+    """
+
+    rows = [row for row in incidents if str(row.get("registration_id") or "") == "scheduler_completion_freshness"]
+    if not rows:
+        return []
+    append_csv_rows(path, rows, fieldnames=SCHEDULER_ATTRIBUTION_FIELDS)
+    return rows
+
+
 def _evaluate_scheduler_freshness(
     cfg: EngineConfig,
     state: dict[str, Any],
@@ -645,6 +838,9 @@ def _evaluate_scheduler_freshness(
             age_seconds = max(0.0, (observed_at - success_at).total_seconds())
             observation_token = last_success
             observed_state = "fresh" if age_seconds <= maximum else "stale"
+            # WO-152: the attribution window opens at the victim's own
+            # observation_token and closes at the watchdog's observed_at.
+            window_start = success_at
         else:
             if not first_unobserved:
                 first_unobserved = generated_at
@@ -652,14 +848,25 @@ def _evaluate_scheduler_freshness(
             age_seconds = max(0.0, (observed_at - first_at).total_seconds())
             observation_token = first_unobserved
             observed_state = "unobserved" if age_seconds <= maximum else "stale_unobserved"
+            window_start = first_at
 
         stale = age_seconds > maximum
+        # WO-152: persisted for every registered entity, every cycle - stale,
+        # fresh, marked or not - using the same int-or-None coercion
+        # _starved_job_self_state's current_failed uses, and decoupled from
+        # whether that enum is computed this cycle.
+        raw_failed = job.get("failed_cycles_total")
+        try:
+            failed_cycles_observed = int(raw_failed) if raw_failed is not None else None
+        except (TypeError, ValueError):
+            failed_cycles_observed = None
         next_jobs[job_name] = {
             "last_success_utc": last_success,
             "first_unobserved_at_utc": first_unobserved,
             "age_seconds": round(age_seconds, 3),
             "maximum_age_seconds": maximum,
             "currently_stale": stale,
+            "failed_cycles_total_observed": failed_cycles_observed,
         }
         evaluations.append(
             {
@@ -672,6 +879,20 @@ def _evaluate_scheduler_freshness(
         )
         if not stale:
             continue
+        # WO-152: strictly additive. The stale decision, age arithmetic,
+        # maximum comparison, incident id and episode anchor are all computed
+        # above and are byte-identical to their pre-WO values. If attribution
+        # raises for any reason the incident is STILL emitted, with
+        # attributed_to null and occupancy_error carrying the exception class
+        # name - a watchdog that cannot explain an incident must still raise
+        # it. Safety-lane entities are excluded by this guard: the constant
+        # tables are keyed on MARKED_JOBS and raise KeyError for anything else.
+        attribution: dict[str, Any] = {}
+        if job_name in MARKED_JOBS:
+            try:
+                attribution = _attribute_starvation(job_name, jobs, window_start, observed_at)
+            except Exception as exc:  # noqa: BLE001 - containment is the point
+                attribution = {"attributed_to": None, "occupancy_error": type(exc).__name__}
         row = _incident(
             generated_at=generated_at,
             registration_id="scheduler_completion_freshness",
@@ -684,6 +905,10 @@ def _evaluate_scheduler_freshness(
             count=1,
             maximum=0,
         )
+        # INCIDENT_FIELDS stays frozen at 14, so these additive keys ride the
+        # row into degraded_state.json and the WO-152 sidecar and are dropped
+        # from the main ledger CSV by DictWriter's extrasaction="ignore".
+        row.update(attribution)
         incidents[row["incident_id"]] = row
 
     state["scheduler_freshness"] = next_jobs
@@ -1383,6 +1608,7 @@ def build_degraded_state_watchdog(
     output_path = cfg.output_root / OUTPUT_FILE
     state_path = cfg.output_root / STATE_FILE
     ledger_path = cfg.output_root / INCIDENT_LEDGER
+    sidecar_path = cfg.output_root / ATTRIBUTION_LEDGER
     base = {
         "work_order": WORK_ORDER,
         "generated_at_utc": generated_at,
@@ -1433,6 +1659,12 @@ def build_degraded_state_watchdog(
                 )
                 active = [row for row in active if row.get("registration_id") != "degraded_state_watchdog_wedged"] + [wedge]
             new = _append_incidents(ledger_path, active)
+            try:
+                _append_attribution(sidecar_path, new)
+            except Exception:  # noqa: BLE001 - containment is the point
+                pass  # the sidecar is additive evidence; its failure must never
+                # suppress the owner notification for incidents already
+                # appended to the main ledger by the call above.
             # Minimize the race with the actual lock holder before the one
             # unavoidable pre-send debt write.
             state = _mapping(read_json(state_path, default={}) or {})
@@ -1507,6 +1739,12 @@ def build_degraded_state_watchdog(
 
         active = sorted(active_by_id.values(), key=lambda row: (row["registration_id"], row["entity"]))
         new = _append_incidents(ledger_path, active)
+        try:
+            _append_attribution(sidecar_path, new)
+        except Exception:  # noqa: BLE001 - containment is the point
+            pass  # the sidecar is additive evidence; its failure must never
+            # suppress the owner notification for incidents already appended
+            # to the main ledger by the call above.
         notification = _notification(
             cfg,
             generated_at=generated_at,

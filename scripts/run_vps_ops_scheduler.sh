@@ -213,6 +213,61 @@ os.replace(tmp_path, path)
 PY
 }
 
+# WO-152: record that a job is in flight, so the watchdog can attribute a
+# starvation incident to whatever was holding the serial ops loop instead of
+# recording only the victim. Write-only telemetry: no job's execution,
+# scheduling decision, exit code, skip classification, or timeout depends on
+# this marker, and a failure here logs and proceeds - losing an attribution
+# field is strictly better than losing a job run.
+#
+# Both parameters take an explicit ${n:-} default. The scheduler runs `set -u`
+# (:18) and every `set -e` in it is inside a job subshell, never in the main
+# loop - so a bare "$2" on a one-argument call does not fail the function, it
+# TERMINATES THE SCHEDULER.
+#
+# The completion stamp needs no counterpart here: stamp_status rebuilds
+# jobs[job_name] wholesale (:180-201) and carries no in_flight_since_utc key,
+# so the marker's absence after completion is permanent by construction, for
+# every job, on every completion, success or failure alike.
+mark_in_flight() {
+  MARK_JOB="${1:-}"
+  MARK_STAMP="${2:-}"
+  if [ -z "$MARK_JOB" ] || [ -z "$MARK_STAMP" ]; then
+    log "mark_in_flight: empty job name or start stamp (job='${MARK_JOB}' started_at='${MARK_STAMP}'); no marker written, job proceeds unmarked"
+    return 0
+  fi
+  JOB="$MARK_JOB" STARTED_AT="$MARK_STAMP" OUT_DIR="$OUT_DIR" python - <<'PY' || log "mark_in_flight: status.json marker write FAILED for $MARK_JOB; job proceeds unmarked"
+import json, os, sys
+from pathlib import Path
+path = Path(os.environ["OUT_DIR"]) / "status.json"
+if path.exists():
+    text = path.read_text(encoding="utf-8")
+    if text.strip():
+        try:
+            payload = json.loads(text)
+        except Exception:
+            # Existing, non-empty, but unparseable: SKIP the write rather than
+            # replace the file wholesale. Exiting non-zero routes through the
+            # wrapper's own `|| log` above, which logs and returns 0 without
+            # creating a temp file or touching the corrupt file.
+            sys.exit(1)
+    else:
+        payload = {}
+else:
+    payload = {}
+jobs = payload.setdefault("jobs", {})
+job_name = os.environ["JOB"]
+record = jobs.get(job_name)
+record = record if isinstance(record, dict) else {}
+record["in_flight_since_utc"] = os.environ["STARTED_AT"]
+jobs[job_name] = record
+tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+os.replace(tmp_path, path)
+PY
+  return 0
+}
+
 seconds_since_stamp() {
   STAMP_FILE="$OUT_DIR/last_$1"
   if [ ! -f "$STAMP_FILE" ]; then
@@ -382,6 +437,7 @@ odds_quota_available() {
 run_governance_refresh() {
   log "governance_refresh: starting"
   GOVERNANCE_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  mark_in_flight governance_refresh "$GOVERNANCE_STARTED_AT"
   (
     set -e
     timeout "$GOVERNANCE_TIMEOUT" python -m polymarket_predictive_engine.cli refresh-governance --config "$CONFIG_PATH"
@@ -412,6 +468,7 @@ run_clv_snapshot() {
   fi
   log "clv_snapshot: starting"
   CLV_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  mark_in_flight clv_snapshot "$CLV_STARTED_AT"
   (
     set -e
     timeout "$CLV_TIMEOUT" python scripts/superbru_clv_experiment.py snapshot
@@ -445,6 +502,7 @@ run_locked_card_refresh() {
   fi
   log "locked_card_refresh: starting"
   CARD_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  mark_in_flight locked_card_refresh "$CARD_STARTED_AT"
   (
     set -e
     mkdir -p outputs/superbru_pool outputs/market_odds outputs/latest \
@@ -568,6 +626,7 @@ run_training_harvest() {
   # trainer wiring is a separate leakage-reviewed work order (WO-33).
   log "training_harvest: starting"
   HARVEST_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  mark_in_flight training_harvest "$HARVEST_STARTED_AT"
   # WO-85: every child result is persisted, earlier failures do not starve
   # later evidence, ordinary work not started before the whole-job deadline
   # is skipped explicitly, and retention + anchoring are always attempted last.
@@ -634,6 +693,11 @@ run_maker_study_intraday() {
   # here gates on it.
   TRAINING_AGE="$(seconds_since_success_stamp training_harvest)"
   log "maker_study_intraday: starting (training_harvest_age=${TRAINING_AGE}s)"
+  # WO-152: this job is the one MARKED_JOBS member with no pre-existing
+  # *_STARTED_AT stamp to reuse, so the stamp is taken here alongside the
+  # marker. It feeds mark_in_flight only - no scheduling decision reads it.
+  MAKER_STUDY_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  mark_in_flight maker_study_intraday "$MAKER_STUDY_STARTED_AT"
   (
     set -e
     # WO-151 §151.1: identifies this invocation as the "intraday_job"
@@ -664,6 +728,7 @@ run_trade_prints() {
   # training substrate; nothing here trades or gates.
   log "trade_prints: starting"
   PRINTS_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  mark_in_flight trade_prints "$PRINTS_STARTED_AT"
   (
     set -e
     timeout "$PRINTS_TIMEOUT" python -m polymarket_predictive_engine.cli collect-trade-prints --config "$CONFIG_PATH"
@@ -700,6 +765,7 @@ run_book_pulse() {
   fi
   log "book_pulse: starting"
   BOOK_PULSE_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  mark_in_flight book_pulse "$BOOK_PULSE_STARTED_AT"
   (
     set -e
     timeout "$BOOK_PULSE_TIMEOUT" python -m polymarket_predictive_engine.cli snapshot-official-books-pulse --config "$CONFIG_PATH"
@@ -780,6 +846,7 @@ run_ledger_anchor() {
   # here and functional when the scheduler runs on the host.
   log "ledger_anchor: starting"
   LEDGER_ANCHOR_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  mark_in_flight ledger_anchor "$LEDGER_ANCHOR_STARTED_AT"
   (
     set -e
     timeout "$LEDGER_ANCHOR_TIMEOUT" python -m polymarket_predictive_engine.cli anchor-ledgers --config "$CONFIG_PATH"

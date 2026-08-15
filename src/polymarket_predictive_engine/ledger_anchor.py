@@ -84,6 +84,7 @@ DEFAULT_LEDGER_REGISTRY: list[dict[str, str]] = [
     {"glob": "polymarket_training/historical_bid_ask_v1.csv", "mode": "append_only"},
     {"glob": "performance/background_timeout_incidents.csv", "mode": "append_only"},
     {"glob": "performance/degraded_state_incidents.csv", "mode": "append_only"},
+    {"glob": "performance/scheduler_attribution_v1.csv", "mode": "append_only"},
     {"glob": "performance/wallet_reconciliation_history.csv", "mode": "append_only"},
     {"glob": "performance/wallet_reconciliation_wallet_history.csv", "mode": "append_only"},
     {"glob": "performance/cost_ledger_summary.json", "mode": "snapshot"},

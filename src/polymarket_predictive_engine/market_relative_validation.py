@@ -174,12 +174,12 @@ def _label_index(
         # several horizon rows per market/token/timestamp, so a setdefault would
         # let a reordering of labels.csv silently swap which defect the
         # histogram reports and hide the other.
-        if row.get("horizon", "all_valid") not in {"", "all_valid"}:
-            _record_drop(dropped, key, "label horizon is not all_valid")
-            continue
-        if _label_target(row) is None:
-            _record_drop(dropped, key, "label is not a clean binary settlement")
-            continue
+        # Key completeness is checked FIRST because it carries the highest
+        # precedence. Ordering it after the horizon and target checks made that
+        # precedence inert: a label that was BOTH incomplete and dirty exited at
+        # the earlier branch, incomplete_pairs never populated, and a complete
+        # prediction for the same market/token reported a timestamp mismatch.
+        # The declared ordering has to be the executed ordering.
         if not all(key):
             _record_drop(dropped, key, "label key is incomplete")
             # A label missing only its timestamp still registers its pair, so
@@ -188,6 +188,12 @@ def _label_index(
             # malformed label producer.
             if key[0] and key[1]:
                 incomplete_pairs.add((key[0], key[1]))
+            continue
+        if row.get("horizon", "all_valid") not in {"", "all_valid"}:
+            _record_drop(dropped, key, "label horizon is not all_valid")
+            continue
+        if _label_target(row) is None:
+            _record_drop(dropped, key, "label is not a clean binary settlement")
             continue
         index[key] = row
     return index, dropped, pairs, incomplete_pairs

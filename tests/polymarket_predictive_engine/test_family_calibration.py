@@ -369,3 +369,25 @@ def test_duplicate_label_drop_reasons_are_order_independent() -> None:
 
     assert forward[0]["reason"] == reverse[0]["reason"]
     assert forward[0]["reason"] == "label is not a clean binary settlement"
+
+
+def test_incomplete_label_key_wins_even_when_the_label_is_also_dirty() -> None:
+    """The declared precedence must be the executed precedence.
+
+    A label that is BOTH missing its timestamp AND carries a bad horizon used to
+    exit at the horizon branch, so incomplete_pairs never populated and a
+    complete prediction for the same market/token was reported as a timestamp
+    mismatch - pointing at the join key rather than the malformed producer.
+    """
+    prediction = {
+        "market_id": "m1", "token_id": "t1", "prediction_timestamp": "2026-01-01T00:00:00Z",
+        "model_probability": "0.7", "market_midpoint": "0.5",
+    }
+    both_wrong = {
+        "market_id": "m1", "token_id": "t1", "prediction_timestamp": "",
+        "target": "", "horizon": "h24", "resolution_quality": "clean_settlement",
+    }
+
+    rejected = join_clean_settled_predictions([prediction], [both_wrong])[1]
+
+    assert rejected[0]["reason"] == "label key is incomplete"

@@ -129,18 +129,38 @@ def _label_target(row: Mapping[str, Any]) -> int | None:
     return None
 
 
-def _label_index(label_rows: Iterable[Mapping[str, Any]]) -> dict[tuple[str, str, str], Mapping[str, Any]]:
+def _label_index(
+    label_rows: Iterable[Mapping[str, Any]],
+) -> tuple[dict[tuple[str, str, str], Mapping[str, Any]], dict[tuple[str, str, str], str], set[tuple[str, str]]]:
+    """Index clean settled labels, and retain WHY each dropped label was dropped.
+
+    A label can fail to reach the index for three quite different reasons, and
+    a caller that only sees the finished index cannot tell them apart from a
+    market that was never labelled at all. The two extra return values exist so
+    a rejection can name its actual cause: ``dropped`` maps a full key to the
+    reason it never entered the index, and ``pairs`` holds every
+    (market_id, token_id) seen in the label rows regardless of outcome, which
+    is what separates a timestamp mismatch from a genuinely absent market.
+    """
+
     index: dict[tuple[str, str, str], Mapping[str, Any]] = {}
+    dropped: dict[tuple[str, str, str], str] = {}
+    pairs: set[tuple[str, str]] = set()
     for row in label_rows:
-        if row.get("horizon", "all_valid") not in {"", "all_valid"}:
-            continue
-        target = _label_target(row)
-        if target is None:
-            continue
         key = (str(row.get("market_id", "")), str(row.get("token_id", "")), str(row.get("prediction_timestamp", "")))
-        if all(key):
-            index[key] = row
-    return index
+        if key[0] and key[1]:
+            pairs.add((key[0], key[1]))
+        if row.get("horizon", "all_valid") not in {"", "all_valid"}:
+            dropped.setdefault(key, "label horizon is not all_valid")
+            continue
+        if _label_target(row) is None:
+            dropped.setdefault(key, "label is not a clean binary settlement")
+            continue
+        if not all(key):
+            dropped.setdefault(key, "label key is incomplete")
+            continue
+        index[key] = row
+    return index, dropped, pairs
 
 
 def _unit_key(row: Mapping[str, Any]) -> str:
@@ -164,7 +184,7 @@ def join_clean_settled_predictions(
     label_rows: Iterable[Mapping[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Join prediction rows to clean settled labels without using label columns as features."""
-    labels = _label_index(label_rows)
+    labels, dropped_labels, labelled_pairs = _label_index(label_rows)
     joined: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
 
@@ -172,7 +192,17 @@ def join_clean_settled_predictions(
         key = (str(pred.get("market_id", "")), str(pred.get("token_id", "")), str(pred.get("prediction_timestamp", "")))
         label = labels.get(key)
         if not label:
-            rejected.append({"market_id": key[0], "token_id": key[1], "prediction_timestamp": key[2], "reason": "no clean settled label"})
+            # A miss has four distinguishable causes and they need four
+            # different fixes. Collapsing them into one string made a 100%
+            # rejection rate undiagnosable and would wrongly attribute a
+            # timestamp-key or label-quality problem to corpus coverage.
+            if key in dropped_labels:
+                reason = dropped_labels[key]
+            elif (key[0], key[1]) in labelled_pairs:
+                reason = "label exists for market and token but not at this prediction_timestamp"
+            else:
+                reason = "no label for this market and token"
+            rejected.append({"market_id": key[0], "token_id": key[1], "prediction_timestamp": key[2], "reason": reason})
             continue
 
         model_p, model_source = _first_probability(pred, MODEL_PROBABILITY_FIELDS)

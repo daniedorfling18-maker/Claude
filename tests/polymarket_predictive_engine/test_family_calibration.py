@@ -10,6 +10,7 @@ from polymarket_predictive_engine.family_calibration import (
     CLASS_MODEL_BEATS,
     build_family_calibration_scorecard,
 )
+from polymarket_predictive_engine.market_relative_validation import join_clean_settled_predictions
 from polymarket_predictive_engine.utils import csv_columns, read_csv_rows, write_csv
 
 
@@ -195,37 +196,112 @@ def test_rejected_join_reasons_are_published_not_just_counted(tmp_path: Path) ->
     assert payload["status"] == "no_clean_settled_rows"
     assert payload["clean_settled_joined_rows"] == 0
     assert payload["rejected_join_rows"] == 1
-    # The reason histogram is the diagnostic that was missing.
-    assert payload["rejected_join_reasons"] == {"no clean settled label": 1}
+    # The reason histogram is the diagnostic that was missing, and it must name
+    # the genuinely-absent-market case specifically - not a blanket string that
+    # a timestamp mismatch or a dirty label would also produce.
+    assert payload["rejected_join_reasons"] == {"no label for this market and token": 1}
     assert payload["rejected_join_examples"][0]["market_id"] == "market-1"
-    assert payload["rejected_join_examples"][0]["reason"] == "no clean settled label"
+    assert payload["rejected_join_examples"][0]["reason"] == "no label for this market and token"
 
 
-def test_rejected_join_reasons_distinguish_the_same_source_defect(tmp_path: Path) -> None:
-    """The other candidate cause, and it is a different fix entirely.
+def test_rejected_join_reasons_separate_timestamp_and_label_quality_misses(tmp_path: Path) -> None:
+    """The conflation that made the diagnostic useless in its first form.
 
-    If the model probability and the market midpoint resolve to the same source
-    column, every row is rejected for a reason that has nothing to do with the
-    corpus - so the two must not be conflated in the artifact.
+    A label present for the same market and token but at a different
+    prediction_timestamp, and a label dropped for not being a clean binary
+    settlement, both used to surface as the same string as a market that was
+    never labelled at all. Those need three different fixes, so they must be
+    three different reasons.
     """
     cfg = _cfg(tmp_path, minimum_rows=4)
-    prediction, label = _row_pair(
-        market_id="market-1",
-        token_id="token-01",
-        target=1,
-        model_probability=0.7,
-        market_probability=0.5,
-        question="Some question",
+
+    matched_pred, timestamp_label = _row_pair(
+        market_id="market-ts", token_id="token-01", target=1,
+        model_probability=0.7, market_probability=0.5, question="timestamp case",
     )
-    # Strip every distinct model field so model and market resolve identically.
+    timestamp_label["prediction_timestamp"] = "2026-07-03T23:59:00Z"  # same market/token, different instant
+
+    dirty_pred, dirty_label = _row_pair(
+        market_id="market-dirty", token_id="token-02", target=1,
+        model_probability=0.7, market_probability=0.5, question="dirty label case",
+    )
+    dirty_label["target"] = ""  # not a clean binary settlement
+
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "predictions.csv",
+        [matched_pred, dirty_pred],
+        list(matched_pred),
+    )
+    write_csv(
+        cfg.output_root / "polymarket_training" / "labels.csv",
+        [timestamp_label, dirty_label],
+        list(timestamp_label),
+    )
+
+    payload = build_family_calibration_scorecard(cfg)
+
+    assert payload["clean_settled_joined_rows"] == 0
+    assert payload["rejected_join_reasons"] == {
+        "label exists for market and token but not at this prediction_timestamp": 1,
+        "label is not a clean binary settlement": 1,
+    }
+
+
+def test_missing_model_probability_is_named_as_such(tmp_path: Path) -> None:
+    """A prediction with no model column is a wiring fault, not a corpus fault."""
+    cfg = _cfg(tmp_path, minimum_rows=4)
+    prediction, label = _row_pair(
+        market_id="market-1", token_id="token-01", target=1,
+        model_probability=0.7, market_probability=0.5, question="Some question",
+    )
     prediction.pop("model_probability", None)
-    prediction["market_midpoint"] = 0.5
     write_csv(cfg.output_root / "polymarket_predictions" / "predictions.csv", [prediction], list(prediction))
     write_csv(cfg.output_root / "polymarket_training" / "labels.csv", [label], list(label))
 
     payload = build_family_calibration_scorecard(cfg)
 
     assert payload["clean_settled_joined_rows"] == 0
-    reasons = payload["rejected_join_reasons"]
-    assert reasons, "a rejection reason must always be published"
-    assert "no clean settled label" not in reasons
+    assert payload["rejected_join_reasons"] == {"missing model or market probability": 1}
+
+
+def test_a_model_probability_copied_from_the_midpoint_is_not_currently_diagnosed() -> None:
+    """Records a REAL fail-open, so it is disclosed rather than assumed handled.
+
+    join_clean_settled_predictions has a guard that rejects a row when
+    ``model_source == market_source``. MODEL_PROBABILITY_FIELDS and
+    MARKET_MIDPOINT_FIELDS are disjoint, so that comparison can never be true
+    for an ordinary row and the guard is unreachable. A prediction whose model
+    probability is simply the midpoint copied under a model field name is
+    therefore ACCEPTED and scored as though it carried independent information.
+
+    This test pins the current behaviour rather than asserting the guard works.
+    Closing it means detecting equality of VALUES, which changes what the join
+    accepts and belongs in its own change, not in a diagnostic one.
+    """
+    joined, rejected = join_clean_settled_predictions(
+        [
+            {
+                "market_id": "m1",
+                "token_id": "t1",
+                "prediction_timestamp": "2026-01-01T00:00:00Z",
+                # identical value, different field names: a copied midpoint
+                "model_probability": "0.55",
+                "market_midpoint": "0.55",
+            }
+        ],
+        [
+            {
+                "market_id": "m1",
+                "token_id": "t1",
+                "prediction_timestamp": "2026-01-01T00:00:00Z",
+                "target": "1",
+                "horizon": "all_valid",
+                "resolution_quality": "clean_settlement",
+            }
+        ],
+    )
+
+    assert rejected == [], "the source-equality guard cannot fire on disjoint field lists"
+    assert len(joined) == 1
+    assert joined[0]["model_probability"] == joined[0]["market_probability"] == 0.55
+    assert joined[0]["model_probability_source"] != joined[0]["market_probability_source"]

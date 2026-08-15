@@ -129,6 +129,20 @@ def _label_target(row: Mapping[str, Any]) -> int | None:
     return None
 
 
+# Lower index wins, whatever order the rows arrive in.
+_LABEL_DROP_PRECEDENCE = (
+    "label key is incomplete",
+    "label is not a clean binary settlement",
+    "label horizon is not all_valid",
+)
+
+
+def _record_drop(dropped: dict[tuple[str, str, str], str], key: tuple[str, str, str], reason: str) -> None:
+    current = dropped.get(key)
+    if current is None or _LABEL_DROP_PRECEDENCE.index(reason) < _LABEL_DROP_PRECEDENCE.index(current):
+        dropped[key] = reason
+
+
 def _label_index(
     label_rows: Iterable[Mapping[str, Any]],
 ) -> tuple[
@@ -156,14 +170,18 @@ def _label_index(
         key = (str(row.get("market_id", "")), str(row.get("token_id", "")), str(row.get("prediction_timestamp", "")))
         if key[0] and key[1]:
             pairs.add((key[0], key[1]))
+        # Deterministic precedence, NOT first-row-wins. The label producer emits
+        # several horizon rows per market/token/timestamp, so a setdefault would
+        # let a reordering of labels.csv silently swap which defect the
+        # histogram reports and hide the other.
         if row.get("horizon", "all_valid") not in {"", "all_valid"}:
-            dropped.setdefault(key, "label horizon is not all_valid")
+            _record_drop(dropped, key, "label horizon is not all_valid")
             continue
         if _label_target(row) is None:
-            dropped.setdefault(key, "label is not a clean binary settlement")
+            _record_drop(dropped, key, "label is not a clean binary settlement")
             continue
         if not all(key):
-            dropped.setdefault(key, "label key is incomplete")
+            _record_drop(dropped, key, "label key is incomplete")
             # A label missing only its timestamp still registers its pair, so
             # without this the join would report a timestamp MISMATCH and send
             # the operator to change the join key, when the actual fault is a
@@ -208,7 +226,13 @@ def join_clean_settled_predictions(
             # different fixes. Collapsing them into one string made a 100%
             # rejection rate undiagnosable and would wrongly attribute a
             # timestamp-key or label-quality problem to corpus coverage.
-            if key in dropped_labels:
+            if not all(key):
+                # The prediction itself is malformed. Checked BEFORE any
+                # label-side cause, or a blank prediction timestamp reads as a
+                # timestamp mismatch and sends the operator to repair labels or
+                # the join key instead of the prediction producer.
+                reason = "prediction key is incomplete"
+            elif key in dropped_labels:
                 reason = dropped_labels[key]
             elif (key[0], key[1]) in incomplete_pairs:
                 reason = "label key is incomplete"

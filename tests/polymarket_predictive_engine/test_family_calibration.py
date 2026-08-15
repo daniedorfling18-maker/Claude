@@ -329,3 +329,43 @@ def test_incomplete_label_key_is_not_reported_as_a_timestamp_mismatch(tmp_path: 
 
     assert payload["clean_settled_joined_rows"] == 0
     assert payload["rejected_join_reasons"] == {"label key is incomplete": 1}
+
+
+def test_incomplete_prediction_key_blames_the_prediction_not_the_labels(tmp_path: Path) -> None:
+    """A malformed prediction producer must not read as a label-corpus fault."""
+    cfg = _cfg(tmp_path, minimum_rows=4)
+    prediction, label = _row_pair(
+        market_id="market-1", token_id="token-01", target=1,
+        model_probability=0.7, market_probability=0.5, question="Some question",
+    )
+    prediction["prediction_timestamp"] = ""  # malformed prediction, label is fine
+
+    write_csv(cfg.output_root / "polymarket_predictions" / "predictions.csv", [prediction], list(prediction))
+    write_csv(cfg.output_root / "polymarket_training" / "labels.csv", [label], list(label))
+
+    payload = build_family_calibration_scorecard(cfg)
+    assert payload["rejected_join_reasons"] == {"prediction key is incomplete": 1}
+
+
+def test_duplicate_label_drop_reasons_are_order_independent() -> None:
+    """The label producer emits several horizon rows per key, so a first-wins
+    setdefault would let a reordering of labels.csv swap which defect the
+    histogram reports and hide the other."""
+    prediction = {
+        "market_id": "m1", "token_id": "t1", "prediction_timestamp": "2026-01-01T00:00:00Z",
+        "model_probability": "0.7", "market_midpoint": "0.5",
+    }
+    dirty = {
+        "market_id": "m1", "token_id": "t1", "prediction_timestamp": "2026-01-01T00:00:00Z",
+        "target": "", "horizon": "all_valid", "resolution_quality": "clean_settlement",
+    }
+    wrong_horizon = {
+        "market_id": "m1", "token_id": "t1", "prediction_timestamp": "2026-01-01T00:00:00Z",
+        "target": "1", "horizon": "h24", "resolution_quality": "clean_settlement",
+    }
+
+    forward = join_clean_settled_predictions([prediction], [dirty, wrong_horizon])[1]
+    reverse = join_clean_settled_predictions([prediction], [wrong_horizon, dirty])[1]
+
+    assert forward[0]["reason"] == reverse[0]["reason"]
+    assert forward[0]["reason"] == "label is not a clean binary settlement"

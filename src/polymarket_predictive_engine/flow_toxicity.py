@@ -42,6 +42,36 @@ TOXICITY_FIELDS = [
     "toxicity_block_reasons",
 ]
 
+# Wallet-axis markouts.
+#
+# The market-axis table above answers "is this market's flow toxic". It cannot
+# answer "which wallets actually predict", because it discards the wallet the
+# moment it classifies a fill as smart or crowd. That classification is itself
+# the constraint: _top_wallets resolves "smart" to the LATEST snapshot of
+# leaderboard_history.csv capped at 100 wallets, and the mirror holds 200 rows
+# across 2 snapshots naming the same 100 wallets. So of 475 markets scored from
+# 200,000 fills, only 16 ever produce a smart-fill markout - not because prices
+# are missing (176 markets have coverage) but because a fill can only be smart
+# if it belongs to one of a hundred wallets on a public PnL leaderboard.
+#
+# A PnL/volume ranking is not a measure of prediction. This table publishes the
+# empirical alternative the data already supports: forward markout per wallet,
+# split into an earlier ranking window and a later evaluation window so a wallet
+# can be ranked on one and judged on the other. Diagnostic only - no gate,
+# sizing or order surface reads it.
+WALLET_MARKOUT_FIELDS = [
+    "generated_at_utc",
+    "wallet",
+    "on_current_leaderboard",
+    "fills_total",
+    "markout_mean_total",
+    "fills_ranking_window",
+    "markout_mean_ranking_window",
+    "fills_evaluation_window",
+    "markout_mean_evaluation_window",
+    "markets_touched",
+]
+
 # WO-102 (2026-07-17): the historical toxicity_score is a UNIVERSE-RELATIVE
 # percentile (index / (n-1)). A genuinely one-sided market can silently fall
 # BELOW the standing-rule-8 percentile threshold simply because more calm
@@ -218,6 +248,12 @@ def _markout_stats(
         trades_by_token.setdefault(str(trade["asset_id"]), []).append(trade)
 
     stats: dict[str, dict[str, float | int]] = {}
+    wallet_stats: dict[str, dict[str, Any]] = {}
+    # Median fill time splits the sample. Wallets are ranked on the earlier half
+    # and judged on the later one, so a ranking can never be validated on the
+    # fills that produced it.
+    stamps = sorted(float(trade["stamp"]) for trade in trades)
+    split_stamp = stamps[len(stamps) // 2] if stamps else 0.0
     for token, token_trades in trades_by_token.items():
         feature_rows = iter(
             connection.execute(
@@ -252,7 +288,27 @@ def _markout_stats(
             tier = "smart" if trade["wallet"] and trade["wallet"] in top_wallets else "crowd"
             market_stats[f"{tier}_count"] += 1
             market_stats[f"{tier}_sum"] += markout
-    return stats
+            wallet = str(trade["wallet"] or "").strip().lower()
+            if wallet:
+                window = "ranking" if float(trade["stamp"]) < split_stamp else "evaluation"
+                entry = wallet_stats.setdefault(
+                    wallet,
+                    {
+                        "fills_total": 0,
+                        "markout_total": 0.0,
+                        "fills_ranking": 0,
+                        "markout_ranking": 0.0,
+                        "fills_evaluation": 0,
+                        "markout_evaluation": 0.0,
+                        "markets": set(),
+                    },
+                )
+                entry["fills_total"] += 1
+                entry["markout_total"] += markout
+                entry[f"fills_{window}"] += 1
+                entry[f"markout_{window}"] += markout
+                entry["markets"].add(market)
+    return stats, wallet_stats
 
 
 def _vpin_raw(trades: list[dict[str, Any]], bucket_usd: float, bucket_count: int) -> tuple[float, int]:
@@ -343,6 +399,7 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
     toxicity = _percentiles(raw_vpin)
     horizon = float(settings["markout_horizon_minutes"]) * 60.0
     markout_by_market: dict[str, dict[str, float | int]] = {}
+    markout_by_wallet: dict[str, dict[str, Any]] = {}
     feature_rows_scanned = 0
     feature_rows_indexed = 0
     price_index_disk_bytes = 0
@@ -356,7 +413,7 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
                     connection,
                     _price_target_bounds(trades, horizon),
                 )
-                markout_by_market = _markout_stats(connection, trades, top_wallets, horizon)
+                markout_by_market, markout_by_wallet = _markout_stats(connection, trades, top_wallets, horizon)
                 price_index_disk_bytes = database_path.stat().st_size
             finally:
                 connection.close()
@@ -403,10 +460,39 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
             }
         )
     write_csv(path, rows_out, fieldnames=TOXICITY_FIELDS)
+
+    def _mean(total: float, count: int) -> float | None:
+        return round(total / count, 6) if count else None
+
+    wallet_rows = [
+        {
+            "generated_at_utc": generated_at,
+            "wallet": wallet,
+            "on_current_leaderboard": wallet in top_wallets,
+            "fills_total": entry["fills_total"],
+            "markout_mean_total": _mean(entry["markout_total"], entry["fills_total"]),
+            "fills_ranking_window": entry["fills_ranking"],
+            "markout_mean_ranking_window": _mean(entry["markout_ranking"], entry["fills_ranking"]),
+            "fills_evaluation_window": entry["fills_evaluation"],
+            "markout_mean_evaluation_window": _mean(entry["markout_evaluation"], entry["fills_evaluation"]),
+            "markets_touched": len(entry["markets"]),
+        }
+        for wallet, entry in sorted(markout_by_wallet.items(), key=lambda item: -item[1]["fills_total"])
+    ]
+    wallet_path = cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv"
+    write_csv(wallet_path, wallet_rows, fieldnames=WALLET_MARKOUT_FIELDS)
     summary.update(
         {
             "status": "ok" if rows_out or not trades else "no_trades",
             "markets_scored": len(rows_out),
+            "wallets_scored": len(wallet_rows),
+            # Published so the sample is visible before any ranking is trusted:
+            # a wallet ranked on the earlier window must be judged on the later
+            # one, and a wallet present in only one window cannot be judged at all.
+            "wallets_in_both_windows": sum(
+                1 for row in wallet_rows if row["fills_ranking_window"] and row["fills_evaluation_window"]
+            ),
+            "wallet_output_path": str(wallet_path),
             "trades_seen": len(trades),
             "missing_wallet_data": missing_wallet_data,
             "price_index_strategy": "disk_backed_streaming_sqlite",

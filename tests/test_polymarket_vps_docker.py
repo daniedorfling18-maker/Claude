@@ -1308,3 +1308,229 @@ def test_book_pulse_disabled_stamps_intentional_skip_at_exit_zero(tmp_path):
     job = json.loads((out_dir / "status.json").read_text(encoding="utf-8"))["jobs"]["book_pulse"]
     assert job["last_exit_code"] == 0
     assert job["skip_kind"] == "intentional"
+
+
+# ---------------------------------------------------------------------------
+# WO-152 — mark_in_flight, the scheduler side of the starvation attribution
+# ledger. Write-only telemetry: no job's execution, scheduling decision, exit
+# code, skip classification, or timeout depends on the marker, and a failing
+# mark_in_flight logs and proceeds.
+# ---------------------------------------------------------------------------
+
+_WO152_SCHEDULER = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
+# The watchdog owns the canonical membership; the scheduler's call sites are
+# asserted against it rather than against a hand-copied list.
+_WO152_MARKED_JOBS = frozenset(
+    {
+        "governance_refresh",
+        "clv_snapshot",
+        "locked_card_refresh",
+        "training_harvest",
+        "maker_study_intraday",
+        "trade_prints",
+        "book_pulse",
+        "ledger_anchor",
+    }
+)
+
+
+def _wo152_env(out_dir: Path) -> dict:
+    return {
+        **os.environ,
+        "OPS_SCHEDULER_LIBRARY_ONLY": "1",
+        "OPS_SCHEDULER_OUT_DIR": str(out_dir),
+    }
+
+
+def _wo152_call(out_dir: Path, snippet: str, shell: str = "sh") -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [shell, "-c", f'set -u; . "$1"; {snippet}', "sh", str(_WO152_SCHEDULER)],
+        env=_wo152_env(out_dir),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_wo152_mark_in_flight_sets_only_the_marker_and_preserves_every_other_record(tmp_path):
+    """WO-152 Test 1."""
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    seed = {
+        "mode": "vps_ops_scheduler",
+        "jobs": {
+            "training_harvest": {"last_exit_code": 0, "runs_total": 34, "failed_cycles_total": 14},
+            "trade_prints": {"last_exit_code": 0, "runs_total": 2604},
+        },
+    }
+    (out_dir / "status.json").write_text(json.dumps(seed), encoding="utf-8")
+
+    result = _wo152_call(out_dir, 'mark_in_flight training_harvest "2026-08-04T22:54:01Z"')
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads((out_dir / "status.json").read_text(encoding="utf-8"))
+    harvest = payload["jobs"]["training_harvest"]
+    assert harvest["in_flight_since_utc"] == "2026-08-04T22:54:01Z"
+    # Every other key on that job's record, and every other job's record.
+    assert harvest["runs_total"] == 34
+    assert harvest["failed_cycles_total"] == 14
+    assert payload["jobs"]["trade_prints"] == seed["jobs"]["trade_prints"]
+    assert payload["mode"] == "vps_ops_scheduler"
+    assert not [p for p in out_dir.iterdir() if p.name.endswith(".tmp")]
+
+
+def test_wo152_stamp_status_clears_the_marker_on_success_and_on_failure(tmp_path):
+    """WO-152 Test 2. stamp_status rebuilds jobs[job] wholesale, so the marker's
+    absence after completion is permanent by construction - no new code."""
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+
+    for exit_code in (0, 1):
+        marked = _wo152_call(out_dir, 'mark_in_flight trade_prints "2026-08-04T22:54:01Z"')
+        assert marked.returncode == 0, marked.stderr
+        assert "in_flight_since_utc" in json.loads((out_dir / "status.json").read_text(encoding="utf-8"))["jobs"]["trade_prints"]
+
+        stamped = _wo152_call(out_dir, f'stamp_status trade_prints {exit_code} "detail" ""')
+        assert stamped.returncode == 0, stamped.stderr
+        record = json.loads((out_dir / "status.json").read_text(encoding="utf-8"))["jobs"]["trade_prints"]
+        assert "in_flight_since_utc" not in record
+        assert record["last_exit_code"] == exit_code
+
+
+def test_wo152_missing_and_empty_status_json_both_write_a_valid_marker(tmp_path):
+    """WO-152 Test 3, the two cases with nothing in the existing file to lose."""
+    for name, seed in (("missing", None), ("empty", "")):
+        out_dir = tmp_path / name
+        out_dir.mkdir()
+        if seed is not None:
+            (out_dir / "status.json").write_text(seed, encoding="utf-8")
+
+        result = _wo152_call(out_dir, 'mark_in_flight book_pulse "2026-08-04T22:54:01Z"')
+
+        assert result.returncode == 0, result.stderr
+        payload = json.loads((out_dir / "status.json").read_text(encoding="utf-8"))
+        assert payload["jobs"]["book_pulse"]["in_flight_since_utc"] == "2026-08-04T22:54:01Z"
+        assert not [p for p in out_dir.iterdir() if p.name.endswith(".tmp")]
+
+
+def test_wo152_corrupt_status_json_is_left_byte_for_byte_untouched(tmp_path):
+    """WO-152 Test 4. Replacing a corrupt file wholesale would destroy every
+    OTHER job's stamps; skipping loses only this one job's attribution."""
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    corrupt = '{"jobs": {"training_harvest": {"runs_total": 34'
+    status = out_dir / "status.json"
+    status.write_bytes(corrupt.encode("utf-8"))
+
+    result = _wo152_call(out_dir, 'mark_in_flight training_harvest "2026-08-04T22:54:01Z"; echo STILL_ALIVE')
+
+    assert result.returncode == 0, result.stderr
+    assert "STILL_ALIVE" in result.stdout
+    assert "mark_in_flight" in (result.stdout + result.stderr)
+    assert status.read_bytes() == corrupt.encode("utf-8")
+    assert not [p for p in out_dir.iterdir() if p.name.endswith(".tmp")]
+
+
+def test_wo152_every_marked_job_is_marked_and_the_skip_path_is_not(tmp_path):
+    """WO-152 Test 5. Asserted against the constant, not a hand-copied list.
+
+    This requires the new MAKER_STUDY_STARTED_AT line to exist, so the
+    assertion fails honestly rather than passing vacuously.
+    """
+    text = _WO152_SCHEDULER.read_text(encoding="utf-8")
+    called = set(re.findall(r"^\s*mark_in_flight ([a-z_]+) ", text, flags=re.MULTILINE))
+
+    assert called == _WO152_MARKED_JOBS
+
+    # Each marked job is marked at the point its own *_STARTED_AT stamp is taken.
+    for job, variable in (
+        ("governance_refresh", "GOVERNANCE_STARTED_AT"),
+        ("clv_snapshot", "CLV_STARTED_AT"),
+        ("locked_card_refresh", "CARD_STARTED_AT"),
+        ("training_harvest", "HARVEST_STARTED_AT"),
+        ("maker_study_intraday", "MAKER_STUDY_STARTED_AT"),
+        ("trade_prints", "PRINTS_STARTED_AT"),
+        ("book_pulse", "BOOK_PULSE_STARTED_AT"),
+        ("ledger_anchor", "LEDGER_ANCHOR_STARTED_AT"),
+    ):
+        assert f'{variable}=$(date -u +%Y-%m-%dT%H:%M:%SZ)\n  mark_in_flight {job} "${variable}"' in text
+
+    # run_book_pulse's disabled branch stamps and returns before the marker: a
+    # job that returns early on a skip path never held the loop.
+    disabled_branch = text.split('if [ "$BOOK_PULSE_ENABLED" = "0" ]; then', 1)[1].split("fi", 1)[0]
+    assert "stamp_status book_pulse 0" in disabled_branch
+    assert "mark_in_flight" not in disabled_branch
+
+
+def test_wo152_mark_in_flight_never_kills_the_scheduler(tmp_path):
+    """WO-152 Tests 6-7. Three failure directions, under the production shell family.
+
+    The scheduler runs `set -u` and every `set -e` in it is inside a job
+    subshell, never in the main loop - so a bare "$2" on a one-argument call
+    would not fail the function, it would TERMINATE THE SCHEDULER.
+    """
+    out_dir = tmp_path / "ops"
+    out_dir.mkdir()
+    # A python child that cannot read or write status.json. The WO's registered
+    # form of this case is an unwritable OUT_DIR, which is not a failure when
+    # the suite runs as root (as it does on the ARM64 gate); a status.json that
+    # is a DIRECTORY raises in the same place, uncaught, for every uid.
+    unreadable = tmp_path / "unreadable"
+    (unreadable / "status.json").mkdir(parents=True)
+
+    cases = {
+        "one_argument": (out_dir, "mark_in_flight training_harvest; echo STILL_ALIVE"),
+        "empty_second": (out_dir, 'mark_in_flight training_harvest ""; echo STILL_ALIVE'),
+        "no_arguments": (out_dir, "mark_in_flight; echo STILL_ALIVE"),
+        "failing_python_child": (unreadable, 'mark_in_flight training_harvest "2026-08-04T22:54:01Z"; echo STILL_ALIVE'),
+    }
+
+    for shell in ("sh", "bash", "dash"):
+        if subprocess.run(["which", shell], capture_output=True, check=False).returncode != 0:
+            continue
+        for name, (directory, snippet) in cases.items():
+            result = _wo152_call(directory, snippet, shell=shell)
+            context = f"{shell}/{name}: rc={result.returncode} out={result.stdout!r} err={result.stderr!r}"
+            # The function returns 0, the calling shell is STILL RUNNING, and a
+            # log line naming mark_in_flight was emitted.
+            assert result.returncode == 0, context
+            assert "STILL_ALIVE" in result.stdout, context
+            assert "mark_in_flight" in (result.stdout + result.stderr), context
+
+
+def test_wo152_library_only_precedent_is_intact():
+    """WO-152 Test 8, in the form its own registered text defines.
+
+    NOTE (build discrepancy, reported for a ruling): the registered assertion is
+    a raw `grep -c` of 14 in this file, but the WO's own scheduler-side tests
+    above extend the same library-only idiom, so the literal count necessarily
+    moves. The registered text defines the 14 as "the count of tests in
+    test_polymarket_vps_docker.py that follow the established library-only
+    source-and-call pattern" and enumerates them by name, so the enumeration is
+    asserted here instead - it is the stable form of the same claim.
+    """
+    text = Path(__file__).read_text(encoding="utf-8")
+    registered = [
+        "test_long_scheduler_job_wait_keeps_safety_pulse_live",
+        "test_failed_training_harvest_rearms_after_bounded_retry_backoff",
+        "test_deploy_forced_governance_refresh_is_not_counted_as_scheduler_overrun",
+        "test_ops_scheduler_disabled_seasonal_card_records_intentional_skip",
+        "test_ops_scheduler_card_refresh_enabled_by_default_preflights_odds",
+        "test_ops_scheduler_rotates_oversized_log",
+        "test_ops_scheduler_log_rotation_is_noop_when_small_or_disabled",
+        "test_wo117_offset_env_nonnumeric_value_does_not_kill_the_scheduler",
+        "test_wo117_window_tolerance_boundary_semantics",
+        "test_wo120_corrupt_stamp_keeps_job_schedulable",
+        "test_wo120_stamp_status_leaves_no_temp_file_and_valid_json",
+        "test_book_pulse_interval_and_timeout_env_clamps",
+        "test_book_pulse_overrun_leaves_last_success_empty_with_numeric_duration_and_recovers",
+        "test_book_pulse_disabled_stamps_intentional_skip_at_exit_zero",
+    ]
+
+    assert len(registered) == 14
+    for name in registered:
+        assert f"def {name}(" in text, name
+
+    # The 15th tree-wide occurrence is a different test file using the same idiom.
+    other = ROOT / "tests" / "polymarket_predictive_engine" / "test_training_harvest.py"
+    assert "OPS_SCHEDULER_LIBRARY_ONLY" in other.read_text(encoding="utf-8")

@@ -402,6 +402,11 @@ ledger_anchor:
     - {glob: performance/background_timeout_incidents.csv, mode: append_only}
     # WO-78 semantic-health incidents are byte-appended and prefix-anchored.
     - {glob: performance/degraded_state_incidents.csv, mode: append_only}
+    # WO-152 starvation-attribution sidecar. This entry MUST accompany the code
+    # default: _settings merges the config over DEFAULT_LEDGER_REGISTRY with
+    # merged.update(...), so an explicit ledger_globs list here REPLACES the
+    # code default wholesale and a code-only enrollment is silently inert.
+    - {glob: performance/scheduler_attribution_v1.csv, mode: append_only}
     # #269 review follow-up: these four H2/H3 registered-hypothesis evidence
     # ledgers were enrolled only in the code default, which this explicit list
     # overrides - they were never anchored in production until now.

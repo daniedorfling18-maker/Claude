@@ -31,6 +31,164 @@ def _is_closed_candidate(market: dict[str, Any]) -> bool:
     return _truthy(market.get("closed"))
 
 
+# Corpus stratification.
+#
+# The resolved corpus used to be "the N most recently closed markets"
+# (closed=true, order=closedTime, ascending=false). Sports fixtures and
+# sub-hourly crypto candles resolve continuously while a macro or political
+# question resolves once, so that rule cannot produce anything but sport and
+# candles no matter how long it runs. Measured 2026-08-15: of 1000 corpus rows,
+# the top resolution sources were ligue2 (131), MLB (118), flashscore (78),
+# ATP (69), PGA (69) and setkacup (66) - and the corpus shared ZERO members with
+# the 40 markets the study was actually quoting. Every directional statistic
+# computed on it (Brier, CLV, the rule search) was therefore measuring a
+# different population from the one being traded.
+#
+# Two corrections below: drop the populations that cannot carry a directional
+# signal, then take a per-family quota instead of a global recency slice.
+
+DEFAULT_MIN_MARKET_DURATION_HOURS = 6.0
+# Domains that publish per-fixture results. A market resolved by one of these is
+# a single sporting fixture, priced against the sharpest books in the world.
+DEFAULT_EXCLUDED_RESOLUTION_DOMAINS = (
+    "setkacup.com",
+    "ligue2.fr",
+    "mlb.com",
+    "flashscore.com",
+    "atptour.com",
+    "pgatour.com",
+    "slstat.com",
+    "uefa.com",
+    "wtatennis.com",
+    "ekstraklasa.org",
+)
+
+
+def _market_open_dt(market: dict[str, Any]) -> datetime | None:
+    for key in ("startDate", "startDateIso", "start_date", "createdAt"):
+        seconds = normalize_external_timestamp(market.get(key))
+        if seconds is not None:
+            return datetime.fromtimestamp(seconds, timezone.utc)
+    return None
+
+
+def _market_duration_hours(market: dict[str, Any]) -> float | None:
+    opened = _market_open_dt(market)
+    if opened is None:
+        return None
+    closed = _market_close_dt(market)
+    if closed <= datetime(1971, 1, 1, tzinfo=timezone.utc):
+        return None
+    delta = (closed - opened).total_seconds() / 3600.0
+    return delta if delta >= 0 else None
+
+
+def _resolution_domain(market: dict[str, Any]) -> str:
+    source = str(market.get("resolutionSource") or "").strip().lower()
+    if not source:
+        return ""
+    source = source.split("://", 1)[-1]
+    return source.split("/", 1)[0].removeprefix("www.")
+
+
+def _market_family(market: dict[str, Any]) -> str:
+    """Stratification key: the population a market belongs to.
+
+    Category first (Gamma's own label), then the resolution domain, then an
+    explicit ``uncategorised`` bucket. Never the question text, which is too
+    granular to stratify on.
+    """
+
+    category = str(market.get("category") or "").strip().lower()
+    if category:
+        return category
+    domain = _resolution_domain(market)
+    if domain:
+        return f"source:{domain}"
+    # Slug prefix before falling back to one shared bucket. Over-splitting is
+    # safe here - a family below the cap simply contributes everything it has -
+    # whereas a single giant "uncategorised" family would hit the cap and
+    # starve the quota for markets Gamma happens not to label.
+    slug = str(market.get("slug") or "").strip().lower()
+    if slug:
+        tokens = [token for token in slug.split("-") if token and not token.isdigit()]
+        if tokens:
+            return "slug:" + "-".join(tokens[:2])
+    return "uncategorised"
+
+
+def _excluded_population(
+    market: dict[str, Any],
+    *,
+    min_duration_hours: float,
+    excluded_domains: tuple[str, ...],
+) -> str:
+    """Return the exclusion reason, or "" when the market is eligible."""
+
+    domain = _resolution_domain(market)
+    if domain and any(domain == bad or domain.endswith(f".{bad}") for bad in excluded_domains):
+        return f"per_fixture_sport:{domain}"
+    duration = _market_duration_hours(market)
+    if duration is not None and duration < min_duration_hours:
+        # Sub-hourly "Up or Down" candles: a coin flip by construction, and the
+        # population that drove the corpus base rate to exactly 0.5000.
+        return "sub_duration_floor"
+    return ""
+
+
+def _stratified_take(
+    candidates: list[dict[str, Any]],
+    *,
+    requested: int,
+    max_share_per_family: float,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Take a per-family quota rather than a global recency slice.
+
+    Families are drawn round-robin, newest first within each, so no single
+    continuously-resolving population can crowd out the rest. A family is capped
+    at ``max_share_per_family`` of the request.
+    """
+
+    by_family: dict[str, list[dict[str, Any]]] = {}
+    for market in candidates:
+        by_family.setdefault(_market_family(market), []).append(market)
+    for rows in by_family.values():
+        rows.sort(key=_market_close_dt, reverse=True)
+
+    cap = max(1, int(requested * max_share_per_family)) if max_share_per_family > 0 else requested
+    selected: list[dict[str, Any]] = []
+    taken: dict[str, int] = {family: 0 for family in by_family}
+    families = sorted(by_family)
+    progressed = True
+    while len(selected) < requested and progressed:
+        progressed = False
+        for family in families:
+            if len(selected) >= requested:
+                break
+            rows = by_family[family]
+            index = taken[family]
+            if index >= len(rows) or index >= cap:
+                continue
+            selected.append(rows[index])
+            taken[family] = index + 1
+            progressed = True
+
+    selected.sort(key=_market_close_dt, reverse=True)
+    composition = {family: count for family, count in sorted(taken.items(), key=lambda kv: -kv[1]) if count}
+    return selected, {
+        "families_available": len(by_family),
+        "families_selected": len(composition),
+        "per_family_cap": cap,
+        "composition": composition,
+        "requested_markets": requested,
+        "selected_markets": len(selected),
+        # A stratified quota can under-fill where a recency slice never would,
+        # because most of the feed is excluded. Surfaced rather than inferred:
+        # a short corpus is a finding about the venue, not a silent shortfall.
+        "quota_met": len(selected) >= requested,
+    }
+
+
 def _as_market_list(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, list):
         return [row for row in payload if isinstance(row, dict)]
@@ -74,6 +232,7 @@ def _scan_feed(
     requested_closed_markets: int,
     label: str,
     progress_every_pages: int,
+    candidate_buffer: int | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -107,8 +266,11 @@ def _scan_feed(
             )
 
         # Closed=true can return very old markets first, so do not stop too early
-        # unless a useful number of candidates has already been collected.
-        if len(candidates) >= max(requested_closed_markets * 4, requested_closed_markets + 100):
+        # unless a useful number of candidates has already been collected. Under
+        # stratification the caller raises this: most of what the feed returns is
+        # excluded, so a buffer sized for the unfiltered case starves the quota.
+        target_buffer = candidate_buffer or max(requested_closed_markets * 4, requested_closed_markets + 100)
+        if len(candidates) >= target_buffer:
             stop_reason = "candidate_buffer_reached"
             break
 
@@ -131,10 +293,22 @@ def _candidate_markets(
     gamma_query_params: dict[str, Any],
     requested_closed_markets: int,
     progress_every_pages: int,
+    stratify: bool,
+    min_duration_hours: float,
+    excluded_domains: tuple[str, ...],
+    max_share_per_family: float,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     all_candidates: list[dict[str, Any]] = []
     seen: set[str] = set()
     scans: list[dict[str, Any]] = []
+    # Measured on the real feed: the excluded populations are the overwhelming
+    # majority of recently-closed markets, so the scan must page far deeper to
+    # fill a stratified quota than it did to fill a recency slice.
+    scan_buffer = (
+        max(requested_closed_markets * 25, requested_closed_markets + 2000)
+        if stratify
+        else max(requested_closed_markets * 4, requested_closed_markets + 100)
+    )
 
     # 1) Explicit closed pagination. Gamma's closed=true feed starts with ancient
     # rows, so we page forward until either we collect a large buffer or hit the
@@ -150,6 +324,7 @@ def _candidate_markets(
         max_pages=max_pages,
         base_params=closed_params,
         requested_closed_markets=requested_closed_markets,
+        candidate_buffer=scan_buffer,
         label="closed_true",
         progress_every_pages=progress_every_pages,
     )
@@ -169,6 +344,7 @@ def _candidate_markets(
         max_pages=max_pages,
         base_params=recent_params,
         requested_closed_markets=requested_closed_markets,
+        candidate_buffer=scan_buffer,
         label="default_recent",
         progress_every_pages=progress_every_pages,
     )
@@ -177,10 +353,46 @@ def _candidate_markets(
         _append_unique(all_candidates, seen, market)
 
     all_candidates.sort(key=_market_close_dt, reverse=True)
-    return all_candidates[:requested_closed_markets], {
-        "strategy": "closed_true_paginated_plus_default_recent_supplement",
+    merged_total = len(all_candidates)
+
+    if not stratify:
+        return all_candidates[:requested_closed_markets], {
+            "strategy": "closed_true_paginated_plus_default_recent_supplement",
+            "scans": scans,
+            "merged_closed_candidates": merged_total,
+            "stratified": False,
+        }
+
+    eligible: list[dict[str, Any]] = []
+    excluded_by_reason: dict[str, int] = {}
+    for market in all_candidates:
+        reason = _excluded_population(
+            market,
+            min_duration_hours=min_duration_hours,
+            excluded_domains=excluded_domains,
+        )
+        if reason:
+            key = reason.split(":", 1)[0]
+            excluded_by_reason[key] = excluded_by_reason.get(key, 0) + 1
+            continue
+        eligible.append(market)
+
+    selected, strata_meta = _stratified_take(
+        eligible,
+        requested=requested_closed_markets,
+        max_share_per_family=max_share_per_family,
+    )
+    return selected, {
+        "strategy": "closed_true_plus_recent_then_population_stratified",
         "scans": scans,
-        "merged_closed_candidates": len(all_candidates),
+        "merged_closed_candidates": merged_total,
+        "stratified": True,
+        "eligible_after_exclusions": len(eligible),
+        "excluded_by_reason": excluded_by_reason,
+        "min_duration_hours": min_duration_hours,
+        # Reported so corpus composition is visible BEFORE any statistic is
+        # computed on it - the failure this stratification exists to prevent.
+        **strata_meta,
     }
 
 
@@ -205,6 +417,19 @@ def historical_backfill(
     gamma_query_params = dict(settings.get("gamma_query_params", {}) or {})
     max_age_days = int(settings.get("max_age_days", 365))
 
+    # Corpus stratification. Defaults are ON: the unstratified corpus was
+    # measured to share zero members with the traded universe, so recency-only
+    # sampling is the defect, not the baseline.
+    strata_settings = dict(settings.get("corpus_stratification", {}) or {})
+    stratify = bool(strata_settings.get("enabled", True))
+    min_duration_hours = float(strata_settings.get("min_market_duration_hours", DEFAULT_MIN_MARKET_DURATION_HOURS))
+    excluded_domains = tuple(
+        str(domain).strip().lower().removeprefix("www.")
+        for domain in (strata_settings.get("excluded_resolution_domains") or DEFAULT_EXCLUDED_RESOLUTION_DOMAINS)
+        if str(domain).strip()
+    )
+    max_share_per_family = float(strata_settings.get("max_share_per_family", 0.15))
+
     candidates, fetch_meta = _candidate_markets(
         base_url=base_url,
         page_size=page_size,
@@ -213,6 +438,10 @@ def historical_backfill(
         gamma_query_params=gamma_query_params,
         requested_closed_markets=requested,
         progress_every_pages=progress_every_pages,
+        stratify=stratify,
+        min_duration_hours=min_duration_hours,
+        excluded_domains=excluded_domains,
+        max_share_per_family=max_share_per_family,
     )
     run_at = replay_run_at or canonical_utc(None)
     run_clock = datetime.fromisoformat(run_at.replace("Z", "+00:00"))

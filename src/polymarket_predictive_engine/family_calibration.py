@@ -187,6 +187,17 @@ def build_family_calibration_scorecard(cfg: EngineConfig) -> dict[str, Any]:
         "bootstrap_seed": bootstrap_seed,
         "clean_settled_joined_rows": len(joined),
         "rejected_join_rows": len(rejected),
+        # join_clean_settled_predictions already computes a reason for every
+        # rejection; publishing only the total made a 100% rejection rate
+        # undiagnosable. Measured 2026-08-15: 16,910 rejected, 0 joined, with no
+        # way to tell "predictions and labels cover disjoint markets" apart from
+        # "the model probability IS the market midpoint" or an exact-timestamp
+        # key that never matches. Diagnostic only - no gate reads this.
+        "rejected_join_reasons": dict(Counter(str(row.get("reason") or "unknown") for row in rejected)),
+        "rejected_join_examples": [
+            {key: row.get(key, "") for key in ("market_id", "token_id", "prediction_timestamp", "reason")}
+            for row in rejected[:5]
+        ],
         "families_scored": len(families),
         "families_with_minimum_rows": len(usable),
         "evidence_counts": dict(counts),

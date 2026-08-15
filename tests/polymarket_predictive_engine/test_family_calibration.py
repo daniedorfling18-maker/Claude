@@ -163,3 +163,69 @@ def test_family_calibration_fails_closed_with_no_clean_rows(tmp_path: Path) -> N
 
 def test_family_calibration_cli_is_registered() -> None:
     assert "family-calibration" in COMMANDS
+
+
+def test_rejected_join_reasons_are_published_not_just_counted(tmp_path: Path) -> None:
+    """A 100% rejection rate must be diagnosable from the artifact alone.
+
+    Measured 2026-08-15 on origin/vps-telemetry: the scorecard reported
+    ``rejected_join_rows: 16910`` with ``clean_settled_joined_rows: 0`` and no
+    reason breakdown, so there was no way to tell "predictions and labels cover
+    disjoint markets" apart from "the model probability IS the market midpoint"
+    or an exact-timestamp key that never matches. The join already computes a
+    reason per rejection; this pins that it reaches the artifact.
+    """
+    cfg = _cfg(tmp_path, minimum_rows=4)
+    prediction, label = _row_pair(
+        market_id="market-1",
+        token_id="token-01",
+        target=1,
+        model_probability=0.7,
+        market_probability=0.5,
+        question="Some question",
+    )
+    # A label whose market the prediction never covers: the disjoint-population
+    # case, which is exactly what the corpus sampling defect produced.
+    label["market_id"] = "market-unrelated"
+    write_csv(cfg.output_root / "polymarket_predictions" / "predictions.csv", [prediction], list(prediction))
+    write_csv(cfg.output_root / "polymarket_training" / "labels.csv", [label], list(label))
+
+    payload = build_family_calibration_scorecard(cfg)
+
+    assert payload["status"] == "no_clean_settled_rows"
+    assert payload["clean_settled_joined_rows"] == 0
+    assert payload["rejected_join_rows"] == 1
+    # The reason histogram is the diagnostic that was missing.
+    assert payload["rejected_join_reasons"] == {"no clean settled label": 1}
+    assert payload["rejected_join_examples"][0]["market_id"] == "market-1"
+    assert payload["rejected_join_examples"][0]["reason"] == "no clean settled label"
+
+
+def test_rejected_join_reasons_distinguish_the_same_source_defect(tmp_path: Path) -> None:
+    """The other candidate cause, and it is a different fix entirely.
+
+    If the model probability and the market midpoint resolve to the same source
+    column, every row is rejected for a reason that has nothing to do with the
+    corpus - so the two must not be conflated in the artifact.
+    """
+    cfg = _cfg(tmp_path, minimum_rows=4)
+    prediction, label = _row_pair(
+        market_id="market-1",
+        token_id="token-01",
+        target=1,
+        model_probability=0.7,
+        market_probability=0.5,
+        question="Some question",
+    )
+    # Strip every distinct model field so model and market resolve identically.
+    prediction.pop("model_probability", None)
+    prediction["market_midpoint"] = 0.5
+    write_csv(cfg.output_root / "polymarket_predictions" / "predictions.csv", [prediction], list(prediction))
+    write_csv(cfg.output_root / "polymarket_training" / "labels.csv", [label], list(label))
+
+    payload = build_family_calibration_scorecard(cfg)
+
+    assert payload["clean_settled_joined_rows"] == 0
+    reasons = payload["rejected_join_reasons"]
+    assert reasons, "a rejection reason must always be published"
+    assert "no clean settled label" not in reasons

@@ -16965,7 +16965,9 @@ attributes garbage; (b) POSITION-side entry_price/exit_price/quantity = "nan"/"i
 attribute garbage, which CAN classify (verified conditional on cohort P&L sign) into classes feeding
 research_focus.py:1053-1061 priority_delta +12.0. [N6 cured: "can", not "currently does"]
 
-## Writes (exactly three files)
+## Writes (exactly four files — the registry pre-flight item 7 requires flipping this WO's status AND
+the charter WP status with a dated "Landed:" note at land time, and WP8 is the edge-attribution entry
+[Codex P1-e])
 1. src/polymarket_predictive_engine/edge_attribution.py
    a. [R1/R2 cured] `attribution_status`: CLOSED six-value enum, evaluated in THIS registered
       precedence, first match wins:
@@ -16984,7 +16986,11 @@ research_focus.py:1053-1061 priority_delta +12.0. [N6 cured: "can", not "current
                                                  settlement_surprise, total_pnl, any *_usdc) is
                                                  non-finite. Covers gate-executed cases entry="nan",
                                                  exit="nan", quantity="inf", line_price="nan".
-        3 "unattributable_no_closing_line"     — no CLV row for the position
+        3 "unattributable_no_closing_line"     — no CLV row for the position, OR a row whose
+                                                 line_kind != "closing" (closing_line.py:359-362 emits
+                                                 "latest_provisional" when no closing quote exists;
+                                                 attributing against it scores a line that never
+                                                 closed — today it IS attributed [Codex P1-d])
         4 "unattributable_unparseable_line"    — CLV row present; line_price missing/""/unparseable
         5 "unattributable_no_entry_mid"        — line parses finite; entry mid missing OR present-
                                                  but-unparseable — the ONLY cause that judges the mid
@@ -17015,7 +17021,10 @@ research_focus.py:1053-1061 priority_delta +12.0. [N6 cured: "can", not "current
       finite values overflows to +/-inf, the run raises loudly rather than emitting non-finite JSON
       [R4-b].
    d. Unattributable rows with an empty signal_cohort take the existing ""->"unknown" cohort-key
-      idiom, so no dropped mass can hide under a keyless cohort [R4-c].
+      idiom, so no dropped mass can hide under a keyless cohort [R4-c]. Every per-cohort
+      unattributable_realised_pnl_usdc uses the SAME parseable-AND-finite rule as the top-level sum
+      in 1c — a "nan" P&L excluded from the summary but aggregated raw into its cohort would emit
+      non-standard JSON one level down [Codex P1-f].
       Cohort objects [unchanged from v2, C5-verified shape]: unattributable_positions,
       unattributable_realised_pnl_usdc, metric_population:"attributed_only"; all-unattributable cohorts
       emit rows with attributed_positions 0, metric fields JSON null, AND recommended_action JSON null
@@ -17032,6 +17041,7 @@ research_focus.py:1053-1061 priority_delta +12.0. [N6 cured: "can", not "current
       silent-breach mode impossible.
 2. tests/polymarket_predictive_engine/test_edge_attribution.py
 3. docs/POLYMARKET_CODEX_WORK_ORDERS.md
+4. docs/POLYMARKET_QUANT_MODE_CHARTER.md — the WP8 status line and dated "Landed:" note only.
 
 ## Consumers (grep -rn "edge_attribution" src/ scripts/ tests/, plus round-2 additions [N2 cured])
 refresh_governance.py:281-287; dashboard.py:1083-1090, :2912, :2953-2954 (funnel), :292 (render);
@@ -17054,7 +17064,8 @@ path publishes first (:178-184); failure is stamped; downstream goes stale-with-
 fresh-but-wrong. This paragraph must survive as a code comment.
 
 ## Tests (enumerated; figures literal)
-1. No CLV row -> cause 3; realised P&L populated; entry_mid populated when parseable; line and
+1. No CLV row -> cause 3; AND a CLV row with line_kind="latest_provisional" -> cause 3, never
+   attributed [Codex P1-d]; realised P&L populated; entry_mid populated when parseable; line and
    attributed-only fields empty.
 2. CLV row with line_price "" and "junk" -> cause 4 (the round-2 R1 case).
 3. line_price="nan" -> cause 2 (parses, non-finite) — regression for gate-executed live defect (a).
@@ -17092,14 +17103,19 @@ fresh-but-wrong. This paragraph must survive as a code comment.
     recommended_action null) AND the governance refresh cycle completes — the KeyError abort mode is
     pinned shut [Codex P1-c].
 12. realised_pnl_usdc="garbage" AND separately "nan" on unattributable rows -> sum unchanged and
-    FINITE, unattributable_pnl_unparseable_count increments for each [G4].
+    FINITE, unattributable_pnl_unparseable_count increments for each [G4]; AND the affected row's
+    COHORT unattributable_realised_pnl_usdc is also finite [Codex P1-f].
 13. Emitted CSV header contains attribution_status AND realised_pnl_usdc [G2 — pins the
     extrasaction="ignore" silent-drop mode shut].
 
 ## Day-after check [N7 cured]
 Read edge_attribution.json AND governance_refresh_status.json on the first post-deploy cycle:
-histogram present with ALL FIVE keys; attributed + skipped == seen; skipped fraction of the same order
-as the measured ~50% (sudden zero => investigate, never celebrate); unattributable_realised_pnl_usdc
+histogram present with ALL FIVE keys; attributed + skipped == seen; skipped fraction within the literal
+bounds [0.30, 0.70] — basis: measured 0.4954 and 0.5177 at the two registration-time refs, widened by
+roughly 20 points each way for one cycle of drift; BELOW 0.30 is investigated as too-good-to-be-true
+(the drain lowering it gradually is expected, a jump is not), ABOVE 0.70 as a coverage regression;
+either way outside the bounds the check FAILS and the cause is named before the WO closes
+[Codex P1-g]; unattributable_realised_pnl_usdc
 PRESENT and FINITE and unattributable_pnl_unparseable_count PRESENT — with skipped > 0 a null/absent
 dropped-mass sum means the core accounting this WO exists for did not ship, and the check FAILS
 [Codex P2]; governance cycle completion stamp

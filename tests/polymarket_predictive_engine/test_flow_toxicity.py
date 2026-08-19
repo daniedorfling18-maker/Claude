@@ -236,8 +236,9 @@ def test_wallet_markouts_are_published_for_wallets_off_the_leaderboard(tmp_path)
     """
     cfg = _config(tmp_path)
     _leaderboard(cfg)  # only "smart1" is on the leaderboard
-    # Price rises after every trade, so a BUY marks out positive.
-    _features(cfg, "tok-a", [(0, 0.50), (10_000, 0.70)])
+    # Price rises after every trade, so a BUY marks out positive. The forward
+    # point sits INSIDE [target, target+horizon] (targets 300/301, horizon 300).
+    _features(cfg, "tok-a", [(0, 0.50), (310, 0.70)])
     trades = [
         {"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0},
         {"market": "0xa", "asset_id": "tok-a", "wallet": "unranked9", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1},
@@ -261,21 +262,30 @@ def test_wallet_markouts_are_published_for_wallets_off_the_leaderboard(tmp_path)
     assert summary["paper_trading_invoked"] is False
 
 
-def test_wallet_markout_windows_split_so_a_ranking_cannot_validate_itself(tmp_path):
-    """Ranking and evaluation windows must not share fills.
+def test_wallet_markout_windows_split_by_whole_market(tmp_path):
+    """The split is chronological AND out-of-sample BY MARKET (AGENTS.md).
 
-    A wallet ranked on the same fills used to judge it is circular by
-    construction. The split is at the median fill time, and a wallet present in
-    only one window is reported as such rather than silently scored.
+    Assigning fills to windows by timestamp alone lets a market traded on both
+    sides of the median leak ranking-window effects into evaluation (Codex P1
+    on #451). A market belongs wholly to one window; one spanning the split
+    belongs to NEITHER — excluded fail-closed and disclosed, never scored.
     """
     cfg = _config(tmp_path)
     _leaderboard(cfg)
-    _features(cfg, "tok-a", [(0, 0.50), (10_000, 0.70)])
+    # every forward point inside [target, target+horizon] for its fills
+    _features(cfg, "tok-a", [(310, 0.70)])   # targets 300, 301
+    _features(cfg, "tok-b", [(410, 0.70)])   # targets 400, 401
+    _features(cfg, "tok-c", [(305, 0.70), (405, 0.70)])  # targets 302, 402
     trades = [
-        {"market": "0xa", "asset_id": "tok-a", "wallet": "early", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0},
-        {"market": "0xa", "asset_id": "tok-a", "wallet": "early", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1},
-        {"market": "0xa", "asset_id": "tok-a", "wallet": "late", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 100},
-        {"market": "0xa", "asset_id": "tok-a", "wallet": "late", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 101},
+        # market A: both fills before the median -> ranking
+        {"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0},
+        {"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1},
+        # market B: both fills at/after the median -> evaluation
+        {"market": "0xb", "asset_id": "tok-b", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 100},
+        {"market": "0xb", "asset_id": "tok-b", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 101},
+        # market C: fills straddle the median -> spanning, in NEITHER window
+        {"market": "0xc", "asset_id": "tok-c", "wallet": "w2", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 2},
+        {"market": "0xc", "asset_id": "tok-c", "wallet": "w2", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 102},
     ]
     write_csv(
         cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
@@ -286,13 +296,68 @@ def test_wallet_markout_windows_split_so_a_ranking_cannot_validate_itself(tmp_pa
     summary = build_flow_toxicity(cfg)
     rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
 
-    # Each wallet's fills land wholly on one side of the median, so neither can
-    # be ranked and judged on the same data.
-    assert int(rows["early"]["fills_ranking_window"]) == 2
-    assert int(rows["early"]["fills_evaluation_window"]) == 0
-    assert int(rows["late"]["fills_ranking_window"]) == 0
-    assert int(rows["late"]["fills_evaluation_window"]) == 2
-    # Neither wallet is judgeable, and the summary says so rather than implying
-    # a usable sample.
-    assert summary["wallets_in_both_windows"] == 0
+    # median of [0,1,2,100,101,102] is 100: A wholly before, B wholly at/after.
+    assert int(rows["w1"]["fills_ranking_window"]) == 2
+    assert int(rows["w1"]["fills_evaluation_window"]) == 2
+    assert int(rows["w1"]["fills_split_spanning"]) == 0
+    # w2 traded only the spanning market: counted, disclosed, never windowed.
+    assert int(rows["w2"]["fills_total"]) == 2
+    assert int(rows["w2"]["fills_ranking_window"]) == 0
+    assert int(rows["w2"]["fills_evaluation_window"]) == 0
+    assert int(rows["w2"]["fills_split_spanning"]) == 2
+    assert summary["wallets_in_both_windows"] == 1
     assert summary["wallets_scored"] == 2
+
+
+def test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged(tmp_path):
+    """A 5m markout read from a price a day late measures a different horizon.
+
+    The wallet axis accepts a price only inside [target, target + horizon];
+    later observations count the fill as stale-excluded (Codex P1 on #451).
+    The market-axis smart/crowd columns keep the long-standing WO-49 lookup.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    # horizon 5m = 300s; target for a t=0 fill is 300; only feature is at
+    # t=100_000 -> 99_700s past target, far beyond the one-horizon tolerance.
+    _features(cfg, "tok-a", [(100_000, 0.90)])
+    trades = [
+        {"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0},
+    ]
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        trades,
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    build_flow_toxicity(cfg)
+    wallet_rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+    market_rows = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+
+    assert int(wallet_rows["w1"]["fills_stale_price_excluded"]) == 1
+    assert int(wallet_rows["w1"]["fills_total"]) == 0
+    assert wallet_rows["w1"]["markout_mean_total"] == ""
+    # Market axis unchanged: the stale point still scores there, as today.
+    assert int(market_rows["0xa"]["crowd_fill_count"]) == 1
+
+
+def test_wallet_artifact_states_its_own_invocation_flags(tmp_path):
+    """AGENTS.md: every NEW artifact states paper/live_trading_invoked=false
+    itself; the summary's copy does not satisfy the artifact-level invariant."""
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])  # inside [target, target+horizon]
+    trades = [
+        {"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0},
+    ]
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        trades,
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    build_flow_toxicity(cfg)
+    rows = read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")
+
+    assert rows and rows[0]["paper_trading_invoked"] == "False"
+    assert rows[0]["live_trading_invoked"] == "False"

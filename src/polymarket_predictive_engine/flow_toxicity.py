@@ -69,7 +69,13 @@ WALLET_MARKOUT_FIELDS = [
     "markout_mean_ranking_window",
     "fills_evaluation_window",
     "markout_mean_evaluation_window",
+    "fills_split_spanning",
+    "fills_stale_price_excluded",
     "markets_touched",
+    # AGENTS.md artifact-level provenance invariant: every NEW artifact states
+    # both flags itself; the summary's copy does not satisfy it.
+    "paper_trading_invoked",
+    "live_trading_invoked",
 ]
 
 # WO-102 (2026-07-17): the historical toxicity_score is a UNIVERSE-RELATIVE
@@ -249,11 +255,37 @@ def _markout_stats(
 
     stats: dict[str, dict[str, float | int]] = {}
     wallet_stats: dict[str, dict[str, Any]] = {}
-    # Median fill time splits the sample. Wallets are ranked on the earlier half
-    # and judged on the later one, so a ranking can never be validated on the
-    # fills that produced it.
+    # Median fill time splits the sample chronologically, and the split is by
+    # WHOLE MARKET, not by fill: a wallet trading one market on both sides of
+    # the median would let market-specific effects observed during ranking
+    # reappear in the evaluation window (Codex P1 on #451; AGENTS.md requires
+    # validation chronological and out-of-sample BY MARKET). A market whose
+    # fills span the split belongs to NEITHER window - excluded fail-closed and
+    # disclosed per wallet as fills_split_spanning, never silently scored.
     stamps = sorted(float(trade["stamp"]) for trade in trades)
     split_stamp = stamps[len(stamps) // 2] if stamps else 0.0
+    market_bounds: dict[str, tuple[float, float]] = {}
+    for trade in trades:
+        market_key = str(trade["market"])
+        stamp = float(trade["stamp"])
+        low, high = market_bounds.get(market_key, (stamp, stamp))
+        market_bounds[market_key] = (min(low, stamp), max(high, stamp))
+    market_window: dict[str, str] = {}
+    for market_key, (low, high) in market_bounds.items():
+        if high < split_stamp:
+            market_window[market_key] = "ranking"
+        elif low >= split_stamp:
+            market_window[market_key] = "evaluation"
+        else:
+            market_window[market_key] = "spanning"
+    # A markout meant to measure the configured horizon, read from a price more
+    # than one horizon late, measures a different horizon (Codex P1 on #451:
+    # without a ceiling, the first observation hours later still scored). The
+    # wallet axis accepts a price only inside [target, target + horizon] and
+    # otherwise counts the fill as stale-excluded. The market-axis smart/crowd
+    # columns keep their long-standing WO-49 lookup unchanged - tightening a
+    # registered artifact is its own change, not a rider on this one.
+    staleness_tolerance = horizon_seconds
     for token, token_trades in trades_by_token.items():
         feature_rows = iter(
             connection.execute(
@@ -290,7 +322,6 @@ def _markout_stats(
             market_stats[f"{tier}_sum"] += markout
             wallet = str(trade["wallet"] or "").strip().lower()
             if wallet:
-                window = "ranking" if float(trade["stamp"]) < split_stamp else "evaluation"
                 entry = wallet_stats.setdefault(
                     wallet,
                     {
@@ -300,14 +331,23 @@ def _markout_stats(
                         "markout_ranking": 0.0,
                         "fills_evaluation": 0,
                         "markout_evaluation": 0.0,
+                        "fills_split_spanning": 0,
+                        "fills_stale_price_excluded": 0,
                         "markets": set(),
                     },
                 )
+                entry["markets"].add(market)
+                if float(current_feature[0]) - target > staleness_tolerance:
+                    entry["fills_stale_price_excluded"] += 1
+                    continue
                 entry["fills_total"] += 1
                 entry["markout_total"] += markout
-                entry[f"fills_{window}"] += 1
-                entry[f"markout_{window}"] += markout
-                entry["markets"].add(market)
+                window = market_window.get(market, "spanning")
+                if window == "spanning":
+                    entry["fills_split_spanning"] += 1
+                else:
+                    entry[f"fills_{window}"] += 1
+                    entry[f"markout_{window}"] += markout
     return stats, wallet_stats
 
 
@@ -475,7 +515,11 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
             "markout_mean_ranking_window": _mean(entry["markout_ranking"], entry["fills_ranking"]),
             "fills_evaluation_window": entry["fills_evaluation"],
             "markout_mean_evaluation_window": _mean(entry["markout_evaluation"], entry["fills_evaluation"]),
+            "fills_split_spanning": entry["fills_split_spanning"],
+            "fills_stale_price_excluded": entry["fills_stale_price_excluded"],
             "markets_touched": len(entry["markets"]),
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
         }
         for wallet, entry in sorted(markout_by_wallet.items(), key=lambda item: -item[1]["fills_total"])
     ]

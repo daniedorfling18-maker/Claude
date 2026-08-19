@@ -16969,9 +16969,11 @@ research_focus.py:1053-1061 priority_delta +12.0. [N6 cured: "can", not "current
 1. src/polymarket_predictive_engine/edge_attribution.py
    a. [R1/R2 cured] `attribution_status`: CLOSED six-value enum, evaluated in THIS registered
       precedence, first match wins:
-        1 "unattributable_malformed_position"  — any required position field missing/unparseable
-                                                 (fields: entry_fill_price, exit_price, quantity,
-                                                 entry_mid_price where present as input), OR quantity
+        1 "unattributable_malformed_position"  — any required position INPUT field missing/
+                                                 unparseable (input keys: entry_price, exit_price,
+                                                 quantity — entry_fill_price is the EMITTED name for
+                                                 entry_price, edge_attribution.py:119/:143; the entry
+                                                 mid is NOT judged here [Codex P1-b]), OR quantity
                                                  parses but is <= 0 — the :122 return-None path the
                                                  code enforces today; a nonpositive-quantity position
                                                  is not a position [G1]
@@ -16984,7 +16986,9 @@ research_focus.py:1053-1061 priority_delta +12.0. [N6 cured: "can", not "current
                                                  exit="nan", quantity="inf", line_price="nan".
         3 "unattributable_no_closing_line"     — no CLV row for the position
         4 "unattributable_unparseable_line"    — CLV row present; line_price missing/""/unparseable
-        5 "unattributable_no_entry_mid"        — line parses finite; entry mid missing/unparseable
+        5 "unattributable_no_entry_mid"        — line parses finite; entry mid missing OR present-
+                                                 but-unparseable — the ONLY cause that judges the mid
+                                                 [Codex P1-b]
         6 "attributed"                         — everything above passed
       (Order note: 3-5 are reachable only when 1-2 pass on position-side fields; line-side nonfinite
       is caught at 2 only when the row exists and parses — a "nan" string PARSES, so it lands in 2;
@@ -17014,9 +17018,12 @@ research_focus.py:1053-1061 priority_delta +12.0. [N6 cured: "can", not "current
       idiom, so no dropped mass can hide under a keyless cohort [R4-c].
       Cohort objects [unchanged from v2, C5-verified shape]: unattributable_positions,
       unattributable_realised_pnl_usdc, metric_population:"attributed_only"; all-unattributable cohorts
-      emit rows with attributed_positions 0 and metric fields JSON null [G6: null, NOT the
-      insufficient_attribution_evidence sentinel or any other class string — a class is a judgment and
-      an empty sample supports none].
+      emit rows with attributed_positions 0, metric fields JSON null, AND recommended_action JSON null
+      [Codex P1-c: the builder resolves actions via RECOMMENDED_ACTIONS[classification]
+      (edge_attribution.py:220), a bracket lookup that raises KeyError on a null classification and
+      aborts the governance refresh; the build must bypass that lookup for this state, and an ad hoc
+      action string is forbidden — a class is a judgment and an empty sample supports none; same for
+      G6's null metrics].
    e. New positions-CSV columns, enumerated [N5/G2]: EXACTLY TWO — attribution_status and
       realised_pnl_usdc (ROW_FIELDS at edge_attribution.py:37-59 is extended with both; all existing
       columns keep names and order). Stated because write_csv uses extrasaction="ignore"
@@ -17056,10 +17063,14 @@ fresh-but-wrong. This paragraph must survive as a code comment.
    research_focus.py:1053-1070 for the affected cohort [G5: worded as no-class-upsert, because 1d
    correctly EMITS a cohort row for it — presence of the row is required, presence of a class is the
    defect].
-5. Malformed position (entry_fill_price="") -> cause 1; AND quantity="0", separately "-5" -> cause 1
+5. Malformed position (entry_price="" — the INPUT key attribute_position reads at :119;
+   entry_fill_price would be an inert extra dict field and the branch would never fire
+   [Codex P1-a]) -> cause 1; AND quantity="0", separately "-5" -> cause 1
    [G1 regression: both parse finite and are return-None'd by :122 today; under v3 they fell through
    to "attributed"]; verbatim strings carried, nothing coerced.
-6. Valid finite line, missing entry mid -> cause 5; AND missing entry mid with line_price="nan" ->
+6. Valid finite line, missing entry mid -> cause 5; AND present-but-unparseable mid
+   (market_midpoint="junk", no valid fallback) -> cause 5, never cause 1 [Codex P1-b];
+   AND missing entry mid with line_price="nan" ->
    cause 2 (the nonfinite line is judged before the missing mid; the mid-missing x nan-line cell is
    pinned so no literal reading of cause 2's antecedent can exclude it [R4-a]).
 7. [R3 cured] Dropped-mass fixture, SYNTHETIC single cohort, literals stated as VALUES drawn from real
@@ -17077,7 +17088,9 @@ fresh-but-wrong. This paragraph must survive as a code comment.
 10. Producer emission: three preserved counters present; attributed + skipped == seen; zero-filled
     five-key histogram sums to skipped (on a fixture where all skips are ONE cause, the other four
     keys are present and 0 — the round-2 N3 case).
-11. All-unattributable cohort emits a row (attributed_positions 0, metrics null).
+11. All-unattributable cohort emits a row (attributed_positions 0, metrics null,
+    recommended_action null) AND the governance refresh cycle completes — the KeyError abort mode is
+    pinned shut [Codex P1-c].
 12. realised_pnl_usdc="garbage" AND separately "nan" on unattributable rows -> sum unchanged and
     FINITE, unattributable_pnl_unparseable_count increments for each [G4].
 13. Emitted CSV header contains attribution_status AND realised_pnl_usdc [G2 — pins the
@@ -17086,7 +17099,10 @@ fresh-but-wrong. This paragraph must survive as a code comment.
 ## Day-after check [N7 cured]
 Read edge_attribution.json AND governance_refresh_status.json on the first post-deploy cycle:
 histogram present with ALL FIVE keys; attributed + skipped == seen; skipped fraction of the same order
-as the measured ~50% (sudden zero => investigate, never celebrate); governance cycle completion stamp
+as the measured ~50% (sudden zero => investigate, never celebrate); unattributable_realised_pnl_usdc
+PRESENT and FINITE and unattributable_pnl_unparseable_count PRESENT — with skipped > 0 a null/absent
+dropped-mass sum means the core accounting this WO exists for did not ship, and the check FAILS
+[Codex P2]; governance cycle completion stamp
 fresh in governance_refresh_status.json (proves the accounting did not raise). Vacuous state: zero
 closed positions -> "not performed". Falsifier: any consumer rendering skipped as 0 while the summary
 shows >0; counts that do not sum; a missing histogram key.

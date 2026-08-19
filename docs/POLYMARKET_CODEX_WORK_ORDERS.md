@@ -16943,3 +16943,150 @@ changing what the day-after operator should actually go check:
    evidence of a problem with THIS WO's alarm — check reading (b), the
    watchdog's own `observed_disk_used_percent`, independently; it does not
    depend on `corpus_retention` at all (subject to qualification 1, above).
+
+## WO-163 — Edge attribution fails closed on unattributable positions — `queued` (registered 2026-08-15 from gate-executed evidence; four-round S8 admission, blockers 4→3→2→0; adds no gate, moves no ceiling, changes no policy or sizing surface → OWNER MERGE after line-audit)
+
+
+Class M (mechanical, non-frozen: telemetry honesty). Admission: FOUR independent S8 gate rounds
+(blockers 4 -> 3 -> 2 -> 0; final verdict ADMISSIBLE WITH CORRECTIONS R4-a/b/c, all applied in this
+text). Every executed figure below was reproduced by the gate against the code and telemetry, not
+carried from the drafter. Routing: OWNER MERGE after line-audit. Build is a separate, later lifecycle
+step, dispatched only after owner merge.
+
+## Provenance (unchanged from v2 except as corrected)
+attribute_position (edge_attribution.py:115-129) silently drops unattributable closed positions:
+216 closed / 109 attributed / 107 skipped (49.54%) at snapshot 279619c9; 226/109/117 (51.77%) at
+b0dff795. Gate re-execution: 102/102 surviving skips = no CLV row. The dropped-loss exemplar:
+entry_fill 0.505094, entry_mid 0.495, exit 0.0, quantity 19.798295, realised_pnl_usdc -10.0, no CLV
+row. Bias flows via edge_attribution.json's cohort objects. [N1 cured] edge_attribution_cohorts.csv is
+an ORPHAN artifact (zero in-repo references, divergent schema); it is out of scope and no consistency
+claim is made about it. Live defects this WO closes, both gate-executed: (a) CLV line_price="nan"
+attributes garbage; (b) POSITION-side entry_price/exit_price/quantity = "nan"/"inf" pass :122 and
+attribute garbage, which CAN classify (verified conditional on cohort P&L sign) into classes feeding
+research_focus.py:1053-1061 priority_delta +12.0. [N6 cured: "can", not "currently does"]
+
+## Writes (exactly three files)
+1. src/polymarket_predictive_engine/edge_attribution.py
+   a. [R1/R2 cured] `attribution_status`: CLOSED six-value enum, evaluated in THIS registered
+      precedence, first match wins:
+        1 "unattributable_malformed_position"  — any required position field missing/unparseable
+                                                 (fields: entry_fill_price, exit_price, quantity,
+                                                 entry_mid_price where present as input), OR quantity
+                                                 parses but is <= 0 — the :122 return-None path the
+                                                 code enforces today; a nonpositive-quantity position
+                                                 is not a position [G1]
+        2 "unattributable_nonfinite_inputs"    — every required input EXCEPT entry_mid parses (entry
+                                                 mid is judged only at cause 5 [R4-a]) but ANY is non-finite
+                                                 (nan/inf, position side OR line side), OR any derived
+                                                 intermediate (execution_cost, line_movement,
+                                                 settlement_surprise, total_pnl, any *_usdc) is
+                                                 non-finite. Covers gate-executed cases entry="nan",
+                                                 exit="nan", quantity="inf", line_price="nan".
+        3 "unattributable_no_closing_line"     — no CLV row for the position
+        4 "unattributable_unparseable_line"    — CLV row present; line_price missing/""/unparseable
+        5 "unattributable_no_entry_mid"        — line parses finite; entry mid missing/unparseable
+        6 "attributed"                         — everything above passed
+      (Order note: 3-5 are reachable only when 1-2 pass on position-side fields; line-side nonfinite
+      is caught at 2 only when the row exists and parses — a "nan" string PARSES, so it lands in 2;
+      "" / "junk" do not parse and land in 4. Stated so no two labels can be true at once.)
+   b. [R1 cured] Per-cause field-population table, registered:
+        ALWAYS populated (all six): shadow_position_id, signal_cohort, category, market_slug,
+          close_reason, quantity*, entry_fill_price*, exit_price*, realised_pnl_usdc*, attribution_status
+          (*verbatim strings from the position row when unparseable — never coerced)
+        Populated from cause 3 onward: entry_mid_price (if parseable)
+        Populated from cause 5 onward: line_price, line_kind
+        Populated ONLY for "attributed": model_probability, model_claimed_edge_per_share,
+          execution_cost_per_share/_usdc, line_movement_per_share/_usdc,
+          settlement_surprise_per_share/_usdc, total_pnl_per_share/_usdc
+        Everything not populated is "" in CSV and null in JSON [N5 cured]. A literal build never
+        computes with an unavailable input — no `entry_fill - None`, no invented 0.0.
+   c. Summary JSON [unchanged, verified cured]: closed_positions_seen, attributed_positions,
+      skipped_unattributable_closed preserved byte-for-name; skipped == sum of causes 1-5. NEW:
+      `unattributable_by_reason` ALWAYS carries ALL FIVE unattributable keys, zero-filled [N3 cured];
+      `unattributable_realised_pnl_usdc` (sum over causes 1-5 of realised_pnl_usdc values that are
+      parseable AND finite [G4: "nan" PARSES — an unguarded parse rule poisons the sum to NaN and
+      json emits invalid output, gate-executed]) and `unattributable_pnl_unparseable_count` (rows
+      whose realised_pnl_usdc is missing, unparseable, or non-finite contribute 0 to the sum and
+      increment this counter). The EMITTED sum itself must be finite: if summation of individually
+      finite values overflows to +/-inf, the run raises loudly rather than emitting non-finite JSON
+      [R4-b].
+   d. Unattributable rows with an empty signal_cohort take the existing ""->"unknown" cohort-key
+      idiom, so no dropped mass can hide under a keyless cohort [R4-c].
+      Cohort objects [unchanged from v2, C5-verified shape]: unattributable_positions,
+      unattributable_realised_pnl_usdc, metric_population:"attributed_only"; all-unattributable cohorts
+      emit rows with attributed_positions 0 and metric fields JSON null [G6: null, NOT the
+      insufficient_attribution_evidence sentinel or any other class string — a class is a judgment and
+      an empty sample supports none].
+   e. New positions-CSV columns, enumerated [N5/G2]: EXACTLY TWO — attribution_status and
+      realised_pnl_usdc (ROW_FIELDS at edge_attribution.py:37-59 is extended with both; all existing
+      columns keep names and order). Stated because write_csv uses extrasaction="ignore"
+      (utils.py:137): a field promised by the table but absent from ROW_FIELDS would be dropped
+      SILENTLY — so test 13 asserts the emitted header contains both new columns, making the
+      silent-breach mode impossible.
+2. tests/polymarket_predictive_engine/test_edge_attribution.py
+3. docs/POLYMARKET_CODEX_WORK_ORDERS.md
+
+## Consumers (grep -rn "edge_attribution" src/ scripts/ tests/, plus round-2 additions [N2 cured])
+refresh_governance.py:281-287; dashboard.py:1083-1090, :2912, :2953-2954 (funnel), :292 (render);
+evidence_history.py:73-93; research_focus.py cohort readers; cli.py:702;
+scripts/audit_polymarket_local_history.py:245-253. All read only preserved key names; new keys additive.
+No in-repo reader of edge_attribution_positions.csv exists; row-count is not branched on anywhere.
+
+## Do NOT touch
+closing_line.py; shadow position producers; safe_float itself (the finite guard is LOCAL to this
+module's parsing helper); edge_attribution_cohorts.csv (orphan; separate cleanup WO if ever); any gate,
+threshold, policy or sizing surface.
+
+## Fail-safe (unchanged from v2; C1-verified)
+Diagnostic only; field-projection identity for attributed rows (existing fields value-identical on
+identical inputs; the one new column is additive). New accounting raises loudly; blast radius stated:
+progress.run re-raises (refresh_governance.py:138), aborting the downstream governance stages of that
+cycle (17 in the scheduler invoker at run_vps_ops_scheduler.sh:443; 16 in
+run_polymarket_local_live_loop.py:1010, which skips dashboard). Correct direction: the model-critical
+path publishes first (:178-184); failure is stamped; downstream goes stale-with-a-stamp, never
+fresh-but-wrong. This paragraph must survive as a code comment.
+
+## Tests (enumerated; figures literal)
+1. No CLV row -> cause 3; realised P&L populated; entry_mid populated when parseable; line and
+   attributed-only fields empty.
+2. CLV row with line_price "" and "junk" -> cause 4 (the round-2 R1 case).
+3. line_price="nan" -> cause 2 (parses, non-finite) — regression for gate-executed live defect (a).
+4. entry_price="nan"; separately exit_price="nan"; separately quantity="inf" -> cause 2 — regression
+   for live defect (b); assert NOT attributed, NOT classified, and NO class upsert occurs at
+   research_focus.py:1053-1070 for the affected cohort [G5: worded as no-class-upsert, because 1d
+   correctly EMITS a cohort row for it — presence of the row is required, presence of a class is the
+   defect].
+5. Malformed position (entry_fill_price="") -> cause 1; AND quantity="0", separately "-5" -> cause 1
+   [G1 regression: both parse finite and are return-None'd by :122 today; under v3 they fell through
+   to "attributed"]; verbatim strings carried, nothing coerced.
+6. Valid finite line, missing entry mid -> cause 5; AND missing entry mid with line_price="nan" ->
+   cause 2 (the nonfinite line is judged before the missing mid; the mid-missing x nan-line cell is
+   pinned so no literal reading of cause 2's antecedent can exclude it [R4-a]).
+7. [R3 cured] Dropped-mass fixture, SYNTHETIC single cohort, literals stated as VALUES drawn from real
+   artifact rows and NOT as a reproduction of artifact grouping (the real nine span seven cohorts —
+   the fixture normalizes signal_cohort to "fixture_cohort" for all ten rows): nine attributed tuples
+   (entry_fill, exit, total_pnl_per_share): (0.59,0.75,+0.16) (0.42,0.53,+0.11) (0.18,1.0,+0.82)
+   (0.24,0.31,+0.07) (0.91,1.0,+0.09) (0.88,1.0,+0.12) (0.49,0.31,-0.18) (0.508157,1.0,+0.491843)
+   (0.78,0.99,+0.21) plus the dropped loss (0.505094, 0.0, no CLV row, realised -10.0). Asserts, all
+   hand-computed: attributed_positions == 9; unattributable_positions == 1;
+   unattributable_realised_pnl_usdc == -10.0; attributed-only sum(total_pnl_per_share) rounded to
+   6dp == 1.891843 [G3: the raw IEEE754 sum is 1.8918430000000002 — literal equality without rounding
+   fails, gate-executed]; mean rounded to 6dp == 0.210205.
+8. Field-projection identity on attributed rows.
+9. CSV round-trip: empty fields -> safe_float None, never 0.0.
+10. Producer emission: three preserved counters present; attributed + skipped == seen; zero-filled
+    five-key histogram sums to skipped (on a fixture where all skips are ONE cause, the other four
+    keys are present and 0 — the round-2 N3 case).
+11. All-unattributable cohort emits a row (attributed_positions 0, metrics null).
+12. realised_pnl_usdc="garbage" AND separately "nan" on unattributable rows -> sum unchanged and
+    FINITE, unattributable_pnl_unparseable_count increments for each [G4].
+13. Emitted CSV header contains attribution_status AND realised_pnl_usdc [G2 — pins the
+    extrasaction="ignore" silent-drop mode shut].
+
+## Day-after check [N7 cured]
+Read edge_attribution.json AND governance_refresh_status.json on the first post-deploy cycle:
+histogram present with ALL FIVE keys; attributed + skipped == seen; skipped fraction of the same order
+as the measured ~50% (sudden zero => investigate, never celebrate); governance cycle completion stamp
+fresh in governance_refresh_status.json (proves the accounting did not raise). Vacuous state: zero
+closed positions -> "not performed". Falsifier: any consumer rendering skipped as 0 while the summary
+shows >0; counts that do not sum; a missing histogram key.

@@ -1,0 +1,8 @@
+{
+  "generated_at_utc": "2026-07-14T08:24:50Z",
+  "live_trading_invoked": false,
+  "lock_file": "outputs/polymarket_model_governance/governance_refresh.lock",
+  "paper_trading_invoked": false,
+  "reason": "another governance refresh owns the cross-process lock",
+  "status": "skipped_already_running"
+}

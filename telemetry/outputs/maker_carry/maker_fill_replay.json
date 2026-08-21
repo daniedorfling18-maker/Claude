@@ -1,0 +1,2592 @@
+{
+  "available_book_sources": [
+    "official"
+  ],
+  "book_source_requested": "both",
+  "book_states": 512,
+  "collection_coverage": {
+    "coverage_ratio": 1.0,
+    "per_market": [
+      {
+        "asset_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+        "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+        "coverage_ratio": 1.0,
+        "question": "Mojtaba Khamenei seen in public by December 31?",
+        "windows_covered": 50,
+        "windows_simulated": 50
+      }
+    ],
+    "regime_cut": {
+      "cutoff_utc": "2026-08-07T01:41:57Z",
+      "last_7_days": {
+        "coverage_ratio": 1.0,
+        "per_market": [
+          {
+            "asset_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+            "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+            "coverage_ratio": 1.0,
+            "question": "Mojtaba Khamenei seen in public by December 31?",
+            "windows_covered": 50,
+            "windows_simulated": 50
+          }
+        ],
+        "status": "covered",
+        "windows_covered": 50,
+        "windows_simulated": 50
+      },
+      "prior_to_last_7_days": {
+        "coverage_ratio": null,
+        "per_market": [
+          {
+            "asset_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+            "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+            "coverage_ratio": null,
+            "question": "Mojtaba Khamenei seen in public by December 31?",
+            "windows_covered": 0,
+            "windows_simulated": 0
+          }
+        ],
+        "status": "not_observed",
+        "windows_covered": 0,
+        "windows_simulated": 0
+      }
+    },
+    "status": "covered",
+    "windows_covered": 50,
+    "windows_simulated": 50
+  },
+  "confirmed_fill_ratio": 0.136364,
+  "confirmed_fill_ratio_status": "observed",
+  "confirmed_fills": 3,
+  "coverage": {
+    "by_horizon": {
+      "15m": {
+        "coverage_ratio": 1.0,
+        "windows_covered": 22,
+        "windows_simulated": 22
+      },
+      "5m": {
+        "coverage_ratio": 1.0,
+        "windows_covered": 22,
+        "windows_simulated": 22
+      },
+      "60m": {
+        "coverage_ratio": 1.0,
+        "windows_covered": 22,
+        "windows_simulated": 22
+      }
+    },
+    "coverage_ratio": 1.0,
+    "windows_covered": 66,
+    "windows_simulated": 66
+  },
+  "coverage_status": "covered",
+  "entry_state_lag_seconds_max": 877.0,
+  "entry_state_lag_seconds_p50": 638.0,
+  "entry_state_lag_seconds_p90": 877.0,
+  "entry_state_lag_unmeasurable": 0,
+  "evaluated_book_sources": [
+    "archive",
+    "official"
+  ],
+  "fills_beyond_legacy_lag": 0,
+  "fills_preview": [
+    {
+      "adverse_usd": {
+        "15m": 10.0,
+        "5m": 15.0,
+        "60m": 20.0
+      },
+      "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+      "depth_ahead": 3802.05,
+      "direction": "ask_fill",
+      "entry_state_lag_seconds": 403.0,
+      "fill_price": 0.33,
+      "fill_size": 1000.0,
+      "later_state_lag_seconds": {
+        "15m": 948.0,
+        "5m": 425.0,
+        "60m": 498.0
+      },
+      "markout_per_share": {
+        "15m": 0.01,
+        "5m": 0.015,
+        "60m": 0.02
+      },
+      "queue_depth_source": "full_book_levels",
+      "quote_rounding": "order_price_min_tick_size_outward",
+      "quoting_basis": "contemporaneous",
+      "source": "official",
+      "stamp": 1786376931.0,
+      "token_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+      "trade_size": 7336.4
+    },
+    {
+      "adverse_usd": {
+        "15m": -9.4364,
+        "5m": -9.4364,
+        "60m": -2.3591
+      },
+      "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+      "depth_ahead": 142.86,
+      "direction": "bid_fill",
+      "entry_state_lag_seconds": 877.0,
+      "fill_price": 0.34,
+      "fill_size": 471.82,
+      "later_state_lag_seconds": {
+        "15m": 474.0,
+        "5m": 1074.0,
+        "60m": 132.0
+      },
+      "markout_per_share": {
+        "15m": -0.02,
+        "5m": -0.02,
+        "60m": -0.005
+      },
+      "queue_depth_source": "full_book_levels",
+      "quote_rounding": "order_price_min_tick_size_outward",
+      "quoting_basis": "contemporaneous",
+      "source": "official",
+      "stamp": 1786380781.0,
+      "token_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+      "trade_size": 614.68
+    },
+    {
+      "adverse_usd": {
+        "15m": 1.70315,
+        "5m": 1.70315,
+        "60m": 1.70315
+      },
+      "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+      "depth_ahead": 49.99,
+      "direction": "bid_fill",
+      "entry_state_lag_seconds": 638.0,
+      "fill_price": 0.26,
+      "fill_size": 340.63,
+      "later_state_lag_seconds": {
+        "15m": 717.0,
+        "5m": 191.0,
+        "60m": 272.0
+      },
+      "markout_per_share": {
+        "15m": 0.005,
+        "5m": 0.005,
+        "60m": 0.005
+      },
+      "queue_depth_source": "full_book_levels",
+      "quote_rounding": "order_price_min_tick_size_outward",
+      "quoting_basis": "contemporaneous",
+      "source": "official",
+      "stamp": 1786570291.0,
+      "token_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+      "trade_size": 390.62
+    }
+  ],
+  "generated_at_utc": "2026-08-21T01:42:15Z",
+  "haircut_policy": {
+    "automatically_applied_to_gate": false,
+    "gate_changed_by_this_report": false,
+    "permitted_direction": "tighten_only",
+    "reported_only": true,
+    "tightening_requires": "dated M-B governance amendment"
+  },
+  "implied_adverse_usd_per_day": 0.682944,
+  "last_in_queue_evaluable_opportunities": 22,
+  "live_trading_invoked": false,
+  "markout_per_fill": {
+    "15m": -0.001667,
+    "5m": -0.0,
+    "60m": 0.006667
+  },
+  "no_contemporaneous_state_opportunities": 316,
+  "no_contemporaneous_state_rate": 0.77451,
+  "note": "Tier-0 last-in-queue replay. A numeric haircut above 1 means the maker-carry study may undercharge adverse selection. The haircut is reporting-only and can only support a future dated tighten-only amendment; it never changes M-B automatically.",
+  "official_snapshot": {
+    "batch_fallback_reason": "",
+    "candidate_seed_exclusions": {
+      "delisted_cooldown": 0,
+      "expired": 4,
+      "missing_token": 0,
+      "non_finite_rank": 0
+    },
+    "candidate_seed_markets": 11,
+    "closest_to_eligibility": [
+      {
+        "book_history_hours": 255.3681,
+        "book_snapshot_count": 512,
+        "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 303.6314,
+        "book_snapshot_count": 465,
+        "condition_id": "0xfee11055c350d06a6165f39cee89aed0614bfb8dc121cafe6ac1a9a56ce60592",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 289.6608,
+        "book_snapshot_count": 352,
+        "condition_id": "0xfa52f5817ea613138cbd376abf4adf5d128dcee82c7b04751409577b70cb15bc",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      }
+    ],
+    "delisted_token_count": 128,
+    "delisted_tokens_skipped": [
+      "12119603566787603441206924665842875721619466546883933923933735870690293451213",
+      "85043841683815526346075797537707621247898357771071878782229571213515944069436"
+    ],
+    "errors": [],
+    "files_written": [
+      "outputs/maker_carry/official_books/0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb.csv.gz",
+      "outputs/maker_carry/official_books/0x2f112a1cd954debe3438caac411ca4395cc53be0e1580a5802ab42618b94aff7.csv.gz",
+      "outputs/maker_carry/official_books/0xe5b6626c2289a7aa8962f1f6e001119cd2c398a7160937416fe1c5a2c3671b2b.csv.gz",
+      "outputs/maker_carry/official_books/0x2d215dfc6dc0e7be3bf0bc077adc3ab5dc562cdfe455bfff02a6723f1c98cf48.csv.gz",
+      "outputs/maker_carry/official_books/0xfee11055c350d06a6165f39cee89aed0614bfb8dc121cafe6ac1a9a56ce60592.csv.gz",
+      "outputs/maker_carry/official_books/0xfa52f5817ea613138cbd376abf4adf5d128dcee82c7b04751409577b70cb15bc.csv.gz",
+      "outputs/maker_carry/official_books/0x55937e321733f53af84a7c74884fc86801b97def5b14be888250e7d5057f4be8.csv.gz",
+      "outputs/maker_carry/official_books/0x8f38b53c21eb19bc2f5765442d027063c72ef28a1e38e04931c289e7b4385ba0.csv.gz",
+      "outputs/maker_carry/official_books/0x71dd44fa5059fbed28a279172185d3623aa34ce86be1936281df26b5d1b87200.csv.gz",
+      "outputs/maker_carry/official_books/0x704e4ea883b17433c66119bde289259b3c7d3668a0101df9c66fda9350f17fd2.csv.gz",
+      "outputs/maker_carry/official_books/0xcc59c2569d30b4b86993f3ff17bb900fffc56e7d98f1a5b02793fc9c133db99a.csv.gz",
+      "outputs/maker_carry/official_books/0x15d2e66dcf1d63c5695d6d0e9e2f8e06dd246d00fd5dfc254f2b22baa33bfa1b.csv.gz",
+      "outputs/maker_carry/official_books/0x490b4abcc5b23958f5515716fbab843574f9cffef4bc52eac3a3939809757b46.csv.gz",
+      "outputs/maker_carry/official_books/0x8062cf78d93f9202f4c0a1018d141f4af35d486a368f07e65265f27d48b4e040.csv.gz",
+      "outputs/maker_carry/official_books/0x7a833b2745bc6911db3ef244e37287c9ab1be1e63ee71266d2c79326cafbe285.csv.gz",
+      "outputs/maker_carry/official_books/0x47ec761ae98d7c28b20c0222f1507e3af0f198a904f86b4a264b2e987f0b80c7.csv.gz",
+      "outputs/maker_carry/official_books/0x30174f3f46398e37c96a07b45916e01eab9a8a854ecb624ac73a91a8490fd074.csv.gz",
+      "outputs/maker_carry/official_books/0xabe0e41540b70f3535b0d9325a19bc6f8c6bcce0ce27c28636a2e1d5c0c4eda8.csv.gz",
+      "outputs/maker_carry/official_books/0x5c79dfde05559b79a9cb9f7c4187e4d49632dd042572ae676952f812732591cc.csv.gz",
+      "outputs/maker_carry/official_books/0x420c29cfe95850eb2351fdef6ae4ff063b2a574aa947d0fe82e7433fd58946f2.csv.gz",
+      "outputs/maker_carry/official_books/0x684e5b72d4e407695397a79ed75ef37273c2655ca2548791a4153233d3744696.csv.gz",
+      "outputs/maker_carry/official_books/0xb7d6db12a48e282585501f57871e6e482b9e2c41c68d1d5019bdbd2902209b69.csv.gz",
+      "outputs/maker_carry/official_books/0x3849e1d62e0807801913d3e2427e8caf3cc6dd1c8ef42d8d5c08c6f9c449dc5e.csv.gz",
+      "outputs/maker_carry/official_books/0x3de0f3d7d7efb40cde68e814d40a0b232832083653c8e78260eb999baa967de0.csv.gz",
+      "outputs/maker_carry/official_books/0xed5a9e7831ee363d92cb102f2c21e2465b09196ef5beb7c8e23671851a1c3ca4.csv.gz",
+      "outputs/maker_carry/official_books/0x1c4c6a698f0591ddf0c96e1beb56f8c75112ef849331bf3b0388f14830a7421d.csv.gz",
+      "outputs/maker_carry/official_books/0xc4ebab9f2830f6df67ab1b98615d5a9be8eebd106fd0f37e9a25e4a4edcc427c.csv.gz",
+      "outputs/maker_carry/official_books/0x46ca741da4abd7ffa993f59ac65bfe83de43ae027accac71d263a493e44064e7.csv.gz",
+      "outputs/maker_carry/official_books/0xcd9079a837d72a0eafde1dc692c819940bd030a295ddc67f27590e98df33878c.csv.gz",
+      "outputs/maker_carry/official_books/0xc1556ecbe613e403dfb9e38bf1b25a8aee2aa1687f2b343bc896dd2c9763ed74.csv.gz",
+      "outputs/maker_carry/official_books/0x9cb23d04b2ded06147482076688b69b487a8d982c63ebdda2ab3678cf27cf390.csv.gz",
+      "outputs/maker_carry/official_books/0x137cf69002f2f24c6cbc7572321db1f6fd995f53d2457fda7e52f7fd82446794.csv.gz",
+      "outputs/maker_carry/official_books/0x9b94d7e2e7250d156b02435f4d59634d357dc789d842eaee15c35c1158d5bca4.csv.gz",
+      "outputs/maker_carry/official_books/0x305c77ad59fa89533c15e415d8e6a57eb490215094cc9f937b963a19c5f66c44.csv.gz",
+      "outputs/maker_carry/official_books/0x9601280c3d5109783ba64644da25bdfdf120ce516a696f88a42f54ffd2ac761b.csv.gz",
+      "outputs/maker_carry/official_books/0x5801ce623a1d2dcb20bec5708fd9f881326aaf1ff82af22248aceccc7bf29708.csv.gz",
+      "outputs/maker_carry/official_books/0x0b44e9c6eb563adf459816f9a7a2de0aa66ba5423c474ecab30c97203a3e8207.csv.gz"
+    ],
+    "generated_at_utc": "2026-08-21T01:41:57Z",
+    "live_trading_invoked": false,
+    "market_polls": [
+      {
+        "asset_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+        "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "34349914026097401057128861099057880661380967396881948920123251373255308524355",
+        "condition_id": "0x2f112a1cd954debe3438caac411ca4395cc53be0e1580a5802ab42618b94aff7",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "64560403554199727186976197678168939291412407939123176985568118037522170599338",
+        "condition_id": "0xe5b6626c2289a7aa8962f1f6e001119cd2c398a7160937416fe1c5a2c3671b2b",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "95033970965067298364754489734745587181272303107799386420668793859825751365027",
+        "condition_id": "0x2d215dfc6dc0e7be3bf0bc077adc3ab5dc562cdfe455bfff02a6723f1c98cf48",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "109043033056028331542121255630455620206200577792689769930516902682948519640408",
+        "condition_id": "0xfee11055c350d06a6165f39cee89aed0614bfb8dc121cafe6ac1a9a56ce60592",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "90637634602465887787679268906394947498675150453246427560023668237516913996412",
+        "condition_id": "0xfa52f5817ea613138cbd376abf4adf5d128dcee82c7b04751409577b70cb15bc",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "12271201066702671192512366723059850977877323787698905069269847136574521131200",
+        "condition_id": "0x55937e321733f53af84a7c74884fc86801b97def5b14be888250e7d5057f4be8",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "1912123006659202393239555952183008613139794898030657820154477280141921306103",
+        "condition_id": "0x8f38b53c21eb19bc2f5765442d027063c72ef28a1e38e04931c289e7b4385ba0",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "94770042529883309392255966715551132169012522769091385480819155582901630638873",
+        "condition_id": "0x71dd44fa5059fbed28a279172185d3623aa34ce86be1936281df26b5d1b87200",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "12689182484229854877669526860350721774940981883026493278950506200273140206090",
+        "condition_id": "0x704e4ea883b17433c66119bde289259b3c7d3668a0101df9c66fda9350f17fd2",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "30168634295384984099987626703440157654602987915064535215384295190163901851184",
+        "condition_id": "0xcc59c2569d30b4b86993f3ff17bb900fffc56e7d98f1a5b02793fc9c133db99a",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "79397895660526576528066965797785113521241099187839967306891454236823723226031",
+        "condition_id": "0x15d2e66dcf1d63c5695d6d0e9e2f8e06dd246d00fd5dfc254f2b22baa33bfa1b",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "51360528208563810292617548915637013520775537929179951806395074353974983084730",
+        "condition_id": "0x490b4abcc5b23958f5515716fbab843574f9cffef4bc52eac3a3939809757b46",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "35480485928147694422522317298160081194603766865102488154902775756915955129166",
+        "condition_id": "0x8062cf78d93f9202f4c0a1018d141f4af35d486a368f07e65265f27d48b4e040",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "75949079072300511635603600206567227738703160855900547778099294726738851616000",
+        "condition_id": "0x7a833b2745bc6911db3ef244e37287c9ab1be1e63ee71266d2c79326cafbe285",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "3995405418988860809616760430893135352799035734473152509556306061162112667429",
+        "condition_id": "0x47ec761ae98d7c28b20c0222f1507e3af0f198a904f86b4a264b2e987f0b80c7",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "88752597571738831347942513760817776151125290177540731190810686943474863159303",
+        "condition_id": "0x30174f3f46398e37c96a07b45916e01eab9a8a854ecb624ac73a91a8490fd074",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "31380452762865791793264313641563783010295782641131937184752318076265493577821",
+        "condition_id": "0xabe0e41540b70f3535b0d9325a19bc6f8c6bcce0ce27c28636a2e1d5c0c4eda8",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "83783489454659420807679723574840032660002326710045123865554753994450797728825",
+        "condition_id": "0x5c79dfde05559b79a9cb9f7c4187e4d49632dd042572ae676952f812732591cc",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "85537695086136451841213091961585038790379342143882045014518113758321124798550",
+        "condition_id": "0x420c29cfe95850eb2351fdef6ae4ff063b2a574aa947d0fe82e7433fd58946f2",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "11876606915924142133615854761923277060697657209957870741155164849437788272266",
+        "condition_id": "0x684e5b72d4e407695397a79ed75ef37273c2655ca2548791a4153233d3744696",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "13676207362387655746963205713590038128620088110508381127494033198879282220597",
+        "condition_id": "0xb7d6db12a48e282585501f57871e6e482b9e2c41c68d1d5019bdbd2902209b69",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "56615676606297588259337956203332341775475048285080710344367729433788967812170",
+        "condition_id": "0x3849e1d62e0807801913d3e2427e8caf3cc6dd1c8ef42d8d5c08c6f9c449dc5e",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "91347242536105459969213788769929618447748782724898414007495579710952664644740",
+        "condition_id": "0x3de0f3d7d7efb40cde68e814d40a0b232832083653c8e78260eb999baa967de0",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "92467093729798172795860015164975956539777812580280382263501795773871198126752",
+        "condition_id": "0xed5a9e7831ee363d92cb102f2c21e2465b09196ef5beb7c8e23671851a1c3ca4",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "34732988886981510167874389845708832808627284379840131351229635795767825787404",
+        "condition_id": "0x1c4c6a698f0591ddf0c96e1beb56f8c75112ef849331bf3b0388f14830a7421d",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "10618696958805388450273982806566275602086720395274264354492776873006123003601",
+        "condition_id": "0xc4ebab9f2830f6df67ab1b98615d5a9be8eebd106fd0f37e9a25e4a4edcc427c",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "86011229287950365043519117852041614651767455889324682112682327985496937935368",
+        "condition_id": "0x46ca741da4abd7ffa993f59ac65bfe83de43ae027accac71d263a493e44064e7",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "5704535028627813610807450987863678382834984459808017027367262166853701331994",
+        "condition_id": "0xcd9079a837d72a0eafde1dc692c819940bd030a295ddc67f27590e98df33878c",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "10451124928493844849355057703558222404087423201197729105477623039880661055484",
+        "condition_id": "0xc1556ecbe613e403dfb9e38bf1b25a8aee2aa1687f2b343bc896dd2c9763ed74",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "35198549486569600595408965368290795524428922595732253580266052028158040373233",
+        "condition_id": "0x9cb23d04b2ded06147482076688b69b487a8d982c63ebdda2ab3678cf27cf390",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "36883966188402112469990905672991660623877201475532264419725150949897779581736",
+        "condition_id": "0x137cf69002f2f24c6cbc7572321db1f6fd995f53d2457fda7e52f7fd82446794",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "81141181734308200688529988294612116916451750660627985997279610187281303006599",
+        "condition_id": "0x9b94d7e2e7250d156b02435f4d59634d357dc789d842eaee15c35c1158d5bca4",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "61266035338126609097678341943704872420259083406996666017235624389844409717472",
+        "condition_id": "0x305c77ad59fa89533c15e415d8e6a57eb490215094cc9f937b963a19c5f66c44",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "100634343526080296675519866299852321904923227713546778501901177732799107316096",
+        "condition_id": "0x9601280c3d5109783ba64644da25bdfdf120ce516a696f88a42f54ffd2ac761b",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "22259676472245304836987936468688287000552053407103691651974610166463919922548",
+        "condition_id": "0x5801ce623a1d2dcb20bec5708fd9f881326aaf1ff82af22248aceccc7bf29708",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      },
+      {
+        "asset_id": "59571367085964167120362569604430876382217425288722535684104776401279160424325",
+        "condition_id": "0x0b44e9c6eb563adf459816f9a7a2de0aa66ba5423c474ecab30c97203a3e8207",
+        "error": "",
+        "rows_added": 1,
+        "status": "ok"
+      }
+    ],
+    "markets_polled": 37,
+    "markets_succeeded": 37,
+    "note": "Current official CLOB books for exactly the maker quote-sheet portfolio. Repeated point-in-time snapshots form the replay archive; no orders or gates are touched.",
+    "paper_trading_invoked": false,
+    "persistent_markets": 25,
+    "portfolio_markets": 1,
+    "rows_added": 37,
+    "seasoning_runway": [
+      {
+        "book_history_hours": 255.3681,
+        "book_snapshot_count": 512,
+        "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 14.9022,
+        "book_snapshot_count": 50,
+        "condition_id": "0x2f112a1cd954debe3438caac411ca4395cc53be0e1580a5802ab42618b94aff7",
+        "hours_remaining": 33.0978,
+        "snapshots_remaining": 50
+      },
+      {
+        "book_history_hours": 14.9022,
+        "book_snapshot_count": 50,
+        "condition_id": "0xe5b6626c2289a7aa8962f1f6e001119cd2c398a7160937416fe1c5a2c3671b2b",
+        "hours_remaining": 33.0978,
+        "snapshots_remaining": 50
+      },
+      {
+        "book_history_hours": 14.9022,
+        "book_snapshot_count": 50,
+        "condition_id": "0x2d215dfc6dc0e7be3bf0bc077adc3ab5dc562cdfe455bfff02a6723f1c98cf48",
+        "hours_remaining": 33.0978,
+        "snapshots_remaining": 50
+      },
+      {
+        "book_history_hours": 303.6314,
+        "book_snapshot_count": 465,
+        "condition_id": "0xfee11055c350d06a6165f39cee89aed0614bfb8dc121cafe6ac1a9a56ce60592",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 289.6608,
+        "book_snapshot_count": 352,
+        "condition_id": "0xfa52f5817ea613138cbd376abf4adf5d128dcee82c7b04751409577b70cb15bc",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 338.0953,
+        "book_snapshot_count": 919,
+        "condition_id": "0x55937e321733f53af84a7c74884fc86801b97def5b14be888250e7d5057f4be8",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 111.1272,
+        "book_snapshot_count": 183,
+        "condition_id": "0x8f38b53c21eb19bc2f5765442d027063c72ef28a1e38e04931c289e7b4385ba0",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 22.5553,
+        "book_snapshot_count": 75,
+        "condition_id": "0x71dd44fa5059fbed28a279172185d3623aa34ce86be1936281df26b5d1b87200",
+        "hours_remaining": 25.4447,
+        "snapshots_remaining": 25
+      },
+      {
+        "book_history_hours": 62.9928,
+        "book_snapshot_count": 128,
+        "condition_id": "0x704e4ea883b17433c66119bde289259b3c7d3668a0101df9c66fda9350f17fd2",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 265.4011,
+        "book_snapshot_count": 211,
+        "condition_id": "0xcc59c2569d30b4b86993f3ff17bb900fffc56e7d98f1a5b02793fc9c133db99a",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 326.2803,
+        "book_snapshot_count": 771,
+        "condition_id": "0x15d2e66dcf1d63c5695d6d0e9e2f8e06dd246d00fd5dfc254f2b22baa33bfa1b",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 143.9603,
+        "book_snapshot_count": 246,
+        "condition_id": "0x490b4abcc5b23958f5515716fbab843574f9cffef4bc52eac3a3939809757b46",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 303.6314,
+        "book_snapshot_count": 484,
+        "condition_id": "0x8062cf78d93f9202f4c0a1018d141f4af35d486a368f07e65265f27d48b4e040",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 14.9022,
+        "book_snapshot_count": 50,
+        "condition_id": "0x7a833b2745bc6911db3ef244e37287c9ab1be1e63ee71266d2c79326cafbe285",
+        "hours_remaining": 33.0978,
+        "snapshots_remaining": 50
+      },
+      {
+        "book_history_hours": 358.3058,
+        "book_snapshot_count": 1060,
+        "condition_id": "0x47ec761ae98d7c28b20c0222f1507e3af0f198a904f86b4a264b2e987f0b80c7",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 358.3058,
+        "book_snapshot_count": 1168,
+        "condition_id": "0x30174f3f46398e37c96a07b45916e01eab9a8a854ecb624ac73a91a8490fd074",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 351.7225,
+        "book_snapshot_count": 807,
+        "condition_id": "0xabe0e41540b70f3535b0d9325a19bc6f8c6bcce0ce27c28636a2e1d5c0c4eda8",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 338.0261,
+        "book_snapshot_count": 1177,
+        "condition_id": "0x5c79dfde05559b79a9cb9f7c4187e4d49632dd042572ae676952f812732591cc",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 22.5553,
+        "book_snapshot_count": 75,
+        "condition_id": "0x420c29cfe95850eb2351fdef6ae4ff063b2a574aa947d0fe82e7433fd58946f2",
+        "hours_remaining": 25.4447,
+        "snapshots_remaining": 25
+      },
+      {
+        "book_history_hours": 87.0208,
+        "book_snapshot_count": 102,
+        "condition_id": "0x684e5b72d4e407695397a79ed75ef37273c2655ca2548791a4153233d3744696",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 14.9022,
+        "book_snapshot_count": 50,
+        "condition_id": "0xb7d6db12a48e282585501f57871e6e482b9e2c41c68d1d5019bdbd2902209b69",
+        "hours_remaining": 33.0978,
+        "snapshots_remaining": 50
+      },
+      {
+        "book_history_hours": 14.9022,
+        "book_snapshot_count": 50,
+        "condition_id": "0x3849e1d62e0807801913d3e2427e8caf3cc6dd1c8ef42d8d5c08c6f9c449dc5e",
+        "hours_remaining": 33.0978,
+        "snapshots_remaining": 50
+      },
+      {
+        "book_history_hours": 338.0261,
+        "book_snapshot_count": 326,
+        "condition_id": "0x3de0f3d7d7efb40cde68e814d40a0b232832083653c8e78260eb999baa967de0",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 351.7225,
+        "book_snapshot_count": 1182,
+        "condition_id": "0xed5a9e7831ee363d92cb102f2c21e2465b09196ef5beb7c8e23671851a1c3ca4",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 231.4064,
+        "book_snapshot_count": 581,
+        "condition_id": "0x1c4c6a698f0591ddf0c96e1beb56f8c75112ef849331bf3b0388f14830a7421d",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 324.0406,
+        "book_snapshot_count": 915,
+        "condition_id": "0xc4ebab9f2830f6df67ab1b98615d5a9be8eebd106fd0f37e9a25e4a4edcc427c",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 327.6803,
+        "book_snapshot_count": 960,
+        "condition_id": "0x46ca741da4abd7ffa993f59ac65bfe83de43ae027accac71d263a493e44064e7",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 22.5553,
+        "book_snapshot_count": 75,
+        "condition_id": "0xcd9079a837d72a0eafde1dc692c819940bd030a295ddc67f27590e98df33878c",
+        "hours_remaining": 25.4447,
+        "snapshots_remaining": 25
+      },
+      {
+        "book_history_hours": 351.7225,
+        "book_snapshot_count": 1009,
+        "condition_id": "0xc1556ecbe613e403dfb9e38bf1b25a8aee2aa1687f2b343bc896dd2c9763ed74",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 338.0261,
+        "book_snapshot_count": 137,
+        "condition_id": "0x9cb23d04b2ded06147482076688b69b487a8d982c63ebdda2ab3678cf27cf390",
+        "hours_remaining": 0.0,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 46.4122,
+        "book_snapshot_count": 127,
+        "condition_id": "0x137cf69002f2f24c6cbc7572321db1f6fd995f53d2457fda7e52f7fd82446794",
+        "hours_remaining": 1.5878,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 46.4122,
+        "book_snapshot_count": 152,
+        "condition_id": "0x9b94d7e2e7250d156b02435f4d59634d357dc789d842eaee15c35c1158d5bca4",
+        "hours_remaining": 1.5878,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 46.4122,
+        "book_snapshot_count": 152,
+        "condition_id": "0x305c77ad59fa89533c15e415d8e6a57eb490215094cc9f937b963a19c5f66c44",
+        "hours_remaining": 1.5878,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 46.4122,
+        "book_snapshot_count": 151,
+        "condition_id": "0x9601280c3d5109783ba64644da25bdfdf120ce516a696f88a42f54ffd2ac761b",
+        "hours_remaining": 1.5878,
+        "snapshots_remaining": 0
+      },
+      {
+        "book_history_hours": 22.1217,
+        "book_snapshot_count": 73,
+        "condition_id": "0x5801ce623a1d2dcb20bec5708fd9f881326aaf1ff82af22248aceccc7bf29708",
+        "hours_remaining": 25.8783,
+        "snapshots_remaining": 27
+      },
+      {
+        "book_history_hours": 22.1217,
+        "book_snapshot_count": 73,
+        "condition_id": "0x0b44e9c6eb563adf459816f9a7a2de0aa66ba5423c474ecab30c97203a3e8207",
+        "hours_remaining": 25.8783,
+        "snapshots_remaining": 27
+      }
+    ],
+    "status": "ok",
+    "tier_event_burst": false,
+    "tier_events_malformed_rows": 0,
+    "tier_events_resync": false,
+    "tier_events_status": "ok",
+    "tier_events_written": 22,
+    "tier_precedence_conflicts": 0,
+    "watchlist_excluded_expired": {
+      "close_time_unparseable": 659,
+      "kept_missing_fields": 706,
+      "persistent": 4,
+      "portfolio_observed_not_excluded": 0,
+      "seed": 4,
+      "stale_map_status": "ok"
+    },
+    "watchlist_excluded_expired_examples": [
+      {
+        "condition_id": "0x8d8cfacfd90c29ddad706b5581527c5a052b6de324c0d0d4b95f3a388a0f3159",
+        "reasons": [
+          "venue_close_time_past"
+        ],
+        "tranche": "persistent"
+      },
+      {
+        "condition_id": "0x8d8cfacfd90c29ddad706b5581527c5a052b6de324c0d0d4b95f3a388a0f3159",
+        "reasons": [
+          "venue_close_time_past"
+        ],
+        "tranche": "seed"
+      },
+      {
+        "condition_id": "0x95b9b8ee4ff31e9e2afd03185fdf563a08838a14f1eb40dbee242f4efee38a79",
+        "reasons": [
+          "venue_close_time_past"
+        ],
+        "tranche": "persistent"
+      },
+      {
+        "condition_id": "0x95b9b8ee4ff31e9e2afd03185fdf563a08838a14f1eb40dbee242f4efee38a79",
+        "reasons": [
+          "venue_close_time_past"
+        ],
+        "tranche": "seed"
+      },
+      {
+        "condition_id": "0xcf4aaa65cf548f0bf28ec33b9a3e99dc2a9282047c8baad6cef9fb1ca9d35519",
+        "reasons": [
+          "venue_close_time_past"
+        ],
+        "tranche": "persistent"
+      },
+      {
+        "condition_id": "0xcf4aaa65cf548f0bf28ec33b9a3e99dc2a9282047c8baad6cef9fb1ca9d35519",
+        "reasons": [
+          "venue_close_time_past"
+        ],
+        "tranche": "seed"
+      },
+      {
+        "condition_id": "0xf599231d9325e07e0444e7aa14df408a0dd1477ce2a9254911159cd36a450a0d",
+        "reasons": [
+          "venue_close_time_past"
+        ],
+        "tranche": "persistent"
+      },
+      {
+        "condition_id": "0xf599231d9325e07e0444e7aa14df408a0dd1477ce2a9254911159cd36a450a0d",
+        "reasons": [
+          "venue_close_time_past"
+        ],
+        "tranche": "seed"
+      }
+    ],
+    "work_order": "WO-44/WO-83"
+  },
+  "order_placement_invoked": false,
+  "paper_trading_invoked": false,
+  "per_market_coverage": [
+    {
+      "asset_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+      "book_history_span_days": 10.6403,
+      "by_horizon": {
+        "15m": {
+          "coverage_ratio": 1.0,
+          "windows_covered": 22,
+          "windows_simulated": 22
+        },
+        "5m": {
+          "coverage_ratio": 1.0,
+          "windows_covered": 22,
+          "windows_simulated": 22
+        },
+        "60m": {
+          "coverage_ratio": 1.0,
+          "windows_covered": 22,
+          "windows_simulated": 22
+        }
+      },
+      "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+      "confirmed_fill_ratio": 0.136364,
+      "confirmed_fill_ratio_status": "observed",
+      "confirmed_fills": 3,
+      "coverage_ratio": 1.0,
+      "coverage_status": "covered",
+      "last_in_queue_evaluable_opportunities": 22,
+      "no_contemporaneous_state_opportunities": 316,
+      "question": "Mojtaba Khamenei seen in public by December 31?",
+      "queue_depth_unavailable_opportunities": 0,
+      "realized_adverse_usd_per_day": 0.236902,
+      "realized_markout_distribution": {
+        "15m": {
+          "count": 3,
+          "max": 0.01,
+          "mean": -0.001667,
+          "median": 0.005,
+          "min": -0.02,
+          "p25": -0.0075,
+          "p75": 0.0075,
+          "p95": 0.0095
+        },
+        "5m": {
+          "count": 3,
+          "max": 0.015,
+          "mean": -0.0,
+          "median": 0.005,
+          "min": -0.02,
+          "p25": -0.0075,
+          "p75": 0.01,
+          "p95": 0.014
+        },
+        "60m": {
+          "count": 3,
+          "max": 0.02,
+          "mean": 0.006667,
+          "median": 0.005,
+          "min": -0.005,
+          "p25": 0.0,
+          "p75": 0.0125,
+          "p95": 0.0185
+        }
+      },
+      "replay_span_days": 30.674016,
+      "simulated_adverse_charge_usd_per_day": 0.0,
+      "simulated_fill_opportunities": 22,
+      "simulation_to_reality_haircut": null,
+      "windows_covered": 66,
+      "windows_simulated": 66
+    }
+  ],
+  "portfolio_generated_at_utc": "2026-08-20T10:46:56Z",
+  "portfolio_markets": 1,
+  "primary_book_source": "official",
+  "quoting_basis": "contemporaneous",
+  "realism_ratio": null,
+  "realism_ratio_by_source": {
+    "archive": "insufficient_coverage",
+    "official": null
+  },
+  "realized_adverse_usd_per_day": 0.682944,
+  "realized_markout_distribution": {
+    "15m": {
+      "count": 3,
+      "max": 0.01,
+      "mean": -0.001667,
+      "median": 0.005,
+      "min": -0.02,
+      "p25": -0.0075,
+      "p75": 0.0075,
+      "p95": 0.0095
+    },
+    "5m": {
+      "count": 3,
+      "max": 0.015,
+      "mean": -0.0,
+      "median": 0.005,
+      "min": -0.02,
+      "p25": -0.0075,
+      "p75": 0.01,
+      "p95": 0.014
+    },
+    "60m": {
+      "count": 3,
+      "max": 0.02,
+      "mean": 0.006667,
+      "median": 0.005,
+      "min": -0.005,
+      "p25": 0.0,
+      "p75": 0.0125,
+      "p95": 0.0185
+    }
+  },
+  "regime_cut": {
+    "by_source": {
+      "archive": {
+        "last_7_days": {
+          "book_states": 0,
+          "confirmed_fill_ratio": null,
+          "confirmed_fill_ratio_status": "no_simulated_fill_opportunities",
+          "confirmed_fills": 0,
+          "coverage": {
+            "by_horizon": {
+              "15m": {
+                "coverage_ratio": null,
+                "windows_covered": 0,
+                "windows_simulated": 0
+              },
+              "5m": {
+                "coverage_ratio": null,
+                "windows_covered": 0,
+                "windows_simulated": 0
+              },
+              "60m": {
+                "coverage_ratio": null,
+                "windows_covered": 0,
+                "windows_simulated": 0
+              }
+            },
+            "coverage_ratio": null,
+            "windows_covered": 0,
+            "windows_simulated": 0
+          },
+          "coverage_status": "insufficient_coverage",
+          "entry_state_lag_seconds_max": null,
+          "entry_state_lag_seconds_p50": null,
+          "entry_state_lag_seconds_p90": null,
+          "entry_state_lag_unmeasurable": 0,
+          "fills_beyond_legacy_lag": 0,
+          "fills_preview": [],
+          "implied_adverse_usd_per_day": 0.0,
+          "last_in_queue_evaluable_opportunities": 0,
+          "markout_per_fill": {
+            "15m": null,
+            "5m": null,
+            "60m": null
+          },
+          "no_contemporaneous_state_opportunities": 317,
+          "no_contemporaneous_state_rate": 0.99373,
+          "per_market_coverage": [
+            {
+              "asset_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+              "book_history_span_days": 0.0,
+              "by_horizon": {
+                "15m": {
+                  "coverage_ratio": null,
+                  "windows_covered": 0,
+                  "windows_simulated": 0
+                },
+                "5m": {
+                  "coverage_ratio": null,
+                  "windows_covered": 0,
+                  "windows_simulated": 0
+                },
+                "60m": {
+                  "coverage_ratio": null,
+                  "windows_covered": 0,
+                  "windows_simulated": 0
+                }
+              },
+              "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+              "confirmed_fill_ratio": null,
+              "confirmed_fill_ratio_status": "no_simulated_fill_opportunities",
+              "confirmed_fills": 0,
+              "coverage_ratio": null,
+              "coverage_status": "no_simulated_fill_opportunities",
+              "last_in_queue_evaluable_opportunities": 0,
+              "no_contemporaneous_state_opportunities": 317,
+              "question": "Mojtaba Khamenei seen in public by December 31?",
+              "queue_depth_unavailable_opportunities": 0,
+              "realized_adverse_usd_per_day": 0.0,
+              "realized_markout_distribution": {
+                "15m": {
+                  "count": 0,
+                  "max": null,
+                  "mean": null,
+                  "median": null,
+                  "min": null,
+                  "p25": null,
+                  "p75": null,
+                  "p95": null
+                },
+                "5m": {
+                  "count": 0,
+                  "max": null,
+                  "mean": null,
+                  "median": null,
+                  "min": null,
+                  "p25": null,
+                  "p75": null,
+                  "p95": null
+                },
+                "60m": {
+                  "count": 0,
+                  "max": null,
+                  "mean": null,
+                  "median": null,
+                  "min": null,
+                  "p25": null,
+                  "p75": null,
+                  "p95": null
+                }
+              },
+              "replay_span_days": 13.551238,
+              "simulated_adverse_charge_usd_per_day": 0.0,
+              "simulated_fill_opportunities": 0,
+              "simulation_to_reality_haircut": null,
+              "windows_covered": 0,
+              "windows_simulated": 0
+            }
+          ],
+          "queue_depth_standard": "full_book_levels_or_quote_aligned_depth_only",
+          "queue_depth_unavailable_opportunities": 0,
+          "quoting_basis": "contemporaneous",
+          "realism_ratio": "insufficient_coverage",
+          "realized_adverse_usd_per_day": 0.0,
+          "realized_markout_distribution": {
+            "15m": {
+              "count": 0,
+              "max": null,
+              "mean": null,
+              "median": null,
+              "min": null,
+              "p25": null,
+              "p75": null,
+              "p95": null
+            },
+            "5m": {
+              "count": 0,
+              "max": null,
+              "mean": null,
+              "median": null,
+              "min": null,
+              "p25": null,
+              "p75": null,
+              "p95": null
+            },
+            "60m": {
+              "count": 0,
+              "max": null,
+              "mean": null,
+              "median": null,
+              "min": null,
+              "p25": null,
+              "p75": null,
+              "p95": null
+            }
+          },
+          "simulated_adverse_charge_usd_per_day": 0.0,
+          "simulated_fill_opportunities": 0,
+          "simulated_fills": 0,
+          "simulated_fills_per_day": 0.0,
+          "simulation_to_reality_haircut": "insufficient_coverage",
+          "source": "archive",
+          "status": "insufficient_coverage",
+          "study_adverse_usd_per_day": 0.0
+        },
+        "prior_to_last_7_days": {
+          "book_states": 0,
+          "confirmed_fill_ratio": null,
+          "confirmed_fill_ratio_status": "no_simulated_fill_opportunities",
+          "confirmed_fills": 0,
+          "coverage": {
+            "by_horizon": {
+              "15m": {
+                "coverage_ratio": null,
+                "windows_covered": 0,
+                "windows_simulated": 0
+              },
+              "5m": {
+                "coverage_ratio": null,
+                "windows_covered": 0,
+                "windows_simulated": 0
+              },
+              "60m": {
+                "coverage_ratio": null,
+                "windows_covered": 0,
+                "windows_simulated": 0
+              }
+            },
+            "coverage_ratio": null,
+            "windows_covered": 0,
+            "windows_simulated": 0
+          },
+          "coverage_status": "insufficient_coverage",
+          "entry_state_lag_seconds_max": null,
+          "entry_state_lag_seconds_p50": null,
+          "entry_state_lag_seconds_p90": null,
+          "entry_state_lag_unmeasurable": 0,
+          "fills_beyond_legacy_lag": 0,
+          "fills_preview": [],
+          "implied_adverse_usd_per_day": 0.0,
+          "last_in_queue_evaluable_opportunities": 0,
+          "markout_per_fill": {
+            "15m": null,
+            "5m": null,
+            "60m": null
+          },
+          "no_contemporaneous_state_opportunities": 89,
+          "no_contemporaneous_state_rate": 1.0,
+          "per_market_coverage": [
+            {
+              "asset_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+              "book_history_span_days": 0.0,
+              "by_horizon": {
+                "15m": {
+                  "coverage_ratio": null,
+                  "windows_covered": 0,
+                  "windows_simulated": 0
+                },
+                "5m": {
+                  "coverage_ratio": null,
+                  "windows_covered": 0,
+                  "windows_simulated": 0
+                },
+                "60m": {
+                  "coverage_ratio": null,
+                  "windows_covered": 0,
+                  "windows_simulated": 0
+                }
+              },
+              "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+              "confirmed_fill_ratio": null,
+              "confirmed_fill_ratio_status": "no_simulated_fill_opportunities",
+              "confirmed_fills": 0,
+              "coverage_ratio": null,
+              "coverage_status": "no_simulated_fill_opportunities",
+              "last_in_queue_evaluable_opportunities": 0,
+              "no_contemporaneous_state_opportunities": 89,
+              "question": "Mojtaba Khamenei seen in public by December 31?",
+              "queue_depth_unavailable_opportunities": 0,
+              "realized_adverse_usd_per_day": 0.0,
+              "realized_markout_distribution": {
+                "15m": {
+                  "count": 0,
+                  "max": null,
+                  "mean": null,
+                  "median": null,
+                  "min": null,
+                  "p25": null,
+                  "p75": null,
+                  "p95": null
+                },
+                "5m": {
+                  "count": 0,
+                  "max": null,
+                  "mean": null,
+                  "median": null,
+                  "min": null,
+                  "p25": null,
+                  "p75": null,
+                  "p95": null
+                },
+                "60m": {
+                  "count": 0,
+                  "max": null,
+                  "mean": null,
+                  "median": null,
+                  "min": null,
+                  "p25": null,
+                  "p75": null,
+                  "p95": null
+                }
+              },
+              "replay_span_days": 14.103947,
+              "simulated_adverse_charge_usd_per_day": 0.0,
+              "simulated_fill_opportunities": 0,
+              "simulation_to_reality_haircut": null,
+              "windows_covered": 0,
+              "windows_simulated": 0
+            }
+          ],
+          "queue_depth_standard": "full_book_levels_or_quote_aligned_depth_only",
+          "queue_depth_unavailable_opportunities": 0,
+          "quoting_basis": "contemporaneous",
+          "realism_ratio": "insufficient_coverage",
+          "realized_adverse_usd_per_day": 0.0,
+          "realized_markout_distribution": {
+            "15m": {
+              "count": 0,
+              "max": null,
+              "mean": null,
+              "median": null,
+              "min": null,
+              "p25": null,
+              "p75": null,
+              "p95": null
+            },
+            "5m": {
+              "count": 0,
+              "max": null,
+              "mean": null,
+              "median": null,
+              "min": null,
+              "p25": null,
+              "p75": null,
+              "p95": null
+            },
+            "60m": {
+              "count": 0,
+              "max": null,
+              "mean": null,
+              "median": null,
+              "min": null,
+              "p25": null,
+              "p75": null,
+              "p95": null
+            }
+          },
+          "simulated_adverse_charge_usd_per_day": 0.0,
+          "simulated_fill_opportunities": 0,
+          "simulated_fills": 0,
+          "simulated_fills_per_day": 0.0,
+          "simulation_to_reality_haircut": "insufficient_coverage",
+          "source": "archive",
+          "status": "insufficient_coverage",
+          "study_adverse_usd_per_day": 0.0
+        }
+      },
+      "official": {
+        "last_7_days": {
+          "book_states": 512,
+          "confirmed_fill_ratio": 0.136364,
+          "confirmed_fill_ratio_status": "observed",
+          "confirmed_fills": 3,
+          "coverage": {
+            "by_horizon": {
+              "15m": {
+                "coverage_ratio": 1.0,
+                "windows_covered": 22,
+                "windows_simulated": 22
+              },
+              "5m": {
+                "coverage_ratio": 1.0,
+                "windows_covered": 22,
+                "windows_simulated": 22
+              },
+              "60m": {
+                "coverage_ratio": 1.0,
+                "windows_covered": 22,
+                "windows_simulated": 22
+              }
+            },
+            "coverage_ratio": 1.0,
+            "windows_covered": 66,
+            "windows_simulated": 66
+          },
+          "coverage_status": "covered",
+          "entry_state_lag_seconds_max": 877.0,
+          "entry_state_lag_seconds_p50": 638.0,
+          "entry_state_lag_seconds_p90": 877.0,
+          "entry_state_lag_unmeasurable": 0,
+          "fills_beyond_legacy_lag": 0,
+          "fills_preview": [
+            {
+              "adverse_usd": {
+                "15m": 10.0,
+                "5m": 15.0,
+                "60m": 20.0
+              },
+              "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+              "depth_ahead": 3802.05,
+              "direction": "ask_fill",
+              "entry_state_lag_seconds": 403.0,
+              "fill_price": 0.33,
+              "fill_size": 1000.0,
+              "later_state_lag_seconds": {
+                "15m": 948.0,
+                "5m": 425.0,
+                "60m": 498.0
+              },
+              "markout_per_share": {
+                "15m": 0.01,
+                "5m": 0.015,
+                "60m": 0.02
+              },
+              "queue_depth_source": "full_book_levels",
+              "quote_rounding": "order_price_min_tick_size_outward",
+              "quoting_basis": "contemporaneous",
+              "source": "official",
+              "stamp": 1786376931.0,
+              "token_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+              "trade_size": 7336.4
+            },
+            {
+              "adverse_usd": {
+                "15m": -9.4364,
+                "5m": -9.4364,
+                "60m": -2.3591
+              },
+              "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+              "depth_ahead": 142.86,
+              "direction": "bid_fill",
+              "entry_state_lag_seconds": 877.0,
+              "fill_price": 0.34,
+              "fill_size": 471.82,
+              "later_state_lag_seconds": {
+                "15m": 474.0,
+                "5m": 1074.0,
+                "60m": 132.0
+              },
+              "markout_per_share": {
+                "15m": -0.02,
+                "5m": -0.02,
+                "60m": -0.005
+              },
+              "queue_depth_source": "full_book_levels",
+              "quote_rounding": "order_price_min_tick_size_outward",
+              "quoting_basis": "contemporaneous",
+              "source": "official",
+              "stamp": 1786380781.0,
+              "token_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+              "trade_size": 614.68
+            },
+            {
+              "adverse_usd": {
+                "15m": 1.70315,
+                "5m": 1.70315,
+                "60m": 1.70315
+              },
+              "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+              "depth_ahead": 49.99,
+              "direction": "bid_fill",
+              "entry_state_lag_seconds": 638.0,
+              "fill_price": 0.26,
+              "fill_size": 340.63,
+              "later_state_lag_seconds": {
+                "15m": 717.0,
+                "5m": 191.0,
+                "60m": 272.0
+              },
+              "markout_per_share": {
+                "15m": 0.005,
+                "5m": 0.005,
+                "60m": 0.005
+              },
+              "queue_depth_source": "full_book_levels",
+              "quote_rounding": "order_price_min_tick_size_outward",
+              "quoting_basis": "contemporaneous",
+              "source": "official",
+              "stamp": 1786570291.0,
+              "token_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+              "trade_size": 390.62
+            }
+          ],
+          "implied_adverse_usd_per_day": 0.682944,
+          "last_in_queue_evaluable_opportunities": 22,
+          "markout_per_fill": {
+            "15m": -0.001667,
+            "5m": -0.0,
+            "60m": 0.006667
+          },
+          "no_contemporaneous_state_opportunities": 227,
+          "no_contemporaneous_state_rate": 0.711599,
+          "per_market_coverage": [
+            {
+              "asset_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+              "book_history_span_days": 10.6403,
+              "by_horizon": {
+                "15m": {
+                  "coverage_ratio": 1.0,
+                  "windows_covered": 22,
+                  "windows_simulated": 22
+                },
+                "5m": {
+                  "coverage_ratio": 1.0,
+                  "windows_covered": 22,
+                  "windows_simulated": 22
+                },
+                "60m": {
+                  "coverage_ratio": 1.0,
+                  "windows_covered": 22,
+                  "windows_simulated": 22
+                }
+              },
+              "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+              "confirmed_fill_ratio": 0.136364,
+              "confirmed_fill_ratio_status": "observed",
+              "confirmed_fills": 3,
+              "coverage_ratio": 1.0,
+              "coverage_status": "covered",
+              "last_in_queue_evaluable_opportunities": 22,
+              "no_contemporaneous_state_opportunities": 227,
+              "question": "Mojtaba Khamenei seen in public by December 31?",
+              "queue_depth_unavailable_opportunities": 0,
+              "realized_adverse_usd_per_day": 0.524231,
+              "realized_markout_distribution": {
+                "15m": {
+                  "count": 3,
+                  "max": 0.01,
+                  "mean": -0.001667,
+                  "median": 0.005,
+                  "min": -0.02,
+                  "p25": -0.0075,
+                  "p75": 0.0075,
+                  "p95": 0.0095
+                },
+                "5m": {
+                  "count": 3,
+                  "max": 0.015,
+                  "mean": -0.0,
+                  "median": 0.005,
+                  "min": -0.02,
+                  "p25": -0.0075,
+                  "p75": 0.01,
+                  "p95": 0.014
+                },
+                "60m": {
+                  "count": 3,
+                  "max": 0.02,
+                  "mean": 0.006667,
+                  "median": 0.005,
+                  "min": -0.005,
+                  "p25": 0.0,
+                  "p75": 0.0125,
+                  "p95": 0.0185
+                }
+              },
+              "replay_span_days": 13.861725,
+              "simulated_adverse_charge_usd_per_day": 0.0,
+              "simulated_fill_opportunities": 22,
+              "simulation_to_reality_haircut": null,
+              "windows_covered": 66,
+              "windows_simulated": 66
+            }
+          ],
+          "queue_depth_standard": "full_book_levels_or_quote_aligned_depth_only",
+          "queue_depth_unavailable_opportunities": 0,
+          "quoting_basis": "contemporaneous",
+          "realism_ratio": null,
+          "realized_adverse_usd_per_day": 0.682944,
+          "realized_markout_distribution": {
+            "15m": {
+              "count": 3,
+              "max": 0.01,
+              "mean": -0.001667,
+              "median": 0.005,
+              "min": -0.02,
+              "p25": -0.0075,
+              "p75": 0.0075,
+              "p95": 0.0095
+            },
+            "5m": {
+              "count": 3,
+              "max": 0.015,
+              "mean": -0.0,
+              "median": 0.005,
+              "min": -0.02,
+              "p25": -0.0075,
+              "p75": 0.01,
+              "p95": 0.014
+            },
+            "60m": {
+              "count": 3,
+              "max": 0.02,
+              "mean": 0.006667,
+              "median": 0.005,
+              "min": -0.005,
+              "p25": 0.0,
+              "p75": 0.0125,
+              "p95": 0.0185
+            }
+          },
+          "simulated_adverse_charge_usd_per_day": 0.0,
+          "simulated_fill_opportunities": 22,
+          "simulated_fills": 3,
+          "simulated_fills_per_day": 0.281946,
+          "simulation_to_reality_haircut": null,
+          "source": "official",
+          "status": "ok",
+          "study_adverse_usd_per_day": 0.0
+        },
+        "prior_to_last_7_days": {
+          "book_states": 512,
+          "confirmed_fill_ratio": null,
+          "confirmed_fill_ratio_status": "no_simulated_fill_opportunities",
+          "confirmed_fills": 0,
+          "coverage": {
+            "by_horizon": {
+              "15m": {
+                "coverage_ratio": null,
+                "windows_covered": 0,
+                "windows_simulated": 0
+              },
+              "5m": {
+                "coverage_ratio": null,
+                "windows_covered": 0,
+                "windows_simulated": 0
+              },
+              "60m": {
+                "coverage_ratio": null,
+                "windows_covered": 0,
+                "windows_simulated": 0
+              }
+            },
+            "coverage_ratio": null,
+            "windows_covered": 0,
+            "windows_simulated": 0
+          },
+          "coverage_status": "insufficient_coverage",
+          "entry_state_lag_seconds_max": null,
+          "entry_state_lag_seconds_p50": null,
+          "entry_state_lag_seconds_p90": null,
+          "entry_state_lag_unmeasurable": 0,
+          "fills_beyond_legacy_lag": 0,
+          "fills_preview": [],
+          "implied_adverse_usd_per_day": 0.0,
+          "last_in_queue_evaluable_opportunities": 0,
+          "markout_per_fill": {
+            "15m": null,
+            "5m": null,
+            "60m": null
+          },
+          "no_contemporaneous_state_opportunities": 89,
+          "no_contemporaneous_state_rate": 1.0,
+          "per_market_coverage": [
+            {
+              "asset_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+              "book_history_span_days": 10.6403,
+              "by_horizon": {
+                "15m": {
+                  "coverage_ratio": null,
+                  "windows_covered": 0,
+                  "windows_simulated": 0
+                },
+                "5m": {
+                  "coverage_ratio": null,
+                  "windows_covered": 0,
+                  "windows_simulated": 0
+                },
+                "60m": {
+                  "coverage_ratio": null,
+                  "windows_covered": 0,
+                  "windows_simulated": 0
+                }
+              },
+              "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+              "confirmed_fill_ratio": null,
+              "confirmed_fill_ratio_status": "no_simulated_fill_opportunities",
+              "confirmed_fills": 0,
+              "coverage_ratio": null,
+              "coverage_status": "no_simulated_fill_opportunities",
+              "last_in_queue_evaluable_opportunities": 0,
+              "no_contemporaneous_state_opportunities": 89,
+              "question": "Mojtaba Khamenei seen in public by December 31?",
+              "queue_depth_unavailable_opportunities": 0,
+              "realized_adverse_usd_per_day": 0.0,
+              "realized_markout_distribution": {
+                "15m": {
+                  "count": 0,
+                  "max": null,
+                  "mean": null,
+                  "median": null,
+                  "min": null,
+                  "p25": null,
+                  "p75": null,
+                  "p95": null
+                },
+                "5m": {
+                  "count": 0,
+                  "max": null,
+                  "mean": null,
+                  "median": null,
+                  "min": null,
+                  "p25": null,
+                  "p75": null,
+                  "p95": null
+                },
+                "60m": {
+                  "count": 0,
+                  "max": null,
+                  "mean": null,
+                  "median": null,
+                  "min": null,
+                  "p25": null,
+                  "p75": null,
+                  "p95": null
+                }
+              },
+              "replay_span_days": 30.674016,
+              "simulated_adverse_charge_usd_per_day": 0.0,
+              "simulated_fill_opportunities": 0,
+              "simulation_to_reality_haircut": null,
+              "windows_covered": 0,
+              "windows_simulated": 0
+            }
+          ],
+          "queue_depth_standard": "full_book_levels_or_quote_aligned_depth_only",
+          "queue_depth_unavailable_opportunities": 0,
+          "quoting_basis": "contemporaneous",
+          "realism_ratio": "insufficient_coverage",
+          "realized_adverse_usd_per_day": 0.0,
+          "realized_markout_distribution": {
+            "15m": {
+              "count": 0,
+              "max": null,
+              "mean": null,
+              "median": null,
+              "min": null,
+              "p25": null,
+              "p75": null,
+              "p95": null
+            },
+            "5m": {
+              "count": 0,
+              "max": null,
+              "mean": null,
+              "median": null,
+              "min": null,
+              "p25": null,
+              "p75": null,
+              "p95": null
+            },
+            "60m": {
+              "count": 0,
+              "max": null,
+              "mean": null,
+              "median": null,
+              "min": null,
+              "p25": null,
+              "p75": null,
+              "p95": null
+            }
+          },
+          "simulated_adverse_charge_usd_per_day": 0.0,
+          "simulated_fill_opportunities": 0,
+          "simulated_fills": 0,
+          "simulated_fills_per_day": 0.0,
+          "simulation_to_reality_haircut": "insufficient_coverage",
+          "source": "official",
+          "status": "insufficient_coverage",
+          "study_adverse_usd_per_day": 0.0
+        }
+      }
+    },
+    "cutoff_utc": "2026-08-07T01:41:57Z",
+    "last_7_days": {
+      "book_states": 512,
+      "confirmed_fill_ratio": 0.136364,
+      "confirmed_fill_ratio_status": "observed",
+      "confirmed_fills": 3,
+      "coverage": {
+        "by_horizon": {
+          "15m": {
+            "coverage_ratio": 1.0,
+            "windows_covered": 22,
+            "windows_simulated": 22
+          },
+          "5m": {
+            "coverage_ratio": 1.0,
+            "windows_covered": 22,
+            "windows_simulated": 22
+          },
+          "60m": {
+            "coverage_ratio": 1.0,
+            "windows_covered": 22,
+            "windows_simulated": 22
+          }
+        },
+        "coverage_ratio": 1.0,
+        "windows_covered": 66,
+        "windows_simulated": 66
+      },
+      "coverage_status": "covered",
+      "entry_state_lag_seconds_max": 877.0,
+      "entry_state_lag_seconds_p50": 638.0,
+      "entry_state_lag_seconds_p90": 877.0,
+      "entry_state_lag_unmeasurable": 0,
+      "fills_beyond_legacy_lag": 0,
+      "fills_preview": [
+        {
+          "adverse_usd": {
+            "15m": 10.0,
+            "5m": 15.0,
+            "60m": 20.0
+          },
+          "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+          "depth_ahead": 3802.05,
+          "direction": "ask_fill",
+          "entry_state_lag_seconds": 403.0,
+          "fill_price": 0.33,
+          "fill_size": 1000.0,
+          "later_state_lag_seconds": {
+            "15m": 948.0,
+            "5m": 425.0,
+            "60m": 498.0
+          },
+          "markout_per_share": {
+            "15m": 0.01,
+            "5m": 0.015,
+            "60m": 0.02
+          },
+          "queue_depth_source": "full_book_levels",
+          "quote_rounding": "order_price_min_tick_size_outward",
+          "quoting_basis": "contemporaneous",
+          "source": "official",
+          "stamp": 1786376931.0,
+          "token_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+          "trade_size": 7336.4
+        },
+        {
+          "adverse_usd": {
+            "15m": -9.4364,
+            "5m": -9.4364,
+            "60m": -2.3591
+          },
+          "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+          "depth_ahead": 142.86,
+          "direction": "bid_fill",
+          "entry_state_lag_seconds": 877.0,
+          "fill_price": 0.34,
+          "fill_size": 471.82,
+          "later_state_lag_seconds": {
+            "15m": 474.0,
+            "5m": 1074.0,
+            "60m": 132.0
+          },
+          "markout_per_share": {
+            "15m": -0.02,
+            "5m": -0.02,
+            "60m": -0.005
+          },
+          "queue_depth_source": "full_book_levels",
+          "quote_rounding": "order_price_min_tick_size_outward",
+          "quoting_basis": "contemporaneous",
+          "source": "official",
+          "stamp": 1786380781.0,
+          "token_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+          "trade_size": 614.68
+        },
+        {
+          "adverse_usd": {
+            "15m": 1.70315,
+            "5m": 1.70315,
+            "60m": 1.70315
+          },
+          "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+          "depth_ahead": 49.99,
+          "direction": "bid_fill",
+          "entry_state_lag_seconds": 638.0,
+          "fill_price": 0.26,
+          "fill_size": 340.63,
+          "later_state_lag_seconds": {
+            "15m": 717.0,
+            "5m": 191.0,
+            "60m": 272.0
+          },
+          "markout_per_share": {
+            "15m": 0.005,
+            "5m": 0.005,
+            "60m": 0.005
+          },
+          "queue_depth_source": "full_book_levels",
+          "quote_rounding": "order_price_min_tick_size_outward",
+          "quoting_basis": "contemporaneous",
+          "source": "official",
+          "stamp": 1786570291.0,
+          "token_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+          "trade_size": 390.62
+        }
+      ],
+      "implied_adverse_usd_per_day": 0.682944,
+      "last_in_queue_evaluable_opportunities": 22,
+      "markout_per_fill": {
+        "15m": -0.001667,
+        "5m": -0.0,
+        "60m": 0.006667
+      },
+      "no_contemporaneous_state_opportunities": 227,
+      "no_contemporaneous_state_rate": 0.711599,
+      "per_market_coverage": [
+        {
+          "asset_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+          "book_history_span_days": 10.6403,
+          "by_horizon": {
+            "15m": {
+              "coverage_ratio": 1.0,
+              "windows_covered": 22,
+              "windows_simulated": 22
+            },
+            "5m": {
+              "coverage_ratio": 1.0,
+              "windows_covered": 22,
+              "windows_simulated": 22
+            },
+            "60m": {
+              "coverage_ratio": 1.0,
+              "windows_covered": 22,
+              "windows_simulated": 22
+            }
+          },
+          "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+          "confirmed_fill_ratio": 0.136364,
+          "confirmed_fill_ratio_status": "observed",
+          "confirmed_fills": 3,
+          "coverage_ratio": 1.0,
+          "coverage_status": "covered",
+          "last_in_queue_evaluable_opportunities": 22,
+          "no_contemporaneous_state_opportunities": 227,
+          "question": "Mojtaba Khamenei seen in public by December 31?",
+          "queue_depth_unavailable_opportunities": 0,
+          "realized_adverse_usd_per_day": 0.524231,
+          "realized_markout_distribution": {
+            "15m": {
+              "count": 3,
+              "max": 0.01,
+              "mean": -0.001667,
+              "median": 0.005,
+              "min": -0.02,
+              "p25": -0.0075,
+              "p75": 0.0075,
+              "p95": 0.0095
+            },
+            "5m": {
+              "count": 3,
+              "max": 0.015,
+              "mean": -0.0,
+              "median": 0.005,
+              "min": -0.02,
+              "p25": -0.0075,
+              "p75": 0.01,
+              "p95": 0.014
+            },
+            "60m": {
+              "count": 3,
+              "max": 0.02,
+              "mean": 0.006667,
+              "median": 0.005,
+              "min": -0.005,
+              "p25": 0.0,
+              "p75": 0.0125,
+              "p95": 0.0185
+            }
+          },
+          "replay_span_days": 13.861725,
+          "simulated_adverse_charge_usd_per_day": 0.0,
+          "simulated_fill_opportunities": 22,
+          "simulation_to_reality_haircut": null,
+          "windows_covered": 66,
+          "windows_simulated": 66
+        }
+      ],
+      "queue_depth_standard": "full_book_levels_or_quote_aligned_depth_only",
+      "queue_depth_unavailable_opportunities": 0,
+      "quoting_basis": "contemporaneous",
+      "realism_ratio": null,
+      "realized_adverse_usd_per_day": 0.682944,
+      "realized_markout_distribution": {
+        "15m": {
+          "count": 3,
+          "max": 0.01,
+          "mean": -0.001667,
+          "median": 0.005,
+          "min": -0.02,
+          "p25": -0.0075,
+          "p75": 0.0075,
+          "p95": 0.0095
+        },
+        "5m": {
+          "count": 3,
+          "max": 0.015,
+          "mean": -0.0,
+          "median": 0.005,
+          "min": -0.02,
+          "p25": -0.0075,
+          "p75": 0.01,
+          "p95": 0.014
+        },
+        "60m": {
+          "count": 3,
+          "max": 0.02,
+          "mean": 0.006667,
+          "median": 0.005,
+          "min": -0.005,
+          "p25": 0.0,
+          "p75": 0.0125,
+          "p95": 0.0185
+        }
+      },
+      "simulated_adverse_charge_usd_per_day": 0.0,
+      "simulated_fill_opportunities": 22,
+      "simulated_fills": 3,
+      "simulated_fills_per_day": 0.281946,
+      "simulation_to_reality_haircut": null,
+      "source": "official",
+      "status": "ok",
+      "study_adverse_usd_per_day": 0.0
+    },
+    "prior_to_last_7_days": {
+      "book_states": 512,
+      "confirmed_fill_ratio": null,
+      "confirmed_fill_ratio_status": "no_simulated_fill_opportunities",
+      "confirmed_fills": 0,
+      "coverage": {
+        "by_horizon": {
+          "15m": {
+            "coverage_ratio": null,
+            "windows_covered": 0,
+            "windows_simulated": 0
+          },
+          "5m": {
+            "coverage_ratio": null,
+            "windows_covered": 0,
+            "windows_simulated": 0
+          },
+          "60m": {
+            "coverage_ratio": null,
+            "windows_covered": 0,
+            "windows_simulated": 0
+          }
+        },
+        "coverage_ratio": null,
+        "windows_covered": 0,
+        "windows_simulated": 0
+      },
+      "coverage_status": "insufficient_coverage",
+      "entry_state_lag_seconds_max": null,
+      "entry_state_lag_seconds_p50": null,
+      "entry_state_lag_seconds_p90": null,
+      "entry_state_lag_unmeasurable": 0,
+      "fills_beyond_legacy_lag": 0,
+      "fills_preview": [],
+      "implied_adverse_usd_per_day": 0.0,
+      "last_in_queue_evaluable_opportunities": 0,
+      "markout_per_fill": {
+        "15m": null,
+        "5m": null,
+        "60m": null
+      },
+      "no_contemporaneous_state_opportunities": 89,
+      "no_contemporaneous_state_rate": 1.0,
+      "per_market_coverage": [
+        {
+          "asset_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+          "book_history_span_days": 10.6403,
+          "by_horizon": {
+            "15m": {
+              "coverage_ratio": null,
+              "windows_covered": 0,
+              "windows_simulated": 0
+            },
+            "5m": {
+              "coverage_ratio": null,
+              "windows_covered": 0,
+              "windows_simulated": 0
+            },
+            "60m": {
+              "coverage_ratio": null,
+              "windows_covered": 0,
+              "windows_simulated": 0
+            }
+          },
+          "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+          "confirmed_fill_ratio": null,
+          "confirmed_fill_ratio_status": "no_simulated_fill_opportunities",
+          "confirmed_fills": 0,
+          "coverage_ratio": null,
+          "coverage_status": "no_simulated_fill_opportunities",
+          "last_in_queue_evaluable_opportunities": 0,
+          "no_contemporaneous_state_opportunities": 89,
+          "question": "Mojtaba Khamenei seen in public by December 31?",
+          "queue_depth_unavailable_opportunities": 0,
+          "realized_adverse_usd_per_day": 0.0,
+          "realized_markout_distribution": {
+            "15m": {
+              "count": 0,
+              "max": null,
+              "mean": null,
+              "median": null,
+              "min": null,
+              "p25": null,
+              "p75": null,
+              "p95": null
+            },
+            "5m": {
+              "count": 0,
+              "max": null,
+              "mean": null,
+              "median": null,
+              "min": null,
+              "p25": null,
+              "p75": null,
+              "p95": null
+            },
+            "60m": {
+              "count": 0,
+              "max": null,
+              "mean": null,
+              "median": null,
+              "min": null,
+              "p25": null,
+              "p75": null,
+              "p95": null
+            }
+          },
+          "replay_span_days": 30.674016,
+          "simulated_adverse_charge_usd_per_day": 0.0,
+          "simulated_fill_opportunities": 0,
+          "simulation_to_reality_haircut": null,
+          "windows_covered": 0,
+          "windows_simulated": 0
+        }
+      ],
+      "queue_depth_standard": "full_book_levels_or_quote_aligned_depth_only",
+      "queue_depth_unavailable_opportunities": 0,
+      "quoting_basis": "contemporaneous",
+      "realism_ratio": "insufficient_coverage",
+      "realized_adverse_usd_per_day": 0.0,
+      "realized_markout_distribution": {
+        "15m": {
+          "count": 0,
+          "max": null,
+          "mean": null,
+          "median": null,
+          "min": null,
+          "p25": null,
+          "p75": null,
+          "p95": null
+        },
+        "5m": {
+          "count": 0,
+          "max": null,
+          "mean": null,
+          "median": null,
+          "min": null,
+          "p25": null,
+          "p75": null,
+          "p95": null
+        },
+        "60m": {
+          "count": 0,
+          "max": null,
+          "mean": null,
+          "median": null,
+          "min": null,
+          "p25": null,
+          "p75": null,
+          "p95": null
+        }
+      },
+      "simulated_adverse_charge_usd_per_day": 0.0,
+      "simulated_fill_opportunities": 0,
+      "simulated_fills": 0,
+      "simulated_fills_per_day": 0.0,
+      "simulation_to_reality_haircut": "insufficient_coverage",
+      "source": "official",
+      "status": "insufficient_coverage",
+      "study_adverse_usd_per_day": 0.0
+    }
+  },
+  "replay_days": 14.0,
+  "simulated_adverse_charge_usd_per_day": 0.0,
+  "simulated_fill_opportunities": 22,
+  "simulated_fills": 3,
+  "simulated_fills_per_day": 0.281946,
+  "simulation_to_reality_haircut": null,
+  "source_agreement": {
+    "archive_fills_per_day": 0.0,
+    "fills_per_day_divergence": 0.281946,
+    "official_fills_per_day": 0.281946
+  },
+  "source_results": {
+    "archive": {
+      "book_states": 0,
+      "confirmed_fill_ratio": null,
+      "confirmed_fill_ratio_status": "no_simulated_fill_opportunities",
+      "confirmed_fills": 0,
+      "coverage": {
+        "by_horizon": {
+          "15m": {
+            "coverage_ratio": null,
+            "windows_covered": 0,
+            "windows_simulated": 0
+          },
+          "5m": {
+            "coverage_ratio": null,
+            "windows_covered": 0,
+            "windows_simulated": 0
+          },
+          "60m": {
+            "coverage_ratio": null,
+            "windows_covered": 0,
+            "windows_simulated": 0
+          }
+        },
+        "coverage_ratio": null,
+        "windows_covered": 0,
+        "windows_simulated": 0
+      },
+      "coverage_status": "insufficient_coverage",
+      "entry_state_lag_seconds_max": null,
+      "entry_state_lag_seconds_p50": null,
+      "entry_state_lag_seconds_p90": null,
+      "entry_state_lag_unmeasurable": 0,
+      "fills_beyond_legacy_lag": 0,
+      "fills_preview": [],
+      "implied_adverse_usd_per_day": 0.0,
+      "last_in_queue_evaluable_opportunities": 0,
+      "markout_per_fill": {
+        "15m": null,
+        "5m": null,
+        "60m": null
+      },
+      "no_contemporaneous_state_opportunities": 406,
+      "no_contemporaneous_state_rate": 0.995098,
+      "per_market_coverage": [
+        {
+          "asset_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+          "book_history_span_days": 0.0,
+          "by_horizon": {
+            "15m": {
+              "coverage_ratio": null,
+              "windows_covered": 0,
+              "windows_simulated": 0
+            },
+            "5m": {
+              "coverage_ratio": null,
+              "windows_covered": 0,
+              "windows_simulated": 0
+            },
+            "60m": {
+              "coverage_ratio": null,
+              "windows_covered": 0,
+              "windows_simulated": 0
+            }
+          },
+          "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+          "confirmed_fill_ratio": null,
+          "confirmed_fill_ratio_status": "no_simulated_fill_opportunities",
+          "confirmed_fills": 0,
+          "coverage_ratio": null,
+          "coverage_status": "no_simulated_fill_opportunities",
+          "last_in_queue_evaluable_opportunities": 0,
+          "no_contemporaneous_state_opportunities": 406,
+          "question": "Mojtaba Khamenei seen in public by December 31?",
+          "queue_depth_unavailable_opportunities": 0,
+          "realized_adverse_usd_per_day": 0.0,
+          "realized_markout_distribution": {
+            "15m": {
+              "count": 0,
+              "max": null,
+              "mean": null,
+              "median": null,
+              "min": null,
+              "p25": null,
+              "p75": null,
+              "p95": null
+            },
+            "5m": {
+              "count": 0,
+              "max": null,
+              "mean": null,
+              "median": null,
+              "min": null,
+              "p25": null,
+              "p75": null,
+              "p95": null
+            },
+            "60m": {
+              "count": 0,
+              "max": null,
+              "mean": null,
+              "median": null,
+              "min": null,
+              "p25": null,
+              "p75": null,
+              "p95": null
+            }
+          },
+          "replay_span_days": 30.36353,
+          "simulated_adverse_charge_usd_per_day": 0.0,
+          "simulated_fill_opportunities": 0,
+          "simulation_to_reality_haircut": null,
+          "windows_covered": 0,
+          "windows_simulated": 0
+        }
+      ],
+      "queue_depth_standard": "full_book_levels_or_quote_aligned_depth_only",
+      "queue_depth_unavailable_opportunities": 0,
+      "quoting_basis": "contemporaneous",
+      "realism_ratio": "insufficient_coverage",
+      "realized_adverse_usd_per_day": 0.0,
+      "realized_markout_distribution": {
+        "15m": {
+          "count": 0,
+          "max": null,
+          "mean": null,
+          "median": null,
+          "min": null,
+          "p25": null,
+          "p75": null,
+          "p95": null
+        },
+        "5m": {
+          "count": 0,
+          "max": null,
+          "mean": null,
+          "median": null,
+          "min": null,
+          "p25": null,
+          "p75": null,
+          "p95": null
+        },
+        "60m": {
+          "count": 0,
+          "max": null,
+          "mean": null,
+          "median": null,
+          "min": null,
+          "p25": null,
+          "p75": null,
+          "p95": null
+        }
+      },
+      "simulated_adverse_charge_usd_per_day": 0.0,
+      "simulated_fill_opportunities": 0,
+      "simulated_fills": 0,
+      "simulated_fills_per_day": 0.0,
+      "simulation_to_reality_haircut": "insufficient_coverage",
+      "source": "archive",
+      "status": "insufficient_coverage",
+      "study_adverse_usd_per_day": 0.0
+    },
+    "official": {
+      "book_states": 512,
+      "confirmed_fill_ratio": 0.136364,
+      "confirmed_fill_ratio_status": "observed",
+      "confirmed_fills": 3,
+      "coverage": {
+        "by_horizon": {
+          "15m": {
+            "coverage_ratio": 1.0,
+            "windows_covered": 22,
+            "windows_simulated": 22
+          },
+          "5m": {
+            "coverage_ratio": 1.0,
+            "windows_covered": 22,
+            "windows_simulated": 22
+          },
+          "60m": {
+            "coverage_ratio": 1.0,
+            "windows_covered": 22,
+            "windows_simulated": 22
+          }
+        },
+        "coverage_ratio": 1.0,
+        "windows_covered": 66,
+        "windows_simulated": 66
+      },
+      "coverage_status": "covered",
+      "entry_state_lag_seconds_max": 877.0,
+      "entry_state_lag_seconds_p50": 638.0,
+      "entry_state_lag_seconds_p90": 877.0,
+      "entry_state_lag_unmeasurable": 0,
+      "fills_beyond_legacy_lag": 0,
+      "fills_preview": [
+        {
+          "adverse_usd": {
+            "15m": 10.0,
+            "5m": 15.0,
+            "60m": 20.0
+          },
+          "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+          "depth_ahead": 3802.05,
+          "direction": "ask_fill",
+          "entry_state_lag_seconds": 403.0,
+          "fill_price": 0.33,
+          "fill_size": 1000.0,
+          "later_state_lag_seconds": {
+            "15m": 948.0,
+            "5m": 425.0,
+            "60m": 498.0
+          },
+          "markout_per_share": {
+            "15m": 0.01,
+            "5m": 0.015,
+            "60m": 0.02
+          },
+          "queue_depth_source": "full_book_levels",
+          "quote_rounding": "order_price_min_tick_size_outward",
+          "quoting_basis": "contemporaneous",
+          "source": "official",
+          "stamp": 1786376931.0,
+          "token_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+          "trade_size": 7336.4
+        },
+        {
+          "adverse_usd": {
+            "15m": -9.4364,
+            "5m": -9.4364,
+            "60m": -2.3591
+          },
+          "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+          "depth_ahead": 142.86,
+          "direction": "bid_fill",
+          "entry_state_lag_seconds": 877.0,
+          "fill_price": 0.34,
+          "fill_size": 471.82,
+          "later_state_lag_seconds": {
+            "15m": 474.0,
+            "5m": 1074.0,
+            "60m": 132.0
+          },
+          "markout_per_share": {
+            "15m": -0.02,
+            "5m": -0.02,
+            "60m": -0.005
+          },
+          "queue_depth_source": "full_book_levels",
+          "quote_rounding": "order_price_min_tick_size_outward",
+          "quoting_basis": "contemporaneous",
+          "source": "official",
+          "stamp": 1786380781.0,
+          "token_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+          "trade_size": 614.68
+        },
+        {
+          "adverse_usd": {
+            "15m": 1.70315,
+            "5m": 1.70315,
+            "60m": 1.70315
+          },
+          "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+          "depth_ahead": 49.99,
+          "direction": "bid_fill",
+          "entry_state_lag_seconds": 638.0,
+          "fill_price": 0.26,
+          "fill_size": 340.63,
+          "later_state_lag_seconds": {
+            "15m": 717.0,
+            "5m": 191.0,
+            "60m": 272.0
+          },
+          "markout_per_share": {
+            "15m": 0.005,
+            "5m": 0.005,
+            "60m": 0.005
+          },
+          "queue_depth_source": "full_book_levels",
+          "quote_rounding": "order_price_min_tick_size_outward",
+          "quoting_basis": "contemporaneous",
+          "source": "official",
+          "stamp": 1786570291.0,
+          "token_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+          "trade_size": 390.62
+        }
+      ],
+      "implied_adverse_usd_per_day": 0.682944,
+      "last_in_queue_evaluable_opportunities": 22,
+      "markout_per_fill": {
+        "15m": -0.001667,
+        "5m": -0.0,
+        "60m": 0.006667
+      },
+      "no_contemporaneous_state_opportunities": 316,
+      "no_contemporaneous_state_rate": 0.77451,
+      "per_market_coverage": [
+        {
+          "asset_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+          "book_history_span_days": 10.6403,
+          "by_horizon": {
+            "15m": {
+              "coverage_ratio": 1.0,
+              "windows_covered": 22,
+              "windows_simulated": 22
+            },
+            "5m": {
+              "coverage_ratio": 1.0,
+              "windows_covered": 22,
+              "windows_simulated": 22
+            },
+            "60m": {
+              "coverage_ratio": 1.0,
+              "windows_covered": 22,
+              "windows_simulated": 22
+            }
+          },
+          "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+          "confirmed_fill_ratio": 0.136364,
+          "confirmed_fill_ratio_status": "observed",
+          "confirmed_fills": 3,
+          "coverage_ratio": 1.0,
+          "coverage_status": "covered",
+          "last_in_queue_evaluable_opportunities": 22,
+          "no_contemporaneous_state_opportunities": 316,
+          "question": "Mojtaba Khamenei seen in public by December 31?",
+          "queue_depth_unavailable_opportunities": 0,
+          "realized_adverse_usd_per_day": 0.236902,
+          "realized_markout_distribution": {
+            "15m": {
+              "count": 3,
+              "max": 0.01,
+              "mean": -0.001667,
+              "median": 0.005,
+              "min": -0.02,
+              "p25": -0.0075,
+              "p75": 0.0075,
+              "p95": 0.0095
+            },
+            "5m": {
+              "count": 3,
+              "max": 0.015,
+              "mean": -0.0,
+              "median": 0.005,
+              "min": -0.02,
+              "p25": -0.0075,
+              "p75": 0.01,
+              "p95": 0.014
+            },
+            "60m": {
+              "count": 3,
+              "max": 0.02,
+              "mean": 0.006667,
+              "median": 0.005,
+              "min": -0.005,
+              "p25": 0.0,
+              "p75": 0.0125,
+              "p95": 0.0185
+            }
+          },
+          "replay_span_days": 30.674016,
+          "simulated_adverse_charge_usd_per_day": 0.0,
+          "simulated_fill_opportunities": 22,
+          "simulation_to_reality_haircut": null,
+          "windows_covered": 66,
+          "windows_simulated": 66
+        }
+      ],
+      "queue_depth_standard": "full_book_levels_or_quote_aligned_depth_only",
+      "queue_depth_unavailable_opportunities": 0,
+      "quoting_basis": "contemporaneous",
+      "realism_ratio": null,
+      "realized_adverse_usd_per_day": 0.682944,
+      "realized_markout_distribution": {
+        "15m": {
+          "count": 3,
+          "max": 0.01,
+          "mean": -0.001667,
+          "median": 0.005,
+          "min": -0.02,
+          "p25": -0.0075,
+          "p75": 0.0075,
+          "p95": 0.0095
+        },
+        "5m": {
+          "count": 3,
+          "max": 0.015,
+          "mean": -0.0,
+          "median": 0.005,
+          "min": -0.02,
+          "p25": -0.0075,
+          "p75": 0.01,
+          "p95": 0.014
+        },
+        "60m": {
+          "count": 3,
+          "max": 0.02,
+          "mean": 0.006667,
+          "median": 0.005,
+          "min": -0.005,
+          "p25": 0.0,
+          "p75": 0.0125,
+          "p95": 0.0185
+        }
+      },
+      "simulated_adverse_charge_usd_per_day": 0.0,
+      "simulated_fill_opportunities": 22,
+      "simulated_fills": 3,
+      "simulated_fills_per_day": 0.281946,
+      "simulation_to_reality_haircut": null,
+      "source": "official",
+      "status": "ok",
+      "study_adverse_usd_per_day": 0.0
+    }
+  },
+  "static_sheet_fills_per_day": 3.101406,
+  "static_sheet_realism_ratio": null,
+  "status": "ok",
+  "study_adverse_usd_per_day": 0.0,
+  "trade_prints_seen": 748,
+  "work_order": "WO-40/WO-44/WO-83"
+}

@@ -1,0 +1,5 @@
+incident_id,generated_at_utc,job,started_at_utc,running_seconds,max_runtime_seconds,live_iteration,exit_code,paper_trading_invoked,live_trading_invoked
+timeout_13dfbaf168d8a341bce32ccc,2026-07-13T16:27:31Z,discovery,2026-07-13T16:11:58Z,933.169,900.0,267,75,False,False
+timeout_842d1648902ee1dcc004f3a0,2026-07-13T22:44:51Z,discovery,2026-07-13T22:28:02Z,1008.601,900.0,143,75,False,False
+timeout_65b47d2b60166a6ed6c0b40d,2026-07-14T07:04:04Z,discovery,2026-07-14T06:48:28Z,936.289,900.0,284,75,False,False
+timeout_e18ed3daa984158a06df6111,2026-08-05T03:52:19Z,discovery,2026-08-05T03:36:25Z,953.721,900.0,566,75,False,False

@@ -1,0 +1,13 @@
+family,quote_rows,distinct_assets,assets_with_gap_samples,first_quote_timestamp,last_quote_timestamp,median_gap_seconds
+ai_model_leader,5057,9,9,2026-08-19T07:41:10Z,2026-08-20T19:54:59Z,4.0
+basketball_nba_match,3479,4,4,2026-08-19T07:44:31Z,2026-08-20T19:55:01Z,204.75
+crypto_btc_special,2758,4,4,2026-08-19T07:44:31Z,2026-08-20T19:54:59Z,104.0
+crypto_eth_special,3230,4,4,2026-08-19T07:41:13Z,2026-08-20T19:54:59Z,207.0
+crypto_sol_special,1790,2,2,2026-08-19T07:44:31Z,2026-08-20T19:54:59Z,206.0
+geopolitics,25708,16,16,2026-08-19T07:41:11Z,2026-08-20T19:55:03Z,0.5
+macro_economy,6052,6,6,2026-08-19T07:41:14Z,2026-08-20T19:55:02Z,104.5
+mma_match,1204,2,2,2026-08-19T07:41:09Z,2026-08-20T19:54:59Z,103.0
+policy_legal,2544,2,2,2026-08-19T07:44:31Z,2026-08-20T19:54:59Z,5.0
+tennis_match,773,1,1,2026-08-19T07:41:10Z,2026-08-20T19:20:12Z,0.0
+tennis_tennis_winner,6064,5,5,2026-08-19T07:41:10Z,2026-08-20T19:54:59Z,4.0
+unknown,1341,4,4,2026-08-19T07:47:54Z,2026-08-20T19:51:36Z,0.0

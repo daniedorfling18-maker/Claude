@@ -1,0 +1,847 @@
+{
+  "bot_integrations": [
+    "strict future-bid repricing label: buy at ask, later sell/mark at executable bid",
+    "chronological train/validation split with threshold selected on train only",
+    "transaction-cost-aware validation through executable bid/ask P&L",
+    "selected-trade drawdown, VaR, CVaR, and performance report attached to model summary",
+    "promotion rule remains fail-closed until positive forward cohort evidence exists"
+  ],
+  "curriculum_modules": [
+    {
+      "code_module": "quant_lab.foundations",
+      "implemented": true,
+      "module": 1,
+      "name": "Mathematical and statistical foundations"
+    },
+    {
+      "code_module": "quant_lab.data",
+      "implemented": true,
+      "module": 2,
+      "name": "Financial markets, instruments, and data"
+    },
+    {
+      "code_module": "quant_lab.pricing",
+      "implemented": true,
+      "module": 3,
+      "name": "Derivatives pricing and risk management"
+    },
+    {
+      "code_module": "quant_lab.strategies",
+      "implemented": true,
+      "module": 4,
+      "name": "Classical strategies and backtesting"
+    },
+    {
+      "code_module": "quant_lab.ml",
+      "implemented": true,
+      "module": 5,
+      "name": "Machine learning for trading"
+    },
+    {
+      "code_module": "quant_lab.rl",
+      "implemented": true,
+      "module": 6,
+      "name": "Reinforcement learning for trading"
+    },
+    {
+      "code_module": "quant_lab.sentiment",
+      "implemented": true,
+      "module": 7,
+      "name": "NLP, sentiment, and alternative data"
+    },
+    {
+      "code_module": "quant_lab.deployment",
+      "implemented": true,
+      "module": 8,
+      "name": "Backtesting, risk, and deployment"
+    }
+  ],
+  "generated_at_utc": "2026-08-20T19:58:16Z",
+  "implementation_complete": true,
+  "implemented_modules": 8,
+  "non_negotiables": [
+    "no label leakage",
+    "no paper promotion from in-sample fit",
+    "no forced trades to create activity",
+    "no live execution path from this research stack"
+  ],
+  "price_action_feedback": {
+    "best_positive_monthly_run_rate_usdc": 1973.9336651190747,
+    "collection_queries": [
+      "world cup",
+      "eth updown",
+      "solana updown",
+      "tennis",
+      "btc updown",
+      "ethereum"
+    ],
+    "learning_state": "collect_more_positive_price_action_evidence",
+    "next_action": "Prioritise websocket collection for positive price-action cohorts until bid/ask validation gates clear.",
+    "positive_collect_candidates": 64,
+    "promotion_candidates": 0
+  },
+  "price_action_model": {
+    "blockers": [
+      "no probability threshold cleared the training split trade gates",
+      "selected validation trades 0 < 5",
+      "selected validation P&L is not positive",
+      "selected validation ROI 0.0000 < 0.0300",
+      "selected validation win-rate/payoff gate failed: win_rate 0.0000 below payoff-asymmetry floor 0.3000",
+      "selected validation ROI CI low None < 0.0000",
+      "validation trades 0 < 5"
+    ],
+    "cohort_transfer": {
+      "family": {
+        "field": "family",
+        "minimum_train_positive_targets": 1,
+        "minimum_validation_positive_targets": 1,
+        "overlap_positive_cohorts": [
+          "ai_model_leader",
+          "tennis_tennis_winner"
+        ],
+        "top_cohorts": [
+          {
+            "cohort": "tennis_tennis_winner",
+            "positive_target_transfer": true,
+            "train_pnl_usdc": -522.2066747029327,
+            "train_positive_pnl_rows": 10,
+            "train_positive_targets": 10,
+            "train_roi": -0.034953592684265906,
+            "train_rows": 1494,
+            "validation_pnl_usdc": -340.18995200828056,
+            "validation_positive_pnl_rows": 35,
+            "validation_positive_targets": 18,
+            "validation_roi": -0.034537050965307674,
+            "validation_rows": 985
+          },
+          {
+            "cohort": "ai_model_leader",
+            "positive_target_transfer": true,
+            "train_pnl_usdc": -1503.0865687471687,
+            "train_positive_pnl_rows": 12,
+            "train_positive_targets": 3,
+            "train_roi": -0.06374412929377306,
+            "train_rows": 2358,
+            "validation_pnl_usdc": -1059.0513951480118,
+            "validation_positive_pnl_rows": 4,
+            "validation_positive_targets": 3,
+            "validation_roi": -0.09716067845394603,
+            "validation_rows": 1090
+          },
+          {
+            "cohort": "geopolitics",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -4167.004351483172,
+            "train_positive_pnl_rows": 4,
+            "train_positive_targets": 3,
+            "train_roi": -0.11688651757316051,
+            "train_rows": 3565,
+            "validation_pnl_usdc": -3130.9986510874855,
+            "validation_positive_pnl_rows": 6,
+            "validation_positive_targets": 0,
+            "validation_roi": -0.08124023484918229,
+            "validation_rows": 3854
+          },
+          {
+            "cohort": "crypto_eth_special",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -3405.1461527639035,
+            "train_positive_pnl_rows": 3,
+            "train_positive_targets": 3,
+            "train_roi": -0.2299220899908105,
+            "train_rows": 1481,
+            "validation_pnl_usdc": -980.0565404635715,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": -0.1952303865465282,
+            "validation_rows": 502
+          },
+          {
+            "cohort": "crypto_btc_special",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -777.8415639193258,
+            "train_positive_pnl_rows": 2,
+            "train_positive_targets": 2,
+            "train_roi": -0.08758490754637156,
+            "train_rows": 889,
+            "validation_pnl_usdc": -361.69323661378326,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": -0.06028220610229721,
+            "validation_rows": 600
+          },
+          {
+            "cohort": "macro_economy",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -1810.379843967867,
+            "train_positive_pnl_rows": 2,
+            "train_positive_targets": 2,
+            "train_roi": -0.10899336808957658,
+            "train_rows": 1661,
+            "validation_pnl_usdc": -1085.654447618657,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": -0.13272059261841773,
+            "validation_rows": 818
+          },
+          {
+            "cohort": "crypto_eth_updown_event",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": 0.1865793780687397,
+            "train_positive_pnl_rows": 1,
+            "train_positive_targets": 1,
+            "train_roi": 0.046644844517184925,
+            "train_rows": 2,
+            "validation_pnl_usdc": 0.0,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": 0.0,
+            "validation_rows": 0
+          },
+          {
+            "cohort": "crypto_sol_special",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -542.239149805491,
+            "train_positive_pnl_rows": 1,
+            "train_positive_targets": 1,
+            "train_roi": -0.07724204413183633,
+            "train_rows": 702,
+            "validation_pnl_usdc": -246.61710126379793,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": -0.08504037974613722,
+            "validation_rows": 290
+          },
+          {
+            "cohort": "crypto_btc_updown_event",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": 0.03073770491803285,
+            "train_positive_pnl_rows": 1,
+            "train_positive_targets": 0,
+            "train_roi": 0.015368852459016426,
+            "train_rows": 1,
+            "validation_pnl_usdc": 0.0,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": 0.0,
+            "validation_rows": 0
+          },
+          {
+            "cohort": "crypto_eth_updown_15m",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -0.08000000000000007,
+            "train_positive_pnl_rows": 0,
+            "train_positive_targets": 0,
+            "train_roi": -0.020000000000000018,
+            "train_rows": 2,
+            "validation_pnl_usdc": 0.0,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": 0.0,
+            "validation_rows": 0
+          },
+          {
+            "cohort": "tennis_match",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -0.9201889924658393,
+            "train_positive_pnl_rows": 0,
+            "train_positive_targets": 0,
+            "train_roi": -0.04600944962329197,
+            "train_rows": 2,
+            "validation_pnl_usdc": 0.0,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": 0.0,
+            "validation_rows": 0
+          },
+          {
+            "cohort": "unknown",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -154.75418759869453,
+            "train_positive_pnl_rows": 0,
+            "train_positive_targets": 0,
+            "train_roi": -0.013103656866951273,
+            "train_rows": 1181,
+            "validation_pnl_usdc": -42.735961992325834,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": -0.011426727805434715,
+            "validation_rows": 374
+          },
+          {
+            "cohort": "policy_legal",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -90.77976190476198,
+            "train_positive_pnl_rows": 0,
+            "train_positive_targets": 0,
+            "train_roi": -0.030059523809523835,
+            "train_rows": 302,
+            "validation_pnl_usdc": -207.41071428571541,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": -0.030059523809523973,
+            "validation_rows": 690
+          },
+          {
+            "cohort": "basketball_nba_match",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -389.01714866548053,
+            "train_positive_pnl_rows": 0,
+            "train_positive_targets": 0,
+            "train_roi": -0.03139767140157228,
+            "train_rows": 1239,
+            "validation_pnl_usdc": -231.25033960072489,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": -0.03514442851074846,
+            "validation_rows": 658
+          },
+          {
+            "cohort": "mma_match",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -1484.568003304052,
+            "train_positive_pnl_rows": 0,
+            "train_positive_targets": 0,
+            "train_roi": -0.26557567143185185,
+            "train_rows": 559,
+            "validation_pnl_usdc": -340.4765096655676,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": -0.16690024983606255,
+            "validation_rows": 204
+          }
+        ],
+        "train_only_positive_cohorts": [
+          "crypto_btc_special",
+          "crypto_eth_special",
+          "crypto_eth_updown_event",
+          "crypto_sol_special",
+          "geopolitics",
+          "macro_economy"
+        ],
+        "train_positive_cohorts": [
+          "ai_model_leader",
+          "crypto_btc_special",
+          "crypto_eth_special",
+          "crypto_eth_updown_event",
+          "crypto_sol_special",
+          "geopolitics",
+          "macro_economy",
+          "tennis_tennis_winner"
+        ],
+        "validation_only_positive_cohorts": [],
+        "validation_positive_cohorts": [
+          "ai_model_leader",
+          "tennis_tennis_winner"
+        ]
+      },
+      "reason": "At least one family or signal cohort has tradable positive targets in both train and validation.",
+      "requires_positive_family_or_signal_cohort_transfer": true,
+      "signal_cohort": {
+        "field": "signal_cohort",
+        "minimum_train_positive_targets": 1,
+        "minimum_validation_positive_targets": 1,
+        "overlap_positive_cohorts": [
+          "ai_model_leader",
+          "tennis_tennis_winner"
+        ],
+        "top_cohorts": [
+          {
+            "cohort": "tennis_tennis_winner",
+            "positive_target_transfer": true,
+            "train_pnl_usdc": -520.8328189405321,
+            "train_positive_pnl_rows": 8,
+            "train_positive_targets": 8,
+            "train_roi": -0.03495522274768672,
+            "train_rows": 1490,
+            "validation_pnl_usdc": -340.18995200828056,
+            "validation_positive_pnl_rows": 35,
+            "validation_positive_targets": 18,
+            "validation_roi": -0.034537050965307674,
+            "validation_rows": 985
+          },
+          {
+            "cohort": "ai_model_leader",
+            "positive_target_transfer": true,
+            "train_pnl_usdc": -1494.9882642738623,
+            "train_positive_pnl_rows": 10,
+            "train_positive_targets": 2,
+            "train_roi": -0.06369783827327918,
+            "train_rows": 2347,
+            "validation_pnl_usdc": -1059.0513951480118,
+            "validation_positive_pnl_rows": 4,
+            "validation_positive_targets": 3,
+            "validation_roi": -0.09716067845394603,
+            "validation_rows": 1090
+          },
+          {
+            "cohort": "price_action_scout|paper_confirmation_blocker|geopolitics|no_positive_historical_analogue_examples",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": 1.2145856697326218,
+            "train_positive_pnl_rows": 4,
+            "train_positive_targets": 3,
+            "train_roi": 0.011041687906660198,
+            "train_rows": 11,
+            "validation_pnl_usdc": 0.0,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": 0.0,
+            "validation_rows": 0
+          },
+          {
+            "cohort": "price_action_scout|label_headroom|macro_economy",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": 1.2657781990873689,
+            "train_positive_pnl_rows": 2,
+            "train_positive_targets": 2,
+            "train_roi": 0.031644454977184225,
+            "train_rows": 4,
+            "validation_pnl_usdc": 0.0,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": 0.0,
+            "validation_rows": 0
+          },
+          {
+            "cohort": "price_action_scout|paper_confirmation_blocker|tennis_tennis_winner|no_historical_analogue_rows",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -1.3738557624006553,
+            "train_positive_pnl_rows": 2,
+            "train_positive_targets": 2,
+            "train_roi": -0.03434639406001638,
+            "train_rows": 4,
+            "validation_pnl_usdc": 0.0,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": 0.0,
+            "validation_rows": 0
+          },
+          {
+            "cohort": "crypto_eth_updown_event",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": 0.1865793780687397,
+            "train_positive_pnl_rows": 1,
+            "train_positive_targets": 1,
+            "train_roi": 0.046644844517184925,
+            "train_rows": 2,
+            "validation_pnl_usdc": 0.0,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": 0.0,
+            "validation_rows": 0
+          },
+          {
+            "cohort": "price_action_scout|current_positive_analogue|crypto_sol_special",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": 0.4494382022471914,
+            "train_positive_pnl_rows": 1,
+            "train_positive_targets": 1,
+            "train_roi": 0.04494382022471914,
+            "train_rows": 1,
+            "validation_pnl_usdc": 0.0,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": 0.0,
+            "validation_rows": 0
+          },
+          {
+            "cohort": "price_action_scout|paper_confirmation_blocker|ai_model_leader|no_positive_historical_analogue_examples",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -5.057900432900435,
+            "train_positive_pnl_rows": 2,
+            "train_positive_targets": 1,
+            "train_roi": -0.07225572047000621,
+            "train_rows": 7,
+            "validation_pnl_usdc": 0.0,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": 0.0,
+            "validation_rows": 0
+          },
+          {
+            "cohort": "price_action_scout|paper_confirmation_blocker|crypto_btc_special|no_positive_historical_analogue_examples",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": 0.5747126436781614,
+            "train_positive_pnl_rows": 1,
+            "train_positive_targets": 1,
+            "train_roi": 0.05747126436781615,
+            "train_rows": 1,
+            "validation_pnl_usdc": 0.0,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": 0.0,
+            "validation_rows": 0
+          },
+          {
+            "cohort": "price_action_scout|paper_confirmation_blocker|crypto_eth_special|no_historical_analogue_rows",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -1.0714285714285727,
+            "train_positive_pnl_rows": 1,
+            "train_positive_targets": 1,
+            "train_roi": -0.05357142857142864,
+            "train_rows": 2,
+            "validation_pnl_usdc": 0.0,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": 0.0,
+            "validation_rows": 0
+          },
+          {
+            "cohort": "price_action_scout|paper_confirmation_blocker|crypto_eth_special|no_positive_historical_analogue_examples",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": 0.9210526315789467,
+            "train_positive_pnl_rows": 1,
+            "train_positive_targets": 1,
+            "train_roi": 0.09210526315789466,
+            "train_rows": 1,
+            "validation_pnl_usdc": 0.0,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": 0.0,
+            "validation_rows": 0
+          },
+          {
+            "cohort": "crypto_btc_special",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -771.4645417306723,
+            "train_positive_pnl_rows": 1,
+            "train_positive_targets": 1,
+            "train_roi": -0.08717113465883303,
+            "train_rows": 885,
+            "validation_pnl_usdc": -361.69323661378326,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": -0.06028220610229721,
+            "validation_rows": 600
+          },
+          {
+            "cohort": "crypto_eth_special",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -3404.9957768240542,
+            "train_positive_pnl_rows": 1,
+            "train_positive_targets": 1,
+            "train_roi": -0.2303786046565666,
+            "train_rows": 1478,
+            "validation_pnl_usdc": -980.0565404635715,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": -0.1952303865465282,
+            "validation_rows": 502
+          },
+          {
+            "cohort": "exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=up",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": 0.03073770491803285,
+            "train_positive_pnl_rows": 1,
+            "train_positive_targets": 0,
+            "train_roi": 0.015368852459016426,
+            "train_rows": 1,
+            "validation_pnl_usdc": 0.0,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": 0.0,
+            "validation_rows": 0
+          },
+          {
+            "cohort": "exploratory_crypto_updown_live_model|crypto_eth_updown_15m|outcome=up",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -0.08000000000000007,
+            "train_positive_pnl_rows": 0,
+            "train_positive_targets": 0,
+            "train_roi": -0.020000000000000018,
+            "train_rows": 2,
+            "validation_pnl_usdc": 0.0,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": 0.0,
+            "validation_rows": 0
+          },
+          {
+            "cohort": "low_price_tick_probe|crypto_btc_special|one_cent_return>=0.03",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -0.32835820895522394,
+            "train_positive_pnl_rows": 0,
+            "train_positive_targets": 0,
+            "train_roi": -0.32835820895522394,
+            "train_rows": 1,
+            "validation_pnl_usdc": 0.0,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": 0.0,
+            "validation_rows": 0
+          },
+          {
+            "cohort": "price_action_scout|current_positive_analogue|geopolitics",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -0.03157894736842108,
+            "train_positive_pnl_rows": 0,
+            "train_positive_targets": 0,
+            "train_roi": -0.0031578947368421082,
+            "train_rows": 1,
+            "validation_pnl_usdc": 0.0,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": 0.0,
+            "validation_rows": 0
+          },
+          {
+            "cohort": "price_action_scout|current_positive_analogue|tennis_match",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -0.1884816753926692,
+            "train_positive_pnl_rows": 0,
+            "train_positive_targets": 0,
+            "train_roi": -0.01884816753926692,
+            "train_rows": 1,
+            "validation_pnl_usdc": 0.0,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": 0.0,
+            "validation_rows": 0
+          },
+          {
+            "cohort": "price_action_scout|label_headroom|basketball_nba_match",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -2.3809523809523805,
+            "train_positive_pnl_rows": 0,
+            "train_positive_targets": 0,
+            "train_roi": -0.11904761904761903,
+            "train_rows": 2,
+            "validation_pnl_usdc": 0.0,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": 0.0,
+            "validation_rows": 0
+          },
+          {
+            "cohort": "price_action_scout|paper_confirmation_blocker|ai_model_leader|no_historical_analogue_rows",
+            "positive_target_transfer": false,
+            "train_pnl_usdc": -3.040404040404039,
+            "train_positive_pnl_rows": 0,
+            "train_positive_targets": 0,
+            "train_roi": -0.07601010101010097,
+            "train_rows": 4,
+            "validation_pnl_usdc": 0.0,
+            "validation_positive_pnl_rows": 0,
+            "validation_positive_targets": 0,
+            "validation_roi": 0.0,
+            "validation_rows": 0
+          }
+        ],
+        "train_only_positive_cohorts": [
+          "crypto_btc_special",
+          "crypto_eth_special",
+          "crypto_eth_updown_event",
+          "price_action_scout|current_positive_analogue|crypto_sol_special",
+          "price_action_scout|label_headroom|macro_economy",
+          "price_action_scout|paper_confirmation_blocker|ai_model_leader|no_positive_historical_analogue_examples",
+          "price_action_scout|paper_confirmation_blocker|crypto_btc_special|no_positive_historical_analogue_examples",
+          "price_action_scout|paper_confirmation_blocker|crypto_eth_special|no_historical_analogue_rows",
+          "price_action_scout|paper_confirmation_blocker|crypto_eth_special|no_positive_historical_analogue_examples",
+          "price_action_scout|paper_confirmation_blocker|geopolitics|no_positive_historical_analogue_examples",
+          "price_action_scout|paper_confirmation_blocker|tennis_tennis_winner|no_historical_analogue_rows"
+        ],
+        "train_positive_cohorts": [
+          "ai_model_leader",
+          "crypto_btc_special",
+          "crypto_eth_special",
+          "crypto_eth_updown_event",
+          "price_action_scout|current_positive_analogue|crypto_sol_special",
+          "price_action_scout|label_headroom|macro_economy",
+          "price_action_scout|paper_confirmation_blocker|ai_model_leader|no_positive_historical_analogue_examples",
+          "price_action_scout|paper_confirmation_blocker|crypto_btc_special|no_positive_historical_analogue_examples",
+          "price_action_scout|paper_confirmation_blocker|crypto_eth_special|no_historical_analogue_rows",
+          "price_action_scout|paper_confirmation_blocker|crypto_eth_special|no_positive_historical_analogue_examples",
+          "price_action_scout|paper_confirmation_blocker|geopolitics|no_positive_historical_analogue_examples",
+          "price_action_scout|paper_confirmation_blocker|tennis_tennis_winner|no_historical_analogue_rows",
+          "tennis_tennis_winner"
+        ],
+        "validation_only_positive_cohorts": [],
+        "validation_positive_cohorts": [
+          "ai_model_leader",
+          "tennis_tennis_winner"
+        ]
+      },
+      "state": "positive_transfer_observed"
+    },
+    "decision": "collect_more_bid_ask_price_action_model_evidence",
+    "promotion_ready": false,
+    "quant_promotion_decision": {
+      "approved": false,
+      "reason": "validation trades 0 < 5"
+    },
+    "selected_risk": {
+      "conditional_var_95": 0.0,
+      "historical_var_95": 0.0,
+      "max_drawdown": 0.0,
+      "performance": {
+        "annualized_return": 0.0,
+        "annualized_volatility": 0.0,
+        "average_return": 0.0,
+        "hit_rate": 0.0,
+        "max_drawdown": 0.0,
+        "observations": 0,
+        "profit_factor": 0.0,
+        "sharpe": 0.0,
+        "sortino": 0.0,
+        "total_return": 0.0
+      },
+      "return_unit": "per_selected_trade_roi",
+      "selected_trade_returns": 0
+    },
+    "selected_validation": {
+      "mean_selected_probability": 0.0,
+      "selected_avg_loss_roi": 0.0,
+      "selected_avg_win_roi": 0.0,
+      "selected_deduped_rows": 0,
+      "selected_expectancy_usdc_per_trade": 0.0,
+      "selected_gross_loss_usdc": 0,
+      "selected_gross_profit_usdc": 0,
+      "selected_payoff_ratio": 0.0,
+      "selected_pnl_usdc": 0,
+      "selected_profit_factor": 0.0,
+      "selected_raw_rows": 0,
+      "selected_roi": 0.0,
+      "selected_stake_usdc": 0,
+      "selected_trades": 0,
+      "selected_win_rate": 0.0,
+      "threshold": 0.55
+    },
+    "status": "trained",
+    "train_positive_targets": 25,
+    "training_event_sources": {
+      "combined": {
+        "positive_pnl_rows": 81,
+        "positive_targets": 46,
+        "prepared_rows": 25503,
+        "raw_rows": 27778
+      },
+      "microstructure_trade_event": {
+        "positive_pnl_rows": 65,
+        "positive_targets": 33,
+        "prepared_rows": 25452,
+        "raw_rows": 26591
+      },
+      "paper_broker_round_trip": {
+        "positive_pnl_rows": 2,
+        "positive_targets": 1,
+        "prepared_rows": 6,
+        "raw_rows": 20
+      },
+      "price_action_scout_round_trip": {
+        "positive_pnl_rows": 14,
+        "positive_targets": 12,
+        "prepared_rows": 45,
+        "raw_rows": 1167
+      },
+      "strategy_v2_round_trip": {
+        "positive_pnl_rows": 0,
+        "positive_targets": 0,
+        "prepared_rows": 0,
+        "raw_rows": 0
+      }
+    },
+    "training_events": 25503,
+    "validation_gap": {
+      "collection_queries": [
+        "tennis",
+        "bitcoin",
+        "ethereum",
+        "economy",
+        "solana",
+        "eth updown"
+      ],
+      "minimum_validation_positive_targets": 1,
+      "positive_train_cohorts": [
+        {
+          "cohort": "tennis_tennis_winner",
+          "evidence_source": "microstructure_trade_event",
+          "family": "tennis_tennis_winner",
+          "latest_positive_train_time_utc": "2026-08-20T11:58:32Z",
+          "positive_train_targets": 8,
+          "recommended_collection_query": "tennis"
+        },
+        {
+          "cohort": "price_action_scout|paper_confirmation_blocker|geopolitics|no_positive_historical_analogue_examples",
+          "evidence_source": "price_action_scout_round_trip",
+          "family": "geopolitics",
+          "latest_positive_train_time_utc": "2026-07-17T04:47:40Z",
+          "positive_train_targets": 3,
+          "recommended_collection_query": ""
+        },
+        {
+          "cohort": "ai_model_leader",
+          "evidence_source": "microstructure_trade_event",
+          "family": "ai_model_leader",
+          "latest_positive_train_time_utc": "2026-08-20T05:42:34Z",
+          "positive_train_targets": 2,
+          "recommended_collection_query": "bitcoin"
+        },
+        {
+          "cohort": "price_action_scout|paper_confirmation_blocker|tennis_tennis_winner|no_historical_analogue_rows",
+          "evidence_source": "price_action_scout_round_trip",
+          "family": "tennis_tennis_winner",
+          "latest_positive_train_time_utc": "2026-07-11T11:36:57Z",
+          "positive_train_targets": 2,
+          "recommended_collection_query": "tennis"
+        },
+        {
+          "cohort": "price_action_scout|label_headroom|macro_economy",
+          "evidence_source": "price_action_scout_round_trip",
+          "family": "macro_economy",
+          "latest_positive_train_time_utc": "2026-07-04T18:36:15Z",
+          "positive_train_targets": 2,
+          "recommended_collection_query": "economy"
+        },
+        {
+          "cohort": "crypto_btc_special",
+          "evidence_source": "microstructure_trade_event",
+          "family": "crypto_btc_special",
+          "latest_positive_train_time_utc": "2026-08-20T07:47:31Z",
+          "positive_train_targets": 1,
+          "recommended_collection_query": "bitcoin"
+        },
+        {
+          "cohort": "crypto_eth_special",
+          "evidence_source": "microstructure_trade_event",
+          "family": "crypto_eth_special",
+          "latest_positive_train_time_utc": "2026-08-19T18:41:40Z",
+          "positive_train_targets": 1,
+          "recommended_collection_query": "ethereum"
+        },
+        {
+          "cohort": "price_action_scout|paper_confirmation_blocker|crypto_eth_special|no_positive_historical_analogue_examples",
+          "evidence_source": "price_action_scout_round_trip",
+          "family": "crypto_eth_special",
+          "latest_positive_train_time_utc": "2026-08-13T04:57:24Z",
+          "positive_train_targets": 1,
+          "recommended_collection_query": "ethereum"
+        },
+        {
+          "cohort": "price_action_scout|paper_confirmation_blocker|ai_model_leader|no_positive_historical_analogue_examples",
+          "evidence_source": "price_action_scout_round_trip",
+          "family": "ai_model_leader",
+          "latest_positive_train_time_utc": "2026-07-19T19:38:21Z",
+          "positive_train_targets": 1,
+          "recommended_collection_query": ""
+        },
+        {
+          "cohort": "price_action_scout|paper_confirmation_blocker|crypto_btc_special|no_positive_historical_analogue_examples",
+          "evidence_source": "price_action_scout_round_trip",
+          "family": "crypto_btc_special",
+          "latest_positive_train_time_utc": "2026-07-12T02:55:12Z",
+          "positive_train_targets": 1,
+          "recommended_collection_query": "bitcoin"
+        }
+      ],
+      "reason": "Validation-positive evidence is not the current primary blocker.",
+      "state": "sufficient_or_waiting_for_training_examples",
+      "train_positive_targets": 25,
+      "validation_positive_targets": 21
+    },
+    "validation_positive_targets": 21,
+    "validation_rows": 10065
+  },
+  "status": "ok",
+  "total_modules": 8,
+  "trading_posture": "shadow_research_only_until_positive_forward_bid_ask_evidence"
+}

@@ -1,0 +1,67 @@
+[
+  {
+    "archived_at_utc": "2026-07-04T12:18:04Z",
+    "historical_data_preserved": true,
+    "new_baseline": {
+      "baseline_cash_usdc": 1048.631135349166,
+      "baseline_equity_usdc": 1048.631135349166,
+      "baseline_generation": 2,
+      "baseline_total_exposure_usdc": 0.0,
+      "broker_generated_at_utc": "2026-07-04T12:16:47Z",
+      "created_at_utc": "2026-07-04T12:18:04Z",
+      "historical_data_preserved": true,
+      "note": "Operator reset of the active paper-profit proof window. Historical fills, round trips, quotes, model evidence, and learning data are preserved; only post-reset closed round trips count toward active $100/month proof.",
+      "previous_baseline_created_at_utc": "2026-07-01T12:04:30Z",
+      "reset_at_utc": "2026-07-04T12:18:04Z",
+      "reset_operator": "codex",
+      "reset_reason": "strict entry quote proof gate deployed; start clean verified paper-profit window while preserving historical fills, quotes, model evidence, and learning data"
+    },
+    "previous_baseline": {
+      "baseline_cash_usdc": 1000.0,
+      "baseline_equity_usdc": 1000.0,
+      "baseline_total_exposure_usdc": 0.0,
+      "created_at_utc": "2026-07-01T12:04:30Z",
+      "note": "Clean forward paper-profit baseline. Delete this file only if intentionally starting a new paper evidence window."
+    },
+    "previous_round_trip_summary": {
+      "audited_baseline_closed_round_trips": 9,
+      "audited_baseline_realized_pnl_usdc": -0.12597873737665144,
+      "audited_realized_pnl_usdc": -0.12597873737665144,
+      "baseline_closed_round_trips": 16,
+      "baseline_positive_round_trips": 5,
+      "baseline_proof_entry_snapshot_missing_round_trips": 2,
+      "baseline_proof_exit_snapshot_missing_round_trips": 1,
+      "baseline_proof_verified_closed_round_trips": 6,
+      "baseline_proof_verified_realized_pnl_usdc": -0.19104112596845146,
+      "baseline_quote_conflict_round_trips": 5,
+      "baseline_quote_unverified_round_trips": 2,
+      "baseline_realized_pnl_usdc": 54.39938980876589,
+      "baseline_start_utc": "2026-07-01T12:04:30Z",
+      "closed_round_trips": 20,
+      "generated_at_utc": "2026-07-04T12:06:28Z",
+      "negative_round_trips": 15,
+      "positive_round_trips": 5,
+      "proof_verified_realized_pnl_usdc": -0.19104112596845146,
+      "quote_conflict_round_trips": 5,
+      "quote_unverified_round_trips": 6,
+      "realized_pnl_usdc": 54.27329221191124
+    },
+    "previous_tracker": {
+      "actual_pnl_since_baseline_usdc": 48.631135349166016,
+      "decision_pnl_usdc": -0.19104112596845146,
+      "generated_at_utc": "2026-07-04T12:16:47Z",
+      "monthly_run_rate_usdc": -1.904994666054568,
+      "profit_target_proof_blockers": [
+        "quote_conflict_round_trips_5",
+        "quote_unverified_round_trips_2",
+        "entry_snapshot_missing_round_trips_2",
+        "exit_snapshot_missing_round_trips_1"
+      ],
+      "profit_target_proof_status": "unverified_paper_run_rate",
+      "status": "not_on_pace",
+      "verified_evidence_ready": false
+    },
+    "reset_operator": "codex",
+    "reset_reason": "strict entry quote proof gate deployed; start clean verified paper-profit window while preserving historical fills, quotes, model evidence, and learning data"
+  }
+]

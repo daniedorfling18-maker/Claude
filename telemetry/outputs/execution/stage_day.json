@@ -1,0 +1,153 @@
+{
+  "a1_reminders": [
+    "Use the single project account under custody Amendment A1.",
+    "Complete the human Stage-1 window before any future executor canary; human and executor windows never overlap.",
+    "Keep the balance at or near the active stage cap and sweep registered excess to VALR manually.",
+    "The system only reports and records human actions; it never places, amends, cancels, signs, or authenticates an order."
+  ],
+  "a1_sweep_advisory": {
+    "account_structure": "single_project_account_under_custody_amendment_A1",
+    "active_stage_cap_usd": 100.0,
+    "advice": "do not initiate an A1 sweep from this artifact",
+    "credential_loading_invoked": false,
+    "generated_at_utc": "2026-08-20T03:12:22Z",
+    "human_action_required": false,
+    "live_trading_invoked": false,
+    "notification_eligible": false,
+    "order_amendment_invoked": false,
+    "order_cancellation_invoked": false,
+    "order_placement_invoked": false,
+    "paper_trading_invoked": false,
+    "reason": "project-account NAV is within the registered stage-cap buffer",
+    "reconciled_nav_usd": 12.730349,
+    "reconciliation_age_seconds": 8.0,
+    "reconciliation_source": "outputs/performance/wallet_reconciliation.json",
+    "reconciliation_status": "clean",
+    "reporting_only": true,
+    "stage_cap_source": "decision_policy.sizing.binding_capital_usd",
+    "status": "not_required",
+    "suggested_sweep_usd": 0.0,
+    "sweep_threshold_usd": 5.0,
+    "threshold_tighten_only": true,
+    "transfer_invoked": false,
+    "withdrawable_cash_usd": 12.730349,
+    "withdrawal_invoked": false,
+    "withdrawal_runbook": "docs/A1_WITHDRAWAL_AND_EXIT_RAIL_RUNBOOK.md",
+    "work_order": "WO-81"
+  },
+  "action_ledger_path": "outputs/execution/stage_operator_log.csv",
+  "action_log_anchor_registry_path": "execution/stage_operator_log.csv",
+  "action_log_append_only": true,
+  "actions_today": [],
+  "cost_delta": {
+    "delta_vs_yesterday_usd": null,
+    "ledger_path": "outputs/performance/cost_ledger.csv",
+    "state": "UNKNOWN",
+    "today_by_category_usd": {},
+    "today_date": "2026-08-20",
+    "today_usd": null,
+    "yesterday_date": "2026-08-19",
+    "yesterday_usd": null
+  },
+  "credential_loading_invoked": false,
+  "generated_at_utc": "2026-08-20T03:12:22Z",
+  "kill_response_steps": [
+    "Stop entering or replacing quotes. Leave the generated stage page open as the evidence reference.",
+    "In Polymarket, open Portfolio, then Open Orders; choose Cancel all and confirm the venue prompt.",
+    "Refresh Open Orders and verify the count is zero. If any order remains, do not replace it; retry the venue cancellation and record the unresolved order ID.",
+    "Open Positions and record every remaining inventory position. Do not improvise a taker exit outside the registered policy.",
+    "Record `kill_acknowledged` and each `quote_pulled` action with this CLI, including UTC time and market ID.",
+    "Capture the resulting requote, reconciliation, and cost evidence; resume only after a documented human review clears the registered trigger."
+  ],
+  "kill_scoreboard": {
+    "criteria": [
+      {
+        "criterion": "cumulative_real_net_score",
+        "observed": 0.0,
+        "threshold": -25.0,
+        "triggered": false
+      },
+      {
+        "criterion": "fills_outrunning_model_two_days",
+        "observed": "UNKNOWN",
+        "threshold": 2,
+        "triggered": false
+      },
+      {
+        "criterion": "kill_data_stale",
+        "observed": "UNKNOWN",
+        "threshold": "UNKNOWN",
+        "triggered": false
+      },
+      {
+        "criterion": "scoreboard_stop",
+        "observed": "flat_no_net_evidence",
+        "threshold": "UNKNOWN",
+        "triggered": false
+      },
+      {
+        "criterion": "single_day_net_score",
+        "observed": "UNKNOWN",
+        "threshold": -15.0,
+        "triggered": false
+      },
+      {
+        "criterion": "uma_dispute_inventory",
+        "observed": "",
+        "threshold": "UNKNOWN",
+        "triggered": false
+      }
+    ],
+    "generated_at_utc": "2026-08-20T03:12:12Z",
+    "status": "clear",
+    "triggered": []
+  },
+  "live_trading_invoked": false,
+  "missing_inputs": [
+    "cost_ledger"
+  ],
+  "order_amendment_invoked": false,
+  "order_cancellation_invoked": false,
+  "order_placement_invoked": false,
+  "order_tickets": {
+    "count": 1,
+    "generated_at_utc": "2026-08-20T03:07:48Z",
+    "state": "EXACT_HUMAN_TICKETS",
+    "tickets": [
+      {
+        "complete": true,
+        "condition_id": "0x3de0f3d7d7efb40cde68e814d40a0b232832083653c8e78260eb999baa967de0",
+        "market_url": "https://polymarket.com/event/us-strike-on-cuba-by",
+        "order_ticket_status": "exact",
+        "outcome": "Yes",
+        "question": "US strike on Cuba by December 31?",
+        "quote_ask_price": 0.18,
+        "quote_bid_price": 0.15,
+        "quote_size_shares": 500.0
+      }
+    ]
+  },
+  "page_path": "outputs/execution/stage_days/2026-08-20.md",
+  "paper_trading_invoked": false,
+  "requote": {
+    "generated_at_utc": "2026-08-20T03:05:45Z",
+    "headline": "All quoted markets pass the current read-only checks.",
+    "kill_criteria_triggered": [],
+    "markets_checked": 1,
+    "markets_requiring_action": 0,
+    "state": "quotes_ok"
+  },
+  "stage_date": "2026-08-20",
+  "status": "incomplete_unknown_inputs",
+  "work_order": "WO-82+WO-88",
+  "yesterday_reconciliation": {
+    "data_api_nav_usd": 12.730349,
+    "generated_at_utc": "2026-08-19T02:56:09Z",
+    "internal_nav_usd": 12.923349,
+    "onchain_nav_usd": 12.730349,
+    "snapshot_date": "2026-08-19",
+    "source": "outputs/performance/wallet_reconciliation_wallet_history.csv",
+    "state": "clean",
+    "unexplained_discrepancy_usd": 0.0
+  }
+}

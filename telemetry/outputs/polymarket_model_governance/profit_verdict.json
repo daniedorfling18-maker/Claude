@@ -1,0 +1,1467 @@
+{
+  "closed_lanes": {
+    "crypto_updown_intraday": "NO - frozen 2026-07 after the execution-cost audit; raw run rate did not survive spreads at short horizons.",
+    "dutch_book_arb": "NO - zero persistent baskets across the full proof-snapshot ledger; the book does not leave riskless spreads."
+  },
+  "extension_resolution": {
+    "as_of_date_utc": "2026-08-21",
+    "as_of_utc": "2026-08-21T01:59:04Z",
+    "final_read_due_utc": "2026-07-20T00:00:00Z",
+    "regime": "terminal",
+    "terminal_no_applied": true,
+    "terminal_read_due_utc": "2026-08-19T23:59:00Z"
+  },
+  "gates": {
+    "A_edge_exists": {
+      "clustering_coverage": {
+        "eligible_finals": 70,
+        "maximum_position_id_fallback_fraction": 0.1,
+        "position_id_fallback_finals": 0,
+        "position_id_fallback_fraction": 0.0,
+        "state": "sufficient"
+      },
+      "independent_market_units": 55,
+      "legacy_alias_notice": "unit_mean_final_clv and units_beating_close are one-release compatibility aliases for the settlement-return fields; they are not true pre-event CLV.",
+      "minimum_final_samples": 12,
+      "note": "Gate A measures unit mean net settlement return per dollar (pre-fee), not closing-line edge; true pre-event CLV is shown beside it and feeds no gate in this study. Units cluster finals by market AND merge markets sharing a fixture (team + settlement date), so neither correlated tokens nor same-match side markets can inflate significance.",
+      "reason": "55 independent settled market units with equal-weight unit mean net settlement return per dollar (pre-fee) -0.013943 <= 0: the settled positions were not profitable on average.",
+      "registered_rule": "Use equal-weight independent fixture units; pass only with positive unit mean net settlement return per dollar (pre-fee) and the registered one-sided sign-test threshold on settled-profitable units after the sample floor.",
+      "settled_finals_total": 70,
+      "sign_test_alpha": 0.1,
+      "sign_test_p": 0.947605,
+      "state": "fail",
+      "unit_mean_final_clv": -0.013943,
+      "unit_mean_net_settlement_return_per_dollar": -0.013943,
+      "units_beating_close": 22,
+      "units_settled_profitable": 22
+    },
+    "B_edge_survives_costs": {
+      "adverse_selection_haircut_per_dollar": 0.005,
+      "exit_cost_haircut_per_dollar": 0.005,
+      "legacy_alias_notice": "net_edge_per_dollar is a one-release compatibility alias for net_settlement_return_after_costs_per_dollar.",
+      "mean_taker_fee_per_dollar": 0.026809,
+      "net_edge_per_dollar": null,
+      "net_settlement_return_after_costs_per_dollar": null,
+      "note": "entry-side costs are embedded in shadow fills; adverse-selection charge covers fill-quality bias shadow entries cannot experience; taker fees per live Polymarket fee schedule (makers pay none - see WO-36).",
+      "reason": "evaluated only after Gate A passes.",
+      "registered_rule": "Pass only when unit mean net settlement return per dollar remains positive after the exit, adverse-selection, and taker-fee charges.",
+      "state": "not_evaluated",
+      "taker_fee_rate": 0.05
+    },
+    "C_scale_feasible": {
+      "achievable_monthly_turnover_usdc": null,
+      "entries_per_day": 2.044,
+      "max_stake_per_trade_usdc": 10.0,
+      "observed_focus_entries": 89,
+      "observed_span_days": 43.55,
+      "reason": "evaluated only after Gate B passes.",
+      "regime": "world_cup_2026_window",
+      "regime_note": "turnover observed during a major-event liquidity regime; a YES is conditional on event-regime flow, not steady state.",
+      "registered_rule": "Pass only when observed focus-entry capacity at the registered per-trade cap can fund the monthly target turnover.",
+      "required_monthly_turnover_usdc": null,
+      "state": "not_evaluated"
+    }
+  },
+  "generated_at_utc": "2026-08-21T01:59:04Z",
+  "live_trading_invoked": false,
+  "next_evidence": "World Cup focus finals settle 2026-07-09 through 2026-07-19; each settled market adds a Gate A unit. If the final read is underpowered (< 12 units) the window extends exactly once, 2026-07-20 through 2026-08-19, regime post_wc_2026, then resolves terminally (amendment 7; see registered_extension_protocol). A YES additionally requires the existing governed paper-confirmation round trips before any run-rate claim.",
+  "paper_trading_invoked": false,
+  "pre_event_clv_diagnostic": {
+    "finals_gradeable": 63,
+    "finals_total": 70,
+    "finals_ungradeable": 7,
+    "gate_binding": false,
+    "live_trading_invoked": false,
+    "official_source_prefix": "polymarket_clob_prices_history:",
+    "paper_trading_invoked": false,
+    "reference_definition": "last official same-token price at or before close_time minus 6h, within [0.05, 0.95]",
+    "reference_hours_before_close": 6,
+    "reference_price_band": [
+      0.05,
+      0.95
+    ],
+    "registered_on": "2026-07-14",
+    "same_clustering_as_gate_a": true,
+    "source_artifact": "outputs/polymarket_training/historical_price_snapshots.csv",
+    "status": "ok",
+    "unit_mean_pre_event_clv": 0.018839,
+    "units": [
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-13T17:59:00Z",
+            "entry_price": 0.234,
+            "pre_event_clv": -0.0115,
+            "reference_line_price": 0.2225,
+            "reference_line_timestamp_utc": "2026-07-13T17:00:08Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_17403b1970d1d4ff80975098",
+            "status": "gradeable",
+            "token_id": "33145602481672952893736840073987236393121044236137891107431869929760837470830"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0x07edfd2e7f79bc4752516cfb105793d13b06388858a72df675d31ff05d86fb5f",
+        "unit_mean_net_settlement_return_per_dollar": -0.0035,
+        "unit_mean_pre_event_clv": -0.0115
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-19T18:00:00Z",
+            "entry_price": 0.175,
+            "pre_event_clv": 0.2335,
+            "reference_line_price": 0.4085,
+            "reference_line_timestamp_utc": "2026-07-19T13:00:06Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_a45cfddba34bcb1895a29853",
+            "status": "gradeable",
+            "token_id": "18812649149814341758733697580460697418474693998558159483117100240528657629879"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": true,
+        "status": "gradeable",
+        "unit_id": "market:0x0c4cd2055d6ea89354ffddc55d6dbcef9355748112ea952fc925f3db6a5c457f",
+        "unit_mean_net_settlement_return_per_dollar": 0.2375,
+        "unit_mean_pre_event_clv": 0.2335
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-01T10:00:00Z",
+            "entry_price": 0.23,
+            "pre_event_clv": -0.135,
+            "reference_line_price": 0.095,
+            "reference_line_timestamp_utc": "2026-07-01T05:00:05Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_9ed9e5bd9e862fee9b00d1ec",
+            "status": "gradeable",
+            "token_id": "51286356739900665958517218755996001284098353481701052787607366451031876880511"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0x1336cdb5c954e541480b6b3d241d299bce0d209ce725007cd7448b1530a8854b",
+        "unit_mean_net_settlement_return_per_dollar": -0.2295,
+        "unit_mean_pre_event_clv": -0.135
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-11T18:00:00Z",
+            "entry_price": 0.42,
+            "pre_event_clv": -0.235,
+            "reference_line_price": 0.185,
+            "reference_line_timestamp_utc": "2026-07-11T15:00:06Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_a9608abea013adf0202e3f29",
+            "status": "gradeable",
+            "token_id": "22977220121936888671053556775814656829923108179761155125259075462814514034328"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0x16b3e96fc29f37ff8a5309e82e1ebd11b6658b171dd788104d9a88c12cceebb6",
+        "unit_mean_net_settlement_return_per_dollar": -0.235,
+        "unit_mean_pre_event_clv": -0.235
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-04T11:00:00Z",
+            "entry_price": 0.39,
+            "pre_event_clv": -0.005,
+            "reference_line_price": 0.385,
+            "reference_line_timestamp_utc": "2026-07-04T08:00:04Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_7f43584bb2835681dbeda108",
+            "status": "gradeable",
+            "token_id": "106403494173745945712618013411865565949479738942503646166426185807843346311144"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0x1734282453f21278357257ca9819caff07a69cf72e6b1b0b5a4570f650211af4",
+        "unit_mean_net_settlement_return_per_dollar": -0.3895,
+        "unit_mean_pre_event_clv": -0.005
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-14T21:59:00Z",
+            "entry_price": 0.469,
+            "pre_event_clv": 0.0085,
+            "reference_line_price": 0.4775,
+            "reference_line_timestamp_utc": "2026-07-14T08:00:05Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_2d1ce234ad56e372e9088e4c",
+            "status": "gradeable",
+            "token_id": "101210529767768522109521013327011182791765840362085947967089633962337103758101"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0x1a64843d427607b164ea18493a30066de60f10abbbdc559066be494528378886",
+        "unit_mean_net_settlement_return_per_dollar": -0.4685,
+        "unit_mean_pre_event_clv": 0.0085
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-16T10:00:00Z",
+            "entry_price": 0.35,
+            "pre_event_clv": 0.455,
+            "reference_line_price": 0.805,
+            "reference_line_timestamp_utc": "2026-07-16T05:00:09Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_9ff001338b57c0190f9b4e13",
+            "status": "gradeable",
+            "token_id": "74751467310548001523578174536683436613056298730683710137283385031618966718497"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": true,
+        "status": "gradeable",
+        "unit_id": "market:0x2077aa708824e31fa20e1d402332367b3a60782d2c012e01e3604ece7d204686",
+        "unit_mean_net_settlement_return_per_dollar": 0.6495,
+        "unit_mean_pre_event_clv": 0.455
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-31T22:00:00Z",
+            "entry_price": 0.38,
+            "pre_event_clv": -0.33,
+            "reference_line_price": 0.05,
+            "reference_line_timestamp_utc": "2026-07-30T09:00:11Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_020733f29540fcce7ebf5236",
+            "status": "gradeable",
+            "token_id": "107428272129048587583997315670529606325369032000682138145211150063313167372818"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0x212774adeeb8e4b1e2ccebceaffe3ff65e177876182ad2d734ba9b1a3d9830d6",
+        "unit_mean_net_settlement_return_per_dollar": -0.3415,
+        "unit_mean_pre_event_clv": -0.33
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-31T22:00:00Z",
+            "reason": "no_official_in_band_observation_at_or_before_cutoff",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_10ad6d33d8745dda3077e4cf",
+            "status": "pre_event_clv_ungradeable",
+            "token_id": "93496916247677946874951464536517511991715588414847755700545460892672050036498"
+          }
+        ],
+        "finals_gradeable": 0,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "pre_event_clv_ungradeable",
+        "unit_id": "market:0x2b0f46d47fb88d56eb9d9a8ef72c44d8069c29544200ed1dae379146e28cade4",
+        "unit_mean_net_settlement_return_per_dollar": -0.000499,
+        "unit_mean_pre_event_clv": null
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-11T11:00:00Z",
+            "entry_price": 0.49,
+            "pre_event_clv": -0.005,
+            "reference_line_price": 0.485,
+            "reference_line_timestamp_utc": "2026-07-11T10:00:06Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_6e17180364684ed7659cfe59",
+            "status": "gradeable",
+            "token_id": "18237340609439602555259079306566918036164241218734979256371277407958876329524"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0x3114b8c9d68c8c7b55c06aa5b68e4d9217a22a58f21e31a28a83b9df189920da",
+        "unit_mean_net_settlement_return_per_dollar": -0.4895,
+        "unit_mean_pre_event_clv": -0.005
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-12T18:00:00Z",
+            "entry_price": 0.37,
+            "pre_event_clv": -0.125,
+            "reference_line_price": 0.245,
+            "reference_line_timestamp_utc": "2026-07-12T01:00:04Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_c58cbc205eefa1e1700d259c",
+            "status": "gradeable",
+            "token_id": "15579232773398251307282915471792114310844694494654532312907387009654692860923"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0x3910cb53f972d00c049ad674c1b183b375bd56786eb4c085ea217f84defdd1ca",
+        "unit_mean_net_settlement_return_per_dollar": -0.3695,
+        "unit_mean_pre_event_clv": -0.125
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-12T10:00:00Z",
+            "entry_price": 0.26,
+            "pre_event_clv": 0.26,
+            "reference_line_price": 0.52,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:03Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_fc732a6a6f3b623d4b9ba126",
+            "status": "gradeable",
+            "token_id": "64153709723552911606489345017025095504754803331793905231147772925792537283580"
+          },
+          {
+            "cutoff_utc": "2026-07-12T10:00:00Z",
+            "entry_price": 0.47250000000000003,
+            "pre_event_clv": 0.0075,
+            "reference_line_price": 0.48,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:06Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_f99366d1efa9c8b95fd2c131",
+            "status": "gradeable",
+            "token_id": "70309830531163204677182090973720805007230053781477999768677408281939728399196"
+          },
+          {
+            "cutoff_utc": "2026-07-12T10:00:00Z",
+            "entry_price": 0.45,
+            "pre_event_clv": 0.07,
+            "reference_line_price": 0.52,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:03Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_4179a934f2ff5f8b2a445e96",
+            "status": "gradeable",
+            "token_id": "64153709723552911606489345017025095504754803331793905231147772925792537283580"
+          }
+        ],
+        "finals_gradeable": 3,
+        "finals_total": 3,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0x3b8eff4712e2b402e70f600dc188c16b85f8cedc927e21f9458296ff27e0722b",
+        "unit_mean_net_settlement_return_per_dollar": -0.058667,
+        "unit_mean_pre_event_clv": 0.1125
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-19T21:59:00Z",
+            "entry_price": 0.4,
+            "pre_event_clv": -0.055,
+            "reference_line_price": 0.345,
+            "reference_line_timestamp_utc": "2026-07-14T18:00:18Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_d3026655148db9f52407e06a",
+            "status": "gradeable",
+            "token_id": "54107343263387475730966095910471611039456828338034353328930651554538556391012"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0x3bf8b96eb51a2a0dbb2272295dedbc21f4d9f46f92040e7aceb768e538b2d736",
+        "unit_mean_net_settlement_return_per_dollar": -0.3995,
+        "unit_mean_pre_event_clv": -0.055
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-16T10:00:00Z",
+            "entry_price": 0.31,
+            "pre_event_clv": -0.245,
+            "reference_line_price": 0.065,
+            "reference_line_timestamp_utc": "2026-07-14T18:00:13Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_4acae404b6c4b94bacb4e1ca",
+            "status": "gradeable",
+            "token_id": "20497841437793312581791312697077475910366090223612451471416274644489891395134"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0x462a940650a7d229081fa9d073ec2fbc93383cce43c099d00faad1ea79649e9f",
+        "unit_mean_net_settlement_return_per_dollar": -0.3095,
+        "unit_mean_pre_event_clv": -0.245
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-19T21:59:00Z",
+            "entry_price": 0.48,
+            "pre_event_clv": 0.33,
+            "reference_line_price": 0.81,
+            "reference_line_timestamp_utc": "2026-07-19T18:00:04Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_004bccb27d4d890542c03a53",
+            "status": "gradeable",
+            "token_id": "37089111703099330271756902756550617087324195263983091188635426682509248301097"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": true,
+        "status": "gradeable",
+        "unit_id": "market:0x4a5758a4535dfd0ce12ae980e0607fa4e91e28a74aff0a6301e932c011c2fbf4",
+        "unit_mean_net_settlement_return_per_dollar": 0.5145,
+        "unit_mean_pre_event_clv": 0.33
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-13T17:59:00Z",
+            "entry_price": 0.46,
+            "pre_event_clv": -0.195,
+            "reference_line_price": 0.265,
+            "reference_line_timestamp_utc": "2026-07-13T17:00:05Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_faa5e3e3bb6d9f364018c4fa",
+            "status": "gradeable",
+            "token_id": "115533238225868603108274286752495680653635818041116254050671667599763901594715"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0x4aa6e8a03d1f839bc8f24ee432139b8bc8f6fb50a0980eca1e4415770e302355",
+        "unit_mean_net_settlement_return_per_dollar": -0.02,
+        "unit_mean_pre_event_clv": -0.195
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-05T03:00:00Z",
+            "entry_price": 0.41,
+            "pre_event_clv": -0.005,
+            "reference_line_price": 0.405,
+            "reference_line_timestamp_utc": "2026-07-04T23:00:21Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_22407d7c0cfd15bc44574a85",
+            "status": "gradeable",
+            "token_id": "33530429943360373054595039678477922135580996783750777538392724478384723531268"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": true,
+        "status": "gradeable",
+        "unit_id": "market:0x54c4201f9eca35bdfea7b9d5075fa630c9a450851605e08a57a1745ca6e9a12c",
+        "unit_mean_net_settlement_return_per_dollar": 0.5895,
+        "unit_mean_pre_event_clv": -0.005
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-31T22:00:00Z",
+            "reason": "no_official_in_band_observation_at_or_before_cutoff",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_af446f3563e292d51af69bc6",
+            "status": "pre_event_clv_ungradeable",
+            "token_id": "11122870307832213829937141164621963143556849554535072384599725110500454191759"
+          }
+        ],
+        "finals_gradeable": 0,
+        "finals_total": 1,
+        "settled_profitable": true,
+        "status": "pre_event_clv_ungradeable",
+        "unit_id": "market:0x5523e3b9895124788b2bed38f4b6be72c3f41cd2d2ee4354d93b26a3f533eaf6",
+        "unit_mean_net_settlement_return_per_dollar": 0.01775,
+        "unit_mean_pre_event_clv": null
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-12T10:00:00Z",
+            "entry_price": 0.38,
+            "pre_event_clv": 0.145,
+            "reference_line_price": 0.525,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:03Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_e8b23580375384efaa10aea6",
+            "status": "gradeable",
+            "token_id": "55528382984414578308889318228828883074034060780071686209945402023097780571705"
+          },
+          {
+            "cutoff_utc": "2026-07-12T10:00:00Z",
+            "entry_price": 0.5,
+            "pre_event_clv": -0.025,
+            "reference_line_price": 0.475,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:03Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_1b285ec51171139a6f516769",
+            "status": "gradeable",
+            "token_id": "86942942731248835776259193090741420335130406064059668589473719630507327367051"
+          },
+          {
+            "cutoff_utc": "2026-07-12T10:00:00Z",
+            "entry_price": 0.43,
+            "pre_event_clv": 0.095,
+            "reference_line_price": 0.525,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:03Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_898313ab5da222ecabb43926",
+            "status": "gradeable",
+            "token_id": "55528382984414578308889318228828883074034060780071686209945402023097780571705"
+          },
+          {
+            "cutoff_utc": "2026-07-12T10:00:00Z",
+            "entry_price": 0.35,
+            "pre_event_clv": 0.125,
+            "reference_line_price": 0.475,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:03Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_fdca1f25b4eb64fdcf4c9c06",
+            "status": "gradeable",
+            "token_id": "86942942731248835776259193090741420335130406064059668589473719630507327367051"
+          },
+          {
+            "cutoff_utc": "2026-07-12T10:00:00Z",
+            "entry_price": 0.6,
+            "pre_event_clv": -0.125,
+            "reference_line_price": 0.475,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:03Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_289a8067b309dab0718dfac3",
+            "status": "gradeable",
+            "token_id": "86942942731248835776259193090741420335130406064059668589473719630507327367051"
+          }
+        ],
+        "finals_gradeable": 5,
+        "finals_total": 5,
+        "settled_profitable": true,
+        "status": "gradeable",
+        "unit_id": "market:0x56db917adc9f852ac7458b94c07b2b94bfd2ec21bd12f9d1d489777df1d9d72b",
+        "unit_mean_net_settlement_return_per_dollar": 0.1452,
+        "unit_mean_pre_event_clv": 0.043
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-19T22:00:00Z",
+            "entry_price": 0.05,
+            "pre_event_clv": 0.45,
+            "reference_line_price": 0.5,
+            "reference_line_timestamp_utc": "2026-07-13T07:00:08Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_7243f05784028c752002a087",
+            "status": "gradeable",
+            "token_id": "56527186903613370615775908564644354689644353352170438157656512134191242434722"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0x5e6f55da39ad8531eab4f27f857614bd9fe506c8daa635fef859d98a58323517",
+        "unit_mean_net_settlement_return_per_dollar": -0.0495,
+        "unit_mean_pre_event_clv": 0.45
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-02T11:00:00Z",
+            "entry_price": 0.37,
+            "pre_event_clv": 0.005,
+            "reference_line_price": 0.375,
+            "reference_line_timestamp_utc": "2026-07-02T06:00:10Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_c6a331fe9657498ddfd04a78",
+            "status": "gradeable",
+            "token_id": "79578447977036871947610607095966963798599162711855390717414165188505123328604"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0x645ead3924ded1effe0e66680da0e7b831e7554689d3f96f07f02419fb95e009",
+        "unit_mean_net_settlement_return_per_dollar": -0.3695,
+        "unit_mean_pre_event_clv": 0.005
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-31T22:00:00Z",
+            "entry_price": 0.35,
+            "pre_event_clv": -0.275,
+            "reference_line_price": 0.075,
+            "reference_line_timestamp_utc": "2026-07-31T00:00:24Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_625284e65a29866ee770b8f6",
+            "status": "gradeable",
+            "token_id": "67618687138618616009474379841981387029656591298511163184190255433704137454173"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0x66fbbbdd85018017c1b6de182e27afbefbceb10baea9c5e13a458ea35d853ace",
+        "unit_mean_net_settlement_return_per_dollar": -0.341,
+        "unit_mean_pre_event_clv": -0.275
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-04T11:00:00Z",
+            "entry_price": 0.26,
+            "pre_event_clv": -0.005,
+            "reference_line_price": 0.255,
+            "reference_line_timestamp_utc": "2026-07-04T08:00:04Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_1ea37063b357f5ee5bec167d",
+            "status": "gradeable",
+            "token_id": "11054728886141638064306468461994919278870329161719543188258566217845794768540"
+          },
+          {
+            "cutoff_utc": "2026-07-04T11:00:00Z",
+            "entry_price": 0.47250000000000003,
+            "pre_event_clv": -0.0275,
+            "reference_line_price": 0.445,
+            "reference_line_timestamp_utc": "2026-07-04T08:00:05Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_71579f07dfdd1a56d5adf18f",
+            "status": "gradeable",
+            "token_id": "100488798831783217716114782002425141486242660258480471496412910201880207917876"
+          }
+        ],
+        "finals_gradeable": 2,
+        "finals_total": 2,
+        "settled_profitable": true,
+        "status": "gradeable",
+        "unit_id": "market:0x696875ecd42b85107cd73854b41337fc9258428a53af3834f9c1434385669b5a",
+        "unit_mean_net_settlement_return_per_dollar": 0.63325,
+        "unit_mean_pre_event_clv": -0.01625
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-30T18:00:00Z",
+            "reason": "no_official_in_band_observation_at_or_before_cutoff",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_76783b39dcf60681b30551df",
+            "status": "pre_event_clv_ungradeable",
+            "token_id": "93951476500003632791935289062898848593712753782086418087200571438021145488845"
+          }
+        ],
+        "finals_gradeable": 0,
+        "finals_total": 1,
+        "settled_profitable": true,
+        "status": "pre_event_clv_ungradeable",
+        "unit_id": "market:0x7ae8cd69a861a7442b7e46d2d7e29b66c826ae36fb52e4e30fc49c2adccb73cf",
+        "unit_mean_net_settlement_return_per_dollar": 0.1055,
+        "unit_mean_pre_event_clv": null
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-19T21:59:00Z",
+            "entry_price": 0.33,
+            "pre_event_clv": 0.5945,
+            "reference_line_price": 0.9245,
+            "reference_line_timestamp_utc": "2026-07-19T18:00:04Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_3f9e6dbff427f3d90214a707",
+            "status": "gradeable",
+            "token_id": "68099147950522191308134976209533771147823729818517018192391581768804443699549"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0x7d3e5102bd59f05398b0737a4680758ec730885e6a0384725d327b38bd94eb22",
+        "unit_mean_net_settlement_return_per_dollar": -0.3295,
+        "unit_mean_pre_event_clv": 0.5945
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-13T17:59:00Z",
+            "entry_price": 0.45,
+            "pre_event_clv": 0.0,
+            "reference_line_price": 0.45,
+            "reference_line_timestamp_utc": "2026-07-13T17:00:06Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_a2266953e6b26b145ac39b8e",
+            "status": "gradeable",
+            "token_id": "17761142320939730650177912236237637988988609904546776372920350104247854085727"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": true,
+        "status": "gradeable",
+        "unit_id": "market:0x7ebcadeb335054725038a9154067487c9fb1cf1ede24b199f8b69ba1531487f0",
+        "unit_mean_net_settlement_return_per_dollar": 0.25,
+        "unit_mean_pre_event_clv": 0.0
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-11T13:45:00Z",
+            "entry_price": 0.5,
+            "pre_event_clv": -0.005,
+            "reference_line_price": 0.495,
+            "reference_line_timestamp_utc": "2026-07-11T10:00:05Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_ef6ad4788c7b2069f1ce0cb7",
+            "status": "gradeable",
+            "token_id": "70602871540178377200470545934807626742304624572845938133134806462802950431069"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": true,
+        "status": "gradeable",
+        "unit_id": "market:0x8a1d36268afdd763921ea086a8e88aebeaed174eae7ed1727ad2547cc5447b08",
+        "unit_mean_net_settlement_return_per_dollar": 0.4995,
+        "unit_mean_pre_event_clv": -0.005
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-30T18:00:00Z",
+            "reason": "no_official_in_band_observation_at_or_before_cutoff",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_2dcac44c988e7acc1227fda4",
+            "status": "pre_event_clv_ungradeable",
+            "token_id": "73236020982042322107719049752749478285487797346322886261660588599081906662415"
+          }
+        ],
+        "finals_gradeable": 0,
+        "finals_total": 1,
+        "settled_profitable": true,
+        "status": "pre_event_clv_ungradeable",
+        "unit_id": "market:0x8a8e093b25d7909ae01e944e746a1dee88801224fcff001c1c890ca43e2a66e1",
+        "unit_mean_net_settlement_return_per_dollar": 0.0351,
+        "unit_mean_pre_event_clv": null
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-05T08:00:00Z",
+            "entry_price": 0.5,
+            "pre_event_clv": -0.055,
+            "reference_line_price": 0.445,
+            "reference_line_timestamp_utc": "2026-07-05T04:00:06Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_76cf5fb435f771fa9938e2ca",
+            "status": "gradeable",
+            "token_id": "68251495945275543885062168102758306348961780723394750616218772714765320813409"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0x8af002b1a58522d5df479817df8d85617afc4de169adbd3a24aa8bebef278fb0",
+        "unit_mean_net_settlement_return_per_dollar": 0.0,
+        "unit_mean_pre_event_clv": -0.055
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-19T22:00:00Z",
+            "entry_price": 0.05,
+            "pre_event_clv": 0.45,
+            "reference_line_price": 0.5,
+            "reference_line_timestamp_utc": "2026-07-13T07:00:04Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_5e1029868c6a835fdef41aaa",
+            "status": "gradeable",
+            "token_id": "114964137300187455673686071186000057049854665542029467996086181303913053414179"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0x8ba29ba1c5ec5084e88ca30b0aaae487a4ad6c112242a6c227fb426a9c3356ba",
+        "unit_mean_net_settlement_return_per_dollar": -0.0385,
+        "unit_mean_pre_event_clv": 0.45
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-28T18:00:00Z",
+            "entry_price": 0.23,
+            "pre_event_clv": -0.0275,
+            "reference_line_price": 0.2025,
+            "reference_line_timestamp_utc": "2026-07-28T17:00:24Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_bd4ddebd5bdc4c8bacb8e0df",
+            "status": "gradeable",
+            "token_id": "36015050921127306245266044699797268780268172446856063291868548314968920497494"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": true,
+        "status": "gradeable",
+        "unit_id": "market:0x8bf1c1536ecb1c08fe13c6b71e8ab1f58bf3461c4cb79f5f1679f869a06aef86",
+        "unit_mean_net_settlement_return_per_dollar": 0.013,
+        "unit_mean_pre_event_clv": -0.0275
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-12T10:00:00Z",
+            "entry_price": 0.4305,
+            "pre_event_clv": -0.0805,
+            "reference_line_price": 0.35,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:07Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_56d6ebd7b9954918d97200db",
+            "status": "gradeable",
+            "token_id": "20586590567682337243649314468465218863766723074710903915323806603797627003369"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": true,
+        "status": "gradeable",
+        "unit_id": "market:0x904773516a54b6091eef0899ecf1dae4ac653e7e3194f1905194ad0729fe1f6c",
+        "unit_mean_net_settlement_return_per_dollar": 0.4295,
+        "unit_mean_pre_event_clv": -0.0805
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-05T03:00:00Z",
+            "entry_price": 0.49,
+            "pre_event_clv": -0.01,
+            "reference_line_price": 0.48,
+            "reference_line_timestamp_utc": "2026-07-04T23:00:19Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_6b92f0ff8577289101b23c5f",
+            "status": "gradeable",
+            "token_id": "102190624741220763966129194312524801551528939292955751357610490906297973503528"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": true,
+        "status": "gradeable",
+        "unit_id": "market:0x90e2a9f38137b2001782759b07792de061e18cf0567b093b663ee4540c3d940c",
+        "unit_mean_net_settlement_return_per_dollar": 0.5095,
+        "unit_mean_pre_event_clv": -0.01
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-31T22:00:00Z",
+            "reason": "no_official_in_band_observation_at_or_before_cutoff",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_fd10a1953e5fe24b9532a4fc",
+            "status": "pre_event_clv_ungradeable",
+            "token_id": "15710525480448889254766605820312761373882786549757118431634104562205370863433"
+          }
+        ],
+        "finals_gradeable": 0,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "pre_event_clv_ungradeable",
+        "unit_id": "market:0x916d89e4ba22568763dd153531efd685a1d465ad157339e0ffc81dbb6885ca61",
+        "unit_mean_net_settlement_return_per_dollar": -0.000499,
+        "unit_mean_pre_event_clv": null
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-12T10:00:00Z",
+            "entry_price": 0.47250000000000003,
+            "pre_event_clv": 0.1175,
+            "reference_line_price": 0.59,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:07Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_c79260bff98f9d03aad77567",
+            "status": "gradeable",
+            "token_id": "50977698590300032741535835435558027865585908844661185430427062221844113796746"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": true,
+        "status": "gradeable",
+        "unit_id": "market:0x98efd0f0ad2a1a747d5ed7e53f344c1c0d230c9119e33a2e22ffb128ba3c8dc7",
+        "unit_mean_net_settlement_return_per_dollar": 0.5245,
+        "unit_mean_pre_event_clv": 0.1175
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-31T22:00:00Z",
+            "reason": "no_official_in_band_observation_at_or_before_cutoff",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_5b3c5df14329ac0cdeb8a633",
+            "status": "pre_event_clv_ungradeable",
+            "token_id": "43975378191074358671281520872697918948044394157610457450863109826755838430110"
+          }
+        ],
+        "finals_gradeable": 0,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "pre_event_clv_ungradeable",
+        "unit_id": "market:0x994c8a855b218caba82f822d6cfbb8f9d8a667bfb5e9702ff3e5323ae8cae73a",
+        "unit_mean_net_settlement_return_per_dollar": -0.000999,
+        "unit_mean_pre_event_clv": null
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-12T08:00:00Z",
+            "entry_price": 0.48,
+            "pre_event_clv": -0.005,
+            "reference_line_price": 0.475,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:03Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_10964165e07475f1b78a1519",
+            "status": "gradeable",
+            "token_id": "20136746619063568973738277652028149981498043474795089012547311685090466604748"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0x99ca68408b07124a5a8eec4dad5c2d5d5571a9ae601714806e196f3dd12e5cd6",
+        "unit_mean_net_settlement_return_per_dollar": -0.4795,
+        "unit_mean_pre_event_clv": -0.005
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-13T17:59:00Z",
+            "entry_price": 0.51,
+            "pre_event_clv": -0.005,
+            "reference_line_price": 0.505,
+            "reference_line_timestamp_utc": "2026-07-13T17:00:05Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_66dfca4aeff978653006da59",
+            "status": "gradeable",
+            "token_id": "52261365243516817473495855032579220012931048638423754381932900155844077398242"
+          },
+          {
+            "cutoff_utc": "2026-07-13T17:59:00Z",
+            "entry_price": 0.5,
+            "pre_event_clv": -0.005,
+            "reference_line_price": 0.495,
+            "reference_line_timestamp_utc": "2026-07-13T17:00:05Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_54dd64503882fc405cb29181",
+            "status": "gradeable",
+            "token_id": "106572797405540473377240335596599132759125961324255838950491653791357331997305"
+          }
+        ],
+        "finals_gradeable": 2,
+        "finals_total": 2,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0xa1f3756ef86ef8706c6657848ece91df227a2c31cd4d870e2bd6a8154f009fb5",
+        "unit_mean_net_settlement_return_per_dollar": -0.005,
+        "unit_mean_pre_event_clv": -0.005
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-12T10:00:00Z",
+            "entry_price": 0.44,
+            "pre_event_clv": 0.025,
+            "reference_line_price": 0.465,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:07Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_5a49314ee89afb4af11f378b",
+            "status": "gradeable",
+            "token_id": "75535028271238048717865371296248554317946914069243118831215160882128523849875"
+          },
+          {
+            "cutoff_utc": "2026-07-12T10:00:00Z",
+            "entry_price": 0.44,
+            "pre_event_clv": 0.095,
+            "reference_line_price": 0.535,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:03Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_e14a5d4a4a01950d00483c36",
+            "status": "gradeable",
+            "token_id": "108814265557335048195152581750913757543935325549626627558610456826613096418940"
+          },
+          {
+            "cutoff_utc": "2026-07-12T10:00:00Z",
+            "entry_price": 0.45,
+            "pre_event_clv": 0.015,
+            "reference_line_price": 0.465,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:07Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_4946a2f7f572490f8337f263",
+            "status": "gradeable",
+            "token_id": "75535028271238048717865371296248554317946914069243118831215160882128523849875"
+          },
+          {
+            "cutoff_utc": "2026-07-12T10:00:00Z",
+            "entry_price": 0.49,
+            "pre_event_clv": 0.045,
+            "reference_line_price": 0.535,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:03Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_040bda3b342629c25cd95e28",
+            "status": "gradeable",
+            "token_id": "108814265557335048195152581750913757543935325549626627558610456826613096418940"
+          }
+        ],
+        "finals_gradeable": 4,
+        "finals_total": 4,
+        "settled_profitable": true,
+        "status": "gradeable",
+        "unit_id": "market:0xa31cf980f4e9d9e441030eb294fd48264b636f323faa705c7ba46d7579dc226e",
+        "unit_mean_net_settlement_return_per_dollar": 0.045,
+        "unit_mean_pre_event_clv": 0.045
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-11T13:45:00Z",
+            "entry_price": 0.5,
+            "pre_event_clv": -0.005,
+            "reference_line_price": 0.495,
+            "reference_line_timestamp_utc": "2026-07-11T10:00:04Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_5d769c55b2e8718ae66a34a1",
+            "status": "gradeable",
+            "token_id": "97691106274962537327436888095367701929558923858062496006649961287568421332519"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0xac8c3dda84a7f4d9618ebc07c92fddf6c3ab83e74b941ffe6b72fd15d67e6dc3",
+        "unit_mean_net_settlement_return_per_dollar": -0.4955,
+        "unit_mean_pre_event_clv": -0.005
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-31T22:00:00Z",
+            "reason": "no_official_in_band_observation_at_or_before_cutoff",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_3c4c127eb841712a913f8a2d",
+            "status": "pre_event_clv_ungradeable",
+            "token_id": "100884095534364268769321993699449844260443547762651923948519421267861169635220"
+          }
+        ],
+        "finals_gradeable": 0,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "pre_event_clv_ungradeable",
+        "unit_id": "market:0xae9371b82303032df14dd6d1b2edf57add61a073cd8fa2d4340e1a35e18ed9b5",
+        "unit_mean_net_settlement_return_per_dollar": -0.000499,
+        "unit_mean_pre_event_clv": null
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-04T11:00:00Z",
+            "entry_price": 0.48,
+            "pre_event_clv": -0.015,
+            "reference_line_price": 0.465,
+            "reference_line_timestamp_utc": "2026-07-04T08:00:06Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_1224aa9fbd20410787479ff7",
+            "status": "gradeable",
+            "token_id": "84853658415200810288101099865856085102981207421863615897992917153317954746467"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": true,
+        "status": "gradeable",
+        "unit_id": "market:0xb2c887f6b401e088ee283f790d4ea21aefa9bd36fa4833ecc0cce6c96a5d4bf0",
+        "unit_mean_net_settlement_return_per_dollar": 0.5195,
+        "unit_mean_pre_event_clv": -0.015
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-28T18:00:00Z",
+            "entry_price": 0.208,
+            "pre_event_clv": -0.0075,
+            "reference_line_price": 0.2005,
+            "reference_line_timestamp_utc": "2026-07-28T17:00:08Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_47ce6917985a6ecebfcd6237",
+            "status": "gradeable",
+            "token_id": "10547381015916960267379463101229159185405356924982461726471550099674011526491"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": true,
+        "status": "gradeable",
+        "unit_id": "market:0xb5c0abeecb5502e6e8d83155c27819174d8317af3c425c3afc5a8c45257a3793",
+        "unit_mean_net_settlement_return_per_dollar": 0.034,
+        "unit_mean_pre_event_clv": -0.0075
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-31T17:59:00Z",
+            "entry_price": 0.44,
+            "pre_event_clv": 0.505,
+            "reference_line_price": 0.945,
+            "reference_line_timestamp_utc": "2026-07-27T21:00:28Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_d51ed10515d8a7d888ce8316",
+            "status": "gradeable",
+            "token_id": "25763685223319524083191986935913634904809447145745901125985995347509432734794"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": true,
+        "status": "gradeable",
+        "unit_id": "market:0xb838caec0354e09985f2c228c54ba190cb284f390beda5ffd58d163ba00648ec",
+        "unit_mean_net_settlement_return_per_dollar": 0.5585,
+        "unit_mean_pre_event_clv": 0.505
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-19T22:00:00Z",
+            "entry_price": 0.05,
+            "pre_event_clv": 0.45,
+            "reference_line_price": 0.5,
+            "reference_line_timestamp_utc": "2026-07-13T07:00:10Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_e835aef8e903ac69515252d3",
+            "status": "gradeable",
+            "token_id": "85882034462548533875562700055504379440850132693939381725631604498134489620181"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0xb8c2f7452e8f0417d6563b31433f580b3c427db74cb7f3b7cbd4964a5c8afea6",
+        "unit_mean_net_settlement_return_per_dollar": -0.0495,
+        "unit_mean_pre_event_clv": 0.45
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-12T10:00:00Z",
+            "entry_price": 0.43,
+            "pre_event_clv": 0.13,
+            "reference_line_price": 0.56,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:03Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_234813f8dd9d7bf34ccff686",
+            "status": "gradeable",
+            "token_id": "59890312346962300075151779792396376789109854434895184276252143392373091389785"
+          },
+          {
+            "cutoff_utc": "2026-07-12T10:00:00Z",
+            "entry_price": 0.42,
+            "pre_event_clv": 0.02,
+            "reference_line_price": 0.44,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:07Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_df33341b9ef5223e303b6157",
+            "status": "gradeable",
+            "token_id": "108027398472302443150464487655820976321462066799725937973190977980554992424177"
+          }
+        ],
+        "finals_gradeable": 2,
+        "finals_total": 2,
+        "settled_profitable": true,
+        "status": "gradeable",
+        "unit_id": "market:0xb93c4a61500843f2c2aad75a34dd488f75b27d25d36a1144d26c60bf8c36b5ca",
+        "unit_mean_net_settlement_return_per_dollar": 0.075,
+        "unit_mean_pre_event_clv": 0.075
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-12T11:00:00Z",
+            "entry_price": 0.5,
+            "pre_event_clv": -0.015,
+            "reference_line_price": 0.485,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:03Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_7c96f49a1cf297f6c5c0d9ed",
+            "status": "gradeable",
+            "token_id": "2251737422960156638808378057820262985130730414592695412432055295258184711036"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": true,
+        "status": "gradeable",
+        "unit_id": "market:0xbb38e8f7970d859613015b508ed1b47301f55a119f090dce32506b8d0967d930",
+        "unit_mean_net_settlement_return_per_dollar": 0.005,
+        "unit_mean_pre_event_clv": -0.015
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-12T08:00:00Z",
+            "entry_price": 0.525,
+            "pre_event_clv": -0.02,
+            "reference_line_price": 0.505,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:07Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_58600913ea88425396296c7d",
+            "status": "gradeable",
+            "token_id": "75671870297160145762494948756221055784251308418589518487469641260554357178644"
+          },
+          {
+            "cutoff_utc": "2026-07-12T08:00:00Z",
+            "entry_price": 0.49,
+            "pre_event_clv": 0.005,
+            "reference_line_price": 0.495,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:06Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_bd742f2f5e5cd62a5cd3691c",
+            "status": "gradeable",
+            "token_id": "83353740063301337242734729745885378493188100076217980058743685730607530577772"
+          }
+        ],
+        "finals_gradeable": 2,
+        "finals_total": 2,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0xc1c455cae20a061c200cd040ff8aae9beec3bb5987e157006e5f88ccdba3ed91",
+        "unit_mean_net_settlement_return_per_dollar": -0.0075,
+        "unit_mean_pre_event_clv": -0.0075
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-19T18:00:00Z",
+            "entry_price": 0.37,
+            "pre_event_clv": -0.2935,
+            "reference_line_price": 0.0765,
+            "reference_line_timestamp_utc": "2026-07-19T13:00:09Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_4239362478db146668b73ea5",
+            "status": "gradeable",
+            "token_id": "19214394437683566921750936876376421489271269944393354497977881791256347396217"
+          },
+          {
+            "cutoff_utc": "2026-07-19T18:00:00Z",
+            "entry_price": 0.341,
+            "pre_event_clv": -0.2645,
+            "reference_line_price": 0.0765,
+            "reference_line_timestamp_utc": "2026-07-19T13:00:09Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_8a12ff3ee7ec35b286c9fe3c",
+            "status": "gradeable",
+            "token_id": "19214394437683566921750936876376421489271269944393354497977881791256347396217"
+          }
+        ],
+        "finals_gradeable": 2,
+        "finals_total": 2,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0xd2a8caba5559bc21e14f6b2aa504cb14a1782751658b71409e25b82e432c0a97",
+        "unit_mean_net_settlement_return_per_dollar": -0.355,
+        "unit_mean_pre_event_clv": -0.279
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-11T10:00:00Z",
+            "entry_price": 0.48,
+            "pre_event_clv": -0.09,
+            "reference_line_price": 0.39,
+            "reference_line_timestamp_utc": "2026-07-11T05:00:06Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_b628b70775660b44fc5fc327",
+            "status": "gradeable",
+            "token_id": "80821783205353867232708443400625071236993989645929795573374709566591862217753"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": true,
+        "status": "gradeable",
+        "unit_id": "market:0xd604981d817e4aba8a375457f41a6109c724c1ab8246d3c27a83f01a53f34f48",
+        "unit_mean_net_settlement_return_per_dollar": 0.5125,
+        "unit_mean_pre_event_clv": -0.09
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-31T17:59:00Z",
+            "entry_price": 0.37,
+            "pre_event_clv": -0.3005,
+            "reference_line_price": 0.0695,
+            "reference_line_timestamp_utc": "2026-07-27T11:00:10Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_f84e2dd5f0785ef4d44d4b28",
+            "status": "gradeable",
+            "token_id": "53309418792814126813253565209817598774351044039766281405658463259168910392637"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0xe7f69ea9dc50a1b2a2a2ef4da94a905463e46292d17650e520dd9a7204b0adb5",
+        "unit_mean_net_settlement_return_per_dollar": -0.3695,
+        "unit_mean_pre_event_clv": -0.3005
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-11T20:00:00Z",
+            "entry_price": 0.5,
+            "pre_event_clv": -0.015,
+            "reference_line_price": 0.485,
+            "reference_line_timestamp_utc": "2026-07-11T15:00:08Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_574dc13a43d33b4d87325899",
+            "status": "gradeable",
+            "token_id": "14398367888676648421806539572052326353401892515809739796278498450454933130776"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0xf48a4e8b525bb3e471b8b710413abbc21627557c41b82c6f7843592f5e319329",
+        "unit_mean_net_settlement_return_per_dollar": -0.495,
+        "unit_mean_pre_event_clv": -0.015
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-14T18:00:00Z",
+            "entry_price": 0.46,
+            "pre_event_clv": -0.005,
+            "reference_line_price": 0.455,
+            "reference_line_timestamp_utc": "2026-07-14T13:00:08Z",
+            "settled_profitable": true,
+            "shadow_position_id": "shadow_position_e69ba7f493f38bfd59ee3df9",
+            "status": "gradeable",
+            "token_id": "76687687901848733791230602614619773894396137158710677490208966731067789329851"
+          },
+          {
+            "cutoff_utc": "2026-07-14T18:00:00Z",
+            "entry_price": 0.45,
+            "pre_event_clv": 0.005,
+            "reference_line_price": 0.455,
+            "reference_line_timestamp_utc": "2026-07-14T13:00:08Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_2b7f0afbdf87387205b6eb02",
+            "status": "gradeable",
+            "token_id": "56364511605477579236001090232222955613662932873061549008311567670815856050769"
+          }
+        ],
+        "finals_gradeable": 2,
+        "finals_total": 2,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0xf9254fe0e26c50ed0d72031257c4f87d55908a8d6115fa047b0752669beadfc7",
+        "unit_mean_net_settlement_return_per_dollar": -0.01,
+        "unit_mean_pre_event_clv": 0.0
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-12T11:00:00Z",
+            "entry_price": 0.49,
+            "pre_event_clv": -0.015,
+            "reference_line_price": 0.475,
+            "reference_line_timestamp_utc": "2026-07-12T06:00:07Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_f2583de725c95ce9038ecec0",
+            "status": "gradeable",
+            "token_id": "21826507280449134214629923518994881403855164454312297439671322865525102121141"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0xf9c72f2a95e641c52b19e6082c079cf95d3c56e704e8e6f85af971ae932d45df",
+        "unit_mean_net_settlement_return_per_dollar": -0.4895,
+        "unit_mean_pre_event_clv": -0.015
+      },
+      {
+        "finals": [
+          {
+            "cutoff_utc": "2026-07-19T18:00:00Z",
+            "entry_price": 0.47,
+            "pre_event_clv": -0.395,
+            "reference_line_price": 0.075,
+            "reference_line_timestamp_utc": "2026-07-19T13:00:11Z",
+            "settled_profitable": false,
+            "shadow_position_id": "shadow_position_896cde175bf84fdc6cdfd976",
+            "status": "gradeable",
+            "token_id": "49886028487112281574279422474095181525913123582177075375309734310587117931078"
+          }
+        ],
+        "finals_gradeable": 1,
+        "finals_total": 1,
+        "settled_profitable": false,
+        "status": "gradeable",
+        "unit_id": "market:0xfa021d817ad33e0fa28e04051b4fea25b0a090e94bb1b2a38b377bce9778eb8e",
+        "unit_mean_net_settlement_return_per_dollar": -0.4695,
+        "unit_mean_pre_event_clv": -0.395
+      }
+    ],
+    "units_gradeable": 48,
+    "units_positive_pre_event_clv": 15,
+    "units_total": 55,
+    "units_ungradeable": 7
+  },
+  "proof_questions_seen": true,
+  "question": "Can this bot generate $100/month profit?",
+  "registered_amendments_at_utc": "2026-07-09T11:00:00Z",
+  "registered_at_utc": "2026-07-09T04:00:00Z",
+  "registered_extension_protocol": {
+    "amendment": 7,
+    "extension_regime": "post_wc_2026",
+    "extension_window_end_utc": "2026-08-19T23:59:00Z",
+    "extension_window_start_utc": "2026-07-20T00:00:00Z",
+    "final_read_due_utc": "2026-07-20T00:00:00Z",
+    "final_read_rule": "amendment 8 (2026-07-17): ANY 2026-07-19/20 verdict other than all-gates-pass takes the single extension, including >= 12 units pending on significance.",
+    "registered_at_utc": "2026-07-10T21:30:00Z",
+    "single_use": true,
+    "terminal_rule": "at the 2026-08-19/20 read the verdict resolves terminally: all gates pass -> yes path; ANY other outcome -> no (failing gate, pending significance, or unit floor unmet alike; amendment 8 closed the pending-on-significance gap, tighten-only)."
+  },
+  "semantics_caveat": "Gate A measures unit mean net settlement return per dollar (pre-fee), not closing-line edge; true pre-event CLV is shown beside it and feeds no gate in this study.",
+  "target_monthly_profit_usdc": 100.0,
+  "verdict": "no_for_tested_edge_classes"
+}

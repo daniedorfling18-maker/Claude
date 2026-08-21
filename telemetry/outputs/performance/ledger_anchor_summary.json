@@ -1,0 +1,13 @@
+{
+  "anchor_date": "2026-08-20",
+  "chain_head": "162c8adc0bfb417c715ab5e3b601f8895a308ac40ad942eaf3cc6d2debd00663",
+  "chain_path": "outputs/performance/ledger_anchor_chain.csv",
+  "external_anchor_branch": "vps-anchor",
+  "external_anchor_pending": true,
+  "generated_at_utc": "2026-08-20T15:21:37Z",
+  "head_path": "outputs/performance/ledger_anchor_head.json",
+  "ledger_count": 41,
+  "live_trading_invoked": false,
+  "paper_trading_invoked": false,
+  "status": "already_anchored"
+}

@@ -1,0 +1,38 @@
+{
+  "candidate_stats": {
+    "snapshot_rows_seen": 30,
+    "snapshot_rows_without_probability": 0,
+    "snapshot_rows_without_timestamp": 0,
+    "snapshot_rows_without_token": 30
+  },
+  "cohorts": [],
+  "evidence_class": "reconstructed_research",
+  "gamma_close_time_requests": 0,
+  "generated_at_utc": "2026-08-20T03:07:29Z",
+  "independent_units": 0,
+  "live_trading_invoked": false,
+  "non_verdict_warning": "Reconstructed entries are retrospective research datapoints only. They are not Gate A evidence and must not be consumed by profit_verdict.py.",
+  "official_price_history_requests": 0,
+  "outputs": {
+    "positions_csv": "outputs/polymarket_model_governance/reconstructed_signal_clv_positions.csv",
+    "summary_json": "outputs/polymarket_model_governance/reconstructed_signal_clv.json"
+  },
+  "paper_trading_invoked": false,
+  "reconstructed_entries": 0,
+  "research_flagged_cohorts": [],
+  "skipped": {},
+  "status": "no_reconstructed_entries",
+  "thresholds": {
+    "entry_max_lag_minutes": 180.0,
+    "fdr_alpha": 0.1,
+    "fundamental_probability_haircut": 0.5,
+    "maximum_entry_price": 0.9,
+    "minimum_entry_price": 0.05,
+    "minimum_fundamental_edge_after_haircut": 0.03,
+    "minimum_units_per_cohort": 8
+  },
+  "thresholds_frozen_as_of_utc": "2026-07-10T00:00:00Z",
+  "unit_beat_close_rate": null,
+  "unit_mean_clv": null,
+  "unit_sign_test_p": null
+}

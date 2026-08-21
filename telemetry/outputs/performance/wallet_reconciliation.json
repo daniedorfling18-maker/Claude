@@ -1,0 +1,254 @@
+{
+  "account_structure": "single_project_account_under_custody_amendment_A1",
+  "comparison_legs": [
+    "internal",
+    "data_api",
+    "onchain"
+  ],
+  "contract_registry": {
+    "addresses": {
+      "ctf": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+      "pusd": "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+    },
+    "fetched_at_utc": "2026-08-20T03:12:15Z",
+    "live_trading_invoked": false,
+    "paper_trading_invoked": false,
+    "source_sha256": "ccbd455ef823afcdda0f301f9aef602014c731a90f5544360dba83322560991b",
+    "source_url": "https://docs.polymarket.com/resources/contracts",
+    "status": "official_live"
+  },
+  "contracts_page_sha256": "ccbd455ef823afcdda0f301f9aef602014c731a90f5544360dba83322560991b",
+  "data_api": {
+    "activity_complete": false,
+    "activity_page_complete": true,
+    "activity_rows": 2,
+    "configured_external_deposit_baseline_usd": 12.923349,
+    "deposits_usd": 0.0,
+    "errors": [],
+    "external_deposit_baseline_applied_usd": 12.923349,
+    "external_deposit_observed_by_activity_feed": false,
+    "nav_usd": 12.730349,
+    "official_positions_value_usd": 0.0,
+    "paid_rewards_usd": 0.0,
+    "position_rows": 1,
+    "positions_complete": true,
+    "positions_value_delta_usd": 0.0,
+    "positions_value_usd": 0.0,
+    "raw_activity_reconstructed_cash_usd": -0.193,
+    "raw_rows_persisted": false,
+    "reconstructed_cash_usd": 12.730349,
+    "reconstruction_complete": false,
+    "reconstruction_note": "The public activity feed omits part or all of the configured external-deposit baseline; $12.92334900 was added to the activity reconstruction without claiming feed completeness.",
+    "status": "reconstruction_incomplete_external_deposit",
+    "unknown_activity_types": [],
+    "unmarked_assets": [],
+    "withdrawals_usd": 0.0
+  },
+  "data_api_nav_usd": 12.730349,
+  "discrepancy_note": "The public activity feed omits part or all of the configured external-deposit baseline; $12.92334900 was added to the activity reconstruction without claiming feed completeness.",
+  "discrepancy_threshold_usd": 1.0,
+  "executor_wallet_address": "",
+  "explanation": "normalized NAV views agree within tolerance; the Data API activity reconstruction is explicitly known-incomplete",
+  "gas_capture_hook": {
+    "errors": [],
+    "ledger_path": "outputs/performance/wallet_gas_observations.csv",
+    "ledger_rows": 2,
+    "new_rows": 0,
+    "status": "ok"
+  },
+  "generated_at_utc": "2026-08-20T03:12:14Z",
+  "governance_note": "Reporting only. A discrepancy is a human-review alert and does not alter a gate or place an order.",
+  "internal": {
+    "accrued_rewards_usd": 0.0,
+    "cash_usd": null,
+    "deposits_usd": 0.0,
+    "explained_adjustment_usd": 0.0,
+    "flow_adjusted_nav_usd": 12.923349,
+    "marked_positions_usd": 0.0,
+    "nav_usd": 12.923349,
+    "scoreboard_generated_at_utc": "2026-08-20T03:05:39Z",
+    "source": "configured_start_plus_score_and_external_flows",
+    "source_path": "outputs/maker_carry/maker_live_test.json",
+    "status": "ok",
+    "wallet_role": "operator",
+    "withdrawals_usd": 0.0
+  },
+  "internal_nav_usd": 12.923349,
+  "known_incomplete_legs": [
+    "data_api"
+  ],
+  "legacy_executor_wallet_config_drift": false,
+  "live_trading_invoked": false,
+  "max_pairwise_delta_usd": 0.193,
+  "nav_aggregation_policy": "single project wallet; legacy separate-wallet rows are never summed if a superseded field is populated",
+  "onchain": {
+    "contracts_page_sha256": "ccbd455ef823afcdda0f301f9aef602014c731a90f5544360dba83322560991b",
+    "contracts_source_url": "https://docs.polymarket.com/resources/contracts",
+    "errors": [],
+    "mark_source": "data-api position curPrice/currentValue used consistently across external NAV views",
+    "nav_usd": 12.730349,
+    "positions": [
+      {
+        "api_size": 0.14,
+        "asset": "25312457392074064866955638920139332428292497556441446372623464789018436410183",
+        "condition_id": "0x20fac1c925b7a2fed6b3b2736f47a800b4d0d4001b9deaeb7b918868eb63d081",
+        "mark": 0.0,
+        "marked_value_usd": 0.0,
+        "onchain_size": 0.14,
+        "quantity_delta": 0.0
+      }
+    ],
+    "positions_scanned": 1,
+    "positions_truncated": false,
+    "positions_value_usd": 0.0,
+    "pusd_balance_usd": 12.730349,
+    "rpc_chain_id": 137,
+    "status": "ok"
+  },
+  "onchain_nav_usd": 12.730349,
+  "operator_wallet_address": "0xD2EC3c8f541ad3aaC9396d63650D9d297bd55D2f",
+  "pairwise_deltas_usd": {
+    "data_api_vs_onchain": 0.0,
+    "internal_vs_data_api": 0.193,
+    "internal_vs_onchain": 0.193
+  },
+  "paper_trading_invoked": false,
+  "primary_wallet_role": "operator",
+  "reconciliation_status": "clean",
+  "rpc_chain_id": 137,
+  "snapshot_date": "2026-08-20",
+  "status": "ok",
+  "unexplained_discrepancy_usd": 0.0,
+  "wallet_address": "0xD2EC3c8f541ad3aaC9396d63650D9d297bd55D2f",
+  "wallet_role": "operator",
+  "wallets": {
+    "executor": {
+      "live_trading_invoked": false,
+      "paper_trading_invoked": false,
+      "reconciliation_status": "not_configured",
+      "status": "not_configured",
+      "wallet_address": "",
+      "wallet_role": "executor"
+    },
+    "operator": {
+      "comparison_legs": [
+        "internal",
+        "data_api",
+        "onchain"
+      ],
+      "contract_registry": {
+        "addresses": {
+          "ctf": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+          "pusd": "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+        },
+        "fetched_at_utc": "2026-08-20T03:12:15Z",
+        "live_trading_invoked": false,
+        "paper_trading_invoked": false,
+        "source_sha256": "ccbd455ef823afcdda0f301f9aef602014c731a90f5544360dba83322560991b",
+        "source_url": "https://docs.polymarket.com/resources/contracts",
+        "status": "official_live"
+      },
+      "contracts_page_sha256": "ccbd455ef823afcdda0f301f9aef602014c731a90f5544360dba83322560991b",
+      "data_api": {
+        "activity_complete": false,
+        "activity_page_complete": true,
+        "activity_rows": 2,
+        "configured_external_deposit_baseline_usd": 12.923349,
+        "deposits_usd": 0.0,
+        "errors": [],
+        "external_deposit_baseline_applied_usd": 12.923349,
+        "external_deposit_observed_by_activity_feed": false,
+        "nav_usd": 12.730349,
+        "official_positions_value_usd": 0.0,
+        "paid_rewards_usd": 0.0,
+        "position_rows": 1,
+        "positions_complete": true,
+        "positions_value_delta_usd": 0.0,
+        "positions_value_usd": 0.0,
+        "raw_activity_reconstructed_cash_usd": -0.193,
+        "raw_rows_persisted": false,
+        "reconstructed_cash_usd": 12.730349,
+        "reconstruction_complete": false,
+        "reconstruction_note": "The public activity feed omits part or all of the configured external-deposit baseline; $12.92334900 was added to the activity reconstruction without claiming feed completeness.",
+        "status": "reconstruction_incomplete_external_deposit",
+        "unknown_activity_types": [],
+        "unmarked_assets": [],
+        "withdrawals_usd": 0.0
+      },
+      "data_api_nav_usd": 12.730349,
+      "discrepancy_note": "The public activity feed omits part or all of the configured external-deposit baseline; $12.92334900 was added to the activity reconstruction without claiming feed completeness.",
+      "discrepancy_threshold_usd": 1.0,
+      "explanation": "normalized NAV views agree within tolerance; the Data API activity reconstruction is explicitly known-incomplete",
+      "gas_capture_hook": {
+        "errors": [],
+        "ledger_path": "outputs/performance/wallet_gas_observations.csv",
+        "ledger_rows": 2,
+        "new_rows": 0,
+        "status": "ok"
+      },
+      "generated_at_utc": "2026-08-20T03:12:14Z",
+      "governance_note": "Reporting only. A discrepancy is a human-review alert and does not alter a gate or place an order.",
+      "internal": {
+        "accrued_rewards_usd": 0.0,
+        "cash_usd": null,
+        "deposits_usd": 0.0,
+        "explained_adjustment_usd": 0.0,
+        "flow_adjusted_nav_usd": 12.923349,
+        "marked_positions_usd": 0.0,
+        "nav_usd": 12.923349,
+        "scoreboard_generated_at_utc": "2026-08-20T03:05:39Z",
+        "source": "configured_start_plus_score_and_external_flows",
+        "source_path": "outputs/maker_carry/maker_live_test.json",
+        "status": "ok",
+        "wallet_role": "operator",
+        "withdrawals_usd": 0.0
+      },
+      "internal_nav_usd": 12.923349,
+      "known_incomplete_legs": [
+        "data_api"
+      ],
+      "live_trading_invoked": false,
+      "max_pairwise_delta_usd": 0.193,
+      "onchain": {
+        "contracts_page_sha256": "ccbd455ef823afcdda0f301f9aef602014c731a90f5544360dba83322560991b",
+        "contracts_source_url": "https://docs.polymarket.com/resources/contracts",
+        "errors": [],
+        "mark_source": "data-api position curPrice/currentValue used consistently across external NAV views",
+        "nav_usd": 12.730349,
+        "positions": [
+          {
+            "api_size": 0.14,
+            "asset": "25312457392074064866955638920139332428292497556441446372623464789018436410183",
+            "condition_id": "0x20fac1c925b7a2fed6b3b2736f47a800b4d0d4001b9deaeb7b918868eb63d081",
+            "mark": 0.0,
+            "marked_value_usd": 0.0,
+            "onchain_size": 0.14,
+            "quantity_delta": 0.0
+          }
+        ],
+        "positions_scanned": 1,
+        "positions_truncated": false,
+        "positions_value_usd": 0.0,
+        "pusd_balance_usd": 12.730349,
+        "rpc_chain_id": 137,
+        "status": "ok"
+      },
+      "onchain_nav_usd": 12.730349,
+      "pairwise_deltas_usd": {
+        "data_api_vs_onchain": 0.0,
+        "internal_vs_data_api": 0.193,
+        "internal_vs_onchain": 0.193
+      },
+      "paper_trading_invoked": false,
+      "reconciliation_status": "clean",
+      "rpc_chain_id": 137,
+      "snapshot_date": "2026-08-20",
+      "status": "ok",
+      "unexplained_discrepancy_usd": 0.0,
+      "wallet_address": "0xD2EC3c8f541ad3aaC9396d63650D9d297bd55D2f",
+      "wallet_role": "operator"
+    }
+  },
+  "wallets_combined": false,
+  "work_order": "WO-62+WO-73+WO-81+WO-84"
+}

@@ -1,0 +1,45 @@
+{
+  "archive_path": "outputs/performance/ledger_state_archive.tar.gz",
+  "archive_sha256": "adbb9349cd8b2dee01550ea3d1d5c8627665188d5a1094fdaa9f676842c11d45",
+  "chain_head": "162c8adc0bfb417c715ab5e3b601f8895a308ac40ad942eaf3cc6d2debd00663",
+  "destination_output_root": null,
+  "dry_run": true,
+  "excluded_path_prefixes_tolerated": [
+    "polymarket_training/"
+  ],
+  "file_count": 360,
+  "generated_at_utc": "2026-08-20T18:30:24Z",
+  "ledger_chain_verification": {
+    "as_of_date": "2026-08-20",
+    "chain_path": "/tmp/polymarket-ledger-restore-4h9yvji8/outputs/performance/ledger_anchor_chain.csv",
+    "first_broken_date": null,
+    "generated_at_utc": "2026-08-20T18:30:25Z",
+    "issues": [],
+    "ledger_prefixes_checked": 785,
+    "links_checked": 26,
+    "live_trading_invoked": false,
+    "missing_at_anchor_tolerated": 208,
+    "paper_trading_invoked": false,
+    "restore_boundary_date": "2026-08-20",
+    "restore_provenance_rejected": null,
+    "restore_tolerated_prefixes": [
+      "polymarket_training/"
+    ],
+    "restored_unverifiable_tolerated": 52,
+    "status": "ok",
+    "verified_chain_head": "162c8adc0bfb417c715ab5e3b601f8895a308ac40ad942eaf3cc6d2debd00663",
+    "verified_through_date": "2026-08-20"
+  },
+  "live_trading_invoked": false,
+  "paper_trading_invoked": false,
+  "restore_applied": false,
+  "restore_boundary_date": "2026-08-20",
+  "restore_provenance_rejected": null,
+  "restored_unverifiable_tolerated": 52,
+  "restored_without_prefixes": [
+    "polymarket_training/"
+  ],
+  "snapshot_date": "2026-08-20",
+  "status": "ok",
+  "work_order": "WO-65"
+}

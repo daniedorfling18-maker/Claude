@@ -1,0 +1,14 @@
+{
+  "container_memory_percent": 38.08555603027344,
+  "degrade_live_loop": false,
+  "degraded_max_websocket_assets": 20,
+  "enabled": true,
+  "generated_at_utc": "2026-08-21T01:59:14Z",
+  "host_memory_percent": 16.26260048596554,
+  "max_memory_percent": 90.0,
+  "memory_percent": 38.08555603027344,
+  "reason": "ok",
+  "skip_cycle": false,
+  "skip_discovery_cycle": false,
+  "skip_prediction_cycle": false
+}

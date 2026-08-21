@@ -1,0 +1,46 @@
+{
+  "commands": {
+    "collect_maker_replay_data": {
+      "duration_seconds": 9,
+      "exit_code": 0
+    },
+    "decision_policy": {
+      "duration_seconds": 2,
+      "exit_code": 0
+    },
+    "executor_ops_monitor": {
+      "duration_seconds": 2,
+      "exit_code": 0
+    },
+    "maker_carry_study": {
+      "duration_seconds": 68,
+      "exit_code": 0
+    },
+    "maker_fill_replay": {
+      "duration_seconds": 2,
+      "exit_code": 0
+    },
+    "maker_live_test": {
+      "duration_seconds": 4,
+      "exit_code": 0
+    },
+    "operating_state": {
+      "duration_seconds": 3,
+      "exit_code": 0
+    },
+    "reconcile_wallet": {
+      "duration_seconds": 5,
+      "exit_code": 0
+    },
+    "requote_alerts": {
+      "duration_seconds": 3,
+      "exit_code": 0
+    }
+  },
+  "execution_lane": "dedicated_one_shot_container",
+  "generated_at_utc": "2026-08-15T12:19:11.324781+00:00",
+  "live_trading_invoked": false,
+  "paper_trading_invoked": false,
+  "scheduler_isolated": true,
+  "work_order": "WO-79-deployment-controls"
+}

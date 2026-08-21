@@ -1,0 +1,47 @@
+{
+  "append_only_resolution_corpus": {
+    "duplicate_states": 2,
+    "live_trading_invoked": false,
+    "output_file": "outputs/polymarket_training/resolution_corpus_v1.csv",
+    "paper_trading_invoked": false,
+    "rows_appended": 8,
+    "rows_seen": 10,
+    "status": "ok"
+  },
+  "clean_settlement_markets": 0,
+  "collected_at_utc": "2026-08-20T03:00:59Z",
+  "live_trading_invoked": false,
+  "matched_tokens": 10,
+  "output_file": "outputs/polymarket_training/websocket_resolutions.csv",
+  "paper_trading_invoked": false,
+  "quality_file": "outputs/polymarket_model_governance/websocket_resolution_quality_report.csv",
+  "resolution_rows": 10,
+  "scans": [
+    {
+      "label": "default_recent",
+      "matched_tokens": 10,
+      "pages_scanned": 22,
+      "rows_seen": 2100,
+      "stop_reason": "empty_or_pagination_limit"
+    },
+    {
+      "label": "closed_true",
+      "matched_tokens": 0,
+      "pages_scanned": 22,
+      "rows_seen": 2100,
+      "stop_reason": "empty_or_pagination_limit"
+    },
+    {
+      "label": "active_true",
+      "matched_tokens": 0,
+      "pages_scanned": 22,
+      "rows_seen": 2100,
+      "stop_reason": "empty_or_pagination_limit"
+    }
+  ],
+  "status": "ok",
+  "unmatched_tokens": 54,
+  "unresolved_markets": 5,
+  "websocket_tokens": 64,
+  "work_order": "WO-101"
+}

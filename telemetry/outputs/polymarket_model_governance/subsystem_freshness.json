@@ -1,0 +1,90 @@
+{
+  "generated_at_utc": "2026-08-21T01:59:09Z",
+  "status": "ok",
+  "subsystems": [
+    {
+      "age_seconds": 52.767722,
+      "generated_at_utc": "2026-08-21T01:58:17Z",
+      "path": "outputs/polymarket_model_governance/local_live_loop_heartbeat.json",
+      "status": "ok",
+      "subsystem": "local_live_loop"
+    },
+    {
+      "age_seconds": 150954.767872,
+      "generated_at_utc": "2026-08-19T08:03:15Z",
+      "path": "outputs/polymarket_model_governance/local_live_loop_discovery_heartbeat.json",
+      "status": "stale",
+      "subsystem": "background_discovery"
+    },
+    {
+      "age_seconds": 9.770061,
+      "generated_at_utc": "2026-08-21T01:59:00Z",
+      "path": "outputs/polymarket_model_governance/forward_paper_cycle.json",
+      "status": "ok",
+      "subsystem": "forward_paper_cycle"
+    },
+    {
+      "age_seconds": 1.771309,
+      "generated_at_utc": "2026-08-21T01:59:08Z",
+      "path": "outputs/polymarket_portfolio/paper_trading_summary.json",
+      "status": "ok",
+      "subsystem": "paper_broker"
+    },
+    {
+      "age_seconds": null,
+      "generated_at_utc": "",
+      "path": "outputs/polymarket_model_governance/paper_trade_readiness.json",
+      "status": "ok",
+      "subsystem": "paper_readiness"
+    },
+    {
+      "age_seconds": 1.772457,
+      "generated_at_utc": "2026-08-21T01:59:08Z",
+      "path": "outputs/polymarket_model_governance/signal_cohort_pnl.json",
+      "status": "computed",
+      "subsystem": "cohort_pnl"
+    },
+    {
+      "age_seconds": 49.773182,
+      "generated_at_utc": "2026-08-21T01:58:20Z",
+      "path": "outputs/polymarket_model_governance/shadow_signal_cohort_pnl.json",
+      "status": "computed",
+      "subsystem": "shadow_cohort_pnl"
+    },
+    {
+      "age_seconds": 3328403.773767,
+      "generated_at_utc": "2026-07-13T13:25:46Z",
+      "path": "outputs/polymarket_model_governance/liquidity_discovery_summary.json",
+      "status": "stale",
+      "subsystem": "liquidity_discovery"
+    },
+    {
+      "age_seconds": 151168.773872,
+      "generated_at_utc": "2026-08-19T07:59:41Z",
+      "path": "outputs/polymarket_model_governance/sharp_odds_fetch_summary.json",
+      "status": "stale",
+      "subsystem": "sharp_odds_fetch"
+    },
+    {
+      "age_seconds": 151165.773976,
+      "generated_at_utc": "2026-08-19T07:59:44Z",
+      "path": "outputs/polymarket_model_governance/sharp_anchor_summary.json",
+      "status": "stale",
+      "subsystem": "sharp_anchor"
+    },
+    {
+      "age_seconds": 3295405.774023,
+      "generated_at_utc": "2026-07-13T22:35:44Z",
+      "path": "outputs/polymarket_model_governance/crypto_fundamental_summary.json",
+      "status": "stale",
+      "subsystem": "crypto_fundamental"
+    },
+    {
+      "age_seconds": null,
+      "generated_at_utc": "",
+      "path": "outputs/polymarket_model_governance/supervisor_status.json",
+      "status": "missing",
+      "subsystem": "supervisor"
+    }
+  ]
+}

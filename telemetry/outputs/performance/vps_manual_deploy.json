@@ -1,0 +1,28 @@
+{
+  "approval_actor": "daniedorfling18-maker",
+  "attestation_unverifiable_reason": "no eligible independent reviewer can exist in this single-owner repository: merge_independently_reviewed_pr.py requires an APPROVED review excluding both the PR author and the repository owner, which no collaborator here satisfies",
+  "attestation_verified": false,
+  "deploy_path": "B_manual_guarded_script",
+  "deployed_sha": "036d09be26a0d0f7d9cba5a049e468b688decd70",
+  "generated_at_utc": "2026-08-15T12:19:22Z",
+  "guard_order": [
+    "assert_target_is_origin_main",
+    "stage_target_scripts",
+    "assert_checkout_matches_marker",
+    "run_capacity_preflight",
+    "assert_private_transport",
+    "arm_rollback",
+    "update_checkout",
+    "write_deploy_markers",
+    "recreate_stack",
+    "run_deploy_acceptance",
+    "run_health_gate",
+    "restart_scheduler"
+  ],
+  "live_trading_invoked": false,
+  "paper_trading_invoked": false,
+  "target_equals_origin_main_tip": true,
+  "trigger_actor": "daniedorfling18-maker",
+  "trigger_mechanism": "push",
+  "work_order": "WO-133"
+}

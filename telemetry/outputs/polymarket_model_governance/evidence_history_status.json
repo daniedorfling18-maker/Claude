@@ -1,0 +1,17 @@
+{
+  "appended_rows": 3,
+  "appended_sources": [
+    "closing_line_value",
+    "edge_attribution",
+    "algo_sweep"
+  ],
+  "existing_rows": 3361,
+  "git_commit": "unknown",
+  "history_path": "outputs/polymarket_model_governance/evidence_history.csv",
+  "live_trading_invoked": false,
+  "missing_sources": [],
+  "paper_trading_invoked": false,
+  "skipped_unchanged_sources": [],
+  "status": "ok",
+  "total_rows": 3364
+}

@@ -1,0 +1,59 @@
+{
+  "backup_directory": "/home/opc/wo73-ledger-recovery-20260713T1825Z",
+  "files": [
+    {
+      "anchor_checks": [
+        {
+          "actual_sha256": "7aac8ba89ae0e3927b053cc796d324861fb5cc25c80686cc7212479ae8106fbf",
+          "byte_length": 571,
+          "expected_sha256": "7aac8ba89ae0e3927b053cc796d324861fb5cc25c80686cc7212479ae8106fbf",
+          "status": "PASS"
+        },
+        {
+          "actual_sha256": "ec760b36edc56faa86014ffd4192a0e455c650c3e56c15765b52214e21d9ce6d",
+          "byte_length": 6238,
+          "expected_sha256": "ec760b36edc56faa86014ffd4192a0e455c650c3e56c15765b52214e21d9ce6d",
+          "status": "PASS"
+        }
+      ],
+      "damaged_sha256": "d71abe2d8d7885a84e4a85a94c0fe5f7688ae6bcd141265bd307032cc974df9b",
+      "legacy_path": "outputs/maker_carry/maker_live_test_history.csv",
+      "name": "maker",
+      "post_snapshot_rows_appended": 3,
+      "restored_sha256": "56304c0b844b570f481ce11267ca598d813d8214364d8832f69cb496d2cb3744",
+      "retained_source_rows": 125,
+      "versioned_role_path": "outputs/maker_carry/maker_live_test_wallet_history.csv",
+      "versioned_role_rows": 128
+    },
+    {
+      "anchor_checks": [
+        {
+          "actual_sha256": "371423ca4d45246651a260fd642b13fe353a60659b111e771fa4b35770d5dbdb",
+          "byte_length": 363,
+          "expected_sha256": "371423ca4d45246651a260fd642b13fe353a60659b111e771fa4b35770d5dbdb",
+          "status": "PASS"
+        },
+        {
+          "actual_sha256": "bc826b4471ed38c09db380a777cf0fe353770e11f2e7e3b5e42c6048ff6678c1",
+          "byte_length": 527,
+          "expected_sha256": "bc826b4471ed38c09db380a777cf0fe353770e11f2e7e3b5e42c6048ff6678c1",
+          "status": "PASS"
+        }
+      ],
+      "damaged_sha256": "19348664dfa5ea76e4abb22b11d9654f95838f1ba34596680adc3b0f09f6aefd",
+      "legacy_path": "outputs/performance/wallet_reconciliation_history.csv",
+      "name": "reconciliation",
+      "post_snapshot_rows_appended": 2,
+      "restored_sha256": "c7ce22bd49d80c6b2f52554399610e934864091aaf610e19cda68a048b61320a",
+      "retained_source_rows": 2,
+      "versioned_role_path": "outputs/performance/wallet_reconciliation_wallet_history.csv",
+      "versioned_role_rows": 4
+    }
+  ],
+  "generated_at_utc": "2026-07-13T18:23:24Z",
+  "incident": "WO-73 append-only schema migration",
+  "live_trading_invoked": false,
+  "paper_trading_invoked": false,
+  "source_commit": "5926e91f28a32561d92b2a92687c832996794a44",
+  "status": "PASS"
+}

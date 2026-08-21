@@ -1,0 +1,4 @@
+risk,severity,mitigation
+Resolution ambiguity,high,resolution-risk filters and manual review
+Lookahead leakage,blocker,feature leakage rejection and point-in-time labels
+Duplicate writer or executor,high,pipeline inventory and duplicate writer checks

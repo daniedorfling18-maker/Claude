@@ -1,0 +1,12 @@
+{
+  "addresses": {
+    "ctf": "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045",
+    "pusd": "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+  },
+  "fetched_at_utc": "2026-08-20T03:12:15Z",
+  "live_trading_invoked": false,
+  "paper_trading_invoked": false,
+  "source_sha256": "ccbd455ef823afcdda0f301f9aef602014c731a90f5544360dba83322560991b",
+  "source_url": "https://docs.polymarket.com/resources/contracts",
+  "status": "official_live"
+}

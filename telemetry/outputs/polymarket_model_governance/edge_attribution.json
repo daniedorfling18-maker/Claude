@@ -1,0 +1,375 @@
+{
+  "attributed_positions": 109,
+  "closed_positions_seen": 226,
+  "cohorts": [
+    {
+      "attributed_positions": 6,
+      "attribution_class": "model_direction_not_confirmed",
+      "execution_cost_usdc": 1.141039,
+      "line_movement_usdc": -8.665274,
+      "recommended_action": "the market moved against entries: re-model features for this cohort or suppress collection priority",
+      "settlement_surprise_usdc": 5.850311,
+      "signal_cohort": "ai_model_leader",
+      "total_pnl_usdc": -3.956002
+    },
+    {
+      "attributed_positions": 2,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.219807,
+      "line_movement_usdc": -0.231884,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": -0.944444,
+      "signal_cohort": "baseball_mlb_match",
+      "total_pnl_usdc": -1.396135
+    },
+    {
+      "attributed_positions": 21,
+      "attribution_class": "model_direction_not_confirmed",
+      "execution_cost_usdc": -262.537366,
+      "line_movement_usdc": -245.102363,
+      "recommended_action": "the market moved against entries: re-model features for this cohort or suppress collection priority",
+      "settlement_surprise_usdc": -21.280285,
+      "signal_cohort": "crypto",
+      "total_pnl_usdc": -3.845278
+    },
+    {
+      "attributed_positions": 3,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.353407,
+      "line_movement_usdc": -8.355934,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": 3.720865,
+      "signal_cohort": "crypto_btc_updown_event",
+      "total_pnl_usdc": -4.988476
+    },
+    {
+      "attributed_positions": 2,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.215079,
+      "line_movement_usdc": -19.763414,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": 18.119103,
+      "signal_cohort": "crypto_eth_updown_event",
+      "total_pnl_usdc": -1.859389
+    },
+    {
+      "attributed_positions": 3,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.446951,
+      "line_movement_usdc": -4.533354,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": 9.620549,
+      "signal_cohort": "crypto_xrp_updown_event",
+      "total_pnl_usdc": 4.640244
+    },
+    {
+      "attributed_positions": 3,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.426033,
+      "line_movement_usdc": 25.202041,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": -34.553211,
+      "signal_cohort": "esports_match",
+      "total_pnl_usdc": -9.777203
+    },
+    {
+      "attributed_positions": 1,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.208333,
+      "line_movement_usdc": -9.770833,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": 12.895833,
+      "signal_cohort": "exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=down",
+      "total_pnl_usdc": 2.916667
+    },
+    {
+      "attributed_positions": 2,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.156986,
+      "line_movement_usdc": 11.130299,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": -13.65777,
+      "signal_cohort": "exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=up",
+      "total_pnl_usdc": -2.684458
+    },
+    {
+      "attributed_positions": 1,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.277778,
+      "line_movement_usdc": 0.0,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": 45.833333,
+      "signal_cohort": "exploratory_crypto_updown_live_model|crypto_eth_updown_15m|outcome=up",
+      "total_pnl_usdc": 45.555556
+    },
+    {
+      "attributed_positions": 3,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.267897,
+      "line_movement_usdc": 23.813886,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": -15.52277,
+      "signal_cohort": "exploratory_crypto_updown_live_model|crypto_eth_updown_daily|outcome=up",
+      "total_pnl_usdc": 8.02322
+    },
+    {
+      "attributed_positions": 1,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.258916,
+      "line_movement_usdc": 9.741084,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": 0.19679,
+      "signal_cohort": "exploratory_crypto_updown_live_model|crypto_sol_updown_15m|outcome=up",
+      "total_pnl_usdc": 9.678957
+    },
+    {
+      "attributed_positions": 1,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.056818,
+      "line_movement_usdc": 1.414773,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": 0.005682,
+      "signal_cohort": "exploratory_crypto_updown_live_model|crypto_xrp_updown_daily|outcome=up",
+      "total_pnl_usdc": 1.363636
+    },
+    {
+      "attributed_positions": 2,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.675675,
+      "line_movement_usdc": -0.675675,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": 0.27027,
+      "signal_cohort": "macro_economy",
+      "total_pnl_usdc": -1.081082
+    },
+    {
+      "attributed_positions": 4,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 1.144842,
+      "line_movement_usdc": 6.089145,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": -35.02944,
+      "signal_cohort": "near_miss_learning|baseball_mlb_match",
+      "total_pnl_usdc": -30.085138
+    },
+    {
+      "attributed_positions": 1,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.217391,
+      "line_movement_usdc": 0.0,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": -0.217391,
+      "signal_cohort": "near_miss_learning|basketball_nba_match",
+      "total_pnl_usdc": -0.434783
+    },
+    {
+      "attributed_positions": 4,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.645445,
+      "line_movement_usdc": -18.037312,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": 29.11534,
+      "signal_cohort": "near_miss_learning|crypto",
+      "total_pnl_usdc": 10.432583
+    },
+    {
+      "attributed_positions": 1,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.192308,
+      "line_movement_usdc": -9.711538,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": 5.673077,
+      "signal_cohort": "near_miss_learning|crypto_btc_updown_event",
+      "total_pnl_usdc": -4.230769
+    },
+    {
+      "attributed_positions": 1,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.277778,
+      "line_movement_usdc": -9.583333,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": 14.861111,
+      "signal_cohort": "near_miss_learning|crypto_eth_updown_event",
+      "total_pnl_usdc": 5.0
+    },
+    {
+      "attributed_positions": 1,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.1,
+      "line_movement_usdc": 3.6,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": -0.7,
+      "signal_cohort": "near_miss_learning|exploratory_historical_rule|crypto_sol_updown_event|outcome=down",
+      "total_pnl_usdc": 2.8
+    },
+    {
+      "attributed_positions": 1,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.128205,
+      "line_movement_usdc": -0.021368,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": -8.098291,
+      "signal_cohort": "near_miss_learning|geopolitics",
+      "total_pnl_usdc": -8.247863
+    },
+    {
+      "attributed_positions": 3,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 1.344807,
+      "line_movement_usdc": -1.898723,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": -3.176243,
+      "signal_cohort": "near_miss_learning|macro_economy",
+      "total_pnl_usdc": -6.419772
+    },
+    {
+      "attributed_positions": 2,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.241429,
+      "line_movement_usdc": 2.441263,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": -3.564799,
+      "signal_cohort": "near_miss_learning|macro_rates",
+      "total_pnl_usdc": -1.364966
+    },
+    {
+      "attributed_positions": 2,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.47619,
+      "line_movement_usdc": 0.0,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": -0.47619,
+      "signal_cohort": "near_miss_learning|policy_legal",
+      "total_pnl_usdc": -0.95238
+    },
+    {
+      "attributed_positions": 1,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.104167,
+      "line_movement_usdc": 3.854167,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": -3.958333,
+      "signal_cohort": "near_miss_learning|tennis_match",
+      "total_pnl_usdc": -0.208333
+    },
+    {
+      "attributed_positions": 1,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.119048,
+      "line_movement_usdc": -5.47619,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": 4.404762,
+      "signal_cohort": "near_miss_learning|tennis_tennis_winner",
+      "total_pnl_usdc": -1.190476
+    },
+    {
+      "attributed_positions": 2,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.442644,
+      "line_movement_usdc": -19.446695,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": 10.251832,
+      "signal_cohort": "near_miss_learning|unknown",
+      "total_pnl_usdc": -9.637507
+    },
+    {
+      "attributed_positions": 5,
+      "attribution_class": "positive_edge_confirmed",
+      "execution_cost_usdc": 1.350159,
+      "line_movement_usdc": 31.795157,
+      "recommended_action": "keep collecting; candidate for deeper forward evidence and governance review",
+      "settlement_surprise_usdc": 2.039768,
+      "signal_cohort": "near_miss_learning|worldcup",
+      "total_pnl_usdc": 32.484767
+    },
+    {
+      "attributed_positions": 3,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.49383,
+      "line_movement_usdc": -8.760257,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": 9.776081,
+      "signal_cohort": "soccer_match",
+      "total_pnl_usdc": 0.521994
+    },
+    {
+      "attributed_positions": 5,
+      "attribution_class": "settlement_adverse",
+      "execution_cost_usdc": 0.709413,
+      "line_movement_usdc": 2.370062,
+      "recommended_action": "line agreed but settlement broke against the final line: investigate resolution risk, holding horizon, and exit policy",
+      "settlement_surprise_usdc": -6.772621,
+      "signal_cohort": "structural|longshot_no|ai_model_leader",
+      "total_pnl_usdc": -5.11197
+    },
+    {
+      "attributed_positions": 2,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.547025,
+      "line_movement_usdc": -0.549953,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": 0.580978,
+      "signal_cohort": "structural|longshot_no|crypto_btc_special",
+      "total_pnl_usdc": -0.516
+    },
+    {
+      "attributed_positions": 2,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.66998,
+      "line_movement_usdc": 0.66,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": -0.81,
+      "signal_cohort": "structural|longshot_no|crypto_eth_special",
+      "total_pnl_usdc": -0.81998
+    },
+    {
+      "attributed_positions": 2,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.56498,
+      "line_movement_usdc": 0.55,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": -0.605,
+      "signal_cohort": "structural|longshot_no|crypto_sol_special",
+      "total_pnl_usdc": -0.61998
+    },
+    {
+      "attributed_positions": 7,
+      "attribution_class": "model_direction_not_confirmed",
+      "execution_cost_usdc": 1.363584,
+      "line_movement_usdc": -16.760801,
+      "recommended_action": "the market moved against entries: re-model features for this cohort or suppress collection priority",
+      "settlement_surprise_usdc": -22.305047,
+      "signal_cohort": "unknown",
+      "total_pnl_usdc": -40.429431
+    },
+    {
+      "attributed_positions": 7,
+      "attribution_class": "model_direction_not_confirmed",
+      "execution_cost_usdc": 1.106212,
+      "line_movement_usdc": -48.750766,
+      "recommended_action": "the market moved against entries: re-model features for this cohort or suppress collection priority",
+      "settlement_surprise_usdc": 27.783759,
+      "signal_cohort": "worldcup",
+      "total_pnl_usdc": -22.073221
+    },
+    {
+      "attributed_positions": 1,
+      "attribution_class": "insufficient_attribution_evidence",
+      "execution_cost_usdc": 0.028571,
+      "line_movement_usdc": 13.6,
+      "recommended_action": "not enough closed attributed positions: collect more before drawing conclusions",
+      "settlement_surprise_usdc": -18.371429,
+      "signal_cohort": "worldcup_2026_winner_fundamental",
+      "total_pnl_usdc": -4.8
+    }
+  ],
+  "generated_at_utc": "2026-08-20T19:57:48Z",
+  "git_commit": "unknown",
+  "governance_note": "attribution directs research and collection; it never promotes, sizes, or trades by itself",
+  "identity_note": "per share: exit - entry_fill == settlement_surprise + line_movement - execution_cost (exact)",
+  "live_trading_invoked": false,
+  "minimum_positions_per_cohort": 5,
+  "paper_trading_invoked": false,
+  "skipped_unattributable_closed": 117,
+  "status": "ok"
+}

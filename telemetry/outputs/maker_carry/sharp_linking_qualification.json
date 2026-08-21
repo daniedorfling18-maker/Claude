@@ -1,0 +1,139 @@
+{
+  "candidate_condition_id": "0x15d2e66dcf1d63c5695d6d0e9e2f8e06dd246d00fd5dfc254f2b22baa33bfa1b",
+  "candidate_token_id": null,
+  "checks": [
+    {
+      "check": "candidate_market_identified",
+      "detail": "candidate=0x15d2e66dcf1d63c5695d6d0e9e2f8e06dd246d00fd5dfc254f2b22baa33bfa1b; token=missing; portfolio_matches=0",
+      "passed": false
+    },
+    {
+      "check": "candidate_policy_version_identified",
+      "detail": "policy_generated_at=2026-08-21T01:41:34Z; policy_version_sha256=474eee542a4fdd1db02c86d179c85b8c45ba7792e67a0fca0f2a9ebe0cc6e944; content_digest_valid=True",
+      "passed": true
+    },
+    {
+      "check": "exact_token_fresh_anchor",
+      "detail": "fresh_joined_anchors=0 (max age 21600s)",
+      "passed": false
+    },
+    {
+      "check": "exact_token_anchor_provenance",
+      "detail": "fresh_token_rows=0; qualifying_rows=0; rejected_provenance=0; sources=[]",
+      "passed": false
+    },
+    {
+      "check": "fresh_anchors_agree",
+      "detail": "anchor_disagreement=0.0000 (max 0.03)",
+      "passed": false
+    },
+    {
+      "check": "consensus_fair_inside_quote_band",
+      "detail": "fair=none; band=[None, None]",
+      "passed": false
+    },
+    {
+      "check": "fresh_executable_pm_book",
+      "detail": "bid=None; ask=None; age=nones (max 300)",
+      "passed": false
+    },
+    {
+      "check": "tier0_replay_fresh",
+      "detail": "replay_age=1089.9s (max 1800)",
+      "passed": true
+    },
+    {
+      "check": "tier0_matches_current_portfolio_version",
+      "detail": "study_version=2026-08-20T10:46:56Z; replay_portfolio_version=2026-08-20T10:46:56Z; postdates=True",
+      "passed": true
+    },
+    {
+      "check": "tier0_primary_source_official",
+      "detail": "primary_book_source=official",
+      "passed": true
+    },
+    {
+      "check": "tier0_market_row_present",
+      "detail": "per_market_coverage_row=missing",
+      "passed": false
+    },
+    {
+      "check": "tier0_min_evaluable_opportunities",
+      "detail": "evaluable=missing (min 30)",
+      "passed": false
+    },
+    {
+      "check": "tier0_min_confirmed_fills",
+      "detail": "confirmed_fills=missing (min 10)",
+      "passed": false
+    },
+    {
+      "check": "tier0_min_coverage_ratio",
+      "detail": "coverage_ratio=missing (min 0.8)",
+      "passed": false
+    },
+    {
+      "check": "tier0_markout_windows_each_horizon",
+      "detail": "windows_covered={'5m': None, '15m': None, '60m': None} (min 10 at each of 5/15/60m)",
+      "passed": false
+    },
+    {
+      "check": "tier0_adverse_haircut_within_ceiling",
+      "detail": "simulation_to_reality_haircut=missing (max 1)",
+      "passed": false
+    }
+  ],
+  "consumed_policy_generated_at": "2026-08-21T01:41:34Z",
+  "consumed_policy_version_sha256": "474eee542a4fdd1db02c86d179c85b8c45ba7792e67a0fca0f2a9ebe0cc6e944",
+  "consumed_replay_generated_at": "2026-08-21T01:23:31Z",
+  "consumed_study_generated_at": "2026-08-20T10:46:56Z",
+  "first_failing_check": "candidate_market_identified",
+  "generated_at_utc": "2026-08-21T01:41:40Z",
+  "live_trading_invoked": false,
+  "note": "Route A sharp-linking funding precondition; fail-closed and tighten-only. Reporting only - no gate, sizing, or order surface is changed by this artifact.",
+  "paper_trading_invoked": false,
+  "qualified": false,
+  "registered_constants": {
+    "max_adverse_haircut": 1.0,
+    "max_anchor_age_seconds": 21600,
+    "max_anchor_disagreement": 0.03,
+    "max_pm_book_age_seconds": 300,
+    "max_replay_age_seconds": 1800,
+    "min_confirmed_fills": 10,
+    "min_coverage_ratio": 0.8,
+    "min_evaluable_opportunities": 30,
+    "min_markout_windows_per_horizon": 10,
+    "qualifying_sharp_sources": [
+      "betfair_ex_eu",
+      "betfair_ex_uk",
+      "pinnacle"
+    ],
+    "required_primary_book_source": "official"
+  },
+  "summary": {
+    "candidate_condition_id": "0x15d2e66dcf1d63c5695d6d0e9e2f8e06dd246d00fd5dfc254f2b22baa33bfa1b",
+    "candidate_token_id": null,
+    "consensus_sharp_fair": null,
+    "consumed_policy_generated_at": "2026-08-21T01:41:34Z",
+    "consumed_policy_version_sha256": "474eee542a4fdd1db02c86d179c85b8c45ba7792e67a0fca0f2a9ebe0cc6e944",
+    "consumed_replay_generated_at": "2026-08-21T01:23:31Z",
+    "consumed_study_generated_at": "2026-08-20T10:46:56Z",
+    "maker_quote_band": [
+      null,
+      null
+    ],
+    "qualifying_sharp_sources": [],
+    "tier0": {
+      "confirmed_fills": null,
+      "coverage_ratio": null,
+      "evaluable_opportunities": null,
+      "markout_windows_covered": {
+        "15m": null,
+        "5m": null,
+        "60m": null
+      },
+      "simulation_to_reality_haircut": null
+    }
+  },
+  "work_order": "WO-105"
+}

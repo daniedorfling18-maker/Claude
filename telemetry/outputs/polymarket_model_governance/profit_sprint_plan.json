@@ -1,0 +1,708 @@
+{
+  "actions_file": "outputs/polymarket_predictions/profit_sprint_actions.csv",
+  "actual_pnl_since_baseline_usdc": 0.0,
+  "approved_signals": 0,
+  "current_probationary_candidates": [],
+  "current_promoted_candidates": [],
+  "decision": "COLLECT_MORE_EVIDENCE",
+  "decision_reason": "Positive or near-positive evidence exists, but no current candidate passes paper-entry gates.",
+  "generated_at_utc": "2026-08-20T19:58:20Z",
+  "input_warnings": [
+    {
+      "reason": "no sharp fundamental rows are available",
+      "source": "sharp_anchor",
+      "status": "built"
+    },
+    {
+      "reason": "no crypto fundamental targets are configured",
+      "source": "crypto_fundamental",
+      "status": "no_targets"
+    }
+  ],
+  "live_trading_invoked": false,
+  "monthly_run_rate_usdc": 0.0,
+  "notes": [
+    "Read/report only: no orders, no live trading, no threshold changes.",
+    "Use PAPER_TRADE_READY or PROBATIONARY_PROBE_READY only as a cue to run the existing paper broker path under current risk gates.",
+    "WAIT_ACTIVE_WINDOW targets are not trades; they are queued for rescoring when the model window opens."
+  ],
+  "paper_trading_invoked": false,
+  "plan_file": "outputs/polymarket_model_governance/profit_sprint_plan.json",
+  "probationary_cohorts": [
+    "exploratory_crypto_updown_live_model|crypto_eth_updown_15m|outcome=up"
+  ],
+  "promoted_cohorts": [],
+  "rejected_signals": 17420,
+  "required_daily_from_here_usdc": 100.0,
+  "shadow_status": {
+    "liquidity_fast_feedback_tradable_tokens": null,
+    "liquidity_tradable_tokens": null,
+    "paper_allowed": null,
+    "paper_reason": "",
+    "shadow_roi": null,
+    "shadow_total_pnl_usdc": null,
+    "status": "missing",
+    "status_file": "",
+    "status_file_candidates": [
+      "/app/work/shadow_research_cycle_latest_status.json",
+      "work/shadow_research_cycle_latest_status.json"
+    ]
+  },
+  "status": "ok",
+  "target_daily_profit_usdc": 3.3333333333333335,
+  "target_monthly_profit_usdc": 100.0,
+  "target_summary": [
+    {
+      "count": 13625,
+      "target_action": "IGNORE_LIQUIDITY"
+    },
+    {
+      "count": 3394,
+      "target_action": "IGNORE_NEGATIVE_EDGE"
+    },
+    {
+      "count": 334,
+      "target_action": "SHADOW_EDGE_WATCH"
+    },
+    {
+      "count": 62,
+      "target_action": "IGNORE_BOOKMAKER"
+    },
+    {
+      "count": 5,
+      "target_action": "SHADOW_LABEL_GATE"
+    }
+  ],
+  "targets_file": "outputs/polymarket_model_governance/profit_sprint_targets.csv",
+  "top_actionable": [
+    {
+      "buy_fills": 3.0,
+      "clv_ci_high": null,
+      "clv_ci_low": null,
+      "clv_evidence": "insufficient_clv_evidence",
+      "clv_final_positions": 1,
+      "clv_mean_final": -0.005,
+      "cohort": "exploratory_crypto_updown_live_model|crypto_eth_updown_15m|outcome=up",
+      "evidence_elapsed_hours": 1200.2898512408333,
+      "full_gates_passed": 5,
+      "full_gates_total": 6,
+      "gaps_to_full": {
+        "fills_remaining": 2.0,
+        "monthly_run_rate_remaining_usdc": 0.0,
+        "pnl_remaining_usdc": 0.0,
+        "roi_pnl_equivalent_remaining_usdc": 0.0,
+        "settled_remaining": 0.0,
+        "tracking_hours_remaining": 0.0
+      },
+      "metadata_blocker": "",
+      "metadata_valid": true,
+      "missing_full_gates": [
+        "fills"
+      ],
+      "missing_probation_gates": [],
+      "monthly_run_rate_usdc": 27.32673276048856,
+      "next_action": "Eligible for probationary review; keep probe cap small until full promotion gates clear.",
+      "probation_gates_passed": 6,
+      "probation_gates_total": 6,
+      "probationary": true,
+      "promoted": false,
+      "promotion_ready_checks": 6,
+      "promotion_ready_score": 5,
+      "roi": 3.2482539682539686,
+      "settled_fills": 3.0,
+      "status": "probationary",
+      "total_pnl_usdc": 45.47555555555556
+    },
+    {
+      "buy_fills": 5.0,
+      "clv_ci_high": 0.609,
+      "clv_ci_low": -0.2037,
+      "clv_evidence": "insufficient_clv_evidence",
+      "clv_final_positions": 5,
+      "clv_mean_final": 0.2054,
+      "cohort": "near_miss_learning|worldcup",
+      "evidence_elapsed_hours": 1183.3617957438887,
+      "full_gates_passed": 5,
+      "full_gates_total": 6,
+      "gaps_to_full": {
+        "fills_remaining": 0.0,
+        "monthly_run_rate_remaining_usdc": 0.23509643192605267,
+        "pnl_remaining_usdc": 0.0,
+        "roi_pnl_equivalent_remaining_usdc": 0.0,
+        "settled_remaining": 0.0,
+        "tracking_hours_remaining": 0.0
+      },
+      "metadata_blocker": "",
+      "metadata_valid": true,
+      "missing_full_gates": [
+        "run_rate"
+      ],
+      "missing_probation_gates": [
+        "run_rate"
+      ],
+      "monthly_run_rate_usdc": 19.764903568073947,
+      "next_action": "Positive evidence exists, but monthly run-rate is still below the promotion threshold.",
+      "probation_gates_passed": 5,
+      "probation_gates_total": 6,
+      "probationary": false,
+      "promoted": false,
+      "promotion_ready_checks": 6,
+      "promotion_ready_score": 5,
+      "roi": 0.6496953271953267,
+      "settled_fills": 5.0,
+      "status": "near_full_promotion",
+      "total_pnl_usdc": 32.48476635976634
+    },
+    {
+      "buy_fills": 7.0,
+      "clv_ci_high": null,
+      "clv_ci_low": null,
+      "clv_evidence": "insufficient_clv_evidence",
+      "clv_final_positions": 0,
+      "clv_mean_final": null,
+      "cohort": "near_miss_learning|soccer_match",
+      "evidence_elapsed_hours": 964.5037401758334,
+      "full_gates_passed": 5,
+      "full_gates_total": 6,
+      "gaps_to_full": {
+        "fills_remaining": 0.0,
+        "monthly_run_rate_remaining_usdc": 10.337800621153498,
+        "pnl_remaining_usdc": 0.0,
+        "roi_pnl_equivalent_remaining_usdc": 0.0,
+        "settled_remaining": 0.0,
+        "tracking_hours_remaining": 0.0
+      },
+      "metadata_blocker": "",
+      "metadata_valid": true,
+      "missing_full_gates": [
+        "run_rate"
+      ],
+      "missing_probation_gates": [
+        "run_rate"
+      ],
+      "monthly_run_rate_usdc": 9.662199378846502,
+      "next_action": "Positive evidence exists, but monthly run-rate is still below the promotion threshold.",
+      "probation_gates_passed": 5,
+      "probation_gates_total": 6,
+      "probationary": false,
+      "promoted": false,
+      "promotion_ready_checks": 6,
+      "promotion_ready_score": 5,
+      "roi": 0.1849053063338776,
+      "settled_fills": 7.0,
+      "status": "near_full_promotion",
+      "total_pnl_usdc": 12.943371443371433
+    },
+    {
+      "buy_fills": 12.0,
+      "clv_ci_high": null,
+      "clv_ci_low": null,
+      "clv_evidence": "insufficient_clv_evidence",
+      "clv_final_positions": 0,
+      "clv_mean_final": null,
+      "cohort": "ai_model_leader",
+      "evidence_elapsed_hours": 875.3965178733333,
+      "full_gates_passed": 5,
+      "full_gates_total": 6,
+      "gaps_to_full": {
+        "fills_remaining": 0.0,
+        "monthly_run_rate_remaining_usdc": 16.024156095228314,
+        "pnl_remaining_usdc": 0.0,
+        "roi_pnl_equivalent_remaining_usdc": 0.0,
+        "settled_remaining": 0.0,
+        "tracking_hours_remaining": 0.0
+      },
+      "metadata_blocker": "",
+      "metadata_valid": true,
+      "missing_full_gates": [
+        "run_rate"
+      ],
+      "missing_probation_gates": [
+        "run_rate"
+      ],
+      "monthly_run_rate_usdc": 3.9758439047716867,
+      "next_action": "Positive evidence exists, but monthly run-rate is still below the promotion threshold.",
+      "probation_gates_passed": 5,
+      "probation_gates_total": 6,
+      "probationary": false,
+      "promoted": false,
+      "promotion_ready_checks": 6,
+      "promotion_ready_score": 5,
+      "roi": 0.040282869326987006,
+      "settled_fills": 12.0,
+      "status": "near_full_promotion",
+      "total_pnl_usdc": 4.833944319238441
+    },
+    {
+      "buy_fills": 5.0,
+      "clv_ci_high": 0.321,
+      "clv_ci_low": -0.30975,
+      "clv_evidence": "insufficient_clv_evidence",
+      "clv_final_positions": 4,
+      "clv_mean_final": -0.084125,
+      "cohort": "near_miss_learning|crypto",
+      "evidence_elapsed_hours": 1207.4059623744445,
+      "full_gates_passed": 5,
+      "full_gates_total": 6,
+      "gaps_to_full": {
+        "fills_remaining": 0.0,
+        "monthly_run_rate_remaining_usdc": 14.838969290929647,
+        "pnl_remaining_usdc": 0.0,
+        "roi_pnl_equivalent_remaining_usdc": 0.0,
+        "settled_remaining": 0.0,
+        "tracking_hours_remaining": 0.0
+      },
+      "metadata_blocker": "paper_quote_conflicts_excluded_from_edge",
+      "metadata_valid": false,
+      "missing_full_gates": [
+        "run_rate"
+      ],
+      "missing_probation_gates": [
+        "run_rate"
+      ],
+      "monthly_run_rate_usdc": 5.161030709070353,
+      "next_action": "Metadata is unresolved; keep shadow tracking only and do not promote or probe this cohort.",
+      "probation_gates_passed": 5,
+      "probation_gates_total": 6,
+      "probationary": false,
+      "promoted": false,
+      "promotion_ready_checks": 6,
+      "promotion_ready_score": 5,
+      "roi": 0.17309609028144493,
+      "settled_fills": 5.0,
+      "status": "metadata_blocked",
+      "total_pnl_usdc": 8.654804514072246
+    },
+    {
+      "buy_fills": 3.0,
+      "clv_ci_high": null,
+      "clv_ci_low": null,
+      "clv_evidence": "insufficient_clv_evidence",
+      "clv_final_positions": 1,
+      "clv_mean_final": -0.2395,
+      "cohort": "exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=down",
+      "evidence_elapsed_hours": 1190.4276290122223,
+      "full_gates_passed": 5,
+      "full_gates_total": 6,
+      "gaps_to_full": {
+        "fills_remaining": 2.0,
+        "monthly_run_rate_remaining_usdc": 0.0,
+        "pnl_remaining_usdc": 0.0,
+        "roi_pnl_equivalent_remaining_usdc": 0.0,
+        "settled_remaining": 0.0,
+        "tracking_hours_remaining": 0.0
+      },
+      "metadata_blocker": "paper_quote_conflicts_excluded_from_edge",
+      "metadata_valid": false,
+      "missing_full_gates": [
+        "fills"
+      ],
+      "missing_probation_gates": [],
+      "monthly_run_rate_usdc": 79.38586068507638,
+      "next_action": "Metadata is unresolved; keep shadow tracking only and do not promote or probe this cohort.",
+      "probation_gates_passed": 6,
+      "probation_gates_total": 6,
+      "probationary": false,
+      "promoted": false,
+      "promotion_ready_checks": 6,
+      "promotion_ready_score": 5,
+      "roi": 0.22418512859689338,
+      "settled_fills": 3.0,
+      "status": "metadata_blocked",
+      "total_pnl_usdc": 3.138591800356507
+    },
+    {
+      "buy_fills": 3.0,
+      "clv_ci_high": 0.5795,
+      "clv_ci_low": 0.219,
+      "clv_evidence": "insufficient_clv_evidence",
+      "clv_final_positions": 3,
+      "clv_mean_final": 0.402667,
+      "cohort": "exploratory_crypto_updown_live_model|crypto_eth_updown_daily|outcome=up",
+      "evidence_elapsed_hours": 1206.9387401316667,
+      "full_gates_passed": 4,
+      "full_gates_total": 6,
+      "gaps_to_full": {
+        "fills_remaining": 2.0,
+        "monthly_run_rate_remaining_usdc": 15.213743659910747,
+        "pnl_remaining_usdc": 0.0,
+        "roi_pnl_equivalent_remaining_usdc": 0.0,
+        "settled_remaining": 0.0,
+        "tracking_hours_remaining": 0.0
+      },
+      "metadata_blocker": "paper_quote_conflicts_excluded_from_edge",
+      "metadata_valid": false,
+      "missing_full_gates": [
+        "fills",
+        "run_rate"
+      ],
+      "missing_probation_gates": [
+        "run_rate"
+      ],
+      "monthly_run_rate_usdc": 4.786256340089252,
+      "next_action": "Metadata is unresolved; keep shadow tracking only and do not promote or probe this cohort.",
+      "probation_gates_passed": 5,
+      "probation_gates_total": 6,
+      "probationary": false,
+      "promoted": false,
+      "promotion_ready_checks": 6,
+      "promotion_ready_score": 4,
+      "roi": 0.26744065727116584,
+      "settled_fills": 3.0,
+      "status": "metadata_blocked",
+      "total_pnl_usdc": 8.023219718134975
+    },
+    {
+      "buy_fills": 3.0,
+      "clv_ci_high": 0.5995,
+      "clv_ci_low": -0.4095,
+      "clv_evidence": "insufficient_clv_evidence",
+      "clv_final_positions": 3,
+      "clv_mean_final": -0.019833,
+      "cohort": "crypto_xrp_updown_event",
+      "evidence_elapsed_hours": 1206.6606845594442,
+      "full_gates_passed": 4,
+      "full_gates_total": 6,
+      "gaps_to_full": {
+        "fills_remaining": 2.0,
+        "monthly_run_rate_remaining_usdc": 17.231221956175393,
+        "pnl_remaining_usdc": 0.0,
+        "roi_pnl_equivalent_remaining_usdc": 0.0,
+        "settled_remaining": 0.0,
+        "tracking_hours_remaining": 0.0
+      },
+      "metadata_blocker": "paper_quotes_unverified_by_snapshot",
+      "metadata_valid": false,
+      "missing_full_gates": [
+        "fills",
+        "run_rate"
+      ],
+      "missing_probation_gates": [
+        "run_rate"
+      ],
+      "monthly_run_rate_usdc": 2.7687780438246072,
+      "next_action": "Metadata is unresolved; keep shadow tracking only and do not promote or probe this cohort.",
+      "probation_gates_passed": 5,
+      "probation_gates_total": 6,
+      "probationary": false,
+      "promoted": false,
+      "promotion_ready_checks": 6,
+      "promotion_ready_score": 4,
+      "roi": 0.1546747967479675,
+      "settled_fills": 3.0,
+      "status": "metadata_blocked",
+      "total_pnl_usdc": 4.640243902439025
+    },
+    {
+      "buy_fills": 3.0,
+      "clv_ci_high": null,
+      "clv_ci_low": null,
+      "clv_evidence": "insufficient_clv_evidence",
+      "clv_final_positions": 0,
+      "clv_mean_final": null,
+      "cohort": "exploratory_crypto_updown_live_model|crypto_eth_updown_15m|outcome=down",
+      "evidence_elapsed_hours": 1201.513740127778,
+      "full_gates_passed": 3,
+      "full_gates_total": 6,
+      "gaps_to_full": {
+        "fills_remaining": 2.0,
+        "monthly_run_rate_remaining_usdc": 11.376731481529424,
+        "pnl_remaining_usdc": 0.0,
+        "roi_pnl_equivalent_remaining_usdc": 0.0,
+        "settled_remaining": 2.0,
+        "tracking_hours_remaining": 0.0
+      },
+      "metadata_blocker": "",
+      "metadata_valid": true,
+      "missing_full_gates": [
+        "fills",
+        "settled",
+        "run_rate"
+      ],
+      "missing_probation_gates": [
+        "settled",
+        "run_rate"
+      ],
+      "monthly_run_rate_usdc": 8.623268518470576,
+      "next_action": "Needs more settled forward/shadow evidence before promotion.",
+      "probation_gates_passed": 4,
+      "probation_gates_total": 6,
+      "probationary": false,
+      "promoted": false,
+      "promotion_ready_checks": 6,
+      "promotion_ready_score": 3,
+      "roi": 0.7421602787456446,
+      "settled_fills": 1.0,
+      "status": "collecting_evidence",
+      "total_pnl_usdc": 10.390243902439025
+    },
+    {
+      "buy_fills": 1.0,
+      "clv_ci_high": null,
+      "clv_ci_low": null,
+      "clv_evidence": "insufficient_clv_evidence",
+      "clv_final_positions": 1,
+      "clv_mean_final": 0.481843,
+      "cohort": "exploratory_crypto_updown_live_model|crypto_sol_updown_15m|outcome=up",
+      "evidence_elapsed_hours": 1170.9384623561111,
+      "full_gates_passed": 3,
+      "full_gates_total": 6,
+      "gaps_to_full": {
+        "fills_remaining": 4.0,
+        "monthly_run_rate_remaining_usdc": 14.048492200854911,
+        "pnl_remaining_usdc": 0.0,
+        "roi_pnl_equivalent_remaining_usdc": 0.0,
+        "settled_remaining": 2.0,
+        "tracking_hours_remaining": 0.0
+      },
+      "metadata_blocker": "",
+      "metadata_valid": true,
+      "missing_full_gates": [
+        "fills",
+        "settled",
+        "run_rate"
+      ],
+      "missing_probation_gates": [
+        "fills",
+        "settled",
+        "run_rate"
+      ],
+      "monthly_run_rate_usdc": 5.951507799145089,
+      "next_action": "Needs more settled forward/shadow evidence before promotion.",
+      "probation_gates_passed": 3,
+      "probation_gates_total": 6,
+      "probationary": false,
+      "promoted": false,
+      "promotion_ready_checks": 6,
+      "promotion_ready_score": 3,
+      "roi": 0.9678957487548139,
+      "settled_fills": 1.0,
+      "status": "collecting_evidence",
+      "total_pnl_usdc": 9.67895748754814
+    }
+  ],
+  "top_rejection_reasons": [
+    {
+      "count": 6072,
+      "rejection_reason": "alpha lower-bound edge below configured minimum; cohort_quarantined"
+    },
+    {
+      "count": 2360,
+      "rejection_reason": "alpha lower-bound edge below configured minimum; liquidity_below_alpha_trade_limit; cohort_quarantined"
+    },
+    {
+      "count": 1968,
+      "rejection_reason": "alpha lower-bound edge below configured minimum; price_below_alpha_trade_limit; cohort_quarantined"
+    },
+    {
+      "count": 1327,
+      "rejection_reason": "alpha lower-bound edge below configured minimum; spread_above_alpha_trade_limit; relative_spread_above_alpha_trade_limit; cohort_quarantined"
+    },
+    {
+      "count": 1027,
+      "rejection_reason": "alpha lower-bound edge below configured minimum"
+    },
+    {
+      "count": 732,
+      "rejection_reason": "alpha lower-bound edge below configured minimum; relative_spread_above_alpha_trade_limit; cohort_quarantined"
+    },
+    {
+      "count": 679,
+      "rejection_reason": "alpha lower-bound edge below configured minimum; spread_above_alpha_trade_limit; relative_spread_above_alpha_trade_limit; liquidity_below_alpha_trade_limit; cohort_quarantined"
+    },
+    {
+      "count": 582,
+      "rejection_reason": "alpha lower-bound edge below configured minimum; spread_above_alpha_trade_limit; cohort_quarantined"
+    },
+    {
+      "count": 427,
+      "rejection_reason": "alpha lower-bound edge below configured minimum; liquidity_below_alpha_trade_limit"
+    },
+    {
+      "count": 345,
+      "rejection_reason": "alpha lower-bound edge below configured minimum; price_below_alpha_trade_limit"
+    }
+  ],
+  "top_targets": [
+    {
+      "category": "ai_model_leader",
+      "edge_lower_bound": 0.07039550454784989,
+      "liquidity": 7323.95,
+      "market_slug": "will-anthropic-have-the-best-ai-model-at-the-end-of-december-2026",
+      "next_command": "polymarket-engine collect-snapshot-labels --config polymarket_predictive_config.example.yaml",
+      "outcome": "No",
+      "priority": 85,
+      "question": "Will Anthropic have the best AI model at the end of December 2026?",
+      "rank": 1,
+      "reason": "Positive edge but category label gate is not satisfied; collect shadow/label evidence only.",
+      "recommended_query": "top_active",
+      "rejection_reason": "same-category validation gate failed: 0 < 25 resolved labels",
+      "signal_cohort": "ai_model_leader",
+      "spread": 0.010000000000000009,
+      "target_action": "SHADOW_LABEL_GATE",
+      "target_score": 96.93955
+    },
+    {
+      "category": "ai_model_leader",
+      "edge_lower_bound": 0.050194799989807234,
+      "liquidity": 1290.5900000000001,
+      "market_slug": "will-any-ai-model-reach-1510-overall-arena-score-by-september-30-2026",
+      "next_command": "polymarket-engine collect-snapshot-labels --config polymarket_predictive_config.example.yaml",
+      "outcome": "Yes",
+      "priority": 85,
+      "question": "Will any AI model reach 1510 Overall Arena Score by September 30, 2026?",
+      "rank": 2,
+      "reason": "Positive edge but category label gate is not satisfied; collect shadow/label evidence only.",
+      "recommended_query": "top_active",
+      "rejection_reason": "same-category validation gate failed: 0 < 25 resolved labels",
+      "signal_cohort": "ai_model_leader",
+      "spread": 0.030000000000000027,
+      "target_action": "SHADOW_LABEL_GATE",
+      "target_score": 91.01007
+    },
+    {
+      "category": "ai_model_leader",
+      "edge_lower_bound": 0.04636818658008661,
+      "liquidity": 100.03,
+      "market_slug": "will-openai-have-a-1-ai-model-by-december-31-2026",
+      "next_command": "polymarket-engine collect-snapshot-labels --config polymarket_predictive_config.example.yaml",
+      "outcome": "Yes",
+      "priority": 85,
+      "question": "Will OpenAI have a #1 AI model by December 31, 2026?",
+      "rank": 3,
+      "reason": "Positive edge but category label gate is not satisfied; collect shadow/label evidence only.",
+      "recommended_query": "top_active",
+      "rejection_reason": "same-category validation gate failed: 0 < 25 resolved labels",
+      "signal_cohort": "ai_model_leader",
+      "spread": 0.019999999999999962,
+      "target_action": "SHADOW_LABEL_GATE",
+      "target_score": 89.536849
+    },
+    {
+      "category": "ai_model_leader",
+      "edge_lower_bound": 0.04087230518297191,
+      "liquidity": 105.36,
+      "market_slug": "will-a-chinese-company-have-one-of-the-top-5-ai-models-by-december-31",
+      "next_command": "polymarket-engine collect-snapshot-labels --config polymarket_predictive_config.example.yaml",
+      "outcome": "No",
+      "priority": 85,
+      "question": "Will a Chinese company have one of the top 5 AI models by December 31?",
+      "rank": 4,
+      "reason": "Positive edge but category label gate is not satisfied; collect shadow/label evidence only.",
+      "recommended_query": "top_active",
+      "rejection_reason": "same-category validation gate failed: 0 < 25 resolved labels",
+      "signal_cohort": "ai_model_leader",
+      "spread": 0.020000000000000018,
+      "target_action": "SHADOW_LABEL_GATE",
+      "target_score": 88.992591
+    },
+    {
+      "category": "policy_legal",
+      "edge_lower_bound": 0.03482258658008657,
+      "liquidity": 160.0,
+      "market_slug": "will-petr-yan-be-the-ufc-bantamweight-champion-on-december-31-2026",
+      "next_command": "polymarket-engine collect-snapshot-labels --config polymarket_predictive_config.example.yaml",
+      "outcome": "No",
+      "priority": 85,
+      "question": "Will Petr Yan be the UFC Bantamweight Champion on December 31, 2026?",
+      "rank": 5,
+      "reason": "Positive edge but category label gate is not satisfied; collect shadow/label evidence only.",
+      "recommended_query": "top_active",
+      "rejection_reason": "same-category validation gate failed: 0 < 25 resolved labels",
+      "signal_cohort": "policy_legal",
+      "spread": 0.030000000000000027,
+      "target_action": "SHADOW_LABEL_GATE",
+      "target_score": 88.342259
+    },
+    {
+      "category": "tennis",
+      "edge_lower_bound": 0.07181258658008659,
+      "liquidity": 28802.329999999998,
+      "market_slug": "atp-kopriva-buse-2026-07-20",
+      "next_command": "polymarket-engine profit-sprint --config polymarket_predictive_config.example.yaml",
+      "outcome": "Vit Kopriva",
+      "priority": 65,
+      "question": "Generali Open: Vit Kopriva vs Ignacio Buse",
+      "rank": 6,
+      "reason": "Positive lower-bound edge exists but not enough to pass paper-entry gates; keep in watch/shadow mode.",
+      "recommended_query": "tennis",
+      "rejection_reason": "alpha lower-bound edge below configured minimum; cohort_quarantined",
+      "signal_cohort": "tennis_match",
+      "spread": 0.010000000000000009,
+      "target_action": "SHADOW_EDGE_WATCH",
+      "target_score": 77.081259
+    },
+    {
+      "category": "macro_rates",
+      "edge_lower_bound": 0.07168758658008659,
+      "liquidity": 8527.789999999999,
+      "market_slug": "will-the-fed-pausepausepause-in-the-next-three-decisions-junjulsep",
+      "next_command": "polymarket-engine profit-sprint --config polymarket_predictive_config.example.yaml",
+      "outcome": "Yes",
+      "priority": 65,
+      "question": "Will the Fed Pause\u2013Pause\u2013Pause in the next three decisions (Jun\u2013Jul\u2013Sep)?",
+      "rank": 7,
+      "reason": "Positive lower-bound edge exists but not enough to pass paper-entry gates; keep in watch/shadow mode.",
+      "recommended_query": "top_active",
+      "rejection_reason": "alpha lower-bound edge below configured minimum; cohort_quarantined",
+      "signal_cohort": "macro_rates",
+      "spread": 0.010000000000000009,
+      "target_action": "SHADOW_EDGE_WATCH",
+      "target_score": 77.068759
+    },
+    {
+      "category": "tennis",
+      "edge_lower_bound": 0.07168758658008659,
+      "liquidity": 15119.61,
+      "market_slug": "atp-berrett-navone-2026-08-03",
+      "next_command": "polymarket-engine profit-sprint --config polymarket_predictive_config.example.yaml",
+      "outcome": "Mariano Navone",
+      "priority": 65,
+      "question": "Canadian Open: Matteo Berrettini vs Mariano Navone",
+      "rank": 8,
+      "reason": "Positive lower-bound edge exists but not enough to pass paper-entry gates; keep in watch/shadow mode.",
+      "recommended_query": "tennis",
+      "rejection_reason": "alpha lower-bound edge below configured minimum; cohort_quarantined",
+      "signal_cohort": "tennis_match",
+      "spread": 0.010000000000000009,
+      "target_action": "SHADOW_EDGE_WATCH",
+      "target_score": 77.068759
+    },
+    {
+      "category": "crypto",
+      "edge_lower_bound": 0.06823558658008659,
+      "liquidity": 6830.599999999999,
+      "market_slug": "will-ethereum-dip-to-1250-by-december-31-2026-from-june-8",
+      "next_command": "polymarket-engine profit-sprint --config polymarket_predictive_config.example.yaml",
+      "outcome": "Yes",
+      "priority": 65,
+      "question": "Will Ethereum dip to $1,250 by December 31, 2026?",
+      "rank": 9,
+      "reason": "Positive lower-bound edge exists but not enough to pass paper-entry gates; keep in watch/shadow mode.",
+      "recommended_query": "top_active",
+      "rejection_reason": "alpha lower-bound edge below configured minimum; cohort_quarantined",
+      "signal_cohort": "crypto",
+      "spread": 0.010000000000000009,
+      "target_action": "SHADOW_EDGE_WATCH",
+      "target_score": 76.723559
+    },
+    {
+      "category": "tennis",
+      "edge_lower_bound": 0.07224758658008659,
+      "liquidity": 4586.03,
+      "market_slug": "atp-rublev-darderi-2026-07-19-set-handicap-home-1pt5",
+      "next_command": "polymarket-engine profit-sprint --config polymarket_predictive_config.example.yaml",
+      "outcome": "Rublev",
+      "priority": 65,
+      "question": "Set Handicap: Rublev (-1.5) vs Darderi (+1.5)",
+      "rank": 10,
+      "reason": "Positive lower-bound edge exists but not enough to pass paper-entry gates; keep in watch/shadow mode.",
+      "recommended_query": "tennis",
+      "rejection_reason": "alpha lower-bound edge below configured minimum; cohort_quarantined",
+      "signal_cohort": "tennis_tennis_set",
+      "spread": 0.010000000000000009,
+      "target_action": "SHADOW_EDGE_WATCH",
+      "target_score": 76.710789
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "advisory": "paper trading mechanically ready",
+  "approved_for_paper_trading": true,
+  "blockers": [],
+  "calibration_model_present": true,
+  "data_quality_blockers": 0,
+  "decision": "APPROVED_FOR_PAPER_TRADING",
+  "expected_profitable_oos": true,
+  "kill_switch_active": false,
+  "min_paper_labels": 50,
+  "model_source": "calibration_v2",
+  "oos_paper_roi_at_minimum_edge": 0.0277,
+  "optimized_model_champion": false,
+  "optimized_model_deployment_mode": "shadow",
+  "resolved_labels": 1360,
+  "trading_mode": "paper",
+  "training_artifact_blockers": []
+}

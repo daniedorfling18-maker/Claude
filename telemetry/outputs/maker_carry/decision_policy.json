@@ -1,0 +1,122 @@
+{
+  "action_reason": "policy_decision_date_reached_with_pending_maker_gate",
+  "composition_stability": {
+    "most_recurrent_count": 1,
+    "most_recurrent_market": "0x15d2e66dcf1d63c5695d6d0e9e2f8e06dd246d00fd5dfc254f2b22baa33bfa1b",
+    "observations": 5,
+    "recent_top_markets": [
+      "0x15d2e66dcf1d63c5695d6d0e9e2f8e06dd246d00fd5dfc254f2b22baa33bfa1b",
+      "0xabe0e41540b70f3535b0d9325a19bc6f8c6bcce0ce27c28636a2e1d5c0c4eda8",
+      "0x059db22dae2d735516017d47d1def0ea43e5d7221259c3aaa60c090d32566d4e",
+      "0x5c79dfde05559b79a9cb9f7c4187e4d49632dd042572ae676952f812732591cc",
+      "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb"
+    ],
+    "required_recurrence": 4,
+    "stable": false,
+    "window_days": 7
+  },
+  "generated_at_utc": "2026-08-21T01:41:34Z",
+  "indicated_action": "defer_funding_continue_study",
+  "inputs_snapshot": {
+    "gate_a_state": "pending",
+    "gate_b_state": "pending",
+    "kill_input_age_seconds": 3.0,
+    "kill_input_latest_observation_utc": "2026-08-21T01:41:31Z",
+    "kill_input_maximum_age_seconds": 1800.0,
+    "live_stage_guard_activation_reasons": [
+      "maker_live_test_wallet_configured"
+    ],
+    "live_stage_guard_active": true,
+    "maker_carry_history_rows": 139,
+    "maker_carry_study_generated_at_utc": "2026-08-20T10:46:56Z",
+    "maker_live_test_generated_at_utc": "2026-08-21T01:41:31Z",
+    "maker_live_test_history_rows": 3290,
+    "recent_below_target_runs": 6,
+    "target_net_usd_per_day": 3.33
+  },
+  "kill_criteria_status": {
+    "criteria": {
+      "cumulative_real_net_score": {
+        "invalid_input": false,
+        "threshold": -25.0,
+        "triggered": false,
+        "value": 0.0
+      },
+      "fills_outrunning_model_two_days": {
+        "days": 0,
+        "threshold_days": 2,
+        "triggered": false
+      },
+      "kill_data_stale": {
+        "age_seconds": 3.0,
+        "guard_active": true,
+        "latest_observation_source": "maker_live_test",
+        "latest_observation_utc": "2026-08-21T01:41:31Z",
+        "threshold_seconds": 1800.0,
+        "triggered": false
+      },
+      "scoreboard_stop": {
+        "triggered": false,
+        "value": "flat_no_net_evidence"
+      },
+      "single_day_net_score": {
+        "invalid_input_count": 0,
+        "threshold": -15.0,
+        "triggered": false,
+        "worst_day": 0.0
+      },
+      "uma_dispute_inventory": {
+        "triggered": false,
+        "value": ""
+      }
+    },
+    "kill_data_stale": false,
+    "kill_input_freshness": {
+      "age_seconds": 3.0,
+      "guard_activation_reasons": [
+        "maker_live_test_wallet_configured"
+      ],
+      "guard_active": true,
+      "kill_data_stale": false,
+      "latest_observation_source": "maker_live_test",
+      "latest_observation_utc": "2026-08-21T01:41:31Z",
+      "maximum_age_seconds": 1800.0,
+      "state": "fresh",
+      "tighten_only_maximum_seconds": 1800
+    },
+    "status": "clear",
+    "triggered": []
+  },
+  "kill_data_stale": false,
+  "ladder": {
+    "consecutive_live_ok_days": 0,
+    "ladder_capital_usd": 100.0,
+    "modelled_gross_usd_per_day": 0.3413,
+    "owner_activity_days_ignored": 0,
+    "rewards_usd_total": 0.0,
+    "stage": 0,
+    "stage2_reward_floor_usd": null,
+    "stage_reason": "stage_0_default_or_no_live_test"
+  },
+  "ladder_stage_permitted": 0,
+  "live_trading_invoked": false,
+  "paper_trading_invoked": false,
+  "policy_note": "indicates, never executes - the human decides; the system never trades",
+  "policy_version_sha256": "474eee542a4fdd1db02c86d179c85b8c45ba7792e67a0fca0f2a9ebe0cc6e944",
+  "registered_at_utc": "2026-07-10T00:00:00Z",
+  "sizing": {
+    "binding_cap": "ladder",
+    "binding_capital_usd": 100.0,
+    "daily_net_mean_usd": 6.16381,
+    "daily_net_std_usd": 11.732607,
+    "inline_quarter_kelly_fraction": 1.0,
+    "kelly_capital_usd": 100.0,
+    "kelly_full_weight_days": 20,
+    "kelly_lineage": "risk.shrunk_kelly_fraction",
+    "kelly_observations": 26,
+    "kelly_overlay_interpretation": "Owner decision 2026-07-17: binding_capital_usd caps size-ups above the venue minimum; the minimum-size stage quote indicated by a fund_* action is the registered floor and is not vetoed by the overlay.",
+    "kelly_shrinkage": 0.0,
+    "quarter_kelly_fraction": 1.0
+  },
+  "status": "ok"
+}

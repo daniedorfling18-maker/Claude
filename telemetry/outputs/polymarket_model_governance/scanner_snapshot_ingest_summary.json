@@ -1,0 +1,12 @@
+{
+  "database_path": "work/polymarket/polymarket_engine.sqlite",
+  "db_error": "",
+  "db_status": "inserted",
+  "generated_at_utc": "2026-08-19T08:00:27Z",
+  "raw_output_file": "outputs/polymarket_fixed/all/ml/raw_market_snapshots.csv",
+  "rows_appended": 1304,
+  "source_file": "/app/outputs/polymarket/market_snapshot.csv",
+  "source_rows": 1304,
+  "status": "ingested",
+  "total_raw_rows": 230334
+}

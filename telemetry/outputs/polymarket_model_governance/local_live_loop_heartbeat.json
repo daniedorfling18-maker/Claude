@@ -1,0 +1,642 @@
+{
+  "asset_count": 80,
+  "asset_sources": {
+    "maker_requote_ticket": 1,
+    "open_positions": 29,
+    "shadow_positions": 7,
+    "websocket_liquidity_targets": 43
+  },
+  "background_jobs_block_prediction": false,
+  "degraded_prediction_cycle_seconds": 60.0,
+  "degraded_prediction_next_due_in_seconds": 0.0,
+  "discovery": {
+    "cycle_seconds": 300.0,
+    "discovery_iteration": 1,
+    "last_fast_updown": {},
+    "last_scan": {
+      "per_query": [
+        {
+          "actual_query": "tennis",
+          "attempt": 1,
+          "attempts": [
+            "tennis"
+          ],
+          "frozen_updown_alias_exclusions": [],
+          "query": "tennis",
+          "scanner_opportunities": 0,
+          "snapshot_path": "/app/outputs/polymarket/query_scans/tennis-tennis/market_snapshot.csv",
+          "tokens": 284
+        },
+        {
+          "actual_query": "sports",
+          "attempt": 1,
+          "attempts": [
+            "sports"
+          ],
+          "frozen_updown_alias_exclusions": [],
+          "query": "sports",
+          "scanner_opportunities": 0,
+          "snapshot_path": "/app/outputs/polymarket/query_scans/sports-sports/market_snapshot.csv",
+          "tokens": 262
+        },
+        {
+          "actual_query": "elections",
+          "attempt": 1,
+          "attempts": [
+            "elections",
+            "election",
+            "presidential election",
+            "senate election"
+          ],
+          "frozen_updown_alias_exclusions": [],
+          "query": "elections",
+          "scanner_opportunities": 0,
+          "snapshot_path": "/app/outputs/polymarket/query_scans/elections-elections/market_snapshot.csv",
+          "tokens": 78
+        },
+        {
+          "actual_query": "world cup",
+          "attempt": 1,
+          "attempts": [
+            "world cup"
+          ],
+          "frozen_updown_alias_exclusions": [],
+          "query": "world cup",
+          "scanner_opportunities": 0,
+          "snapshot_path": "/app/outputs/polymarket/query_scans/world-cup-world-cup/market_snapshot.csv",
+          "tokens": 24
+        },
+        {
+          "actual_query": "ai",
+          "attempt": 1,
+          "attempts": [
+            "ai",
+            "openai",
+            "anthropic",
+            "xai"
+          ],
+          "frozen_updown_alias_exclusions": [],
+          "query": "ai",
+          "scanner_opportunities": 0,
+          "snapshot_path": "/app/outputs/polymarket/query_scans/ai-ai/market_snapshot.csv",
+          "tokens": 282
+        },
+        {
+          "actual_query": "openai",
+          "attempt": 1,
+          "attempts": [
+            "openai"
+          ],
+          "frozen_updown_alias_exclusions": [],
+          "query": "openai",
+          "scanner_opportunities": 0,
+          "snapshot_path": "/app/outputs/polymarket/query_scans/openai-openai/market_snapshot.csv",
+          "tokens": 62
+        },
+        {
+          "actual_query": "economy",
+          "attempt": 1,
+          "attempts": [
+            "economy",
+            "inflation",
+            "cpi",
+            "recession",
+            "jobs"
+          ],
+          "frozen_updown_alias_exclusions": [],
+          "query": "economy",
+          "scanner_opportunities": 0,
+          "snapshot_path": "/app/outputs/polymarket/query_scans/economy-economy/market_snapshot.csv",
+          "tokens": 90
+        },
+        {
+          "actual_query": "bitcoin",
+          "attempt": 1,
+          "attempts": [
+            "bitcoin"
+          ],
+          "frozen_updown_alias_exclusions": [],
+          "query": "bitcoin",
+          "scanner_opportunities": 0,
+          "snapshot_path": "/app/outputs/polymarket/query_scans/bitcoin-bitcoin/market_snapshot.csv",
+          "tokens": 222
+        }
+      ],
+      "queries": [
+        "tennis",
+        "sports",
+        "elections",
+        "world cup",
+        "ai",
+        "openai",
+        "economy",
+        "bitcoin"
+      ],
+      "scan_plan": {
+        "adaptive_priority": {
+          "enabled": true,
+          "feedback_broaden_queries": [],
+          "feedback_learning_state": "price_action_candidates_ready_for_governed_paper_bridge",
+          "min_priority_value": 3.0,
+          "priority_queries": [
+            "world cup",
+            "ai",
+            "openai",
+            "economy",
+            "bitcoin",
+            "tennis",
+            "ethereum",
+            "solana",
+            "mma",
+            "nba",
+            "fed",
+            "stocks",
+            "politics",
+            "esports",
+            "mlb",
+            "sports",
+            "elections"
+          ],
+          "require_positive_evidence": true,
+          "research_focus_enabled": true,
+          "research_focus_queries": [
+            "ai",
+            "openai",
+            "economy",
+            "bitcoin",
+            "tennis",
+            "ethereum",
+            "solana",
+            "world cup",
+            "mma",
+            "nba",
+            "fed",
+            "stocks",
+            "politics",
+            "esports",
+            "mlb",
+            "sports",
+            "elections"
+          ],
+          "research_focus_validation_gap_needs_collection": true,
+          "suppressed_queries": [],
+          "top_cohorts": [
+            {
+              "cohort": "research_focus",
+              "cohort_priority_value": 50.0,
+              "learning_state": "price_action_candidates_ready_for_governed_paper_bridge",
+              "priority_value": 50.0,
+              "query": "world cup",
+              "source": "research_focus",
+              "summary": "Strict price-action model has positive train repricing examples but no positive validation examples; focus fresh websocket/scout collection on tennis, ethereum, economy, solana. Gap: Positive repricing examples exist in train, but validation has not yet seen a positive executable bid repricing.. Model blocker: no probability threshold cleared the training split trade gates; validation positive repricing targets 0 < 1; selected validation trades 0 < 5; selected validation P&L is not positive; selected validation ROI 0.0000 < 0.0300; selected validation win-rate/payoff gate failed: win_rate 0.0000 below payoff-asymmetry floor 0.3000; selected validation ROI CI low None < 0.0000; validation trades 0 < 5.",
+              "validation_gap_needs_collection": true
+            },
+            {
+              "cohort": "research_focus",
+              "cohort_priority_value": 50.0,
+              "learning_state": "price_action_candidates_ready_for_governed_paper_bridge",
+              "priority_value": 50.0,
+              "query": "ai",
+              "source": "research_focus",
+              "summary": "Strict price-action model has positive train repricing examples but no positive validation examples; focus fresh websocket/scout collection on tennis, ethereum, economy, solana. Gap: Positive repricing examples exist in train, but validation has not yet seen a positive executable bid repricing.. Model blocker: no probability threshold cleared the training split trade gates; validation positive repricing targets 0 < 1; selected validation trades 0 < 5; selected validation P&L is not positive; selected validation ROI 0.0000 < 0.0300; selected validation win-rate/payoff gate failed: win_rate 0.0000 below payoff-asymmetry floor 0.3000; selected validation ROI CI low None < 0.0000; validation trades 0 < 5.",
+              "validation_gap_needs_collection": true
+            },
+            {
+              "cohort": "research_focus",
+              "cohort_priority_value": 50.0,
+              "learning_state": "price_action_candidates_ready_for_governed_paper_bridge",
+              "priority_value": 50.0,
+              "query": "openai",
+              "source": "research_focus",
+              "summary": "Strict price-action model has positive train repricing examples but no positive validation examples; focus fresh websocket/scout collection on tennis, ethereum, economy, solana. Gap: Positive repricing examples exist in train, but validation has not yet seen a positive executable bid repricing.. Model blocker: no probability threshold cleared the training split trade gates; validation positive repricing targets 0 < 1; selected validation trades 0 < 5; selected validation P&L is not positive; selected validation ROI 0.0000 < 0.0300; selected validation win-rate/payoff gate failed: win_rate 0.0000 below payoff-asymmetry floor 0.3000; selected validation ROI CI low None < 0.0000; validation trades 0 < 5.",
+              "validation_gap_needs_collection": true
+            },
+            {
+              "cohort": "research_focus",
+              "cohort_priority_value": 50.0,
+              "learning_state": "price_action_candidates_ready_for_governed_paper_bridge",
+              "priority_value": 50.0,
+              "query": "economy",
+              "source": "research_focus",
+              "summary": "Strict price-action model has positive train repricing examples but no positive validation examples; focus fresh websocket/scout collection on tennis, ethereum, economy, solana. Gap: Positive repricing examples exist in train, but validation has not yet seen a positive executable bid repricing.. Model blocker: no probability threshold cleared the training split trade gates; validation positive repricing targets 0 < 1; selected validation trades 0 < 5; selected validation P&L is not positive; selected validation ROI 0.0000 < 0.0300; selected validation win-rate/payoff gate failed: win_rate 0.0000 below payoff-asymmetry floor 0.3000; selected validation ROI CI low None < 0.0000; validation trades 0 < 5.",
+              "validation_gap_needs_collection": true
+            },
+            {
+              "cohort": "research_focus",
+              "cohort_priority_value": 50.0,
+              "learning_state": "price_action_candidates_ready_for_governed_paper_bridge",
+              "priority_value": 50.0,
+              "query": "bitcoin",
+              "source": "research_focus",
+              "summary": "Strict price-action model has positive train repricing examples but no positive validation examples; focus fresh websocket/scout collection on tennis, ethereum, economy, solana. Gap: Positive repricing examples exist in train, but validation has not yet seen a positive executable bid repricing.. Model blocker: no probability threshold cleared the training split trade gates; validation positive repricing targets 0 < 1; selected validation trades 0 < 5; selected validation P&L is not positive; selected validation ROI 0.0000 < 0.0300; selected validation win-rate/payoff gate failed: win_rate 0.0000 below payoff-asymmetry floor 0.3000; selected validation ROI CI low None < 0.0000; validation trades 0 < 5.",
+              "validation_gap_needs_collection": true
+            },
+            {
+              "cohort": "research_focus",
+              "cohort_priority_value": 50.0,
+              "learning_state": "price_action_candidates_ready_for_governed_paper_bridge",
+              "priority_value": 50.0,
+              "query": "tennis",
+              "source": "research_focus",
+              "summary": "Strict price-action model has positive train repricing examples but no positive validation examples; focus fresh websocket/scout collection on tennis, ethereum, economy, solana. Gap: Positive repricing examples exist in train, but validation has not yet seen a positive executable bid repricing.. Model blocker: no probability threshold cleared the training split trade gates; validation positive repricing targets 0 < 1; selected validation trades 0 < 5; selected validation P&L is not positive; selected validation ROI 0.0000 < 0.0300; selected validation win-rate/payoff gate failed: win_rate 0.0000 below payoff-asymmetry floor 0.3000; selected validation ROI CI low None < 0.0000; validation trades 0 < 5.",
+              "validation_gap_needs_collection": true
+            }
+          ]
+        },
+        "all_queries": [
+          "world cup",
+          "tennis",
+          "nba",
+          "mlb",
+          "mma",
+          "sports",
+          "politics",
+          "elections",
+          "fed",
+          "economy",
+          "stocks",
+          "ai",
+          "openai",
+          "bitcoin",
+          "ethereum",
+          "solana",
+          "esports"
+        ],
+        "configured_queries": [
+          "world cup",
+          "tennis",
+          "nba",
+          "mlb",
+          "mma",
+          "sports",
+          "politics",
+          "elections",
+          "fed",
+          "economy",
+          "stocks"
+        ],
+        "frozen_updown": {
+          "excluded_queries": [
+            {
+              "query": "btc updown",
+              "reason": "frozen_crypto_updown_no_collection_priority"
+            },
+            {
+              "query": "solana updown",
+              "reason": "frozen_crypto_updown_no_collection_priority"
+            },
+            {
+              "query": "eth updown",
+              "reason": "frozen_crypto_updown_no_collection_priority"
+            }
+          ],
+          "excluded_query_count": 3,
+          "policy_version": "wo95_primary_hypothesis_discovery_v1",
+          "selected_count": 0,
+          "selected_queries": []
+        },
+        "injected_broad_repricing_queries": [],
+        "injected_primary_hypothesis_queries": [],
+        "injected_research_focus_queries": [
+          "ai",
+          "openai",
+          "bitcoin",
+          "ethereum",
+          "solana",
+          "esports",
+          "btc updown",
+          "solana updown",
+          "eth updown"
+        ],
+        "max_queries_per_cycle": 8,
+        "mode": "batch",
+        "ordered_queries": [
+          "world cup",
+          "ai",
+          "openai",
+          "economy",
+          "bitcoin",
+          "tennis",
+          "ethereum",
+          "solana",
+          "mma",
+          "nba",
+          "fed",
+          "stocks",
+          "politics",
+          "esports",
+          "mlb",
+          "sports",
+          "elections"
+        ],
+        "primary_hypothesis_coverage": {
+          "capacity": 8,
+          "missing_hypotheses": [],
+          "policy_version": "wo95_primary_hypothesis_discovery_v1",
+          "queries_by_hypothesis": {
+            "h1_sharp_anchor": [
+              "world cup",
+              "tennis"
+            ],
+            "h2_dutch_consistency": [
+              "sports"
+            ],
+            "h3_structural_smart_flow": [
+              "elections",
+              "economy"
+            ]
+          },
+          "required_hypotheses": [
+            "h1_sharp_anchor",
+            "h2_dutch_consistency",
+            "h3_structural_smart_flow"
+          ],
+          "reserved_queries": [
+            "tennis",
+            "sports",
+            "elections"
+          ],
+          "status": "ok",
+          "target_queries": {
+            "h1_sharp_anchor": "tennis",
+            "h2_dutch_consistency": "sports",
+            "h3_structural_smart_flow": "elections"
+          }
+        },
+        "primary_hypothesis_reserved_queries": [
+          "tennis",
+          "sports",
+          "elections"
+        ],
+        "research_focus_reserve_enabled": true,
+        "research_focus_reserved_queries": [],
+        "scan_sequence": 2,
+        "selected_queries": [
+          "tennis",
+          "sports",
+          "elections",
+          "world cup",
+          "ai",
+          "openai",
+          "economy",
+          "bitcoin"
+        ]
+      },
+      "scanner_opportunities": 0,
+      "snapshot_path": "/app/outputs/polymarket/market_snapshot.csv",
+      "tokens": 1304
+    },
+    "last_status": "ran",
+    "next_due_in_seconds": 0.0,
+    "running_iteration": 0,
+    "scan": {},
+    "started_at_utc": "",
+    "status": "skipped"
+  },
+  "discovery_blocks_governance": false,
+  "discovery_governance_block_seconds": 90.0,
+  "discovery_max_runtime_seconds": 900.0,
+  "discovery_no_longer_blocks_governance": false,
+  "discovery_no_longer_blocks_prediction": false,
+  "discovery_running_seconds": null,
+  "effective_max_assets": 80,
+  "elapsed_seconds": 43.924,
+  "full_prediction_cycle": {
+    "source": "websocket",
+    "started_at_utc": "2026-08-21T01:59:58Z",
+    "status": "running"
+  },
+  "generated_at_utc": "2026-08-21T01:59:58Z",
+  "governance_due_blocks_prediction": false,
+  "governance_max_runtime_seconds": 600.0,
+  "governance_refresh": {
+    "cycle_seconds": 0.0,
+    "last_summary": {
+      "status": "not_started"
+    },
+    "next_due_in_seconds": null,
+    "started_at_utc": "",
+    "status": "not_started"
+  },
+  "governance_running_seconds": null,
+  "heavy_background_job": "prediction",
+  "ingest": {
+    "inserted_market_snapshots": 53,
+    "skipped_rows": 0,
+    "status": "ok"
+  },
+  "iteration": 4650,
+  "prediction_blocks_governance": false,
+  "prediction_cycle_seconds": 30.0,
+  "prediction_governance_block_seconds": 90.0,
+  "prediction_lock_maintenance": {
+    "status": "not_locked"
+  },
+  "prediction_max_runtime_seconds": 600.0,
+  "prediction_mode": "paper-bridge",
+  "prediction_no_longer_blocks_governance": true,
+  "prediction_running_seconds": 5.602836608886719e-05,
+  "price_action_scout": {
+    "closed_trades": 27,
+    "current_positive_analogue_targets": 0,
+    "decision": "collect_more_bid_ask_price_action_scout_evidence",
+    "open_trades": 18,
+    "status": "computed"
+  },
+  "requested_max_assets": 80,
+  "resource_guard": {
+    "container_memory_percent": 38.08555603027344,
+    "degrade_live_loop": false,
+    "degraded_max_websocket_assets": 20,
+    "enabled": true,
+    "host_memory_percent": 16.26260048596554,
+    "max_memory_percent": 90.0,
+    "memory_percent": 38.08555603027344,
+    "reason": "ok",
+    "skip_cycle": false,
+    "skip_discovery_cycle": false,
+    "skip_prediction_cycle": false
+  },
+  "status": "ok",
+  "websocket": {
+    "append_mode": true,
+    "best_bid_ask_messages_received": 0,
+    "best_bid_ask_messages_retained": 3000,
+    "best_bid_ask_output_file": "outputs/polymarket_websocket/websocket_best_bid_ask.json",
+    "dropped_best_bid_ask_messages": 0,
+    "dropped_messages": 11,
+    "existing_messages": 15000,
+    "latest_output_file": "outputs/polymarket_websocket/websocket_messages_latest.json",
+    "lifecycle_capture": {
+      "custom_feature_enabled": true,
+      "downstream_wired": false,
+      "market_births_appended": 0,
+      "market_births_duplicates": 0,
+      "market_births_file": "outputs/polymarket_websocket/market_births.csv",
+      "market_births_invalid": 0,
+      "market_births_received": 0,
+      "resolution_events_appended": 0,
+      "resolution_events_duplicates": 0,
+      "resolution_events_file": "outputs/polymarket_websocket/resolution_events.csv",
+      "resolution_events_invalid": 0,
+      "resolution_events_received": 0
+    },
+    "max_best_bid_ask_messages": 3000,
+    "max_messages": 15000,
+    "messages": 15000,
+    "new_messages": 11,
+    "output_file": "outputs/polymarket_websocket/websocket_messages.json",
+    "retained_new_messages": 11,
+    "seconds": 20,
+    "selected_subscription": "{\"assets_ids\": [\"7372974787747703468363173511100619071382102470973414293127030322668458888034\", \"109643129069070227576389393736246747645420239159664322555293451137214490685036\", \"43595531958558267934455886300539818619407063141211246186008687659488782680099\", \"101106027123457230511923560603100933782439732335133293995646065340833826927163\", \"71827396998946924240056437519949087820352588387051888811942886136688189882272\", \"40553687028357385570012767684841134153932705410424731659907218042194272368471\", \"6003904135061936547790713762650160287283968685330714568260970794818630572545\", \"80080666935022421409008183305973221240813840495378722317438719068727398514970\", \"103912144433381375033777625602521546472516088434935794616071416272647403013541\", \"67718828845920386088756585343739136462737819134101447980208518213153186435007\", \"107064985435494333113391038470401719113272800530429703182710416066774068907304\", \"54533043819946592547517511176940999955633860128497669742211153063842200957669\", \"67759026735129950411953054344568700672410333285720790718009963808018846725874\", \"46567293169762615147895646425485617554441306631537089020538395786901322917919\", \"83780270981142745588382022281730474198984169895285729238591949316014506482735\", \"111604417349377875799825956621596386269673370070912696668140891647145772186047\", \"81884788045396255319724909241792008311631947807765080028129774338189457212300\", \"109411971502191575990239845904268761232798482984901335510771668136732563339375\", \"6567244660746898210158255639902281602329344920209013325941853079874959136606\", \"91031279171981959197361710127213577102576826515163085396576756946418341946256\", \"103883506437088954379798373643258684749986129514483159127060003637507493197511\", \"64172740292631568430927824514370563467849451267431738273328581112453821186477\", \"40006011392479278716728826026838613216160228550879638897627220487286855929731\", \"79671173971291281288979155001773858879943182901188584688721663954174110342864\", \"114548016853747232835723930399248065751701993585518116420876352200866213673281\", \"67373916574892147187303350639912478865725471574290142157843896025797680800073\", \"10332001969981498454094975105479481101197345162802102101478412733032476799533\", \"105160202173485348912338978461024692500189538590991948225326013735362457102327\", \"114138515149713064539478148066361741623220306931314194839810680522821240901317\", \"58490859328243212279412541458794308476991330364217513266494370658881648510092\", \"65176072261324737856085688071627118509549293922582857186996392180609764586527\", \"56331397442298013031637751743917063488782287296146609687478597202083892654134\", \"111042447650638700846182571204593579022770840925359929993760314750576595664427\", \"2427510173563168530654677093444917357767551989792885760649227463000109130939\", \"21470149341290235568443046796948276522679518508943231681070239280601927615387\", \"84394488982058292533072425437932297770796452646855770981137941788656211626032\", \"87854174148074652060467921081181402357467303721471806610111179101805869578687\", \"81376564113205313962670402623035723408891351486682543183723967037757376935125\", \"86511462414102168596879148591191857209536954257360439056586395394549997171501\", \"21874577331782954169360483486156393331549874340979903236532325153030627412077\", \"34525377212139355785611089201709983883282104006968460811778751845444327183258\", \"34352156398446436078106018571351437965469399998092625112032289774684767742814\", \"17543443874603102773870035939503962160674594506978288762449328723650964802540\", \"27324706329524328396966755059855693831799046547472279724138450702295699133482\", \"54572000029212935673052439719725586286825272140344408035506650961899605870132\", \"24248064739807943708062848066877951441878691695479734806500457145253446147153\", \"58556096477996720298820021459303315761119601564911227476383906767248630286145\", \"12372430546965660725957017712626888450346108632953584263464711242208995181695\", \"29221647660001052534885426446639848390010824454348882014638265430112051361512\", \"88446040293694634817223282433323789426729779125635587766131752299224372362386\", \"9026469324102605102307422463289059933747503876473416458571688189421606447134\", \"104886615402017902317462413385001471393649224415923075992618028910546450870173\", \"85292437971517117051013315167706863955194415897735521976898340308311851733649\", \"79044942643714866729558056184363628342002545029617597811724084512464665338611\", \"81718924566344342339932153243056822500865643754622838691875214933560980686588\", \"12023915225121598294095819109757031770683593618804863730859503106741995867293\", \"105034581660279735907048350342968787201101983197805669873057540757770059756885\", \"1780702196679647062667061480586232003462305846033798567161191975266382860792\", \"61269928972601646274450320950335287094098783124695300612540802497991126406367\", \"104475344139610383099450044275767940154215872616914022795003498444118559085477\", \"16636591294027108067609392990832542985972247836353495649527577852717482970558\", \"6527439894417506591879968948282318689407350936676236354099012095831027111289\", \"71401904010247427754329784277924205841820460862761252985878735510347215917540\", \"104262187875698171363225679631768597298955978199013813614721422095755488472904\", \"2649199107841433650002090865886628469777181894506830736515213694771093840632\", \"107111506004559425167535337910569809007100298896139468418632748246491535011700\", \"91349426536473341472396950667988584323016085405499092844939105892689673932206\", \"57418860792080955904919337057039448785734433779019186232169939221492252115591\", \"61613488725066083738210184581306920941345613326763512563637655013981415522667\", \"17604489170973354843108988820183540408277693731517132323158472776610141980187\", \"44437828835918970572754149333933371073424732398014446529359093781493670177161\", \"80335609827602144973400700286800607989091471408666208830272936565190453177519\", \"90713175285238837229141362456380660699457701142142655731293716395090014512187\", \"97305085248939915948076254207246953533710367464980804943159201498255487564681\", \"49921282478333259285749805039395969822975583794964743234276357774681254250778\", \"21381604720372833532621682757591075796608802435814933570064101106007846357998\", \"1516513454171209635514053162313025854650756369584719728539827097121735380200\", \"73236020982042322107719049752749478285487797346322886261660588599081906662415\", \"46312529158416609898079553446176504311993678139330779840129310682124759689495\", \"74688233996655490813518268761284868354011132001307729243128802204408129419098\", \"98498627019279358412304301399839472193992301596778591827631393640653141804050\", \"35596541828042021719542829843878878132042091082176384026750305027337834086811\", \"107513289396870137608380070173094456556926774585165688210403148839571060064872\", \"15495228285254466231335125808946052073840342359869563499062266006502800512695\", \"43975378191074358671281520872697918948044394157610457450863109826755838430110\", \"32950667601234459153147809204874586210606478849353100509512671881325449975912\", \"54276033582078673401364183324244113404590190122705464276265601906123612097189\", \"79895259217313803731994821165811563835560123915015381398339503448680100356036\", \"94054589826024475291045917009737839809132161124230826827242696889963451483597\", \"51819545177992980050544653528219085611945377861594412412561048331713992664435\", \"31627048520492227354616069874124458767757243686332730237616510640600462926383\", \"114034864011098849665581122043067683218020304289877802733979597625918907569224\", \"72119665672938998702718005181109631489987420327515828531069284911434094450764\", \"17197869493187833053389100719279218733754467731633419623023697564773627790847\", \"2401142811962862070663936635856656850619624784245958295355645508255517264349\", \"60508215325190177373410488147044212101567817797077332790561244336196532307240\", \"67762550855572599115109240170181269623944178808820636545438763502781484850730\", \"22985876253848997634722146548328705896768137336926060314635427633082846638604\", \"19653256042621618513359712634441094602989715483047297038180875646470350509987\", \"73148754771904705789992839223698652347584217442761841171877207189768130833542\", \"101454463517202516711386718324708667600036017191366034710454724175336612725119\"], \"custom_feature_enabled\": true, \"type\": \"market\"}",
+    "status": "collected",
+    "subscription_attempts": 3,
+    "subscription_errors": [],
+    "target_assets": 101,
+    "target_current_positive_analogue_counts": {},
+    "target_family_counts": {
+      "ai_model_leader": 10,
+      "baseball_mlb_match": 5,
+      "basketball_nba_match": 3,
+      "crypto_btc_special": 16,
+      "crypto_eth_special": 11,
+      "crypto_sol_special": 10,
+      "crypto_special": 2,
+      "crypto_xrp_special": 2,
+      "esports_match": 5,
+      "geopolitics": 14,
+      "macro_economy": 5,
+      "macro_rates": 5,
+      "mma_match": 1,
+      "policy_legal": 2,
+      "soccer_match": 5,
+      "tennis_tennis_winner": 5
+    },
+    "target_fast_feedback_family_counts": {
+      "crypto_btc_special": 2
+    },
+    "target_feedback_broaden_counts": {
+      "ai_model_leader": 2,
+      "baseball_mlb_match": 3,
+      "basketball_nba_match": 3,
+      "crypto_btc_special": 4,
+      "crypto_eth_special": 1,
+      "esports_match": 3,
+      "macro_economy": 1,
+      "macro_rates": 1,
+      "soccer_match": 3,
+      "tennis_tennis_winner": 3
+    },
+    "target_file": "outputs/polymarket_model_governance/websocket_liquidity_targets.csv",
+    "target_historical_breadth_counts": {
+      "tennis_tennis_winner": 3
+    },
+    "target_paper_confirmation_blocker_counts": {
+      "ai_model_leader": 3,
+      "crypto_sol_special": 1
+    },
+    "target_position_counts": {},
+    "target_profit_sprint_counts": {
+      "SHADOW_EDGE_WATCH": 7
+    },
+    "target_research_counts": {
+      "ai_model_leader": 5,
+      "crypto_btc_special": 12,
+      "crypto_eth_special": 10,
+      "crypto_sol_special": 8,
+      "crypto_special": 2,
+      "crypto_xrp_special": 2,
+      "esports_match": 2,
+      "geopolitics": 7,
+      "macro_economy": 4,
+      "macro_rates": 4,
+      "mma_match": 1,
+      "soccer_match": 1,
+      "tennis_tennis_winner": 2
+    },
+    "target_source": "profit_sprint_targets+liquidity_watchlist+price_action_feedback_broaden+historical_breadth_targets+paper_confirmation_blocker_targets+research_repricing_coverage",
+    "target_strategy_v2_counts": {},
+    "total_messages": 15000
+  },
+  "websocket_features": {
+    "category_counts": {
+      "ai_model_leader": 4554,
+      "basketball_nba_match": 3974,
+      "crypto_btc_special": 2205,
+      "crypto_eth_special": 2990,
+      "crypto_sol_special": 1820,
+      "geopolitics": 26455,
+      "macro_economy": 5627,
+      "mma_match": 1167,
+      "policy_legal": 2594,
+      "tennis_match": 32,
+      "tennis_tennis_winner": 5659,
+      "unknown": 2923
+    },
+    "collected_at_utc": "2026-08-21T01:59:31Z",
+    "deduped_feature_rows": "",
+    "dropped_for_max_feature_rows": 0,
+    "event_type_counts": {
+      "book": 26358,
+      "last_trade_price": 32,
+      "price_change": 33610
+    },
+    "existing_feature_rows": 60000,
+    "feature_columns": [
+      "collected_at_utc",
+      "source_timestamp",
+      "market",
+      "asset_id",
+      "market_slug",
+      "question",
+      "category",
+      "selection",
+      "close_time",
+      "event_type",
+      "best_bid",
+      "best_ask",
+      "midpoint",
+      "spread",
+      "last_trade_price",
+      "top_bid_size",
+      "top_ask_size",
+      "bid_depth_1pct",
+      "ask_depth_1pct",
+      "bid_depth_5pct",
+      "ask_depth_5pct",
+      "book_imbalance",
+      "price_change_side",
+      "price_change_price",
+      "price_change_size"
+    ],
+    "feature_retention_cutoff_utc": "2026-08-18T01:57:43Z",
+    "feature_retention_enabled": true,
+    "feature_retention_hours": 72,
+    "feature_retention_last_write_age_seconds": 108.0,
+    "feature_retention_last_write_utc": "2026-08-21T01:57:43Z",
+    "feature_retention_write_due": false,
+    "feature_retention_write_interval_seconds": 120.0,
+    "feature_retention_write_skipped": true,
+    "feature_rows": 60000,
+    "features_file": "outputs/polymarket_training/websocket_market_features.csv",
+    "input_exists": true,
+    "input_file": "outputs/polymarket_websocket/websocket_messages_latest.json",
+    "input_scope": "latest_messages",
+    "issue_type_counts": {},
+    "label_columns_present": [],
+    "malformed_message_count": 0,
+    "max_feature_rows": 60000,
+    "messages_processed": 11,
+    "metadata_enriched_rows": 63,
+    "metadata_index_keys": 3094,
+    "new_feature_rows": 63,
+    "quality_file": "outputs/polymarket_model_governance/websocket_feature_quality_report.csv",
+    "quality_rows": 0,
+    "retained_feature_rows": 60000,
+    "return_latest_features_only": true,
+    "returned_feature_rows": 63,
+    "status": "ok"
+  },
+  "websocket_quality_rows": 0,
+  "websocket_seconds": 20
+}

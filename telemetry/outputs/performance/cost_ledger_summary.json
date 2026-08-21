@@ -1,0 +1,38 @@
+{
+  "aggregate_all_time": {
+    "by_category_usd": {
+      "gas": 0.0,
+      "other": 0.0,
+      "rail": 0.0,
+      "subscription": 0.0
+    },
+    "end_date": null,
+    "invalid_rows": 0,
+    "ledger_path": "outputs/performance/cost_ledger.csv",
+    "row_count": 0,
+    "start_date": null,
+    "total_usd": 0.0
+  },
+  "duplicate_cost_refs": [],
+  "gas_observations_path": "outputs/performance/wallet_gas_observations.csv",
+  "generated_at_utc": "2026-08-20T03:12:20Z",
+  "invalid_gas_observations": 0,
+  "ledger_path": "outputs/performance/cost_ledger.csv",
+  "live_trading_invoked": false,
+  "manual_gas_entries_required": [],
+  "new_rows": 0,
+  "paper_trading_invoked": false,
+  "pending_attributed_gas_rows": 0,
+  "pol_usd_source": {
+    "coin_id": "polygon-ecosystem-token",
+    "name": "CoinGecko simple-price",
+    "price_usd": null,
+    "status": "not_requested_no_pending_gas",
+    "url": "https://api.coingecko.com/api/v3/simple/price"
+  },
+  "relayer_paid_observations_excluded": 2,
+  "reporting_only": true,
+  "status": "ok",
+  "summary_path": "outputs/performance/cost_ledger_summary.json",
+  "work_order": "WO-63"
+}

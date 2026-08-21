@@ -1,0 +1,456 @@
+{
+  "bias_prior_strength": 25.0,
+  "cells": {
+    "category_probability|unknown|0.10-0.20": {
+      "actual_win_rate": 0.2857142857142857,
+      "market_brier": 0.22212857142857143,
+      "mean_market_probability": 0.16071428571428573,
+      "raw_bias": 0.12499999999999997,
+      "rows": 14,
+      "shrunk_bias": 0.044871794871794865
+    },
+    "category_probability|unknown|0.20-0.30": {
+      "actual_win_rate": 0.5,
+      "market_brier": 0.3019895833333333,
+      "mean_market_probability": 0.26000000000000006,
+      "raw_bias": 0.23999999999999994,
+      "rows": 24,
+      "shrunk_bias": 0.11755102040816323
+    },
+    "category_probability|unknown|0.30-0.40": {
+      "actual_win_rate": 0.6825396825396826,
+      "market_brier": 0.32928373015873025,
+      "mean_market_probability": 0.3570634920634921,
+      "raw_bias": 0.3254761904761905,
+      "rows": 63,
+      "shrunk_bias": 0.23301136363636366
+    },
+    "category_probability|unknown|0.40-0.50": {
+      "actual_win_rate": 0.68,
+      "market_brier": 0.24993124999999985,
+      "mean_market_probability": 0.47224999999999967,
+      "raw_bias": 0.20775000000000038,
+      "rows": 100,
+      "shrunk_bias": 0.16620000000000032
+    },
+    "category_probability|unknown|0.50-0.60": {
+      "actual_win_rate": 0.4587378640776699,
+      "market_brier": 0.24966547330097102,
+      "mean_market_probability": 0.5060072815533977,
+      "raw_bias": -0.04726941747572777,
+      "rows": 412,
+      "shrunk_bias": -0.044565217391303986
+    },
+    "category_probability|unknown|0.60-0.70": {
+      "actual_win_rate": 0.3088235294117647,
+      "market_brier": 0.33113970588235303,
+      "mean_market_probability": 0.6417647058823526,
+      "raw_bias": -0.33294117647058785,
+      "rows": 68,
+      "shrunk_bias": -0.24344086021505348
+    },
+    "category_probability|unknown|0.70-0.80": {
+      "actual_win_rate": 0.5416666666666666,
+      "market_brier": 0.28323020833333334,
+      "mean_market_probability": 0.7385416666666668,
+      "raw_bias": -0.19687500000000013,
+      "rows": 24,
+      "shrunk_bias": -0.09642857142857149
+    },
+    "category_probability|unknown|0.80-0.90": {
+      "actual_win_rate": 0.6923076923076923,
+      "market_brier": 0.2362903846153846,
+      "mean_market_probability": 0.8419230769230768,
+      "raw_bias": -0.14961538461538448,
+      "rows": 13,
+      "shrunk_bias": -0.05118421052631575
+    },
+    "category_time_probability|unknown|1-3d|0.10-0.20": {
+      "actual_win_rate": 0.375,
+      "market_brier": 0.280440625,
+      "mean_market_probability": 0.16562500000000002,
+      "raw_bias": 0.20937499999999998,
+      "rows": 8,
+      "shrunk_bias": 0.05075757575757575
+    },
+    "category_time_probability|unknown|1-3d|0.20-0.30": {
+      "actual_win_rate": 0.3333333333333333,
+      "market_brier": 0.22449583333333334,
+      "mean_market_probability": 0.25083333333333335,
+      "raw_bias": 0.08249999999999996,
+      "rows": 12,
+      "shrunk_bias": 0.026756756756756747
+    },
+    "category_time_probability|unknown|1-3d|0.30-0.40": {
+      "actual_win_rate": 0.5714285714285714,
+      "market_brier": 0.300225,
+      "mean_market_probability": 0.35,
+      "raw_bias": 0.22142857142857142,
+      "rows": 14,
+      "shrunk_bias": 0.07948717948717948
+    },
+    "category_time_probability|unknown|1-3d|0.40-0.50": {
+      "actual_win_rate": 0.4666666666666667,
+      "market_brier": 0.242565,
+      "mean_market_probability": 0.4323333333333334,
+      "raw_bias": 0.03433333333333327,
+      "rows": 15,
+      "shrunk_bias": 0.012874999999999977
+    },
+    "category_time_probability|unknown|1-3d|0.50-0.60": {
+      "actual_win_rate": 0.5333333333333333,
+      "market_brier": 0.24544999999999997,
+      "mean_market_probability": 0.5273333333333334,
+      "raw_bias": 0.005999999999999894,
+      "rows": 30,
+      "shrunk_bias": 0.003272727272727215
+    },
+    "category_time_probability|unknown|1-3d|0.60-0.70": {
+      "actual_win_rate": 0.3888888888888889,
+      "market_brier": 0.31198750000000003,
+      "mean_market_probability": 0.646388888888889,
+      "raw_bias": -0.2575000000000001,
+      "rows": 18,
+      "shrunk_bias": -0.10779069767441866
+    },
+    "category_time_probability|unknown|1-3d|0.70-0.80": {
+      "actual_win_rate": 0.75,
+      "market_brier": 0.18697708333333332,
+      "mean_market_probability": 0.7462499999999999,
+      "raw_bias": 0.003750000000000142,
+      "rows": 12,
+      "shrunk_bias": 0.0012162162162162623
+    },
+    "category_time_probability|unknown|1-6h|0.30-0.40": {
+      "actual_win_rate": 0.6363636363636364,
+      "market_brier": 0.32101818181818187,
+      "mean_market_probability": 0.34818181818181815,
+      "raw_bias": 0.2881818181818182,
+      "rows": 11,
+      "shrunk_bias": 0.08805555555555557
+    },
+    "category_time_probability|unknown|1-6h|0.40-0.50": {
+      "actual_win_rate": 0.8,
+      "market_brier": 0.24653249999999996,
+      "mean_market_probability": 0.4710000000000001,
+      "raw_bias": 0.32899999999999996,
+      "rows": 20,
+      "shrunk_bias": 0.1462222222222222
+    },
+    "category_time_probability|unknown|1-6h|0.50-0.60": {
+      "actual_win_rate": 0.44642857142857145,
+      "market_brier": 0.24938080357142853,
+      "mean_market_probability": 0.5051785714285716,
+      "raw_bias": -0.058750000000000135,
+      "rows": 112,
+      "shrunk_bias": -0.04802919708029208
+    },
+    "category_time_probability|unknown|1-6h|0.60-0.70": {
+      "actual_win_rate": 0.36363636363636365,
+      "market_brier": 0.32101818181818187,
+      "mean_market_probability": 0.6518181818181819,
+      "raw_bias": -0.2881818181818182,
+      "rows": 11,
+      "shrunk_bias": -0.08805555555555557
+    },
+    "category_time_probability|unknown|3-7d|0.30-0.40": {
+      "actual_win_rate": 0.7241379310344828,
+      "market_brier": 0.3369999999999999,
+      "mean_market_probability": 0.3631034482758621,
+      "raw_bias": 0.36103448275862066,
+      "rows": 29,
+      "shrunk_bias": 0.1938888888888889
+    },
+    "category_time_probability|unknown|3-7d|0.40-0.50": {
+      "actual_win_rate": 0.46153846153846156,
+      "market_brier": 0.26591923076923074,
+      "mean_market_probability": 0.4653846153846154,
+      "raw_bias": -0.0038461538461538325,
+      "rows": 13,
+      "shrunk_bias": -0.001315789473684206
+    },
+    "category_time_probability|unknown|3-7d|0.50-0.60": {
+      "actual_win_rate": 0.5277777777777778,
+      "market_brier": 0.25269305555555555,
+      "mean_market_probability": 0.5097222222222223,
+      "raw_bias": 0.01805555555555549,
+      "rows": 36,
+      "shrunk_bias": 0.010655737704917994
+    },
+    "category_time_probability|unknown|3-7d|0.60-0.70": {
+      "actual_win_rate": 0.26666666666666666,
+      "market_brier": 0.3377666666666666,
+      "mean_market_probability": 0.6356666666666667,
+      "raw_bias": -0.36900000000000005,
+      "rows": 30,
+      "shrunk_bias": -0.2012727272727273
+    },
+    "category_time_probability|unknown|6-24h|0.30-0.40": {
+      "actual_win_rate": 0.7777777777777778,
+      "market_brier": 0.35972499999999996,
+      "mean_market_probability": 0.35944444444444446,
+      "raw_bias": 0.41833333333333333,
+      "rows": 9,
+      "shrunk_bias": 0.11073529411764706
+    },
+    "category_time_probability|unknown|6-24h|0.40-0.50": {
+      "actual_win_rate": 0.75,
+      "market_brier": 0.2493663461538461,
+      "mean_market_probability": 0.4859615384615384,
+      "raw_bias": 0.2640384615384616,
+      "rows": 52,
+      "shrunk_bias": 0.17831168831168837
+    },
+    "category_time_probability|unknown|6-24h|0.50-0.60": {
+      "actual_win_rate": 0.4444444444444444,
+      "market_brier": 0.24987638888888902,
+      "mean_market_probability": 0.5030982905982905,
+      "raw_bias": -0.058653846153846056,
+      "rows": 234,
+      "shrunk_bias": -0.0529922779922779
+    },
+    "category_time_probability|unknown|6-24h|0.60-0.70": {
+      "actual_win_rate": 0.2222222222222222,
+      "market_brier": 0.359725,
+      "mean_market_probability": 0.6405555555555557,
+      "raw_bias": -0.41833333333333345,
+      "rows": 9,
+      "shrunk_bias": -0.11073529411764708
+    },
+    "global|all": {
+      "actual_win_rate": 0.5,
+      "market_brier": 0.2713324240331484,
+      "mean_market_probability": 0.49999309392265184,
+      "raw_bias": 6.906077348156625e-06,
+      "rows": 724,
+      "shrunk_bias": 6.675567423318287e-06
+    },
+    "probability|all|0.10-0.20": {
+      "actual_win_rate": 0.2857142857142857,
+      "market_brier": 0.22212857142857143,
+      "mean_market_probability": 0.16071428571428573,
+      "raw_bias": 0.12499999999999997,
+      "rows": 14,
+      "shrunk_bias": 0.044871794871794865
+    },
+    "probability|all|0.20-0.30": {
+      "actual_win_rate": 0.5,
+      "market_brier": 0.3019895833333333,
+      "mean_market_probability": 0.26000000000000006,
+      "raw_bias": 0.23999999999999994,
+      "rows": 24,
+      "shrunk_bias": 0.11755102040816323
+    },
+    "probability|all|0.30-0.40": {
+      "actual_win_rate": 0.6825396825396826,
+      "market_brier": 0.32928373015873025,
+      "mean_market_probability": 0.3570634920634921,
+      "raw_bias": 0.3254761904761905,
+      "rows": 63,
+      "shrunk_bias": 0.23301136363636366
+    },
+    "probability|all|0.40-0.50": {
+      "actual_win_rate": 0.68,
+      "market_brier": 0.24993124999999985,
+      "mean_market_probability": 0.47224999999999967,
+      "raw_bias": 0.20775000000000038,
+      "rows": 100,
+      "shrunk_bias": 0.16620000000000032
+    },
+    "probability|all|0.50-0.60": {
+      "actual_win_rate": 0.4587378640776699,
+      "market_brier": 0.24966547330097102,
+      "mean_market_probability": 0.5060072815533977,
+      "raw_bias": -0.04726941747572777,
+      "rows": 412,
+      "shrunk_bias": -0.044565217391303986
+    },
+    "probability|all|0.60-0.70": {
+      "actual_win_rate": 0.3088235294117647,
+      "market_brier": 0.33113970588235303,
+      "mean_market_probability": 0.6417647058823526,
+      "raw_bias": -0.33294117647058785,
+      "rows": 68,
+      "shrunk_bias": -0.24344086021505348
+    },
+    "probability|all|0.70-0.80": {
+      "actual_win_rate": 0.5416666666666666,
+      "market_brier": 0.28323020833333334,
+      "mean_market_probability": 0.7385416666666668,
+      "raw_bias": -0.19687500000000013,
+      "rows": 24,
+      "shrunk_bias": -0.09642857142857149
+    },
+    "probability|all|0.80-0.90": {
+      "actual_win_rate": 0.6923076923076923,
+      "market_brier": 0.2362903846153846,
+      "mean_market_probability": 0.8419230769230768,
+      "raw_bias": -0.14961538461538448,
+      "rows": 13,
+      "shrunk_bias": -0.05118421052631575
+    },
+    "time_probability|all|1-3d|0.10-0.20": {
+      "actual_win_rate": 0.375,
+      "market_brier": 0.280440625,
+      "mean_market_probability": 0.16562500000000002,
+      "raw_bias": 0.20937499999999998,
+      "rows": 8,
+      "shrunk_bias": 0.05075757575757575
+    },
+    "time_probability|all|1-3d|0.20-0.30": {
+      "actual_win_rate": 0.3333333333333333,
+      "market_brier": 0.22449583333333334,
+      "mean_market_probability": 0.25083333333333335,
+      "raw_bias": 0.08249999999999996,
+      "rows": 12,
+      "shrunk_bias": 0.026756756756756747
+    },
+    "time_probability|all|1-3d|0.30-0.40": {
+      "actual_win_rate": 0.5714285714285714,
+      "market_brier": 0.300225,
+      "mean_market_probability": 0.35,
+      "raw_bias": 0.22142857142857142,
+      "rows": 14,
+      "shrunk_bias": 0.07948717948717948
+    },
+    "time_probability|all|1-3d|0.40-0.50": {
+      "actual_win_rate": 0.4666666666666667,
+      "market_brier": 0.242565,
+      "mean_market_probability": 0.4323333333333334,
+      "raw_bias": 0.03433333333333327,
+      "rows": 15,
+      "shrunk_bias": 0.012874999999999977
+    },
+    "time_probability|all|1-3d|0.50-0.60": {
+      "actual_win_rate": 0.5333333333333333,
+      "market_brier": 0.24544999999999997,
+      "mean_market_probability": 0.5273333333333334,
+      "raw_bias": 0.005999999999999894,
+      "rows": 30,
+      "shrunk_bias": 0.003272727272727215
+    },
+    "time_probability|all|1-3d|0.60-0.70": {
+      "actual_win_rate": 0.3888888888888889,
+      "market_brier": 0.31198750000000003,
+      "mean_market_probability": 0.646388888888889,
+      "raw_bias": -0.2575000000000001,
+      "rows": 18,
+      "shrunk_bias": -0.10779069767441866
+    },
+    "time_probability|all|1-3d|0.70-0.80": {
+      "actual_win_rate": 0.75,
+      "market_brier": 0.18697708333333332,
+      "mean_market_probability": 0.7462499999999999,
+      "raw_bias": 0.003750000000000142,
+      "rows": 12,
+      "shrunk_bias": 0.0012162162162162623
+    },
+    "time_probability|all|1-6h|0.30-0.40": {
+      "actual_win_rate": 0.6363636363636364,
+      "market_brier": 0.32101818181818187,
+      "mean_market_probability": 0.34818181818181815,
+      "raw_bias": 0.2881818181818182,
+      "rows": 11,
+      "shrunk_bias": 0.08805555555555557
+    },
+    "time_probability|all|1-6h|0.40-0.50": {
+      "actual_win_rate": 0.8,
+      "market_brier": 0.24653249999999996,
+      "mean_market_probability": 0.4710000000000001,
+      "raw_bias": 0.32899999999999996,
+      "rows": 20,
+      "shrunk_bias": 0.1462222222222222
+    },
+    "time_probability|all|1-6h|0.50-0.60": {
+      "actual_win_rate": 0.44642857142857145,
+      "market_brier": 0.24938080357142853,
+      "mean_market_probability": 0.5051785714285716,
+      "raw_bias": -0.058750000000000135,
+      "rows": 112,
+      "shrunk_bias": -0.04802919708029208
+    },
+    "time_probability|all|1-6h|0.60-0.70": {
+      "actual_win_rate": 0.36363636363636365,
+      "market_brier": 0.32101818181818187,
+      "mean_market_probability": 0.6518181818181819,
+      "raw_bias": -0.2881818181818182,
+      "rows": 11,
+      "shrunk_bias": -0.08805555555555557
+    },
+    "time_probability|all|3-7d|0.30-0.40": {
+      "actual_win_rate": 0.7241379310344828,
+      "market_brier": 0.3369999999999999,
+      "mean_market_probability": 0.3631034482758621,
+      "raw_bias": 0.36103448275862066,
+      "rows": 29,
+      "shrunk_bias": 0.1938888888888889
+    },
+    "time_probability|all|3-7d|0.40-0.50": {
+      "actual_win_rate": 0.46153846153846156,
+      "market_brier": 0.26591923076923074,
+      "mean_market_probability": 0.4653846153846154,
+      "raw_bias": -0.0038461538461538325,
+      "rows": 13,
+      "shrunk_bias": -0.001315789473684206
+    },
+    "time_probability|all|3-7d|0.50-0.60": {
+      "actual_win_rate": 0.5277777777777778,
+      "market_brier": 0.25269305555555555,
+      "mean_market_probability": 0.5097222222222223,
+      "raw_bias": 0.01805555555555549,
+      "rows": 36,
+      "shrunk_bias": 0.010655737704917994
+    },
+    "time_probability|all|3-7d|0.60-0.70": {
+      "actual_win_rate": 0.26666666666666666,
+      "market_brier": 0.3377666666666666,
+      "mean_market_probability": 0.6356666666666667,
+      "raw_bias": -0.36900000000000005,
+      "rows": 30,
+      "shrunk_bias": -0.2012727272727273
+    },
+    "time_probability|all|6-24h|0.30-0.40": {
+      "actual_win_rate": 0.7777777777777778,
+      "market_brier": 0.35972499999999996,
+      "mean_market_probability": 0.35944444444444446,
+      "raw_bias": 0.41833333333333333,
+      "rows": 9,
+      "shrunk_bias": 0.11073529411764706
+    },
+    "time_probability|all|6-24h|0.40-0.50": {
+      "actual_win_rate": 0.75,
+      "market_brier": 0.2493663461538461,
+      "mean_market_probability": 0.4859615384615384,
+      "raw_bias": 0.2640384615384616,
+      "rows": 52,
+      "shrunk_bias": 0.17831168831168837
+    },
+    "time_probability|all|6-24h|0.50-0.60": {
+      "actual_win_rate": 0.4444444444444444,
+      "market_brier": 0.24987638888888902,
+      "mean_market_probability": 0.5030982905982905,
+      "raw_bias": -0.058653846153846056,
+      "rows": 234,
+      "shrunk_bias": -0.0529922779922779
+    },
+    "time_probability|all|6-24h|0.60-0.70": {
+      "actual_win_rate": 0.2222222222222222,
+      "market_brier": 0.359725,
+      "mean_market_probability": 0.6405555555555557,
+      "raw_bias": -0.41833333333333345,
+      "rows": 9,
+      "shrunk_bias": -0.11073529411764708
+    }
+  },
+  "deployment_mode": "alpha_overlay",
+  "feature_policy": "Learns only ex-ante market calibration residuals: target - market_probability by category/time/probability bucket.",
+  "git_commit_hash": "unknown",
+  "global_bias": 6.675567423318287e-06,
+  "minimum_cell_rows": 8,
+  "model_version": "pm-mispricing-alpha-v1",
+  "probability_buckets": 10,
+  "status": "trained",
+  "trained_at": "2026-07-13T22:36:53Z",
+  "training_markets": 80,
+  "training_rows": 724
+}

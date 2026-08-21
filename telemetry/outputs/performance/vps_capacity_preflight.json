@@ -1,0 +1,131 @@
+{
+  "blockers": [],
+  "checks": [
+    {
+      "id": "vcpu_capacity",
+      "measured": 4,
+      "passed": true,
+      "required": 2,
+      "unit": "count"
+    },
+    {
+      "id": "compose_memory_commit",
+      "measured": 24060227584,
+      "passed": true,
+      "required": 7784628224,
+      "unit": "bytes"
+    },
+    {
+      "id": "available_memory_headroom",
+      "measured": 19015675904,
+      "passed": true,
+      "required": 536870912,
+      "unit": "bytes"
+    },
+    {
+      "id": "deployment_disk_headroom",
+      "measured": 35961626624,
+      "passed": true,
+      "required": 6442450944,
+      "unit": "bytes"
+    }
+  ],
+  "compose_memory_limits": [
+    {
+      "bytes": 4294967296,
+      "capacity_replaces": [],
+      "configured": "4g",
+      "profiles": [],
+      "service": "polymarket-paper-live",
+      "source": "PM_PAPER_MEM_LIMIT"
+    },
+    {
+      "bytes": 268435456,
+      "capacity_replaces": [],
+      "configured": "256m",
+      "profiles": [],
+      "service": "polymarket-dashboard",
+      "source": "PM_DASHBOARD_MEM_LIMIT"
+    },
+    {
+      "bytes": 1073741824,
+      "capacity_replaces": [],
+      "configured": "1g",
+      "profiles": [],
+      "service": "superbru-auto-pick-watchdog",
+      "source": "SUPERBRU_AUTO_PICK_MEM_LIMIT"
+    },
+    {
+      "bytes": 2147483648,
+      "capacity_replaces": [],
+      "configured": "2g",
+      "profiles": [],
+      "service": "vps-ops-scheduler",
+      "source": "VPS_OPS_MEM_LIMIT"
+    },
+    {
+      "bytes": 2147483648,
+      "capacity_replaces": [
+        "vps-ops-scheduler"
+      ],
+      "configured": "2g",
+      "profiles": [
+        "deploy-acceptance"
+      ],
+      "service": "vps-deploy-acceptance",
+      "source": "VPS_DEPLOY_ACCEPTANCE_MEM_LIMIT"
+    }
+  ],
+  "compose_memory_modes": [
+    {
+      "active_services": [
+        "polymarket-dashboard",
+        "polymarket-paper-live",
+        "superbru-auto-pick-watchdog",
+        "vps-ops-scheduler"
+      ],
+      "bytes": 7784628224,
+      "mode": "default",
+      "profiles": [],
+      "replaced_services": []
+    },
+    {
+      "active_services": [
+        "polymarket-dashboard",
+        "polymarket-paper-live",
+        "superbru-auto-pick-watchdog",
+        "vps-deploy-acceptance"
+      ],
+      "bytes": 7784628224,
+      "mode": "profiles:deploy-acceptance",
+      "profiles": [
+        "deploy-acceptance"
+      ],
+      "replaced_services": [
+        "vps-ops-scheduler"
+      ]
+    }
+  ],
+  "compose_path": "/tmp/tmp.OcvE4sdlWQ/compose.yml",
+  "decision": "DEPLOY_ALLOWED",
+  "env_path": ".env",
+  "generated_at_utc": "2026-08-15T12:10:22Z",
+  "host_metrics": {
+    "disk_free_bytes": 35961626624,
+    "disk_total_bytes": 88944410624,
+    "memory_available_bytes": 19015675904,
+    "memory_total_bytes": 24060227584,
+    "swap_total_bytes": 4294963200,
+    "vcpu_count": 4
+  },
+  "live_trading_invoked": false,
+  "paper_trading_invoked": false,
+  "reporting_only": true,
+  "requirements": {
+    "minimum_available_memory_bytes": 536870912,
+    "minimum_free_disk_bytes": 6442450944,
+    "minimum_total_memory_bytes": 7784628224,
+    "minimum_vcpus": 2
+  },
+  "status": "pass"
+}

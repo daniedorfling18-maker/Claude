@@ -1,0 +1,44 @@
+{
+  "approved_for_live_trading": false,
+  "approved_for_paper_trading": false,
+  "data_quality_blockers": 0,
+  "forward_paper_evidence": {
+    "latest_cycle_predictions": 0,
+    "latest_cycle_status": "ran",
+    "paper_roi": 0.048631135349166014,
+    "positive_roi": true,
+    "present": true,
+    "sources": [
+      {
+        "path": "outputs/polymarket_portfolio/paper_fills.csv",
+        "roi": null,
+        "status": "present",
+        "trades": 49
+      }
+    ],
+    "trades": 49
+  },
+  "live_blockers": [
+    "no statistically credible out-of-sample skill over the market midpoint",
+    "human approval file missing: config/polymarket_live_approval.yaml"
+  ],
+  "market_relative_brier_gain_ci95": null,
+  "market_relative_brier_improvement": null,
+  "market_relative_skill_credible": false,
+  "market_relative_validation_markets": null,
+  "market_relative_validation_rows": null,
+  "market_relative_validation_status": "missing",
+  "min_resolved_labels": 100,
+  "model_copies_market_midpoint": null,
+  "oos_beats_market_significantly": false,
+  "oos_brier_skill_vs_market": null,
+  "optimized_model_champion": false,
+  "optimized_model_deployment_mode": "shadow",
+  "optimized_model_status": "trained",
+  "paper_blockers": [
+    "no statistically credible out-of-sample skill over the market midpoint"
+  ],
+  "resolved_labels": 1360,
+  "skill_model_status": "missing",
+  "target_resolved_labels": 300
+}

@@ -1,0 +1,12 @@
+name,path,exists,bytes,rows
+family_viability,outputs/polymarket_model_governance/family_viability_leaderboard.csv,False,0,0
+features_v2,outputs/polymarket_training/features_v2.csv,True,29358362,42585
+features_v2_websocket,outputs/polymarket_training/features_v2_websocket.csv,True,87259005,119921
+labels,outputs/polymarket_training/labels.csv,True,892975,2692
+liquidity_watchlist,outputs/polymarket_liquidity_discovery/liquidity_watchlist.csv,True,125909,240
+mispricing_alpha_scores,outputs/polymarket_predictions/mispricing_alpha_scores.csv,True,33223941,17420
+predictions,outputs/polymarket_predictions/predictions.csv,True,33223941,17420
+rejected_signals,outputs/polymarket_predictions/rejected_signals.csv,True,25469859,17420
+shadow_fills,outputs/polymarket_shadow/shadow_fills.csv,True,241808,453
+shadow_positions,outputs/polymarket_shadow/shadow_positions.csv,True,1188457,227
+trade_signals,outputs/polymarket_predictions/trade_signals.csv,True,2,0

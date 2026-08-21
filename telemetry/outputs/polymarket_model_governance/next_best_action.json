@@ -1,0 +1,5 @@
+{
+  "action": "Keep collecting shadow evidence; do not force paper probes until the cohort clears quarantine or earns probationary/promoted status.",
+  "diagnosis_status": "signals_rejected",
+  "summary": "alpha lower-bound edge below configured minimum; cohort_quarantined"
+}

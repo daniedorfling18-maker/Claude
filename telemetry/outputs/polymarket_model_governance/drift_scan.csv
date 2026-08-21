@@ -1,0 +1,1 @@
+category,horizon_hours,time_to_close_bin,price_bin,markets,samples,mean_start_price,mean_drift,cluster_bootstrap_ci_low,cluster_bootstrap_ci_high,cluster_bootstrap_p,bh_fdr_pass,cost_stack_per_dollar,abs_drift_exceeds_cost,research_flag,paper_trading_invoked,live_trading_invoked

@@ -1,0 +1,15 @@
+{
+  "curve_path": "outputs/calibration_bias/calibration_curve.csv",
+  "curve_rows": 0,
+  "fdr_alpha": 0.1,
+  "flagged_bins": 0,
+  "flagged_preview": [],
+  "generated_at_utc": "2026-08-20T03:12:25Z",
+  "live_trading_invoked": false,
+  "min_markets_per_bin": 200,
+  "note": "Study-only favourite/longshot calibration scan. Flags are candidates for future pre-registration, not trades.",
+  "paper_trading_invoked": false,
+  "resolved_markets": 0,
+  "status": "insufficient_data",
+  "work_order": "WO-42"
+}

@@ -1,0 +1,462 @@
+{
+  "active_incident_count": 1,
+  "active_incidents": [
+    {
+      "consecutive_degraded_observations": 135,
+      "degraded_state": "breach_or_missing",
+      "detected_at_utc": "2026-08-21T01:55:03Z",
+      "entity": "operating_state_slo",
+      "event_type": "incident_open",
+      "incident_id": "degraded_e4bc9c9d9b3df54cb1ae268d",
+      "live_trading_invoked": false,
+      "max_consecutive_degraded_observations": 0,
+      "observation_token": "2026-08-21T01:54:48Z",
+      "owner_notification_eligible": true,
+      "paper_trading_invoked": false,
+      "reason": "SLO rows breached, unknown, or missing: scheduler_overrun_cycles",
+      "registration_id": "operating_state_slo_breach",
+      "source_artifact": "performance/operating_state.json"
+    }
+  ],
+  "body_file": "outputs/ops_scheduler/degraded_state_notification.md",
+  "decision_use": "owner alerting only; fail-closed, risk, gate, broker, sizing, and order states are unchanged",
+  "evaluations": [
+    {
+      "artifact": "maker_carry/requote_alerts.json",
+      "consecutive_degraded_observations": 0,
+      "max_consecutive_degraded_observations": 3,
+      "missing_input_rules": [],
+      "observation_token": "2026-08-21T01:41:36Z",
+      "observed_state": "quotes_ok",
+      "registration_id": "requote_missing_inputs",
+      "risk_rules_ignored_by_watchdog": [],
+      "state": "healthy_or_valid_risk_state",
+      "triggering_missing_input_rules": []
+    },
+    {
+      "artifact": "maker_carry/maker_fill_replay.json",
+      "consecutive_degraded_observations": 0,
+      "max_consecutive_degraded_observations": 3,
+      "observation_token": "2026-08-21T01:42:15Z",
+      "observed_state": "covered",
+      "registration_id": "maker_replay_insufficient_coverage",
+      "state": "healthy"
+    },
+    {
+      "artifact": "ops_scheduler/status.json",
+      "failing_jobs": [],
+      "max_consecutive_degraded_observations": 0,
+      "observed_jobs": 13,
+      "registration_id": "scheduler_nonzero_exit",
+      "state": "healthy"
+    },
+    {
+      "artifact": "ops_scheduler/status.json",
+      "jobs": [
+        {
+          "age_seconds": 21373.692,
+          "job": "governance_refresh",
+          "last_success_utc": "2026-08-20T19:58:49.308350+00:00",
+          "maximum_age_seconds": 25200,
+          "state": "fresh"
+        },
+        {
+          "age_seconds": 12702.691,
+          "job": "clv_snapshot",
+          "last_success_utc": "2026-08-20T22:23:20.309219+00:00",
+          "maximum_age_seconds": 32400,
+          "state": "fresh"
+        },
+        {
+          "age_seconds": 37677.819,
+          "job": "locked_card_refresh",
+          "last_success_utc": "2026-08-20T15:27:05.180597+00:00",
+          "maximum_age_seconds": 46800,
+          "state": "fresh"
+        },
+        {
+          "age_seconds": 81608.443,
+          "job": "training_harvest",
+          "last_success_utc": "2026-08-20T03:14:54.557001+00:00",
+          "maximum_age_seconds": 90000,
+          "state": "fresh"
+        },
+        {
+          "age_seconds": 54346.635,
+          "job": "maker_study_intraday",
+          "last_success_utc": "2026-08-20T10:49:16.365043+00:00",
+          "maximum_age_seconds": 90000,
+          "state": "fresh"
+        },
+        {
+          "age_seconds": 681.884,
+          "job": "trade_prints",
+          "last_success_utc": "2026-08-21T01:43:41.115590+00:00",
+          "maximum_age_seconds": 1200,
+          "state": "fresh"
+        },
+        {
+          "age_seconds": 4.318,
+          "job": "book_pulse",
+          "last_success_utc": "2026-08-21T01:54:58.681568+00:00",
+          "maximum_age_seconds": 900,
+          "state": "fresh"
+        },
+        {
+          "age_seconds": 1.712,
+          "job": "executor_ops_monitor",
+          "last_success_utc": "2026-08-21T01:55:01.288477+00:00",
+          "maximum_age_seconds": 900,
+          "state": "fresh"
+        },
+        {
+          "age_seconds": 9.441,
+          "job": "degraded_state_watchdog",
+          "last_success_utc": "2026-08-21T01:54:53.559038+00:00",
+          "maximum_age_seconds": 900,
+          "state": "fresh"
+        },
+        {
+          "age_seconds": 37990.062,
+          "job": "ledger_anchor",
+          "last_success_utc": "2026-08-20T15:21:52.938234+00:00",
+          "maximum_age_seconds": 93600,
+          "state": "fresh"
+        },
+        {
+          "age_seconds": 799.316,
+          "job": "maker_safety_refresh",
+          "last_success_utc": "2026-08-21T01:41:43.684117+00:00",
+          "maximum_age_seconds": 3600,
+          "state": "fresh"
+        }
+      ],
+      "registration_id": "scheduler_completion_freshness",
+      "stale_jobs": [],
+      "state": "healthy_or_initializing"
+    },
+    {
+      "age_seconds": 3.0,
+      "artifact": "maker_carry/decision_policy.json",
+      "guard_active": true,
+      "indicated_action": "defer_funding_continue_study",
+      "kill_data_stale": false,
+      "latest_observation_utc": "2026-08-21T01:41:31Z",
+      "maximum_age_seconds": 1800.0,
+      "registration_id": "kill_input_stale_live_stage",
+      "state": "fresh"
+    },
+    {
+      "artifact": "performance/wallet_reconciliation.json",
+      "consecutive_degraded_observations": 0,
+      "healthy_reachable_states": [
+        "clean",
+        "explained"
+      ],
+      "max_consecutive_degraded_observations": 2,
+      "migrated_legacy_counter": false,
+      "observation_token": "2026-08-20T03:12:14Z",
+      "observed_state": "clean",
+      "registration_id": "wallet_reconciliation_not_clean",
+      "state": "healthy"
+    },
+    {
+      "artifact": "performance/operating_state.json",
+      "max_consecutive_degraded_observations": 0,
+      "observation_token": "2026-08-21T01:54:48Z",
+      "observed_rows": 23,
+      "registration_id": "operating_state_unknown_regression",
+      "regressed_rows": [],
+      "state": "healthy"
+    },
+    {
+      "artifact": "performance/ledger_anchor_verification.json",
+      "observation_token": "2026-08-20T15:21:37Z",
+      "observed_state": "ok",
+      "registration_id": "ledger_chain_integrity",
+      "state": "healthy"
+    },
+    {
+      "artifact": "performance/disaster_recovery_status.json",
+      "observation_token": "2026-08-21T01:30:08Z",
+      "observed_state": "not_due",
+      "registration_id": "disaster_recovery_not_recoverable",
+      "state": "healthy",
+      "status_artifact_age_seconds": 1495.0,
+      "status_artifact_max_age_seconds": 21600
+    },
+    {
+      "artifact": "maker_carry/maker_carry_study.json",
+      "observation_token": "2026-08-20T10:46:56Z",
+      "observed_state": "ok",
+      "registration_id": "maker_study_run_failed",
+      "state": "healthy"
+    },
+    {
+      "artifact": "maker_carry/official_book_snapshot.json",
+      "consecutive_degraded_observations": 0,
+      "max_consecutive_degraded_observations": 3,
+      "observation_token": "2026-08-21T01:41:57Z",
+      "observed_state": "ok",
+      "registration_id": "official_book_snapshot_partial",
+      "state": "healthy"
+    },
+    {
+      "artifact": "performance/operating_state.json",
+      "failed_rows": [
+        "scheduler_overrun_cycles"
+      ],
+      "observation_token": "2026-08-21T01:54:48Z",
+      "registration_id": "operating_state_slo_breach",
+      "state": "incident"
+    },
+    {
+      "artifact": "performance/*_push_status.json",
+      "bridges": [
+        {
+          "age_seconds": 1497.0,
+          "bridge": "anchor",
+          "observation_token": "2026-08-21T01:30:06Z",
+          "state": "healthy",
+          "status": "ok"
+        },
+        {
+          "age_seconds": 1489.0,
+          "bridge": "telemetry",
+          "observation_token": "2026-08-21T01:30:14Z",
+          "state": "healthy",
+          "status": "ok"
+        }
+      ],
+      "registration_id": "publication_bridge_unhealthy",
+      "state": "healthy"
+    }
+  ],
+  "generated_at_utc": "2026-08-21T01:55:03Z",
+  "incident_ledger": "outputs/performance/degraded_state_incidents.csv",
+  "live_trading_invoked": false,
+  "new_incident_count": 0,
+  "new_incidents": [],
+  "notification": {
+    "body_file": "outputs/ops_scheduler/degraded_state_notification.md",
+    "cooldown_seconds": 3600.0,
+    "delivery": {
+      "attempted": false,
+      "channel_configured": true,
+      "delivered": false,
+      "error": ""
+    },
+    "eligible": false,
+    "enabled": true,
+    "next_eligible_push_utc": "",
+    "notified_entities": {
+      "official_book_snapshot_partial|official_book_snapshot": "2026-08-20T23:14:02Z",
+      "operating_state_slo_breach|operating_state_slo": "2026-08-20T19:59:11Z",
+      "publication_bridge_unhealthy|telemetry": "2026-08-20T13:00:51Z",
+      "scheduler_completion_freshness|book_pulse": "2026-08-20T03:11:10Z",
+      "scheduler_completion_freshness|trade_prints": "2026-08-20T03:05:57Z"
+    },
+    "notify": false,
+    "pattern": "superbru_score_change_state_digest",
+    "pushes_suppressed_by_cooldown": 0,
+    "state_changed": false,
+    "subject": "Polymarket degraded-state incidents: 1 active",
+    "suppressed_entities": [],
+    "undelivered_incident_entities": [],
+    "undelivered_incident_ids": [],
+    "undelivered_incident_registrations": []
+  },
+  "notify": false,
+  "order_amendment_invoked": false,
+  "order_cancellation_invoked": false,
+  "order_placement_invoked": false,
+  "paper_trading_invoked": false,
+  "read_only": true,
+  "registrations": [
+    {
+      "artifact": "performance/ledger_anchor_verification.json",
+      "degraded_condition": "chain is absent, broken, or unverified",
+      "evaluation_policy": "explicit verified healthy allowlist",
+      "healthy_reachable_states": [
+        "ok and verified"
+      ],
+      "id": "ledger_chain_integrity",
+      "incident_on_observation": 1,
+      "max_consecutive_degraded_observations": 0,
+      "observation_unit": "verification"
+    },
+    {
+      "artifact": "performance/disaster_recovery_status.json",
+      "degraded_condition": "archive/push/RPO is not recoverable",
+      "evaluation_policy": "explicit healthy allowlists and compliant RPO",
+      "healthy_reachable_states": [
+        "ok",
+        "not_due"
+      ],
+      "id": "disaster_recovery_not_recoverable",
+      "incident_on_observation": 1,
+      "max_consecutive_degraded_observations": 0,
+      "observation_unit": "DR run"
+    },
+    {
+      "artifact": "maker_carry/maker_carry_study.json",
+      "degraded_condition": "missing or failed status",
+      "evaluation_policy": "explicit healthy status allowlist",
+      "healthy_reachable_states": [
+        "ok",
+        "no_candidates",
+        "disabled"
+      ],
+      "id": "maker_study_run_failed",
+      "incident_on_observation": 1,
+      "max_consecutive_degraded_observations": 0,
+      "observation_unit": "study run"
+    },
+    {
+      "artifact": "maker_carry/official_book_snapshot.json",
+      "degraded_condition": "persistent status outside the explicit healthy allowlist",
+      "evaluation_policy": "distinct-cycle persistence",
+      "healthy_reachable_states": [
+        "disabled",
+        "no_portfolio",
+        "ok"
+      ],
+      "id": "official_book_snapshot_partial",
+      "incident_on_observation": 4,
+      "max_consecutive_degraded_observations": 3,
+      "observation_unit": "snapshot cycle"
+    },
+    {
+      "artifact": "performance/operating_state.json",
+      "degraded_condition": "breached, unknown, or omitted SLO",
+      "evaluation_policy": "registered row completeness and explicit OK",
+      "healthy_reachable_states": [
+        "all registered SLO rows present and OK"
+      ],
+      "id": "operating_state_slo_breach",
+      "incident_on_observation": 1,
+      "max_consecutive_degraded_observations": 0,
+      "observation_unit": "operating-state run"
+    },
+    {
+      "artifact": "performance/*_push_status.json",
+      "degraded_condition": "missing, failed, or stale host publication",
+      "evaluation_policy": "fixed two-hour grace; configuration cannot widen",
+      "healthy_reachable_states": [
+        "ok within fixed grace"
+      ],
+      "id": "publication_bridge_unhealthy",
+      "incident_on_observation": 1,
+      "max_consecutive_degraded_observations": 0,
+      "observation_unit": "wall-clock observation"
+    },
+    {
+      "artifact": "maker_carry/requote_alerts.json",
+      "degraded_condition": "pull_quotes_now/STOP with a registered missing-input rule",
+      "evaluation_policy": "registered missing-input predicate with legitimate risk-state exemption",
+      "healthy_reachable_states": [
+        "quotes_ok",
+        "requote_advised",
+        "pull_quotes_now_or_STOP_with_risk_reason_only"
+      ],
+      "id": "requote_missing_inputs",
+      "incident_on_observation": 4,
+      "max_consecutive_degraded_observations": 3,
+      "observation_unit": "producer cycle"
+    },
+    {
+      "artifact": "maker_carry/maker_fill_replay.json",
+      "degraded_condition": "nonzero simulated fill opportunities with zero 5m replay coverage",
+      "evaluation_policy": "registered zero-coverage predicate with no-opportunity exemption",
+      "healthy_reachable_states": [
+        "covered",
+        "partial",
+        "no_simulated_fill_opportunities"
+      ],
+      "id": "maker_replay_insufficient_coverage",
+      "incident_on_observation": 4,
+      "max_consecutive_degraded_observations": 3,
+      "observation_unit": "distinct maker replay"
+    },
+    {
+      "artifact": "ops_scheduler/status.json",
+      "degraded_condition": "any job last_exit_code != 0",
+      "evaluation_policy": "zero-exit allowlist",
+      "healthy_reachable_states": [
+        "last_exit_code=0"
+      ],
+      "id": "scheduler_nonzero_exit",
+      "incident_on_observation": 1,
+      "max_consecutive_degraded_observations": 0,
+      "observation_unit": "job completion"
+    },
+    {
+      "artifact": "ops_scheduler/status.json",
+      "degraded_condition": "a periodic job has no successful completion inside its registered ceiling",
+      "evaluation_policy": "immediate incident once completion age exceeds the fixed per-job maximum",
+      "healthy_reachable_states": [
+        "last successful completion is within the registered job ceiling"
+      ],
+      "id": "scheduler_completion_freshness",
+      "incident_on_observation": 1,
+      "max_consecutive_degraded_observations": 0,
+      "observation_unit": "watchdog wall-clock observation",
+      "registered_job_maximum_seconds": {
+        "book_pulse": 900,
+        "clv_snapshot": 32400,
+        "degraded_state_watchdog": 900,
+        "executor_ops_monitor": 900,
+        "governance_refresh": 25200,
+        "ledger_anchor": 93600,
+        "locked_card_refresh": 46800,
+        "maker_safety_refresh": 3600,
+        "maker_study_intraday": 90000,
+        "trade_prints": 1200,
+        "training_harvest": 90000
+      }
+    },
+    {
+      "artifact": "maker_carry/decision_policy.json",
+      "degraded_condition": "decision policy reports kill_data_stale while a live-stage guard is active",
+      "evaluation_policy": "immediate incident and owner alert; policy action must already be STOP",
+      "healthy_reachable_states": [
+        "inactive_pre_live",
+        "fresh"
+      ],
+      "id": "kill_input_stale_live_stage",
+      "incident_on_observation": 1,
+      "max_consecutive_degraded_observations": 0,
+      "observation_unit": "decision-policy refresh"
+    },
+    {
+      "artifact": "performance/wallet_reconciliation.json",
+      "degraded_condition": "any observed reconciliation status outside the registered healthy allowlist",
+      "evaluation_policy": "healthy-status allowlist; unknown sibling states fail closed",
+      "healthy_reachable_states": [
+        "clean",
+        "explained"
+      ],
+      "id": "wallet_reconciliation_not_clean",
+      "incident_on_observation": 3,
+      "legacy_registration_id": "wallet_reconciliation_partial",
+      "max_consecutive_degraded_observations": 2,
+      "observation_unit": "distinct harvest"
+    },
+    {
+      "artifact": "performance/operating_state.json",
+      "degraded_condition": "previously known row becomes UNKNOWN",
+      "evaluation_policy": "known-to-UNKNOWN transition predicate",
+      "healthy_reachable_states": [
+        "row state is known",
+        "UNKNOWN before any known observation"
+      ],
+      "id": "operating_state_unknown_regression",
+      "incident_on_observation": 1,
+      "max_consecutive_degraded_observations": 0,
+      "observation_unit": "generated operating-state run"
+    }
+  ],
+  "state_changed": false,
+  "status": "incident",
+  "work_order": "WO-78+WO-83+WO-84+WO-85+WO-86+WO-121+WO-129"
+}

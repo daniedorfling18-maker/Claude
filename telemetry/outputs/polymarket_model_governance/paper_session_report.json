@@ -1,0 +1,138 @@
+{
+  "calibration": {
+    "model_feature_columns": [
+      "midpoint",
+      "implied_probability",
+      "executable_buy_price",
+      "hours_to_close",
+      "days_to_close",
+      "is_last_24h",
+      "is_last_6h",
+      "is_last_1h",
+      "hour_of_day",
+      "day_of_week",
+      "logit_midpoint",
+      "distance_to_half",
+      "snapshots_so_far",
+      "question_length",
+      "slug_tokens",
+      "word_will",
+      "word_by",
+      "word_before",
+      "word_after",
+      "word_or",
+      "word_and",
+      "price_change_5m",
+      "price_change_15m",
+      "price_change_1h",
+      "price_change_6h",
+      "price_change_24h",
+      "rolling_mean_1h",
+      "rolling_mean_6h",
+      "rolling_volatility_6h",
+      "rolling_mean_24h",
+      "rolling_volatility_24h",
+      "predicted_probability"
+    ],
+    "model_version": "pm-bucket-calibration-v2",
+    "status": "trained",
+    "training_rows": 724
+  },
+  "generated_at_utc": "2026-07-03T03:51:51Z",
+  "headline": {
+    "evaluation": "out_of_sample_by_market",
+    "expected_profitable_oos": false,
+    "oos_pnl_at_minimum_edge": 0.135,
+    "oos_roi_at_minimum_edge": 0.0277,
+    "oos_settled_rows": 56,
+    "oos_test_markets": 24,
+    "verdict": "paper engine ready, but the model is NOT profitable out of sample - do not expect gains"
+  },
+  "live_trading": false,
+  "paper": {
+    "approved_orders_realised_pnl": 0.0,
+    "edge_distribution": {
+      "fraction_above_minimum": 0.2321,
+      "fraction_positive_edge": 0.2321,
+      "max_edge": 0.3476,
+      "mean_edge": -0.0075
+    },
+    "evaluation": "out_of_sample_by_market",
+    "in_sample": false,
+    "minimum_edge": 0.03,
+    "note": "Calibrator fit on earlier markets and settled on later held-out markets; in-sample evaluation overstates edge, so this is the forward-style paper P&L.",
+    "orders": 0,
+    "orders_file": "outputs/polymarket_paper_edge/paper_edge_orders.csv",
+    "paper_pnl_by_edge_threshold": [
+      {
+        "bets": 13,
+        "edge_threshold": 0.0,
+        "roi_on_staked": 0.0277,
+        "staked": 4.865,
+        "total_realised_pnl": 0.135,
+        "win_rate": 0.3846
+      },
+      {
+        "bets": 13,
+        "edge_threshold": 0.01,
+        "roi_on_staked": 0.0277,
+        "staked": 4.865,
+        "total_realised_pnl": 0.135,
+        "win_rate": 0.3846
+      },
+      {
+        "bets": 13,
+        "edge_threshold": 0.02,
+        "roi_on_staked": 0.0277,
+        "staked": 4.865,
+        "total_realised_pnl": 0.135,
+        "win_rate": 0.3846
+      },
+      {
+        "bets": 13,
+        "edge_threshold": 0.03,
+        "roi_on_staked": 0.0277,
+        "staked": 4.865,
+        "total_realised_pnl": 0.135,
+        "win_rate": 0.3846
+      },
+      {
+        "bets": 13,
+        "edge_threshold": 0.05,
+        "roi_on_staked": 0.0277,
+        "staked": 4.865,
+        "total_realised_pnl": 0.135,
+        "win_rate": 0.3846
+      }
+    ],
+    "rejections": 56,
+    "rejections_file": "outputs/polymarket_paper_edge/paper_edge_rejections.csv",
+    "settled_rows": 56,
+    "simulated_at": "2026-07-03T03:51:53Z",
+    "status": "paper_only",
+    "test_markets": 24,
+    "test_rows": 56,
+    "train_markets": 56,
+    "train_rows": 668
+  },
+  "readiness": {
+    "advisory": "paper trading mechanically ready",
+    "approved_for_paper_trading": true,
+    "blockers": [],
+    "calibration_model_present": true,
+    "data_quality_blockers": 0,
+    "decision": "APPROVED_FOR_PAPER_TRADING",
+    "expected_profitable_oos": false,
+    "kill_switch_active": false,
+    "min_paper_labels": 50,
+    "model_source": "calibration_v2",
+    "oos_paper_roi_at_minimum_edge": null,
+    "optimized_model_champion": false,
+    "optimized_model_deployment_mode": "shadow",
+    "resolved_labels": 160,
+    "trading_mode": "paper",
+    "training_artifact_blockers": []
+  },
+  "status": "ran",
+  "trading_mode": "paper"
+}

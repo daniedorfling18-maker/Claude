@@ -1,0 +1,21 @@
+{
+  "deferred_future_observation_sources": [],
+  "duplicate_rows": 202146,
+  "exclusions": {
+    "midpoint_or_one_sided_only": 1062
+  },
+  "generated_at_utc": "2026-08-20T03:05:40Z",
+  "live_trading_invoked": false,
+  "midpoint_only_rows_accepted": 0,
+  "output_file": "outputs/polymarket_training/historical_bid_ask_v1.csv",
+  "paper_trading_invoked": false,
+  "producer_contract": "websocket_normaliser exact two-sided book rows and immutable training archives",
+  "rows_appended": 26240,
+  "rows_seen": 229448,
+  "source_files_available": 931,
+  "source_files_changed": 428,
+  "source_files_deferred_for_future_observations": 0,
+  "state_file": "outputs/polymarket_model_governance/historical_bid_ask_ingest_state.json",
+  "status": "ok",
+  "work_order": "WO-101"
+}

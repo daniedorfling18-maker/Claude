@@ -1,0 +1,20 @@
+{
+  "clean_label_count": 2852,
+  "detected_leakage_columns": [],
+  "historical_feature_rows": 0,
+  "input_rows": {
+    "websocket": 120000
+  },
+  "lineage_file": "outputs/polymarket_model_governance/feature_lineage_v2_websocket.csv",
+  "normalised_rows": {
+    "websocket": 119921
+  },
+  "output_file": "outputs/polymarket_training/features_v2_websocket.csv",
+  "raw_snapshot_feature_rows": 0,
+  "research_override": true,
+  "skipped_rows": 79,
+  "source_filter": "websocket",
+  "status": "ok",
+  "total_feature_rows": 119921,
+  "websocket_feature_rows": 119921
+}

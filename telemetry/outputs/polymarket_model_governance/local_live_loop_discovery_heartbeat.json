@@ -1,0 +1,381 @@
+{
+  "discovery_iteration": 1,
+  "fast_updown": {},
+  "generated_at_utc": "2026-08-19T08:03:15Z",
+  "live_iteration": 3200,
+  "scan": {
+    "per_query": [
+      {
+        "actual_query": "tennis",
+        "attempt": 1,
+        "attempts": [
+          "tennis"
+        ],
+        "frozen_updown_alias_exclusions": [],
+        "query": "tennis",
+        "scanner_opportunities": 0,
+        "snapshot_path": "/app/outputs/polymarket/query_scans/tennis-tennis/market_snapshot.csv",
+        "tokens": 284
+      },
+      {
+        "actual_query": "sports",
+        "attempt": 1,
+        "attempts": [
+          "sports"
+        ],
+        "frozen_updown_alias_exclusions": [],
+        "query": "sports",
+        "scanner_opportunities": 0,
+        "snapshot_path": "/app/outputs/polymarket/query_scans/sports-sports/market_snapshot.csv",
+        "tokens": 262
+      },
+      {
+        "actual_query": "elections",
+        "attempt": 1,
+        "attempts": [
+          "elections",
+          "election",
+          "presidential election",
+          "senate election"
+        ],
+        "frozen_updown_alias_exclusions": [],
+        "query": "elections",
+        "scanner_opportunities": 0,
+        "snapshot_path": "/app/outputs/polymarket/query_scans/elections-elections/market_snapshot.csv",
+        "tokens": 78
+      },
+      {
+        "actual_query": "world cup",
+        "attempt": 1,
+        "attempts": [
+          "world cup"
+        ],
+        "frozen_updown_alias_exclusions": [],
+        "query": "world cup",
+        "scanner_opportunities": 0,
+        "snapshot_path": "/app/outputs/polymarket/query_scans/world-cup-world-cup/market_snapshot.csv",
+        "tokens": 24
+      },
+      {
+        "actual_query": "ai",
+        "attempt": 1,
+        "attempts": [
+          "ai",
+          "openai",
+          "anthropic",
+          "xai"
+        ],
+        "frozen_updown_alias_exclusions": [],
+        "query": "ai",
+        "scanner_opportunities": 0,
+        "snapshot_path": "/app/outputs/polymarket/query_scans/ai-ai/market_snapshot.csv",
+        "tokens": 282
+      },
+      {
+        "actual_query": "openai",
+        "attempt": 1,
+        "attempts": [
+          "openai"
+        ],
+        "frozen_updown_alias_exclusions": [],
+        "query": "openai",
+        "scanner_opportunities": 0,
+        "snapshot_path": "/app/outputs/polymarket/query_scans/openai-openai/market_snapshot.csv",
+        "tokens": 62
+      },
+      {
+        "actual_query": "economy",
+        "attempt": 1,
+        "attempts": [
+          "economy",
+          "inflation",
+          "cpi",
+          "recession",
+          "jobs"
+        ],
+        "frozen_updown_alias_exclusions": [],
+        "query": "economy",
+        "scanner_opportunities": 0,
+        "snapshot_path": "/app/outputs/polymarket/query_scans/economy-economy/market_snapshot.csv",
+        "tokens": 90
+      },
+      {
+        "actual_query": "bitcoin",
+        "attempt": 1,
+        "attempts": [
+          "bitcoin"
+        ],
+        "frozen_updown_alias_exclusions": [],
+        "query": "bitcoin",
+        "scanner_opportunities": 0,
+        "snapshot_path": "/app/outputs/polymarket/query_scans/bitcoin-bitcoin/market_snapshot.csv",
+        "tokens": 222
+      }
+    ],
+    "queries": [
+      "tennis",
+      "sports",
+      "elections",
+      "world cup",
+      "ai",
+      "openai",
+      "economy",
+      "bitcoin"
+    ],
+    "scan_plan": {
+      "adaptive_priority": {
+        "enabled": true,
+        "feedback_broaden_queries": [],
+        "feedback_learning_state": "price_action_candidates_ready_for_governed_paper_bridge",
+        "min_priority_value": 3.0,
+        "priority_queries": [
+          "world cup",
+          "ai",
+          "openai",
+          "economy",
+          "bitcoin",
+          "tennis",
+          "ethereum",
+          "solana",
+          "mma",
+          "nba",
+          "fed",
+          "stocks",
+          "politics",
+          "esports",
+          "mlb",
+          "sports",
+          "elections"
+        ],
+        "require_positive_evidence": true,
+        "research_focus_enabled": true,
+        "research_focus_queries": [
+          "ai",
+          "openai",
+          "economy",
+          "bitcoin",
+          "tennis",
+          "ethereum",
+          "solana",
+          "world cup",
+          "mma",
+          "nba",
+          "fed",
+          "stocks",
+          "politics",
+          "esports",
+          "mlb",
+          "sports",
+          "elections"
+        ],
+        "research_focus_validation_gap_needs_collection": true,
+        "suppressed_queries": [],
+        "top_cohorts": [
+          {
+            "cohort": "research_focus",
+            "cohort_priority_value": 50.0,
+            "learning_state": "price_action_candidates_ready_for_governed_paper_bridge",
+            "priority_value": 50.0,
+            "query": "world cup",
+            "source": "research_focus",
+            "summary": "Strict price-action model has positive train repricing examples but no positive validation examples; focus fresh websocket/scout collection on tennis, ethereum, economy, solana. Gap: Positive repricing examples exist in train, but validation has not yet seen a positive executable bid repricing.. Model blocker: no probability threshold cleared the training split trade gates; validation positive repricing targets 0 < 1; selected validation trades 0 < 5; selected validation P&L is not positive; selected validation ROI 0.0000 < 0.0300; selected validation win-rate/payoff gate failed: win_rate 0.0000 below payoff-asymmetry floor 0.3000; selected validation ROI CI low None < 0.0000; validation trades 0 < 5.",
+            "validation_gap_needs_collection": true
+          },
+          {
+            "cohort": "research_focus",
+            "cohort_priority_value": 50.0,
+            "learning_state": "price_action_candidates_ready_for_governed_paper_bridge",
+            "priority_value": 50.0,
+            "query": "ai",
+            "source": "research_focus",
+            "summary": "Strict price-action model has positive train repricing examples but no positive validation examples; focus fresh websocket/scout collection on tennis, ethereum, economy, solana. Gap: Positive repricing examples exist in train, but validation has not yet seen a positive executable bid repricing.. Model blocker: no probability threshold cleared the training split trade gates; validation positive repricing targets 0 < 1; selected validation trades 0 < 5; selected validation P&L is not positive; selected validation ROI 0.0000 < 0.0300; selected validation win-rate/payoff gate failed: win_rate 0.0000 below payoff-asymmetry floor 0.3000; selected validation ROI CI low None < 0.0000; validation trades 0 < 5.",
+            "validation_gap_needs_collection": true
+          },
+          {
+            "cohort": "research_focus",
+            "cohort_priority_value": 50.0,
+            "learning_state": "price_action_candidates_ready_for_governed_paper_bridge",
+            "priority_value": 50.0,
+            "query": "openai",
+            "source": "research_focus",
+            "summary": "Strict price-action model has positive train repricing examples but no positive validation examples; focus fresh websocket/scout collection on tennis, ethereum, economy, solana. Gap: Positive repricing examples exist in train, but validation has not yet seen a positive executable bid repricing.. Model blocker: no probability threshold cleared the training split trade gates; validation positive repricing targets 0 < 1; selected validation trades 0 < 5; selected validation P&L is not positive; selected validation ROI 0.0000 < 0.0300; selected validation win-rate/payoff gate failed: win_rate 0.0000 below payoff-asymmetry floor 0.3000; selected validation ROI CI low None < 0.0000; validation trades 0 < 5.",
+            "validation_gap_needs_collection": true
+          },
+          {
+            "cohort": "research_focus",
+            "cohort_priority_value": 50.0,
+            "learning_state": "price_action_candidates_ready_for_governed_paper_bridge",
+            "priority_value": 50.0,
+            "query": "economy",
+            "source": "research_focus",
+            "summary": "Strict price-action model has positive train repricing examples but no positive validation examples; focus fresh websocket/scout collection on tennis, ethereum, economy, solana. Gap: Positive repricing examples exist in train, but validation has not yet seen a positive executable bid repricing.. Model blocker: no probability threshold cleared the training split trade gates; validation positive repricing targets 0 < 1; selected validation trades 0 < 5; selected validation P&L is not positive; selected validation ROI 0.0000 < 0.0300; selected validation win-rate/payoff gate failed: win_rate 0.0000 below payoff-asymmetry floor 0.3000; selected validation ROI CI low None < 0.0000; validation trades 0 < 5.",
+            "validation_gap_needs_collection": true
+          },
+          {
+            "cohort": "research_focus",
+            "cohort_priority_value": 50.0,
+            "learning_state": "price_action_candidates_ready_for_governed_paper_bridge",
+            "priority_value": 50.0,
+            "query": "bitcoin",
+            "source": "research_focus",
+            "summary": "Strict price-action model has positive train repricing examples but no positive validation examples; focus fresh websocket/scout collection on tennis, ethereum, economy, solana. Gap: Positive repricing examples exist in train, but validation has not yet seen a positive executable bid repricing.. Model blocker: no probability threshold cleared the training split trade gates; validation positive repricing targets 0 < 1; selected validation trades 0 < 5; selected validation P&L is not positive; selected validation ROI 0.0000 < 0.0300; selected validation win-rate/payoff gate failed: win_rate 0.0000 below payoff-asymmetry floor 0.3000; selected validation ROI CI low None < 0.0000; validation trades 0 < 5.",
+            "validation_gap_needs_collection": true
+          },
+          {
+            "cohort": "research_focus",
+            "cohort_priority_value": 50.0,
+            "learning_state": "price_action_candidates_ready_for_governed_paper_bridge",
+            "priority_value": 50.0,
+            "query": "tennis",
+            "source": "research_focus",
+            "summary": "Strict price-action model has positive train repricing examples but no positive validation examples; focus fresh websocket/scout collection on tennis, ethereum, economy, solana. Gap: Positive repricing examples exist in train, but validation has not yet seen a positive executable bid repricing.. Model blocker: no probability threshold cleared the training split trade gates; validation positive repricing targets 0 < 1; selected validation trades 0 < 5; selected validation P&L is not positive; selected validation ROI 0.0000 < 0.0300; selected validation win-rate/payoff gate failed: win_rate 0.0000 below payoff-asymmetry floor 0.3000; selected validation ROI CI low None < 0.0000; validation trades 0 < 5.",
+            "validation_gap_needs_collection": true
+          }
+        ]
+      },
+      "all_queries": [
+        "world cup",
+        "tennis",
+        "nba",
+        "mlb",
+        "mma",
+        "sports",
+        "politics",
+        "elections",
+        "fed",
+        "economy",
+        "stocks",
+        "ai",
+        "openai",
+        "bitcoin",
+        "ethereum",
+        "solana",
+        "esports"
+      ],
+      "configured_queries": [
+        "world cup",
+        "tennis",
+        "nba",
+        "mlb",
+        "mma",
+        "sports",
+        "politics",
+        "elections",
+        "fed",
+        "economy",
+        "stocks"
+      ],
+      "frozen_updown": {
+        "excluded_queries": [
+          {
+            "query": "btc updown",
+            "reason": "frozen_crypto_updown_no_collection_priority"
+          },
+          {
+            "query": "solana updown",
+            "reason": "frozen_crypto_updown_no_collection_priority"
+          },
+          {
+            "query": "eth updown",
+            "reason": "frozen_crypto_updown_no_collection_priority"
+          }
+        ],
+        "excluded_query_count": 3,
+        "policy_version": "wo95_primary_hypothesis_discovery_v1",
+        "selected_count": 0,
+        "selected_queries": []
+      },
+      "injected_broad_repricing_queries": [],
+      "injected_primary_hypothesis_queries": [],
+      "injected_research_focus_queries": [
+        "ai",
+        "openai",
+        "bitcoin",
+        "ethereum",
+        "solana",
+        "esports",
+        "btc updown",
+        "solana updown",
+        "eth updown"
+      ],
+      "max_queries_per_cycle": 8,
+      "mode": "batch",
+      "ordered_queries": [
+        "world cup",
+        "ai",
+        "openai",
+        "economy",
+        "bitcoin",
+        "tennis",
+        "ethereum",
+        "solana",
+        "mma",
+        "nba",
+        "fed",
+        "stocks",
+        "politics",
+        "esports",
+        "mlb",
+        "sports",
+        "elections"
+      ],
+      "primary_hypothesis_coverage": {
+        "capacity": 8,
+        "missing_hypotheses": [],
+        "policy_version": "wo95_primary_hypothesis_discovery_v1",
+        "queries_by_hypothesis": {
+          "h1_sharp_anchor": [
+            "world cup",
+            "tennis"
+          ],
+          "h2_dutch_consistency": [
+            "sports"
+          ],
+          "h3_structural_smart_flow": [
+            "elections",
+            "economy"
+          ]
+        },
+        "required_hypotheses": [
+          "h1_sharp_anchor",
+          "h2_dutch_consistency",
+          "h3_structural_smart_flow"
+        ],
+        "reserved_queries": [
+          "tennis",
+          "sports",
+          "elections"
+        ],
+        "status": "ok",
+        "target_queries": {
+          "h1_sharp_anchor": "tennis",
+          "h2_dutch_consistency": "sports",
+          "h3_structural_smart_flow": "elections"
+        }
+      },
+      "primary_hypothesis_reserved_queries": [
+        "tennis",
+        "sports",
+        "elections"
+      ],
+      "research_focus_reserve_enabled": true,
+      "research_focus_reserved_queries": [],
+      "scan_sequence": 2,
+      "selected_queries": [
+        "tennis",
+        "sports",
+        "elections",
+        "world cup",
+        "ai",
+        "openai",
+        "economy",
+        "bitcoin"
+      ]
+    },
+    "scanner_opportunities": 0,
+    "snapshot_path": "/app/outputs/polymarket/market_snapshot.csv",
+    "tokens": 1304
+  },
+  "started_at_utc": "2026-08-19T07:54:04Z",
+  "status": "ran"
+}

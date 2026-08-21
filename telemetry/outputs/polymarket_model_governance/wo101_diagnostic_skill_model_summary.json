@@ -1,0 +1,18 @@
+{
+  "evidence_class": "diagnostic_h3_structural_bias_substrate",
+  "generated_at_utc": "2026-08-20T03:07:26Z",
+  "input_features": "outputs/polymarket_training/resolved_corpus_features_v1.csv",
+  "input_labels": "outputs/polymarket_training/resolved_corpus_labels_v1.csv",
+  "joined_rows": 0,
+  "live_trading_invoked": false,
+  "market_overlap": [],
+  "markets": 0,
+  "minimum_validation_markets_required": 10,
+  "model_version": "pm-skill-logit-v2-wo101",
+  "paper_trading_invoked": false,
+  "promotion_authority": false,
+  "reason": "need >=50 WO-101 exact bid/ask rows, both classes in the purged train split, at least 10 distinct registered validation markets, and zero market overlap",
+  "registered_h3_verdict_authority": false,
+  "status": "insufficient_data",
+  "validation_markets": 0
+}

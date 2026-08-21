@@ -1,0 +1,21 @@
+{
+  "best_net_buy_all_yes": -0.010839,
+  "best_net_sell_all_yes": -0.016046,
+  "deviation_threshold_per_basket": 0.002,
+  "errors": [],
+  "flagged_deviations": 0,
+  "flagged_events": [],
+  "flagged_with_executable_depth": 0,
+  "generated_at_utc": "2026-08-21T01:43:26Z",
+  "groups_with_complete_ask_side": 67,
+  "groups_with_complete_bid_side": 17,
+  "ledger_path": "outputs/event_group_consistency/event_group_deviations.csv",
+  "ledger_rows": 1331,
+  "live_trading_invoked": false,
+  "max_executable_basket_usd": 0.0,
+  "neg_risk_groups_scanned": 67,
+  "note": "Measurement of internal-consistency deviations net of live taker fees. Persistence = the same event recurring across scans. Any trading lane for this edge class requires its own pre-registered gates first (WO-34).",
+  "paper_trading_invoked": false,
+  "status": "ok",
+  "work_order": "WO-34"
+}

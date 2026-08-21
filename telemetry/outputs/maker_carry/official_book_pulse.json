@@ -1,0 +1,49 @@
+{
+  "batch_fallback_reason": "",
+  "candidate_seed_exclusions": {
+    "delisted_cooldown": 0,
+    "expired": 0,
+    "missing_token": 0,
+    "non_finite_rank": 0
+  },
+  "candidate_seed_markets": 0,
+  "closest_to_eligibility": [],
+  "delisted_marker_write": "skipped_portfolio_scope",
+  "delisted_token_count": 128,
+  "delisted_tokens_skipped": [
+    "12119603566787603441206924665842875721619466546883933923933735870690293451213",
+    "85043841683815526346075797537707621247898357771071878782229571213515944069436"
+  ],
+  "errors": [],
+  "files_written": [
+    "outputs/maker_carry/official_books/0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb.csv.gz"
+  ],
+  "generated_at_utc": "2026-08-21T01:54:43Z",
+  "live_trading_invoked": false,
+  "market_polls": [
+    {
+      "asset_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+      "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+      "error": "",
+      "rows_added": 1,
+      "status": "ok"
+    }
+  ],
+  "markets_polled": 1,
+  "markets_succeeded": 1,
+  "note": "Current official CLOB books for exactly the maker quote-sheet portfolio. Repeated point-in-time snapshots form the replay archive; no orders or gates are touched.",
+  "paper_trading_invoked": false,
+  "persistent_markets": 0,
+  "portfolio_markets": 1,
+  "rows_added": 1,
+  "scope": "portfolio",
+  "seasoning_runway": [],
+  "status": "ok",
+  "tier_event_burst": false,
+  "tier_events_malformed_rows": 0,
+  "tier_events_resync": false,
+  "tier_events_status": "skipped_portfolio_scope",
+  "tier_events_written": 0,
+  "tier_precedence_conflicts": 0,
+  "work_order": "WO-149"
+}

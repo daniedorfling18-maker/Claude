@@ -1,0 +1,137 @@
+{
+  "a1_sweep_advisory": {
+    "account_structure": "single_project_account_under_custody_amendment_A1",
+    "active_stage_cap_usd": 100.0,
+    "advice": "do not initiate an A1 sweep from this artifact",
+    "credential_loading_invoked": false,
+    "generated_at_utc": "2026-08-21T01:55:00Z",
+    "human_action_required": false,
+    "live_trading_invoked": false,
+    "notification_eligible": false,
+    "order_amendment_invoked": false,
+    "order_cancellation_invoked": false,
+    "order_placement_invoked": false,
+    "paper_trading_invoked": false,
+    "reason": "project-account NAV is within the registered stage-cap buffer",
+    "reconciled_nav_usd": 12.730349,
+    "reconciliation_age_seconds": 81766.945,
+    "reconciliation_source": "outputs/performance/wallet_reconciliation.json",
+    "reconciliation_status": "clean",
+    "reporting_only": true,
+    "stage_cap_source": "decision_policy.sizing.binding_capital_usd",
+    "status": "not_required",
+    "suggested_sweep_usd": 0.0,
+    "sweep_threshold_usd": 5.0,
+    "threshold_tighten_only": true,
+    "transfer_invoked": false,
+    "withdrawable_cash_usd": 12.730349,
+    "withdrawal_invoked": false,
+    "withdrawal_runbook": "docs/A1_WITHDRAWAL_AND_EXIT_RAIL_RUNBOOK.md",
+    "work_order": "WO-81"
+  },
+  "body_file": "outputs/execution/executor_ops_notification.md",
+  "credential_loading_invoked": false,
+  "dead_man": {
+    "countdown_seconds": null,
+    "gap_threshold_seconds": 1800.0,
+    "heartbeat_age_seconds": null,
+    "heartbeat_at_utc": null,
+    "independent_monitor": "vps_ops_scheduler",
+    "state": "ABSENT"
+  },
+  "execution_ledger_path": "outputs/execution/execution_ledger.csv",
+  "execution_ledger_rows": 0,
+  "executor_present": false,
+  "executor_reconciliation": {
+    "account_structure": "single_project_account_under_custody_amendment_A1",
+    "executor_wallet_present": true,
+    "generated_at_utc": "2026-08-20T03:12:14Z",
+    "status": "clean",
+    "threshold_usd": 1.0,
+    "unexplained_discrepancy_usd": 0.0,
+    "wallet_source_role": "operator_project_wallet_A1"
+  },
+  "exposure_usd": null,
+  "exposure_vs_stage_cap_state": "ABSENT",
+  "freshness_slo": {
+    "heartbeat_age_seconds": null,
+    "slo_seconds": 600.0,
+    "state": "ABSENT"
+  },
+  "generated_at_utc": "2026-08-21T01:55:00Z",
+  "heartbeat_path": "outputs/execution/executor_heartbeat.json",
+  "kill_criteria_scoreboard": {
+    "criteria": [
+      {
+        "criterion": "cumulative_real_net_score",
+        "observed": 0.0,
+        "threshold": -25.0,
+        "triggered": false
+      },
+      {
+        "criterion": "fills_outrunning_model_two_days",
+        "observed": 0,
+        "threshold": 2,
+        "triggered": false
+      },
+      {
+        "criterion": "kill_data_stale",
+        "observed": 3.0,
+        "threshold": null,
+        "triggered": false
+      },
+      {
+        "criterion": "scoreboard_stop",
+        "observed": "flat_no_net_evidence",
+        "threshold": null,
+        "triggered": false
+      },
+      {
+        "criterion": "single_day_net_score",
+        "observed": 0.0,
+        "threshold": -15.0,
+        "triggered": false
+      },
+      {
+        "criterion": "uma_dispute_inventory",
+        "observed": "",
+        "threshold": null,
+        "triggered": false
+      }
+    ],
+    "generated_at_utc": "2026-08-21T01:41:34Z",
+    "status": "clear",
+    "triggered": []
+  },
+  "last_action_age_seconds": null,
+  "last_action_at_utc": null,
+  "live_trading_invoked": false,
+  "mode": "ABSENT",
+  "notification": {
+    "body_file": "outputs/execution/executor_ops_notification.md",
+    "channel": "existing_email_wrapper",
+    "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "eligible": false,
+    "enabled": true,
+    "notify": false,
+    "pattern": "superbru_score_change_state_digest",
+    "state_changed": false,
+    "subject": "Polymarket executor ops: 0 active alert(s)"
+  },
+  "notify": false,
+  "open_orders": null,
+  "order_amendment_invoked": false,
+  "order_cancellation_invoked": false,
+  "order_placement_invoked": false,
+  "owner_alert_count": 0,
+  "owner_alerts": [],
+  "paper_trading_invoked": false,
+  "post_amendment_item_2_implemented": false,
+  "read_only": true,
+  "stage_cap_source": "decision_policy.sizing.binding_capital_usd",
+  "stage_cap_usd": 100.0,
+  "state_changed": false,
+  "status": "ABSENT",
+  "stop_propagation_binding_implemented": false,
+  "work_order": "WO-75"
+}

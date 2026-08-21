@@ -1,0 +1,259 @@
+{
+  "contracts": [
+    {
+      "consumer": {
+        "component": "requote_alerts",
+        "coverage": "one evaluated requote row per portfolio condition_id",
+        "current_book_fallback": "websocket bid/ask OR bounded public CLOB REST book",
+        "required_fields": [
+          "condition_id",
+          "market_url",
+          "outcome",
+          "token_id",
+          "order_price_min_tick_size",
+          "quote_bid_price",
+          "quote_ask_price"
+        ]
+      },
+      "id": "quote_sheet_to_requote_alerts",
+      "producer": {
+        "artifact": "maker_carry/maker_carry_study.json",
+        "component": "maker_carry_study",
+        "coverage": "every portfolio ticket, including markets absent from the websocket subscription set",
+        "declared_fields": [
+          "condition_id",
+          "market_url",
+          "outcome",
+          "token_id",
+          "order_price_min_tick_size",
+          "quote_bid_price",
+          "quote_ask_price"
+        ],
+        "freshness": {
+          "field": "generated_at_utc",
+          "maximum_age_seconds": 93600
+        },
+        "record_path": "portfolio[]"
+      }
+    },
+    {
+      "consumer": {
+        "component": "degraded_state_watchdog",
+        "coverage": "every stamped scheduler job is inspected; every non-zero exit alerts immediately",
+        "required_fields": [
+          "job_name",
+          "last_run_utc",
+          "last_exit_code"
+        ]
+      },
+      "id": "scheduler_jobs_to_status_alerting",
+      "producer": {
+        "artifact": "ops_scheduler/status.json",
+        "component": "vps_ops_scheduler",
+        "coverage": "every job stamped by the scheduler",
+        "declared_fields": [
+          "job_name",
+          "last_run_utc",
+          "last_exit_code",
+          "detail"
+        ],
+        "freshness": {
+          "field": "generated_at_utc",
+          "maximum_age_seconds": 300
+        },
+        "record_path": "jobs{job_name}"
+      }
+    },
+    {
+      "consumer": {
+        "component": "reconciled_nav",
+        "coverage": "all three legs are represented before NAV status is reported",
+        "output_fields": [
+          "internal_nav_usd",
+          "data_api_nav_usd",
+          "onchain_nav_usd",
+          "reconciliation_status"
+        ],
+        "required_fields": [
+          "leg_name",
+          "status",
+          "nav_usd"
+        ]
+      },
+      "id": "reconciliation_legs_to_nav",
+      "producer": {
+        "artifact": "performance/wallet_reconciliation.json",
+        "component": "wallet_reconciliation",
+        "coverage": "exactly the internal, Data API, and on-chain legs on every enabled reconciliation",
+        "declared_fields": [
+          "leg_name",
+          "status",
+          "nav_usd"
+        ],
+        "freshness": {
+          "field": "generated_at_utc",
+          "maximum_age_seconds": 93600
+        },
+        "record_path": "internal|data_api|onchain"
+      }
+    },
+    {
+      "consumer": {
+        "component": "maker_fill_replay",
+        "coverage": "every current quote-sheet condition is represented and failed polls remain explicit",
+        "required_fields": [
+          "condition_id",
+          "asset_id",
+          "collected_at_utc",
+          "book_poll_status",
+          "trade_poll_status",
+          "covered"
+        ]
+      },
+      "id": "maker_replay_collection_to_fill_replay",
+      "producer": {
+        "artifact": "maker_carry/maker_replay_collection.json",
+        "component": "collect_maker_replay_data",
+        "coverage": "exactly one matched collection result per current quote-sheet condition on each run",
+        "declared_fields": [
+          "condition_id",
+          "asset_id",
+          "collected_at_utc",
+          "book_poll_status",
+          "trade_poll_status",
+          "covered"
+        ],
+        "freshness": {
+          "field": "generated_at_utc",
+          "maximum_age_seconds": 1800
+        },
+        "record_path": "market_windows[]"
+      }
+    },
+    {
+      "consumer": {
+        "component": "executor_ops_monitor",
+        "coverage": "every ledger-enabled runtime receives a status evaluation; no ledger renders ABSENT",
+        "required_fields": [
+          "recorded_at_utc",
+          "mode",
+          "action_type",
+          "open_orders_after",
+          "exposure_usd_after",
+          "heartbeat_at_utc",
+          "cycle_id",
+          "executor_build_id"
+        ]
+      },
+      "id": "executor_runtime_to_ops_status",
+      "producer": {
+        "artifact": "execution/execution_ledger.csv + execution/executor_heartbeat.json",
+        "component": "future_executor",
+        "coverage": "every ledger-enabled executor cycle emits a heartbeat and every action appends one ledger row",
+        "declared_fields": [
+          "recorded_at_utc",
+          "mode",
+          "action_type",
+          "open_orders_after",
+          "exposure_usd_after",
+          "heartbeat_at_utc",
+          "cycle_id",
+          "executor_build_id"
+        ],
+        "freshness": {
+          "field": "heartbeat_at_utc",
+          "maximum_age_seconds": 600
+        },
+        "record_path": "execution_ledger[] + heartbeat{}"
+      }
+    },
+    {
+      "consumer": {
+        "component": "leakage_safe_training",
+        "coverage": "only clean, closed, non-conflicting token labels observed by the run clock may join; label availability includes first observation",
+        "required_fields": [
+          "resolution_observation_id",
+          "resolution_observed_at_utc",
+          "condition_id",
+          "token_id",
+          "close_time",
+          "resolution_time",
+          "resolution_quality",
+          "target"
+        ]
+      },
+      "id": "resolution_corpus_to_leakage_safe_training",
+      "producer": {
+        "artifact": "polymarket_training/resolution_corpus_v1.csv",
+        "component": "resolution_collector + historical_backfill + websocket_resolution_collector",
+        "coverage": "every distinct Gamma token-level resolution state seen by any registered producer is appended; historical rows remain immutable",
+        "declared_fields": [
+          "resolution_observation_id",
+          "resolution_observed_at_utc",
+          "condition_id",
+          "token_id",
+          "close_time",
+          "resolution_time",
+          "resolution_quality",
+          "target"
+        ],
+        "freshness": {
+          "field": "resolution_observed_at_utc",
+          "maximum_age_seconds": 172800
+        },
+        "record_path": "rows[]"
+      }
+    },
+    {
+      "consumer": {
+        "component": "leakage_safe_training",
+        "coverage": "midpoint-only, one-sided, crossed, future, post-close, unmatched, and out-of-window rows remain excluded",
+        "required_fields": [
+          "quote_observation_id",
+          "observed_at_utc",
+          "market_id",
+          "token_id",
+          "best_bid",
+          "best_ask"
+        ]
+      },
+      "id": "websocket_quotes_to_leakage_safe_training",
+      "producer": {
+        "artifact": "polymarket_training/historical_bid_ask_v1.csv",
+        "component": "websocket_normaliser + historical_bid_ask",
+        "coverage": "every changed live/archive producer file is streamed and every valid timestamped two-sided quote is appended exactly once",
+        "declared_fields": [
+          "quote_observation_id",
+          "observed_at_utc",
+          "market_id",
+          "token_id",
+          "best_bid",
+          "best_ask",
+          "top_bid_size",
+          "top_ask_size"
+        ],
+        "freshness": {
+          "field": "observed_at_utc",
+          "maximum_age_seconds": 345600
+        },
+        "record_path": "rows[]"
+      }
+    }
+  ],
+  "decision_use": "schema/freshness/coverage audit and PR-gate tests only",
+  "declaration_defects": [],
+  "generated_at_utc": "2026-08-15T12:19:15Z",
+  "live_trading_invoked": false,
+  "paper_trading_invoked": false,
+  "scope": [
+    "quote_sheet_to_requote_alerts",
+    "scheduler_jobs_to_status_alerting",
+    "reconciliation_legs_to_nav",
+    "maker_replay_collection_to_fill_replay",
+    "executor_runtime_to_ops_status",
+    "resolution_corpus_to_leakage_safe_training",
+    "websocket_quotes_to_leakage_safe_training"
+  ],
+  "status": "PASS",
+  "work_order": "WO-79"
+}

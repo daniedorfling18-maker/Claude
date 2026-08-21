@@ -1,0 +1,2205 @@
+{
+  "families": [
+    {
+      "assets_with_gap_samples": 9,
+      "distinct_assets": 9,
+      "family": "ai_model_leader",
+      "first_quote_timestamp": "2026-08-19T07:41:10Z",
+      "last_quote_timestamp": "2026-08-20T19:54:59Z",
+      "median_gap_seconds": 4.0,
+      "quote_rows": 5057
+    },
+    {
+      "assets_with_gap_samples": 4,
+      "distinct_assets": 4,
+      "family": "basketball_nba_match",
+      "first_quote_timestamp": "2026-08-19T07:44:31Z",
+      "last_quote_timestamp": "2026-08-20T19:55:01Z",
+      "median_gap_seconds": 204.75,
+      "quote_rows": 3479
+    },
+    {
+      "assets_with_gap_samples": 4,
+      "distinct_assets": 4,
+      "family": "crypto_btc_special",
+      "first_quote_timestamp": "2026-08-19T07:44:31Z",
+      "last_quote_timestamp": "2026-08-20T19:54:59Z",
+      "median_gap_seconds": 104.0,
+      "quote_rows": 2758
+    },
+    {
+      "assets_with_gap_samples": 4,
+      "distinct_assets": 4,
+      "family": "crypto_eth_special",
+      "first_quote_timestamp": "2026-08-19T07:41:13Z",
+      "last_quote_timestamp": "2026-08-20T19:54:59Z",
+      "median_gap_seconds": 207.0,
+      "quote_rows": 3230
+    },
+    {
+      "assets_with_gap_samples": 2,
+      "distinct_assets": 2,
+      "family": "crypto_sol_special",
+      "first_quote_timestamp": "2026-08-19T07:44:31Z",
+      "last_quote_timestamp": "2026-08-20T19:54:59Z",
+      "median_gap_seconds": 206.0,
+      "quote_rows": 1790
+    },
+    {
+      "assets_with_gap_samples": 16,
+      "distinct_assets": 16,
+      "family": "geopolitics",
+      "first_quote_timestamp": "2026-08-19T07:41:11Z",
+      "last_quote_timestamp": "2026-08-20T19:55:03Z",
+      "median_gap_seconds": 0.5,
+      "quote_rows": 25708
+    },
+    {
+      "assets_with_gap_samples": 6,
+      "distinct_assets": 6,
+      "family": "macro_economy",
+      "first_quote_timestamp": "2026-08-19T07:41:14Z",
+      "last_quote_timestamp": "2026-08-20T19:55:02Z",
+      "median_gap_seconds": 104.5,
+      "quote_rows": 6052
+    },
+    {
+      "assets_with_gap_samples": 2,
+      "distinct_assets": 2,
+      "family": "mma_match",
+      "first_quote_timestamp": "2026-08-19T07:41:09Z",
+      "last_quote_timestamp": "2026-08-20T19:54:59Z",
+      "median_gap_seconds": 103.0,
+      "quote_rows": 1204
+    },
+    {
+      "assets_with_gap_samples": 2,
+      "distinct_assets": 2,
+      "family": "policy_legal",
+      "first_quote_timestamp": "2026-08-19T07:44:31Z",
+      "last_quote_timestamp": "2026-08-20T19:54:59Z",
+      "median_gap_seconds": 5.0,
+      "quote_rows": 2544
+    },
+    {
+      "assets_with_gap_samples": 1,
+      "distinct_assets": 1,
+      "family": "tennis_match",
+      "first_quote_timestamp": "2026-08-19T07:41:10Z",
+      "last_quote_timestamp": "2026-08-20T19:20:12Z",
+      "median_gap_seconds": 0.0,
+      "quote_rows": 773
+    },
+    {
+      "assets_with_gap_samples": 5,
+      "distinct_assets": 5,
+      "family": "tennis_tennis_winner",
+      "first_quote_timestamp": "2026-08-19T07:41:10Z",
+      "last_quote_timestamp": "2026-08-20T19:54:59Z",
+      "median_gap_seconds": 4.0,
+      "quote_rows": 6064
+    },
+    {
+      "assets_with_gap_samples": 4,
+      "distinct_assets": 4,
+      "family": "unknown",
+      "first_quote_timestamp": "2026-08-19T07:47:54Z",
+      "last_quote_timestamp": "2026-08-20T19:51:36Z",
+      "median_gap_seconds": 0.0,
+      "quote_rows": 1341
+    }
+  ],
+  "generated_at_utc": "2026-08-20T19:57:56Z",
+  "git_commit": "unknown",
+  "governance_note": "Collection coverage is a scheduler diagnostic; it does not authorise paper or live trading.",
+  "live_trading_invoked": false,
+  "missing_by_family": {
+    "ai_model_leader": 25,
+    "baseball_mlb_match": 14,
+    "basketball_nba_match": 8,
+    "crypto_btc_special": 20,
+    "crypto_btc_updown_15m": 2,
+    "crypto_btc_updown_daily": 6,
+    "crypto_btc_updown_event": 1,
+    "crypto_eth_special": 8,
+    "crypto_eth_updown_15m": 3,
+    "crypto_eth_updown_daily": 5,
+    "crypto_eth_updown_event": 1,
+    "crypto_sol_special": 2,
+    "crypto_sol_updown_15m": 1,
+    "crypto_sol_updown_event": 2,
+    "crypto_xrp_special": 5,
+    "crypto_xrp_updown_daily": 4,
+    "culture_entertainment": 1,
+    "equities_macro": 9,
+    "esports_match": 8,
+    "geopolitics": 7,
+    "macro_economy": 7,
+    "macro_rates": 7,
+    "mma_match": 2,
+    "policy_legal": 3,
+    "tennis_match": 13,
+    "tennis_tennis_set": 6,
+    "tennis_tennis_total": 9,
+    "tennis_tennis_winner": 4,
+    "unknown": 13,
+    "worldcup_2026_winner": 31
+  },
+  "missing_by_reason": {
+    "missing_close_time": 6,
+    "missing_pre_close_quote": 221
+  },
+  "missing_pre_close_positions": [
+    {
+      "close_time": "",
+      "family": "basketball_nba_match",
+      "market_slug": "will-the-toronto-raptors-make-the-2027-nba-play-in-tournament-20260708212312793",
+      "reason": "missing_close_time",
+      "shadow_position_id": "shadow_position_0e72a4628f229c6bf7a1c05c",
+      "signal_cohort": "basketball_nba_match",
+      "token_id": "92466266712761333715476311916228593402612626192747585242259275663037583655966"
+    },
+    {
+      "close_time": "",
+      "family": "unknown",
+      "market_slug": "0xf4db0ac1fe6fdf723307cf8f7ed3b8b35e7b7ab1409c3672f3bd7cea154cb5f9",
+      "reason": "missing_close_time",
+      "shadow_position_id": "shadow_position_1cd766c15bf7bfcd260cfd07",
+      "signal_cohort": "near_miss_learning|unknown",
+      "token_id": "88573568753972843609233782544263688613192447059515439195026030115855631852457"
+    },
+    {
+      "close_time": "",
+      "family": "unknown",
+      "market_slug": "0x1a64843d427607b164ea18493a30066de60f10abbbdc559066be494528378886",
+      "reason": "missing_close_time",
+      "shadow_position_id": "shadow_position_2d1ce234ad56e372e9088e4c",
+      "signal_cohort": "near_miss_learning|unknown",
+      "token_id": "101210529767768522109521013327011182791765840362085947967089633962337103758101"
+    },
+    {
+      "close_time": "",
+      "family": "unknown",
+      "market_slug": "0x068e9ab22d0907e2994ce08907beeec97120fc79decbc8d43a7232edfc78dc3a",
+      "reason": "missing_close_time",
+      "shadow_position_id": "shadow_position_46961e07f39ab766e5377d2f",
+      "signal_cohort": "near_miss_learning|unknown",
+      "token_id": "47581385012550991085148829829464385589071738906241215245717526584676231898767"
+    },
+    {
+      "close_time": "",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-africa-win-the-2026-fifa-world-cup",
+      "reason": "missing_close_time",
+      "shadow_position_id": "shadow_position_5696adcb70c3a6a0b6c98fbb",
+      "signal_cohort": "worldcup_2026_winner_fundamental",
+      "token_id": "1592099975156656573745061572642427093819000123828108257356891175030364428770"
+    },
+    {
+      "close_time": "",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-north-america-win-the-2026-fifa-world-cup",
+      "reason": "missing_close_time",
+      "shadow_position_id": "shadow_position_db3b1e9896c29ced2df1337f",
+      "signal_cohort": "worldcup_2026_winner_fundamental",
+      "token_id": "96570915933183650323624717300751327226821728969018565701035634346205052779472"
+    },
+    {
+      "close_time": "2026-07-01T14:00:00Z",
+      "family": "crypto_btc_updown_event",
+      "market_slug": "bitcoin-up-or-down-july-1-2026-9am-et",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_8aabe31a1925596752230768",
+      "signal_cohort": "near_miss_learning|crypto_btc_updown_event",
+      "token_id": "1563162945160401095963867324951055209473710269890417949906585810475714457575"
+    },
+    {
+      "close_time": "2026-07-01T14:00:00Z",
+      "family": "crypto_eth_updown_event",
+      "market_slug": "ethereum-up-or-down-july-1-2026-9am-et",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_3cd0555436b0cffc5e490855",
+      "signal_cohort": "near_miss_learning|crypto_eth_updown_event",
+      "token_id": "95970913262670810505582938582435436880687579142255885096913338033013971150243"
+    },
+    {
+      "close_time": "2026-07-01T16:00:00Z",
+      "family": "crypto_btc_special",
+      "market_slug": "bitcoin-above-58k-on-july-1-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_9ed9e5bd9e862fee9b00d1ec",
+      "signal_cohort": "near_miss_learning|crypto",
+      "token_id": "51286356739900665958517218755996001284098353481701052787607366451031876880511"
+    },
+    {
+      "close_time": "2026-07-01T16:00:00Z",
+      "family": "crypto_btc_updown_daily",
+      "market_slug": "bitcoin-up-or-down-on-july-1-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_b459988dbebc646e26d8b061",
+      "signal_cohort": "crypto_btc_updown_event",
+      "token_id": "62491181956793915949619523167742425136466075088627377767605544091350002944371"
+    },
+    {
+      "close_time": "2026-07-01T16:00:00Z",
+      "family": "crypto_eth_updown_daily",
+      "market_slug": "ethereum-up-or-down-on-july-1-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_b36a50db728a3d199d2b7cc9",
+      "signal_cohort": "exploratory_crypto_updown_live_model|crypto_eth_updown_daily|outcome=up",
+      "token_id": "15133965731545014374900920914914504425237364675649508262471768181374994898591"
+    },
+    {
+      "close_time": "2026-07-01T16:00:00Z",
+      "family": "crypto_xrp_updown_daily",
+      "market_slug": "xrp-up-or-down-on-july-1-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_749a1b3182070b4d3081a0f8",
+      "signal_cohort": "crypto_xrp_updown_event",
+      "token_id": "103969164718474111862121182153244985315866224399425867264746795676895650391952"
+    },
+    {
+      "close_time": "2026-07-01T17:15:00Z",
+      "family": "crypto_btc_updown_15m",
+      "market_slug": "btc-updown-15m-1782925200",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_359fc76f7930d077cf9ad715",
+      "signal_cohort": "exploratory_crypto_updown_live_model|crypto_btc_updown_15m|outcome=up",
+      "token_id": "50016693890723615376414729588098921971509257785533714315028863861126279377325"
+    },
+    {
+      "close_time": "2026-07-01T18:30:00Z",
+      "family": "crypto_eth_updown_15m",
+      "market_slug": "eth-updown-15m-1782929700",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_5736ee4d55f223d86e6de3f2",
+      "signal_cohort": "crypto_eth_updown_15m",
+      "token_id": "64404340145492398792250908420663625405029501244846147305408259164341493599532"
+    },
+    {
+      "close_time": "2026-07-01T18:30:00Z",
+      "family": "crypto_eth_updown_15m",
+      "market_slug": "eth-updown-15m-1782929700",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_8bdd32b1ea245bc4ddbdca2c",
+      "signal_cohort": "exploratory_crypto_updown_live_model|crypto_eth_updown_15m|outcome=down",
+      "token_id": "112103317158006144434491171750045424061747303379160341160125747805342535518467"
+    },
+    {
+      "close_time": "2026-07-01T19:45:00Z",
+      "family": "crypto_eth_updown_15m",
+      "market_slug": "eth-updown-15m-1782934200",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_8f3e63109d84c899aebb4ed1",
+      "signal_cohort": "exploratory_crypto_updown_live_model|crypto_eth_updown_15m|outcome=up",
+      "token_id": "107620369610662467641284878161275484111890840882476775424604289612078790881219"
+    },
+    {
+      "close_time": "2026-07-02T16:00:00Z",
+      "family": "crypto_btc_updown_daily",
+      "market_slug": "bitcoin-up-or-down-on-july-2-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_47dc2c8914c131ff27d812e6",
+      "signal_cohort": "crypto_btc_updown_event",
+      "token_id": "72416801419123651892812826760064847522875240926748405920628206932844717891276"
+    },
+    {
+      "close_time": "2026-07-02T16:00:00Z",
+      "family": "crypto_btc_updown_daily",
+      "market_slug": "bitcoin-up-or-down-on-july-2-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_50a14c808bb61485bcc99a9b",
+      "signal_cohort": "exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=down",
+      "token_id": "72416801419123651892812826760064847522875240926748405920628206932844717891276"
+    },
+    {
+      "close_time": "2026-07-02T16:00:00Z",
+      "family": "crypto_btc_updown_daily",
+      "market_slug": "bitcoin-up-or-down-on-july-2-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_71bd3067a3f8508211a12f01",
+      "signal_cohort": "crypto_btc_updown_event",
+      "token_id": "105068887882187836388877473645777248531686732926096216121355472205440074476932"
+    },
+    {
+      "close_time": "2026-07-02T16:00:00Z",
+      "family": "crypto_btc_updown_daily",
+      "market_slug": "bitcoin-up-or-down-on-july-2-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_fbe62b23b368643113c0bf6b",
+      "signal_cohort": "exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=up",
+      "token_id": "105068887882187836388877473645777248531686732926096216121355472205440074476932"
+    },
+    {
+      "close_time": "2026-07-02T16:00:00Z",
+      "family": "crypto_eth_updown_daily",
+      "market_slug": "ethereum-up-or-down-on-july-2-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_9051ab02850b4cd29b952a67",
+      "signal_cohort": "exploratory_crypto_updown_live_model|crypto_eth_updown_daily|outcome=up",
+      "token_id": "16021686629839282610880555346289629178896280296975503078900642558641120571580"
+    },
+    {
+      "close_time": "2026-07-02T16:00:00Z",
+      "family": "crypto_eth_updown_daily",
+      "market_slug": "ethereum-up-or-down-on-july-2-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_9711acf31f8e1308c885c599",
+      "signal_cohort": "crypto_eth_updown_event",
+      "token_id": "53855646100834706748889273803999821053702564615604493601478667498735606571859"
+    },
+    {
+      "close_time": "2026-07-02T16:00:00Z",
+      "family": "crypto_eth_updown_daily",
+      "market_slug": "ethereum-up-or-down-on-july-2-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_f1b953f8c74a4e238415929d",
+      "signal_cohort": "crypto_eth_updown_event",
+      "token_id": "53855646100834706748889273803999821053702564615604493601478667498735606571859"
+    },
+    {
+      "close_time": "2026-07-02T16:00:00Z",
+      "family": "crypto_xrp_updown_daily",
+      "market_slug": "xrp-up-or-down-on-july-2-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_358fbf9b649f9b64caaa1551",
+      "signal_cohort": "crypto_xrp_updown_event",
+      "token_id": "23711838747646459680217145220063050152324411345417075523690620234360292287187"
+    },
+    {
+      "close_time": "2026-07-02T16:00:00Z",
+      "family": "crypto_xrp_updown_daily",
+      "market_slug": "xrp-up-or-down-on-july-2-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_3be6c5edf85d63639e1bd140",
+      "signal_cohort": "crypto_xrp_updown_event",
+      "token_id": "79317271173125372383911388169333296393085827383705789603562652871948645253374"
+    },
+    {
+      "close_time": "2026-07-02T16:00:00Z",
+      "family": "crypto_xrp_updown_daily",
+      "market_slug": "xrp-up-or-down-on-july-2-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_7ca9226fe2392a35bc7ecd2a",
+      "signal_cohort": "exploratory_crypto_updown_live_model|crypto_xrp_updown_daily|outcome=up",
+      "token_id": "79317271173125372383911388169333296393085827383705789603562652871948645253374"
+    },
+    {
+      "close_time": "2026-07-02T17:00:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "val-rrq1-100t1-2026-07-02",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_c6a331fe9657498ddfd04a78",
+      "signal_cohort": "near_miss_learning|worldcup",
+      "token_id": "79578447977036871947610607095966963798599162711855390717414165188505123328604"
+    },
+    {
+      "close_time": "2026-07-02T19:00:00Z",
+      "family": "unknown",
+      "market_slug": "fifwc-esp-aut-2026-07-02-esp",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_28a500d4b9f3a3b49433d40e",
+      "signal_cohort": "near_miss_learning|unknown",
+      "token_id": "87195879292900083989013965233465465154610009955293265578539308193346452705988"
+    },
+    {
+      "close_time": "2026-07-03T01:15:00Z",
+      "family": "crypto_sol_updown_15m",
+      "market_slug": "sol-updown-15m-1783040400",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_da9222d53cd97ffc21b7629f",
+      "signal_cohort": "exploratory_crypto_updown_live_model|crypto_sol_updown_15m|outcome=up",
+      "token_id": "82863221626868840911670131219567265287902417688664810006053164033778087559789"
+    },
+    {
+      "close_time": "2026-07-03T14:00:00Z",
+      "family": "esports_match",
+      "market_slug": "lol-g2-tes-2026-07-04-game2",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_4773302870b4f33e4aa2223c",
+      "signal_cohort": "esports_match",
+      "token_id": "37716150691402938392617729334946544059243516117886184387884556484057177338375"
+    },
+    {
+      "close_time": "2026-07-03T14:00:00Z",
+      "family": "esports_match",
+      "market_slug": "lol-g2-tes-2026-07-04-game1",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_6a181d5b39af90f22783cb7b",
+      "signal_cohort": "esports_match",
+      "token_id": "15179233072955840052258083348902437806598214519526291233729732135663116773432"
+    },
+    {
+      "close_time": "2026-07-03T14:00:00Z",
+      "family": "esports_match",
+      "market_slug": "lol-g2-tes-2026-07-04-game3",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_a9883032459cf68a9e5c6396",
+      "signal_cohort": "esports_match",
+      "token_id": "40877341672716702435222914878793412150107296404651621157421926646614227757177"
+    },
+    {
+      "close_time": "2026-07-03T16:00:00Z",
+      "family": "crypto_btc_updown_daily",
+      "market_slug": "bitcoin-up-or-down-on-july-3-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_2a558f2ba7d48446dd4b97a2",
+      "signal_cohort": "exploratory_crypto_updown_live_model|crypto_btc_updown_daily|outcome=up",
+      "token_id": "50771311805338368964020097639756248056470721923795027749194955348287834615038"
+    },
+    {
+      "close_time": "2026-07-03T16:00:00Z",
+      "family": "unknown",
+      "market_slug": "elon-musk-of-tweets-june-26-july-3-180-199",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_48f37bbcceebdd42bc5f1019",
+      "signal_cohort": "unknown",
+      "token_id": "84901166324177966669421211476851825063065823078129143915276546645031839692549"
+    },
+    {
+      "close_time": "2026-07-04T06:15:00Z",
+      "family": "crypto_btc_updown_15m",
+      "market_slug": "btc-updown-15m-1783144800",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_8bc0fcf2480d4ed65b942393",
+      "signal_cohort": "exploratory_crypto_updown_live_model|crypto_btc_updown_15m|outcome=up",
+      "token_id": "19730932935295891416634818734080630158048957832689359721451531885178509824119"
+    },
+    {
+      "close_time": "2026-07-04T09:00:00Z",
+      "family": "esports_match",
+      "market_slug": "lol-ly-fur-2026-07-03-game4",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_bfa1d939b24b429ddef1d525",
+      "signal_cohort": "near_miss_learning|esports_match",
+      "token_id": "16016730289221911065139420790203524941583739442171500009379744997671775172127"
+    },
+    {
+      "close_time": "2026-07-04T17:00:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "val-100t1-bbl1-2026-07-04-total-games-2pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_1224aa9fbd20410787479ff7",
+      "signal_cohort": "near_miss_learning|worldcup",
+      "token_id": "84853658415200810288101099865856085102981207421863615897992917153317954746467"
+    },
+    {
+      "close_time": "2026-07-04T17:00:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "val-rrq1-edg1-2026-07-04-map-handicap-home-1pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_1ea37063b357f5ee5bec167d",
+      "signal_cohort": "near_miss_learning|worldcup",
+      "token_id": "11054728886141638064306468461994919278870329161719543188258566217845794768540"
+    },
+    {
+      "close_time": "2026-07-04T17:00:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "val-rrq1-edg1-2026-07-04",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_71579f07dfdd1a56d5adf18f",
+      "signal_cohort": "near_miss_learning|worldcup",
+      "token_id": "100488798831783217716114782002425141486242660258480471496412910201880207917876"
+    },
+    {
+      "close_time": "2026-07-04T17:00:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "val-100t1-bbl1-2026-07-04",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_7f43584bb2835681dbeda108",
+      "signal_cohort": "near_miss_learning|worldcup",
+      "token_id": "106403494173745945712618013411865565949479738942503646166426185807843346311144"
+    },
+    {
+      "close_time": "2026-07-04T21:00:00Z",
+      "family": "crypto_sol_updown_event",
+      "market_slug": "solana-up-or-down-july-4-2026-4pm-et",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_dfa3c7bf08bba11e21792287",
+      "signal_cohort": "exploratory_historical_rule|crypto_sol_updown_event|outcome=up",
+      "token_id": "63920195570336987073394450805449871371720992420639371391738287051439656019960"
+    },
+    {
+      "close_time": "2026-07-05T09:00:00Z",
+      "family": "esports_match",
+      "market_slug": "lol-tsw-tes-2026-07-04-game-handicap-home-2pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_22407d7c0cfd15bc44574a85",
+      "signal_cohort": "esports_match",
+      "token_id": "33530429943360373054595039678477922135580996783750777538392724478384723531268"
+    },
+    {
+      "close_time": "2026-07-05T09:00:00Z",
+      "family": "esports_match",
+      "market_slug": "lol-tsw-tes-2026-07-04-game2-kill-over-30pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_6b92f0ff8577289101b23c5f",
+      "signal_cohort": "esports_match",
+      "token_id": "102190624741220763966129194312524801551528939292955751357610490906297973503528"
+    },
+    {
+      "close_time": "2026-07-05T13:00:00Z",
+      "family": "esports_match",
+      "market_slug": "lol-hle1-g2-2026-07-05-game3",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_fd82fdf8dc9f6f94063cae1c",
+      "signal_cohort": "near_miss_learning|esports_match",
+      "token_id": "4878248390193678993620450204708741866484174794731493033856855433346065619203"
+    },
+    {
+      "close_time": "2026-07-05T14:00:00Z",
+      "family": "esports_match",
+      "market_slug": "lol-hle1-g2-2026-07-05-game5-kill-over-30pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_76cf5fb435f771fa9938e2ca",
+      "signal_cohort": "esports_match",
+      "token_id": "68251495945275543885062168102758306348961780723394750616218772714765320813409"
+    },
+    {
+      "close_time": "2026-07-10T10:00:00Z",
+      "family": "tennis_match",
+      "market_slug": "wta-alexand-jovic-2026-07-03",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_0ff87e9f1ff13884aa74624b",
+      "signal_cohort": "tennis_match",
+      "token_id": "8034291054833407441050552604585648759190219156987232079377261105843916626085"
+    },
+    {
+      "close_time": "2026-07-10T10:00:00Z",
+      "family": "tennis_tennis_set",
+      "market_slug": "atp-rinderk-djokovi-2026-07-03-first-set-total-10pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_2e790c8d7b01ff882421dc8f",
+      "signal_cohort": "tennis_tennis_set",
+      "token_id": "43063280154365741001045482383057689001871836674672707910479812929585813229491"
+    },
+    {
+      "close_time": "2026-07-10T10:00:00Z",
+      "family": "tennis_tennis_total",
+      "market_slug": "wta-bencic-kalinsk-2026-07-03-match-total-22pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_93ff01d170cbb35e0a596a75",
+      "signal_cohort": "tennis_tennis_total",
+      "token_id": "78529977179597273477923544823521219720181139771035053574474865667589855751902"
+    },
+    {
+      "close_time": "2026-07-11T10:00:00Z",
+      "family": "tennis_match",
+      "market_slug": "atp-lehecka-munar-2026-07-04",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_d127e815dbc7d9c6874f88e0",
+      "signal_cohort": "near_miss_learning|tennis_match",
+      "token_id": "62084735331273717448771183986515479149280784400903153357300304679343623869619"
+    },
+    {
+      "close_time": "2026-07-11T10:00:00Z",
+      "family": "tennis_tennis_set",
+      "market_slug": "atp-lehecka-munar-2026-07-04-set-handicap-home-2pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_f77fdc29ba03a6dd9085de05",
+      "signal_cohort": "tennis_tennis_set",
+      "token_id": "27675183072332599497590722072135858871436087220161483851212193078428233447369"
+    },
+    {
+      "close_time": "2026-07-11T10:00:00Z",
+      "family": "tennis_tennis_winner",
+      "market_slug": "atp-lehecka-munar-2026-07-04-first-set-winner-Lehecka-vs-Munar",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_bb26769d501a4c0d53776676",
+      "signal_cohort": "tennis_tennis_winner",
+      "token_id": "103929245172146075056322841699535584807727838032313970046547993425281687034861"
+    },
+    {
+      "close_time": "2026-07-11T16:00:00Z",
+      "family": "crypto_eth_special",
+      "market_slug": "ethereum-above-1800-on-july-11-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_b628b70775660b44fc5fc327",
+      "signal_cohort": "near_miss_learning|crypto",
+      "token_id": "80821783205353867232708443400625071236993989645929795573374709566591862217753"
+    },
+    {
+      "close_time": "2026-07-11T16:00:00Z",
+      "family": "crypto_eth_updown_daily",
+      "market_slug": "ethereum-up-or-down-on-july-11-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_2127abb1fdea43ce5115f8e5",
+      "signal_cohort": "exploratory_crypto_updown_live_model|crypto_eth_updown_daily|outcome=up",
+      "token_id": "80175748805860480927479961230167126958504343753637342951718900719208211997064"
+    },
+    {
+      "close_time": "2026-07-11T17:00:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "val-100t1-ns1-2026-07-11-total-games-2pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_6e17180364684ed7659cfe59",
+      "signal_cohort": "worldcup",
+      "token_id": "18237340609439602555259079306566918036164241218734979256371277407958876329524"
+    },
+    {
+      "close_time": "2026-07-11T19:45:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "val-bbl1-nrg-2026-07-11-game3-round-total-21pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_5d769c55b2e8718ae66a34a1",
+      "signal_cohort": "worldcup",
+      "token_id": "97691106274962537327436888095367701929558923858062496006649961287568421332519"
+    },
+    {
+      "close_time": "2026-07-11T19:45:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "val-bbl1-nrg-2026-07-11-total-games-2pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_ef6ad4788c7b2069f1ce0cb7",
+      "signal_cohort": "worldcup",
+      "token_id": "70602871540178377200470545934807626742304624572845938133134806462802950431069"
+    },
+    {
+      "close_time": "2026-07-12T00:00:00Z",
+      "family": "tennis_tennis_winner",
+      "market_slug": "will-jannik-sinner-be-the-2026-mens-wimbledon-winner",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_a9608abea013adf0202e3f29",
+      "signal_cohort": "near_miss_learning|tennis_tennis_winner",
+      "token_id": "22977220121936888671053556775814656829923108179761155125259075462814514034328"
+    },
+    {
+      "close_time": "2026-07-12T00:00:00Z",
+      "family": "tennis_tennis_winner",
+      "market_slug": "will-aryna-sabalenka-be-the-2026-womens-wimbledon-winner",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_d46845a7ee275e0e1a12a15d",
+      "signal_cohort": "tennis_tennis_winner",
+      "token_id": "14532148020727350959986694454265689616763845571437647246737392314294227055883"
+    },
+    {
+      "close_time": "2026-07-12T02:00:00Z",
+      "family": "unknown",
+      "market_slug": "val-sad-srb-2026-07-11-game3-round-total-21pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_574dc13a43d33b4d87325899",
+      "signal_cohort": "near_miss_learning|unknown",
+      "token_id": "14398367888676648421806539572052326353401892515809739796278498450454933130776"
+    },
+    {
+      "close_time": "2026-07-12T10:00:00Z",
+      "family": "tennis_tennis_set",
+      "market_slug": "atp-hurkacz-struff-2026-07-05-first-set-total-10pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_1cd8987311d8ce5c3a40169c",
+      "signal_cohort": "near_miss_learning|tennis_tennis_set",
+      "token_id": "42577400862355157062965571014328302937203697627294184185968488702204359196518"
+    },
+    {
+      "close_time": "2026-07-12T10:00:00Z",
+      "family": "tennis_tennis_set",
+      "market_slug": "atp-hurkacz-struff-2026-07-05-set-handicap-home-1pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_5619c6a28d61850fc649eee4",
+      "signal_cohort": "near_miss_learning|tennis_tennis_set",
+      "token_id": "93426377966732776309650134231745522642454956503694706041745928396122776917853"
+    },
+    {
+      "close_time": "2026-07-12T10:00:00Z",
+      "family": "tennis_tennis_set",
+      "market_slug": "atp-safiull-djokovi-2026-07-05-set-handicap-away-1pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_6b9e5efaf4aac3b27b1387a4",
+      "signal_cohort": "tennis_tennis_set",
+      "token_id": "92757384589271631160701887670251642776278193144768776799915915148173921795151"
+    },
+    {
+      "close_time": "2026-07-12T10:00:00Z",
+      "family": "tennis_tennis_set",
+      "market_slug": "atp-hurkacz-struff-2026-07-05-set-totals-3pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_eef86df88247e77f31ecff5d",
+      "signal_cohort": "tennis_tennis_set",
+      "token_id": "96737008388180078037148385221588798134423734714651771975246747205611283956236"
+    },
+    {
+      "close_time": "2026-07-12T10:00:00Z",
+      "family": "tennis_tennis_total",
+      "market_slug": "atp-hurkacz-struff-2026-07-05-match-total-40pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_0c79afeb93c09fee6f3880f3",
+      "signal_cohort": "near_miss_learning|tennis_tennis_total",
+      "token_id": "11362099522845764703440172078354303659761510180485227057416996712373494001364"
+    },
+    {
+      "close_time": "2026-07-12T10:00:00Z",
+      "family": "tennis_tennis_winner",
+      "market_slug": "atp-safiull-djokovi-2026-07-05-first-set-winner-Safiullin-vs-Djokovic",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_5ee2eabf50354b75410b1a8d",
+      "signal_cohort": "tennis_tennis_winner",
+      "token_id": "102573250417806295700770169303052729360781301814290453235076494614411960055758"
+    },
+    {
+      "close_time": "2026-07-12T14:00:00Z",
+      "family": "unknown",
+      "market_slug": "val-nova-fpx-2026-07-12-game1-round-total-21pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_10964165e07475f1b78a1519",
+      "signal_cohort": "unknown",
+      "token_id": "20136746619063568973738277652028149981498043474795089012547311685090466604748"
+    },
+    {
+      "close_time": "2026-07-12T14:00:00Z",
+      "family": "unknown",
+      "market_slug": "val-nova-fpx-2026-07-12-total-games-2pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_58600913ea88425396296c7d",
+      "signal_cohort": "unknown",
+      "token_id": "75671870297160145762494948756221055784251308418589518487469641260554357178644"
+    },
+    {
+      "close_time": "2026-07-12T14:00:00Z",
+      "family": "unknown",
+      "market_slug": "val-nova-fpx-2026-07-12-total-games-2pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_bd742f2f5e5cd62a5cd3691c",
+      "signal_cohort": "unknown",
+      "token_id": "83353740063301337242734729745885378493188100076217980058743685730607530577772"
+    },
+    {
+      "close_time": "2026-07-12T16:00:00Z",
+      "family": "crypto_btc_special",
+      "market_slug": "will-the-price-of-bitcoin-be-between-64000-66000-on-july-12-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_040bda3b342629c25cd95e28",
+      "signal_cohort": "crypto",
+      "token_id": "108814265557335048195152581750913757543935325549626627558610456826613096418940"
+    },
+    {
+      "close_time": "2026-07-12T16:00:00Z",
+      "family": "crypto_btc_special",
+      "market_slug": "bitcoin-above-64k-on-july-12-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_1b285ec51171139a6f516769",
+      "signal_cohort": "crypto",
+      "token_id": "86942942731248835776259193090741420335130406064059668589473719630507327367051"
+    },
+    {
+      "close_time": "2026-07-12T16:00:00Z",
+      "family": "crypto_btc_special",
+      "market_slug": "bitcoin-above-64k-on-july-12-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_289a8067b309dab0718dfac3",
+      "signal_cohort": "crypto",
+      "token_id": "86942942731248835776259193090741420335130406064059668589473719630507327367051"
+    },
+    {
+      "close_time": "2026-07-12T16:00:00Z",
+      "family": "crypto_btc_special",
+      "market_slug": "will-the-price-of-bitcoin-be-between-62000-64000-on-july-12-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_4179a934f2ff5f8b2a445e96",
+      "signal_cohort": "crypto",
+      "token_id": "64153709723552911606489345017025095504754803331793905231147772925792537283580"
+    },
+    {
+      "close_time": "2026-07-12T16:00:00Z",
+      "family": "crypto_btc_special",
+      "market_slug": "will-the-price-of-bitcoin-be-between-64000-66000-on-july-12-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_4946a2f7f572490f8337f263",
+      "signal_cohort": "crypto",
+      "token_id": "75535028271238048717865371296248554317946914069243118831215160882128523849875"
+    },
+    {
+      "close_time": "2026-07-12T16:00:00Z",
+      "family": "crypto_btc_special",
+      "market_slug": "will-the-price-of-bitcoin-be-between-64000-66000-on-july-12-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_5a49314ee89afb4af11f378b",
+      "signal_cohort": "crypto",
+      "token_id": "75535028271238048717865371296248554317946914069243118831215160882128523849875"
+    },
+    {
+      "close_time": "2026-07-12T16:00:00Z",
+      "family": "crypto_btc_special",
+      "market_slug": "bitcoin-above-64k-on-july-12-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_898313ab5da222ecabb43926",
+      "signal_cohort": "crypto",
+      "token_id": "55528382984414578308889318228828883074034060780071686209945402023097780571705"
+    },
+    {
+      "close_time": "2026-07-12T16:00:00Z",
+      "family": "crypto_btc_special",
+      "market_slug": "will-the-price-of-bitcoin-be-between-64000-66000-on-july-12-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_e14a5d4a4a01950d00483c36",
+      "signal_cohort": "crypto",
+      "token_id": "108814265557335048195152581750913757543935325549626627558610456826613096418940"
+    },
+    {
+      "close_time": "2026-07-12T16:00:00Z",
+      "family": "crypto_btc_special",
+      "market_slug": "bitcoin-above-64k-on-july-12-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_e8b23580375384efaa10aea6",
+      "signal_cohort": "near_miss_learning|crypto",
+      "token_id": "55528382984414578308889318228828883074034060780071686209945402023097780571705"
+    },
+    {
+      "close_time": "2026-07-12T16:00:00Z",
+      "family": "crypto_btc_special",
+      "market_slug": "will-the-price-of-bitcoin-be-between-62000-64000-on-july-12-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_f99366d1efa9c8b95fd2c131",
+      "signal_cohort": "crypto",
+      "token_id": "70309830531163204677182090973720805007230053781477999768677408281939728399196"
+    },
+    {
+      "close_time": "2026-07-12T16:00:00Z",
+      "family": "crypto_btc_special",
+      "market_slug": "will-the-price-of-bitcoin-be-between-62000-64000-on-july-12-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_fc732a6a6f3b623d4b9ba126",
+      "signal_cohort": "near_miss_learning|crypto",
+      "token_id": "64153709723552911606489345017025095504754803331793905231147772925792537283580"
+    },
+    {
+      "close_time": "2026-07-12T16:00:00Z",
+      "family": "crypto_btc_special",
+      "market_slug": "bitcoin-above-64k-on-july-12-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_fdca1f25b4eb64fdcf4c9c06",
+      "signal_cohort": "crypto",
+      "token_id": "86942942731248835776259193090741420335130406064059668589473719630507327367051"
+    },
+    {
+      "close_time": "2026-07-12T16:00:00Z",
+      "family": "crypto_eth_special",
+      "market_slug": "ethereum-above-1800-on-july-12-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_234813f8dd9d7bf34ccff686",
+      "signal_cohort": "crypto",
+      "token_id": "59890312346962300075151779792396376789109854434895184276252143392373091389785"
+    },
+    {
+      "close_time": "2026-07-12T16:00:00Z",
+      "family": "crypto_eth_special",
+      "market_slug": "will-the-price-of-ethereum-be-between-1700-1800-on-july-12-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_c79260bff98f9d03aad77567",
+      "signal_cohort": "crypto",
+      "token_id": "50977698590300032741535835435558027865585908844661185430427062221844113796746"
+    },
+    {
+      "close_time": "2026-07-12T16:00:00Z",
+      "family": "crypto_eth_special",
+      "market_slug": "ethereum-above-1800-on-july-12-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_df33341b9ef5223e303b6157",
+      "signal_cohort": "crypto",
+      "token_id": "108027398472302443150464487655820976321462066799725937973190977980554992424177"
+    },
+    {
+      "close_time": "2026-07-12T16:00:00Z",
+      "family": "crypto_xrp_special",
+      "market_slug": "xrp-above-1pt1-on-july-12-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_56d6ebd7b9954918d97200db",
+      "signal_cohort": "crypto",
+      "token_id": "20586590567682337243649314468465218863766723074710903915323806603797627003369"
+    },
+    {
+      "close_time": "2026-07-12T17:00:00Z",
+      "family": "unknown",
+      "market_slug": "val-tyloo-te-2026-07-12-game3-round-total-21pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_7c96f49a1cf297f6c5c0d9ed",
+      "signal_cohort": "unknown",
+      "token_id": "2251737422960156638808378057820262985130730414592695412432055295258184711036"
+    },
+    {
+      "close_time": "2026-07-12T17:00:00Z",
+      "family": "unknown",
+      "market_slug": "val-tyloo-te-2026-07-12-total-games-2pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_f2583de725c95ce9038ecec0",
+      "signal_cohort": "unknown",
+      "token_id": "21826507280449134214629923518994881403855164454312297439671322865525102121141"
+    },
+    {
+      "close_time": "2026-07-13T00:00:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-brazil-reach-the-semifinals-at-the-2026-fifa-world-cup-20260602145149717",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_6e8503d73090d67804185972",
+      "signal_cohort": "worldcup",
+      "token_id": "67055561509316093471395796595350646294389919019450083805134054234605733966507"
+    },
+    {
+      "close_time": "2026-07-13T00:00:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-argentina-reach-the-semifinals-at-the-2026-fifa-world-cup-20260602145149745",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_c58cbc205eefa1e1700d259c",
+      "signal_cohort": "worldcup",
+      "token_id": "15579232773398251307282915471792114310844694494654532312907387009654692860923"
+    },
+    {
+      "close_time": "2026-07-13T23:59:00Z",
+      "family": "baseball_mlb_match",
+      "market_slug": "will-jordan-walker-advance-to-the-semifinals-of-the-2026-mlb-home-run-derby-20260709211856743",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_54dd64503882fc405cb29181",
+      "signal_cohort": "near_miss_learning|baseball_mlb_match",
+      "token_id": "106572797405540473377240335596599132759125961324255838950491653791357331997305"
+    },
+    {
+      "close_time": "2026-07-13T23:59:00Z",
+      "family": "baseball_mlb_match",
+      "market_slug": "will-jordan-walker-advance-to-the-semifinals-of-the-2026-mlb-home-run-derby-20260709211856743",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_66dfca4aeff978653006da59",
+      "signal_cohort": "near_miss_learning|baseball_mlb_match",
+      "token_id": "52261365243516817473495855032579220012931048638423754381932900155844077398242"
+    },
+    {
+      "close_time": "2026-07-13T23:59:00Z",
+      "family": "baseball_mlb_match",
+      "market_slug": "will-jac-caglianone-advance-to-the-semifinals-of-the-2026-mlb-home-run-derby-20260709211856742",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_a2266953e6b26b145ac39b8e",
+      "signal_cohort": "near_miss_learning|baseball_mlb_match",
+      "token_id": "17761142320939730650177912236237637988988609904546776372920350104247854085727"
+    },
+    {
+      "close_time": "2026-07-13T23:59:00Z",
+      "family": "baseball_mlb_match",
+      "market_slug": "will-ben-rice-advance-to-the-semifinals-of-the-2026-mlb-home-run-derby-20260709211856740",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_faa5e3e3bb6d9f364018c4fa",
+      "signal_cohort": "near_miss_learning|baseball_mlb_match",
+      "token_id": "115533238225868603108274286752495680653635818041116254050671667599763901594715"
+    },
+    {
+      "close_time": "2026-07-13T23:59:00Z",
+      "family": "geopolitics",
+      "market_slug": "will-kyle-schwarber-win-the-2026-mlb-home-run-derby",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_17403b1970d1d4ff80975098",
+      "signal_cohort": "near_miss_learning|geopolitics",
+      "token_id": "33145602481672952893736840073987236393121044236137891107431869929760837470830"
+    },
+    {
+      "close_time": "2026-07-15T00:00:00Z",
+      "family": "baseball_mlb_match",
+      "market_slug": "mlb-al-nl-2026-07-14-total-7pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_2b7f0afbdf87387205b6eb02",
+      "signal_cohort": "baseball_mlb_match",
+      "token_id": "56364511605477579236001090232222955613662932873061549008311567670815856050769"
+    },
+    {
+      "close_time": "2026-07-15T00:00:00Z",
+      "family": "baseball_mlb_match",
+      "market_slug": "mlb-al-nl-2026-07-14-total-8pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_e69ba7f493f38bfd59ee3df9",
+      "signal_cohort": "baseball_mlb_match",
+      "token_id": "76687687901848733791230602614619773894396137158710677490208966731067789329851"
+    },
+    {
+      "close_time": "2026-07-16T16:00:00Z",
+      "family": "crypto_btc_special",
+      "market_slug": "bitcoin-above-62k-on-july-16-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_4acae404b6c4b94bacb4e1ca",
+      "signal_cohort": "crypto",
+      "token_id": "20497841437793312581791312697077475910366090223612451471416274644489891395134"
+    },
+    {
+      "close_time": "2026-07-16T16:00:00Z",
+      "family": "crypto_btc_special",
+      "market_slug": "bitcoin-above-64k-on-july-16-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_9ff001338b57c0190f9b4e13",
+      "signal_cohort": "crypto",
+      "token_id": "74751467310548001523578174536683436613056298730683710137283385031618966718497"
+    },
+    {
+      "close_time": "2026-07-18T15:00:00Z",
+      "family": "tennis_tennis_total",
+      "market_slug": "atp-topo-tiffon-2026-07-11-match-total-21pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_185f21a800d52a37a62da13f",
+      "signal_cohort": "near_miss_learning|tennis_tennis_total",
+      "token_id": "88279034793760112412772093518175476394432912033192713256231126642998095511734"
+    },
+    {
+      "close_time": "2026-07-18T15:00:00Z",
+      "family": "tennis_tennis_total",
+      "market_slug": "wta-muchova-noskova-2026-07-11-match-total-22pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_1a70c023e2064b8f675b5725",
+      "signal_cohort": "near_miss_learning|tennis_tennis_total",
+      "token_id": "54462958320146765320333158970838539480571943567890652070524574742745033282030"
+    },
+    {
+      "close_time": "2026-07-18T19:30:00Z",
+      "family": "tennis_match",
+      "market_slug": "atp-galarne-fearnle-2026-07-11",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_2b2adb9186204c6e055cab16",
+      "signal_cohort": "tennis_match",
+      "token_id": "113001005530964189090445865771127695969099001461290034724228071177902240127999"
+    },
+    {
+      "close_time": "2026-07-19T12:00:00Z",
+      "family": "tennis_match",
+      "market_slug": "wta-doubles-guomlad-dabrste-2026-07-12",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_94e34323c8e7ede2f2ff81a1",
+      "signal_cohort": "tennis_match",
+      "token_id": "105059615050887580469115643550998531887443039310043449526369853046029233334637"
+    },
+    {
+      "close_time": "2026-07-19T14:00:00Z",
+      "family": "tennis_match",
+      "market_slug": "wta-hibino-tona-2026-07-12",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_931c936bc16f17198848fbc1",
+      "signal_cohort": "near_miss_learning|tennis_match",
+      "token_id": "73887398079416380747313622004155070109050563537939365204108722868711967783701"
+    },
+    {
+      "close_time": "2026-07-19T15:00:00Z",
+      "family": "macro_rates",
+      "market_slug": "atp-guerrie-gomez-2026-07-12",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_97a5dd16d4fa1c2a5c176663",
+      "signal_cohort": "near_miss_learning|macro_rates",
+      "token_id": "1268933714530289296093521631233912365266919062823702191025124856819608974605"
+    },
+    {
+      "close_time": "2026-07-19T15:00:00Z",
+      "family": "tennis_match",
+      "market_slug": "atp-neumaye-topo-2026-07-12",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_8a4fecdc495a4728cfbef19e",
+      "signal_cohort": "tennis_match",
+      "token_id": "81880210882962730475557265090050535080601864490746973933755357698054446881103"
+    },
+    {
+      "close_time": "2026-07-19T15:00:00Z",
+      "family": "tennis_tennis_total",
+      "market_slug": "atp-sinner-zverev-2026-07-12-match-total-38pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_2f05d453fd6f3ad7c0259d1d",
+      "signal_cohort": "tennis_tennis_total",
+      "token_id": "84118065535858990031381111708588755940152724972777441866352454255165797283003"
+    },
+    {
+      "close_time": "2026-07-19T23:59:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-the-final-be-esp-vs-eng-at-the-2026-fifa-world-cup-20260708195422338",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_77c5638211fdbd6e9ebc6746",
+      "signal_cohort": "near_miss_learning|soccer_match",
+      "token_id": "68572597199146111521345758915289443747958372073094348952231708037637511101046"
+    },
+    {
+      "close_time": "2026-07-19T23:59:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-the-final-be-esp-vs-eng-at-the-2026-fifa-world-cup-20260708195422338",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_861c69c8b5f1bd69c7b4299b",
+      "signal_cohort": "near_miss_learning|soccer_match",
+      "token_id": "68572597199146111521345758915289443747958372073094348952231708037637511101046"
+    },
+    {
+      "close_time": "2026-07-19T23:59:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-the-final-be-fra-vs-arg-at-the-2026-fifa-world-cup-20260708195422331",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_8b359bf7d0923c1c52db2fbe",
+      "signal_cohort": "near_miss_learning|soccer_match",
+      "token_id": "70018376071625827086146319947012007871751334826222300669286047718229167227560"
+    },
+    {
+      "close_time": "2026-07-19T23:59:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-the-final-be-fra-vs-eng-at-the-2026-fifa-world-cup-20260708195422330",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_af5586da4fd6aea04c6f9f1c",
+      "signal_cohort": "soccer_match",
+      "token_id": "89702311446208436197257850803686761766898352340502332001046506866414360572727"
+    },
+    {
+      "close_time": "2026-07-19T23:59:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-the-final-be-fra-vs-arg-at-the-2026-fifa-world-cup-20260708195422331",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_fa9edb7a9054187befd8096f",
+      "signal_cohort": "near_miss_learning|soccer_match",
+      "token_id": "70018376071625827086146319947012007871751334826222300669286047718229167227560"
+    },
+    {
+      "close_time": "2026-07-20T00:00:00Z",
+      "family": "macro_rates",
+      "market_slug": "will-colombia-reach-the-2026-fifa-world-cup-final",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_4aa0885fa499808f33f70754",
+      "signal_cohort": "structural|longshot_no|macro_rates",
+      "token_id": "43628795712486515833828470752867039200350376777314237956256694829779429130222"
+    },
+    {
+      "close_time": "2026-07-20T00:00:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-argentina-reach-the-2026-fifa-world-cup-final",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_41a5f230d6321fc065ea205e",
+      "signal_cohort": "worldcup",
+      "token_id": "29655164621652735807988359935603921446734809810207924831871042520148753286761"
+    },
+    {
+      "close_time": "2026-07-20T00:00:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-lionel-messi-be-the-top-goalscorer-at-the-2026-fifa-world-cup",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_4239362478db146668b73ea5",
+      "signal_cohort": "worldcup",
+      "token_id": "19214394437683566921750936876376421489271269944393354497977881791256347396217"
+    },
+    {
+      "close_time": "2026-07-20T00:00:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-kylian-mbappe-be-the-top-goalscorer-at-the-2026-fifa-world-cup",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_896cde175bf84fdc6cdfd976",
+      "signal_cohort": "worldcup",
+      "token_id": "49886028487112281574279422474095181525913123582177075375309734310587117931078"
+    },
+    {
+      "close_time": "2026-07-20T00:00:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-lionel-messi-be-the-top-goalscorer-at-the-2026-fifa-world-cup",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_8a12ff3ee7ec35b286c9fe3c",
+      "signal_cohort": "soccer_match",
+      "token_id": "19214394437683566921750936876376421489271269944393354497977881791256347396217"
+    },
+    {
+      "close_time": "2026-07-20T00:00:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-argentina-win-the-2026-fifa-world-cup-245",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_a45cfddba34bcb1895a29853",
+      "signal_cohort": "worldcup_2026_winner_fundamental",
+      "token_id": "18812649149814341758733697580460697418474693998558159483117100240528657629879"
+    },
+    {
+      "close_time": "2026-07-20T00:00:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-france-reach-the-2026-fifa-world-cup-final",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_f0a091f5244aecf9b95894bf",
+      "signal_cohort": "worldcup",
+      "token_id": "67697867866538302451407026469381030994678077364956441511771093219468536072529"
+    },
+    {
+      "close_time": "2026-07-20T03:59:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-5-matches-be-decided-by-penalty-shootout-during-the-2026-fifa-world-cup-20260610210228790",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_004bccb27d4d890542c03a53",
+      "signal_cohort": "soccer_match",
+      "token_id": "37089111703099330271756902756550617087324195263983091188635426682509248301097"
+    },
+    {
+      "close_time": "2026-07-20T03:59:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-lionel-messi-win-the-golden-ball-at-the-2026-fifa-world-cup-20260603194032283",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_3f9e6dbff427f3d90214a707",
+      "signal_cohort": "worldcup",
+      "token_id": "68099147950522191308134976209533771147823729818517018192391581768804443699549"
+    },
+    {
+      "close_time": "2026-07-20T03:59:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-lionel-messi-win-the-bronze-ball-at-the-2026-fifa-world-cup-20260603194939945",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_4071824c1a409bb836e1a411",
+      "signal_cohort": "soccer_match",
+      "token_id": "84582761957281883913197128159372322952949243933543146874651198104592540816644"
+    },
+    {
+      "close_time": "2026-07-20T03:59:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-unai-simon-win-the-golden-glove-at-the-2026-fifa-world-cup-20260603195307478",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_6f7dece199a0154ba5819471",
+      "signal_cohort": "near_miss_learning|soccer_match",
+      "token_id": "95373356057942321283159367382273306409832508537003322247844354149498841418161"
+    },
+    {
+      "close_time": "2026-07-20T03:59:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-lionel-messi-win-the-golden-ball-at-the-2026-fifa-world-cup-20260603194032283",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_762d5788f20581e3bf6c99a6",
+      "signal_cohort": "soccer_match",
+      "token_id": "68099147950522191308134976209533771147823729818517018192391581768804443699549"
+    },
+    {
+      "close_time": "2026-07-20T03:59:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-mike-maignan-win-the-golden-glove-at-the-2026-fifa-world-cup-20260603195307476",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_d3026655148db9f52407e06a",
+      "signal_cohort": "soccer_match",
+      "token_id": "54107343263387475730966095910471611039456828338034353328930651554538556391012"
+    },
+    {
+      "close_time": "2026-07-20T04:00:00Z",
+      "family": "crypto_xrp_special",
+      "market_slug": "will-xrp-dip-to-0pt7-july-13-19-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_5e1029868c6a835fdef41aaa",
+      "signal_cohort": "crypto",
+      "token_id": "114964137300187455673686071186000057049854665542029467996086181303913053414179"
+    },
+    {
+      "close_time": "2026-07-20T04:00:00Z",
+      "family": "crypto_xrp_special",
+      "market_slug": "will-xrp-dip-to-0pt6-july-13-19-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_7243f05784028c752002a087",
+      "signal_cohort": "crypto",
+      "token_id": "56527186903613370615775908564644354689644353352170438157656512134191242434722"
+    },
+    {
+      "close_time": "2026-07-20T04:00:00Z",
+      "family": "crypto_xrp_special",
+      "market_slug": "will-xrp-dip-to-0pt5-july-13-19-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_e835aef8e903ac69515252d3",
+      "signal_cohort": "crypto",
+      "token_id": "85882034462548533875562700055504379440850132693939381725631604498134489620181"
+    },
+    {
+      "close_time": "2026-07-20T07:00:00Z",
+      "family": "tennis_match",
+      "market_slug": "wta-bondar-tormo-2026-07-13",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_08f538562ff3b7756196b675",
+      "signal_cohort": "tennis_match",
+      "token_id": "89257912513017886581094960427854661432986909474298464435047805234935436740799"
+    },
+    {
+      "close_time": "2026-07-20T08:00:00Z",
+      "family": "tennis_match",
+      "market_slug": "atp-jong-gaubas-2026-07-13",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_2a234e260c391f54ffe42503",
+      "signal_cohort": "tennis_match",
+      "token_id": "16295343982201798881623104105328482788833777698639684092124510672510271020304"
+    },
+    {
+      "close_time": "2026-07-20T08:00:00Z",
+      "family": "tennis_match",
+      "market_slug": "atp-kjaer-pellegr-2026-07-13",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_86c94347bdab4599ba174ffa",
+      "signal_cohort": "tennis_match",
+      "token_id": "994856844805064057757544989981443651097729609125618445289456572637943842822"
+    },
+    {
+      "close_time": "2026-07-20T08:00:00Z",
+      "family": "tennis_match",
+      "market_slug": "atp-tsitsip-buse-2026-07-13",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_f659bb487288ed577b5e1015",
+      "signal_cohort": "tennis_match",
+      "token_id": "67715969291727036840549773894733340091917886483842875706406174397321353212079"
+    },
+    {
+      "close_time": "2026-07-20T08:00:00Z",
+      "family": "tennis_tennis_total",
+      "market_slug": "atp-sonego-schwaer-2026-07-13-match-total-23pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_348f643256f0e34719425e7e",
+      "signal_cohort": "tennis_tennis_total",
+      "token_id": "100235598376556857263179769631976226259322053312742362881306449815626795931275"
+    },
+    {
+      "close_time": "2026-07-20T14:00:00Z",
+      "family": "tennis_match",
+      "market_slug": "atp-arsenea-marti-2026-07-13",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_3751206e659d4b17a62d4a9d",
+      "signal_cohort": "near_miss_learning|tennis_match",
+      "token_id": "9038376208327764748016810043324905236327230572421315545044444795546592135679"
+    },
+    {
+      "close_time": "2026-07-21T08:00:00Z",
+      "family": "tennis_tennis_total",
+      "market_slug": "atp-cina-halys-2026-07-14-match-total-21pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_c47a956e08d71e9c164471f4",
+      "signal_cohort": "tennis_tennis_total",
+      "token_id": "75377780272030163532820908800125811813705357448286961394752222061119497506807"
+    },
+    {
+      "close_time": "2026-07-22T00:00:00Z",
+      "family": "baseball_mlb_match",
+      "market_slug": "mlb-al-nl-2026-07-14",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_c33baf6b3638adb0617bf7d0",
+      "signal_cohort": "baseball_mlb_match",
+      "token_id": "80080666935022421409008183305973221240813840495378722317438719068727398514970"
+    },
+    {
+      "close_time": "2026-07-26T12:00:00Z",
+      "family": "tennis_tennis_total",
+      "market_slug": "atp-rublev-darderi-2026-07-19-match-total-21pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_6140c6c9c087c934de962301",
+      "signal_cohort": "tennis_tennis_total",
+      "token_id": "55138254762251059845306919882716979143828980525277477600722913573603058775463"
+    },
+    {
+      "close_time": "2026-07-29T00:00:00Z",
+      "family": "macro_rates",
+      "market_slug": "will-the-fed-increase-interest-rates-by-25-bps-after-the-july-2026-meeting",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_2901c32f0080fdb2b341f859",
+      "signal_cohort": "macro_rates",
+      "token_id": "10547381015916960267379463101229159185405356924982461726471550099674011526491"
+    },
+    {
+      "close_time": "2026-07-29T00:00:00Z",
+      "family": "macro_rates",
+      "market_slug": "will-the-fed-increase-interest-rates-by-25-bps-after-the-july-2026-meeting",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_47ce6917985a6ecebfcd6237",
+      "signal_cohort": "near_miss_learning|macro_rates",
+      "token_id": "10547381015916960267379463101229159185405356924982461726471550099674011526491"
+    },
+    {
+      "close_time": "2026-07-29T00:00:00Z",
+      "family": "macro_rates",
+      "market_slug": "will-the-fed-pausepausepause-in-the-next-three-decisions-aprjunjul",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_6cd1fc387f88b06b769b5fbb",
+      "signal_cohort": "macro_rates",
+      "token_id": "101909856712627923879290339593537353880268081288751884838535367478896034248077"
+    },
+    {
+      "close_time": "2026-07-29T00:00:00Z",
+      "family": "macro_rates",
+      "market_slug": "will-the-fed-decide-differently-in-the-next-three-decisions-aprjunjul",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_b7995aa8a9b5f8d2d4ca2e59",
+      "signal_cohort": "macro_rates",
+      "token_id": "102451827870754857819917363477059455981807381920683022472701345996332142120457"
+    },
+    {
+      "close_time": "2026-07-29T00:00:00Z",
+      "family": "macro_rates",
+      "market_slug": "will-there-be-no-change-in-fed-interest-rates-after-the-july-2026-meeting",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_bd4ddebd5bdc4c8bacb8e0df",
+      "signal_cohort": "near_miss_learning|macro_rates",
+      "token_id": "36015050921127306245266044699797268780268172446856063291868548314968920497494"
+    },
+    {
+      "close_time": "2026-07-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-alibaba-have-the-best-chinese-ai-model-at-the-end-of-july-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_186aacc2c751c9ce92fdc2e1",
+      "signal_cohort": "ai_model_leader",
+      "token_id": "4567517282186112560696420853023193838150072383801126897243092142264875387137"
+    },
+    {
+      "close_time": "2026-07-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-google-have-the-best-ai-model-at-the-end-of-july-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_2dcac44c988e7acc1227fda4",
+      "signal_cohort": "structural|longshot_no|ai_model_leader",
+      "token_id": "73236020982042322107719049752749478285487797346322886261660588599081906662415"
+    },
+    {
+      "close_time": "2026-07-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-google-have-the-best-math-ai-model-at-the-end-of-july-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_76783b39dcf60681b30551df",
+      "signal_cohort": "structural|longshot_no|ai_model_leader",
+      "token_id": "93951476500003632791935289062898848593712753782086418087200571438021145488845"
+    },
+    {
+      "close_time": "2026-07-31T23:59:00Z",
+      "family": "equities_macro",
+      "market_slug": "will-alphabet-be-the-second-largest-company-in-the-world-by-market-cap-on-july-31-20260624192749113",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_28b5a29a3464fb5da2104a94",
+      "signal_cohort": "near_miss_learning|equities_macro",
+      "token_id": "80639551841556110014086334610322319982150120076294463498566174170826824423675"
+    },
+    {
+      "close_time": "2026-07-31T23:59:00Z",
+      "family": "equities_macro",
+      "market_slug": "will-apple-be-the-largest-company-in-the-world-by-market-cap-on-july-31-20260624192329843",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_7f0498550235ff7e36b3ba00",
+      "signal_cohort": "near_miss_learning|equities_macro",
+      "token_id": "5823805802875099304203116182652199693089526522530469365767529374822548212673"
+    },
+    {
+      "close_time": "2026-07-31T23:59:00Z",
+      "family": "equities_macro",
+      "market_slug": "will-apple-be-the-second-largest-company-in-the-world-by-market-cap-on-july-31-20260624192749112",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_a56890366971033c3614d755",
+      "signal_cohort": "equities_macro",
+      "token_id": "79162765079028727202719931536645059951675772849915793147357039418708378144838"
+    },
+    {
+      "close_time": "2026-07-31T23:59:00Z",
+      "family": "equities_macro",
+      "market_slug": "will-nvidia-be-the-largest-company-in-the-world-by-market-cap-on-july-31-20260624192329841",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_c49281fb7661880c65e5c796",
+      "signal_cohort": "near_miss_learning|equities_macro",
+      "token_id": "75848210276979954337354349909329862141109563590210566057575338891512846216329"
+    },
+    {
+      "close_time": "2026-07-31T23:59:00Z",
+      "family": "equities_macro",
+      "market_slug": "will-nvidia-be-the-largest-company-in-the-world-by-market-cap-on-july-31-20260624192329841",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_c887282e3d09c5a7a1f6f43b",
+      "signal_cohort": "near_miss_learning|equities_macro",
+      "token_id": "75848210276979954337354349909329862141109563590210566057575338891512846216329"
+    },
+    {
+      "close_time": "2026-07-31T23:59:00Z",
+      "family": "equities_macro",
+      "market_slug": "will-apple-be-the-second-largest-company-in-the-world-by-market-cap-on-july-31-20260624192749112",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_e70e9d673bd1037fd7ebd8f7",
+      "signal_cohort": "equities_macro",
+      "token_id": "79162765079028727202719931536645059951675772849915793147357039418708378144838"
+    },
+    {
+      "close_time": "2026-07-31T23:59:00Z",
+      "family": "unknown",
+      "market_slug": "us-x-iran-diplomatic-meeting-by-july-31-2026-20260622191708361",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_d51ed10515d8a7d888ce8316",
+      "signal_cohort": "unknown",
+      "token_id": "25763685223319524083191986935913634904809447145745901125985995347509432734794"
+    },
+    {
+      "close_time": "2026-07-31T23:59:00Z",
+      "family": "unknown",
+      "market_slug": "will-the-ornn-b200-index-be-between-4pt00-and-5pt00-on-july-31-2026-20260626214212585",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_f84e2dd5f0785ef4d44d4b28",
+      "signal_cohort": "unknown",
+      "token_id": "53309418792814126813253565209817598774351044039766281405658463259168910392637"
+    },
+    {
+      "close_time": "2026-08-01T03:59:59.999Z",
+      "family": "culture_entertainment",
+      "market_slug": "will-nflx-reach-80-in-july-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_0f27c562ae03090e3ae28645",
+      "signal_cohort": "structural|longshot_no|culture_entertainment",
+      "token_id": "71511949524110026827617226351056946623159790837521083728385383282599861451032"
+    },
+    {
+      "close_time": "2026-08-01T03:59:59.999Z",
+      "family": "equities_macro",
+      "market_slug": "will-spy-dip-to-720-in-july-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_8c868d692245935f31ce2c57",
+      "signal_cohort": "equities_macro",
+      "token_id": "24803584857334321314421629236199580191116981146793443171916957628585926739112"
+    },
+    {
+      "close_time": "2026-08-01T04:00:00Z",
+      "family": "crypto_btc_special",
+      "market_slug": "will-bitcoin-reach-75k-in-july-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_af446f3563e292d51af69bc6",
+      "signal_cohort": "structural|longshot_no|crypto_btc_special",
+      "token_id": "11122870307832213829937141164621963143556849554535072384599725110500454191759"
+    },
+    {
+      "close_time": "2026-08-01T04:00:00Z",
+      "family": "crypto_eth_special",
+      "market_slug": "will-ethereum-reach-2400-in-july-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_3c4c127eb841712a913f8a2d",
+      "signal_cohort": "structural|longshot_no|crypto_eth_special",
+      "token_id": "100884095534364268769321993699449844260443547762651923948519421267861169635220"
+    },
+    {
+      "close_time": "2026-08-01T04:00:00Z",
+      "family": "crypto_eth_special",
+      "market_slug": "will-ethereum-reach-2000-in-july-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_625284e65a29866ee770b8f6",
+      "signal_cohort": "crypto",
+      "token_id": "67618687138618616009474379841981387029656591298511163184190255433704137454173"
+    },
+    {
+      "close_time": "2026-08-01T04:00:00Z",
+      "family": "crypto_eth_special",
+      "market_slug": "will-ethereum-reach-1900-in-july-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_dcdd9ef998f4667bfadc1949",
+      "signal_cohort": "crypto",
+      "token_id": "28817002148223268863846336360740958044187532730435903830987432418979666201587"
+    },
+    {
+      "close_time": "2026-08-01T04:00:00Z",
+      "family": "crypto_eth_special",
+      "market_slug": "will-ethereum-reach-2300-in-july-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_fd10a1953e5fe24b9532a4fc",
+      "signal_cohort": "structural|longshot_no|crypto_eth_special",
+      "token_id": "15710525480448889254766605820312761373882786549757118431634104562205370863433"
+    },
+    {
+      "close_time": "2026-08-01T04:00:00Z",
+      "family": "crypto_sol_special",
+      "market_slug": "will-solana-reach-120-in-july-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_10ad6d33d8745dda3077e4cf",
+      "signal_cohort": "structural|longshot_no|crypto_sol_special",
+      "token_id": "93496916247677946874951464536517511991715588414847755700545460892672050036498"
+    },
+    {
+      "close_time": "2026-08-01T04:00:00Z",
+      "family": "crypto_sol_special",
+      "market_slug": "will-solana-reach-130-in-july-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_5b3c5df14329ac0cdeb8a633",
+      "signal_cohort": "structural|longshot_no|crypto_sol_special",
+      "token_id": "43975378191074358671281520872697918948044394157610457450863109826755838430110"
+    },
+    {
+      "close_time": "2026-08-01T04:00:00Z",
+      "family": "crypto_xrp_special",
+      "market_slug": "will-xrp-dip-to-1-in-july-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_020733f29540fcce7ebf5236",
+      "signal_cohort": "crypto",
+      "token_id": "107428272129048587583997315670529606325369032000682138145211150063313167372818"
+    },
+    {
+      "close_time": "2026-08-03T03:59:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-lionel-messi-score-10-goals-during-the-2026-fifa-world-cup",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_0260dcee62a87b518cc18b86",
+      "signal_cohort": "near_miss_learning|soccer_match",
+      "token_id": "113345257491820491534441186223493979799933148951284980801322879899234812873089"
+    },
+    {
+      "close_time": "2026-08-03T03:59:00Z",
+      "family": "worldcup_2026_winner",
+      "market_slug": "will-kylian-mbappe-score-10-goals-during-the-2026-fifa-world-cup",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_8052fa10e75cca92c1610259",
+      "signal_cohort": "near_miss_learning|soccer_match",
+      "token_id": "108448511447054356560203469039805073825532100286735131544848339572714921876245"
+    },
+    {
+      "close_time": "2026-08-05T04:00:00Z",
+      "family": "crypto_sol_updown_event",
+      "market_slug": "sol-updown-4h-1785888000",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_4d871f00df4be882fa342845",
+      "signal_cohort": "near_miss_learning|exploratory_historical_rule|crypto_sol_updown_event|outcome=down",
+      "token_id": "95725145614032343525376796567389798430629193124652051582921449330063310030427"
+    },
+    {
+      "close_time": "2026-08-07T20:00:00Z",
+      "family": "basketball_nba_match",
+      "market_slug": "will-coin-reach-160-by-august-3-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_216eaf41ffd5d675c2ac558d",
+      "signal_cohort": "basketball_nba_match",
+      "token_id": "30912445149862953622799843484798362935418536369185742701061318076580099123077"
+    },
+    {
+      "close_time": "2026-08-12T03:59:00Z",
+      "family": "macro_economy",
+      "market_slug": "will-annual-inflation-be-3pt4-in-july-20260714150613271",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_2ef6c1ec1db500c8fd9be72e",
+      "signal_cohort": "near_miss_learning|macro_economy",
+      "token_id": "108868009106780451749396742652752165981108033815286082004369798819162482250647"
+    },
+    {
+      "close_time": "2026-08-12T03:59:00Z",
+      "family": "macro_economy",
+      "market_slug": "will-annual-inflation-be-3pt3-in-july-20260714150613270",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_fc4c971914b75841fe26b3e6",
+      "signal_cohort": "macro_economy",
+      "token_id": "109794776086649181908739553480349146880931290686249071597614384950723214732783"
+    },
+    {
+      "close_time": "2026-08-22T14:00:00Z",
+      "family": "tennis_tennis_total",
+      "market_slug": "atp-kecmano-cobolli-2026-08-15-match-total-21pt5",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_f33ea11d2e839e33ec1becdf",
+      "signal_cohort": "tennis_tennis_total",
+      "token_id": "25933157807521233311041312388776495461823538331718972195235276420937725440232"
+    },
+    {
+      "close_time": "2026-08-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-alibaba-have-the-best-chinese-ai-model-at-the-end-of-august-2026-20260717004241593",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_3418deb7171326183beb3dac",
+      "signal_cohort": "ai_model_leader",
+      "token_id": "54661912859050167415810598609571166937972969545017708739436680535246603652327"
+    },
+    {
+      "close_time": "2026-08-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-alibaba-have-the-best-chinese-ai-model-at-the-end-of-august-2026-20260717004241593",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_d20369015e8f2034d7cb9446",
+      "signal_cohort": "near_miss_learning|ai_model_leader",
+      "token_id": "54661912859050167415810598609571166937972969545017708739436680535246603652327"
+    },
+    {
+      "close_time": "2026-09-01T04:00:00Z",
+      "family": "crypto_btc_special",
+      "market_slug": "will-bitcoin-dip-to-52pt5k-in-august-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_5353614a0af537341d032e2f",
+      "signal_cohort": "structural|longshot_no|crypto_btc_special",
+      "token_id": "80219722174349458580165755467371454490108077579974535259842913119703735314615"
+    },
+    {
+      "close_time": "2026-09-01T04:00:00Z",
+      "family": "crypto_btc_special",
+      "market_slug": "will-bitcoin-reach-72pt5k-in-august-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_fcf2e66377075690051e8713",
+      "signal_cohort": "structural|longshot_no|crypto_btc_special",
+      "token_id": "3523185360721264825343984255310084370838660506037437952256021216614715901678"
+    },
+    {
+      "close_time": "2026-09-13T00:00:00Z",
+      "family": "tennis_match",
+      "market_slug": "will-jannik-sinner-win-the-2026-mens-us-open",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_b7e27abe01a53689098b5f1f",
+      "signal_cohort": "near_miss_learning|tennis_match",
+      "token_id": "40553687028357385570012767684841134153932705410424731659907218042194272368471"
+    },
+    {
+      "close_time": "2026-09-13T00:00:00Z",
+      "family": "tennis_match",
+      "market_slug": "will-iga-swiatek-win-the-2026-womens-us-open",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_e7f78d3f67a3fc78d7014f45",
+      "signal_cohort": "structural|longshot_no|tennis_match",
+      "token_id": "63121398982749572286119195691751068463674406856603972408298899143876860265927"
+    },
+    {
+      "close_time": "2026-09-28T00:00:00Z",
+      "family": "baseball_mlb_match",
+      "market_slug": "will-shohei-ohtani-lead-the-mlb-in-era-for-the-2026-regular-season",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_4ad7721a3f865c043b9db857",
+      "signal_cohort": "structural|longshot_no|baseball_mlb_match",
+      "token_id": "38149245110376544641991926714453745587434469395409692591758471566541409040037"
+    },
+    {
+      "close_time": "2026-09-28T00:00:00Z",
+      "family": "baseball_mlb_match",
+      "market_slug": "will-shohei-ohtani-lead-the-mlb-in-era-for-the-2026-regular-season",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_566e8838c6cd456b4c458eee",
+      "signal_cohort": "structural|longshot_no|baseball_mlb_match",
+      "token_id": "38149245110376544641991926714453745587434469395409692591758471566541409040037"
+    },
+    {
+      "close_time": "2026-09-28T00:00:00Z",
+      "family": "baseball_mlb_match",
+      "market_slug": "will-shohei-ohtani-lead-the-mlb-in-era-for-the-2026-regular-season",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_72f48d0836c2385e64ca9651",
+      "signal_cohort": "structural|longshot_no|baseball_mlb_match",
+      "token_id": "38149245110376544641991926714453745587434469395409692591758471566541409040037"
+    },
+    {
+      "close_time": "2026-09-28T00:00:00Z",
+      "family": "baseball_mlb_match",
+      "market_slug": "will-the-cleveland-guardians-clinch-a-spot-in-the-2026-mlb-postseason",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_d37683413d0a94e27cab390c",
+      "signal_cohort": "baseball_mlb_match",
+      "token_id": "32342709889407655867901711533709325129481699402678730319215771956214754631454"
+    },
+    {
+      "close_time": "2026-09-30T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-any-ai-model-reach-1510-overall-arena-score-by-september-30-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_363e11a5c63b6ad9cca4f866",
+      "signal_cohort": "ai_model_leader",
+      "token_id": "54274975046785035647018962351209441973728395165653924104773374336698564763879"
+    },
+    {
+      "close_time": "2026-09-30T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-any-ai-model-reach-1510-overall-arena-score-by-september-30-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_ab14ddac8b3853ad9b0bf618",
+      "signal_cohort": "ai_model_leader",
+      "token_id": "54274975046785035647018962351209441973728395165653924104773374336698564763879"
+    },
+    {
+      "close_time": "2026-09-30T23:59:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-openai-have-the-best-ai-model-on-livebench-coding-at-the-end-of-september-2026-20260728165808287",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_5dfcc9830d1515dead46c378",
+      "signal_cohort": "near_miss_learning|ai_model_leader",
+      "token_id": "94006426151547983630500903620916705425556426419356798044195404127553075070932"
+    },
+    {
+      "close_time": "2026-09-30T23:59:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-anthropic-have-the-best-ai-model-on-livebench-mathematics-at-the-end-of-september-2026-20260728165020632",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_dffb2248ad4e9ed8fa9b8f7e",
+      "signal_cohort": "near_miss_learning|ai_model_leader",
+      "token_id": "113480692521564778497512842820603388597790721465875737318475927670026573452763"
+    },
+    {
+      "close_time": "2026-10-05T03:59:00Z",
+      "family": "baseball_mlb_match",
+      "market_slug": "2026-mlb-win-totals-seattle-mariners",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_0b55827365b6847892c17304",
+      "signal_cohort": "baseball_mlb_match",
+      "token_id": "85918589901677286362334906071743033273994312124714946976982240559358877413891"
+    },
+    {
+      "close_time": "2026-10-11T00:00:00Z",
+      "family": "baseball_mlb_match",
+      "market_slug": "will-matt-olson-lead-the-mlb-in-doubles-for-the-2026-regular-season",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_19d7c1d3e3c5c2c194073177",
+      "signal_cohort": "structural|longshot_no|baseball_mlb_match",
+      "token_id": "25092571467150932885719083456287685773120828733951217768288563710688060710237"
+    },
+    {
+      "close_time": "2026-10-11T00:00:00Z",
+      "family": "baseball_mlb_match",
+      "market_slug": "will-matt-olson-lead-the-mlb-in-doubles-for-the-2026-regular-season",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_a755b956f670749224d91362",
+      "signal_cohort": "structural|longshot_no|baseball_mlb_match",
+      "token_id": "25092571467150932885719083456287685773120828733951217768288563710688060710237"
+    },
+    {
+      "close_time": "2026-10-11T00:00:00Z",
+      "family": "geopolitics",
+      "market_slug": "will-kyle-schwarber-hit-the-most-home-runs-during-the-2026-mlb-regular-season",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_bac18b6fbf6ac3ff7332003a",
+      "signal_cohort": "near_miss_learning|geopolitics",
+      "token_id": "29880061952566489686808125557917525240335275846871233640387819113187553719242"
+    },
+    {
+      "close_time": "2026-10-31T03:59:00Z",
+      "family": "basketball_nba_match",
+      "market_slug": "will-lebron-james-play-for-the-miami-heat-in-2026-27",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_01c171664eb150adeab983ae",
+      "signal_cohort": "near_miss_learning|basketball_nba_match",
+      "token_id": "62429084067171308316390058541012087925567325563248051217584518806867987132248"
+    },
+    {
+      "close_time": "2026-10-31T03:59:00Z",
+      "family": "basketball_nba_match",
+      "market_slug": "will-lebron-james-play-for-the-cleveland-cavaliers-in-2026-27",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_173461a57c8756866c7fc939",
+      "signal_cohort": "basketball_nba_match",
+      "token_id": "67044318499994712064109988308237618254832029882233414790755517483383764496170"
+    },
+    {
+      "close_time": "2026-10-31T03:59:00Z",
+      "family": "basketball_nba_match",
+      "market_slug": "will-lebron-james-play-for-the-cleveland-cavaliers-in-2026-27",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_2b7be49308bb05bade2341a3",
+      "signal_cohort": "basketball_nba_match",
+      "token_id": "67044318499994712064109988308237618254832029882233414790755517483383764496170"
+    },
+    {
+      "close_time": "2026-10-31T03:59:00Z",
+      "family": "geopolitics",
+      "market_slug": "will-lebron-james-play-for-the-golden-state-warriors-in-2026-27",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_e7edb908e62187099f77b938",
+      "signal_cohort": "geopolitics",
+      "token_id": "53318090283597351227821817715895354369488632688451622367962782212055936598914"
+    },
+    {
+      "close_time": "2026-10-31T23:59:00Z",
+      "family": "basketball_nba_match",
+      "market_slug": "nba-lebron-james-and-bronny-james-jrpt-to-play-together-in-2026-27-20260630182039143",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_649b93b2b6ebc9adfdec0cec",
+      "signal_cohort": "near_miss_learning|basketball_nba_match",
+      "token_id": "65217747391065610498524733774851088724368138706140421186161031837402714127802"
+    },
+    {
+      "close_time": "2026-11-03T00:00:00Z",
+      "family": "geopolitics",
+      "market_slug": "will-the-republican-party-hold-below-190-house-seats-after-the-2026-midterm-elections",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_61e834b21fd0f3236cb8bea8",
+      "signal_cohort": "near_miss_learning|geopolitics",
+      "token_id": "106321904011141120286469207995805275978977204556483905903452161304048552011252"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-anthropic-have-the-best-ai-model-at-the-end-of-december-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_0df1942f344d787ee6c48ba3",
+      "signal_cohort": "ai_model_leader",
+      "token_id": "101106027123457230511923560603100933782439732335133293995646065340833826927163"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-openai-have-a-1-ai-model-by-december-31-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_1b0ec7017167546bb0be404b",
+      "signal_cohort": "ai_model_leader",
+      "token_id": "70793601446090039661054641455695184186449486414315553749871988541954441879851"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-anthropic-have-the-best-ai-model-at-the-end-of-december-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_1efd75b730b8409d5b444dfd",
+      "signal_cohort": "ai_model_leader",
+      "token_id": "101106027123457230511923560603100933782439732335133293995646065340833826927163"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-moonshot-have-a-1-ai-model-by-december-31-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_2be56f7fe1bc623c86738d5e",
+      "signal_cohort": "structural|longshot_no|ai_model_leader",
+      "token_id": "36136059052713963055376455066088612405225737607621775103472565534306327538275"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-a-chinese-company-have-one-of-the-top-5-ai-models-by-december-31",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_6bc02e919be21e18b723d948",
+      "signal_cohort": "ai_model_leader",
+      "token_id": "15394737252115511624698733646046193249964740097060021118061023239685546384550"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-openai-have-the-best-ai-model-at-the-end-of-december-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_742dbff5b6a530c250aad2c3",
+      "signal_cohort": "structural|longshot_no|ai_model_leader",
+      "token_id": "46139126981840754805284654909166478580319063560175200352549484585453210508880"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-anthropic-have-the-best-ai-model-at-the-end-of-december-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_9ea23164a1e54b668a9832b5",
+      "signal_cohort": "ai_model_leader",
+      "token_id": "101106027123457230511923560603100933782439732335133293995646065340833826927163"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-anthropic-have-the-best-ai-model-at-the-end-of-december-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_b08067530898a49db9a3c275",
+      "signal_cohort": "ai_model_leader",
+      "token_id": "101106027123457230511923560603100933782439732335133293995646065340833826927163"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-a-chinese-company-have-one-of-the-top-5-ai-models-by-december-31",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_bcfd2acf6ba24d9e0d413d95",
+      "signal_cohort": "ai_model_leader",
+      "token_id": "15394737252115511624698733646046193249964740097060021118061023239685546384550"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-any-ai-model-reach-1580-coding-arena-score-by-december-31-2026-846",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_ca1876f86193a5c642b4825e",
+      "signal_cohort": "near_miss_learning|ai_model_leader",
+      "token_id": "78288582157994306934508674396206099772775859795899820495422208721473710134686"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-a-chinese-company-have-the-best-ai-model-by-december-31",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_caf88d9e5e1c657e4a0a477a",
+      "signal_cohort": "structural|longshot_no|ai_model_leader",
+      "token_id": "96397436209982671453637902269275725071267861171129419695794443407952680636718"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-a-chinese-company-have-one-of-the-top-3-ai-models-by-december-31",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_d258a8f096c78bf996267242",
+      "signal_cohort": "near_miss_learning|ai_model_leader",
+      "token_id": "31073898066092073901758862002915643899693247647436421266976536769150563530801"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-anthropic-have-the-best-ai-model-at-the-end-of-december-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_d31c3eda73eabcc2ba5f43e4",
+      "signal_cohort": "ai_model_leader",
+      "token_id": "101106027123457230511923560603100933782439732335133293995646065340833826927163"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-any-ai-model-reach-1600-math-arena-score-by-december-31-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_ef5ba735d2d4e31642b7d959",
+      "signal_cohort": "near_miss_learning|ai_model_leader",
+      "token_id": "45618799395155942424234007557643669012750085368468978237357699778964383322890"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-any-ai-model-reach-1575-math-arena-score-by-december-31-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_fd65c87e236fa14cf568d763",
+      "signal_cohort": "near_miss_learning|ai_model_leader",
+      "token_id": "68448621179046862042293371885664190458598817618518296796216984971510852805335"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "ai_model_leader",
+      "market_slug": "will-openai-announce-glasses-in-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_fe4ea85a91419efef893877c",
+      "signal_cohort": "structural|longshot_no|ai_model_leader",
+      "token_id": "7860813783788365228940933442491468403797619020807014292210819082168277140152"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "equities_macro",
+      "market_slug": "will-alphabet-be-the-largest-company-in-the-world-by-market-cap-on-december-31-872",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_0cb9a921ee90588c0ae2d7f7",
+      "signal_cohort": "structural|longshot_no|equities_macro",
+      "token_id": "54398790535896757998414933803834478150495648270732685658889540342278545164806"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "equities_macro",
+      "market_slug": "will-nvidia-be-the-largest-company-in-the-world-by-market-cap-on-december-31-244",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_e6925d73681576d0fa77b3b6",
+      "signal_cohort": "equities_macro",
+      "token_id": "114033095271617070714983865791504478906266507670567428753203001241312040895286"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "geopolitics",
+      "market_slug": "strait-of-hormuz-traffic-returns-to-normal-by-december-31",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_b0e8b0470a2de3e29e131a92",
+      "signal_cohort": "geopolitics",
+      "token_id": "48727431314333088243693016929623363710488980152833544156961659445129455301311"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "mma_match",
+      "market_slug": "will-joshua-van-be-the-ufc-flyweight-champion-on-december-31-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_5df2ce5fdca61dc4b6811127",
+      "signal_cohort": "near_miss_learning|mma_match",
+      "token_id": "60285307494212907815911525135113808674582218992685451831899236569688589487009"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "mma_match",
+      "market_slug": "will-alexandre-pantoja-be-the-ufc-flyweight-champion-on-december-31-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_740107eef06d5e2e3a184923",
+      "signal_cohort": "near_miss_learning|mma_match",
+      "token_id": "92280573078394525707472752139848747754488378415033588212381105215995844984092"
+    },
+    {
+      "close_time": "2026-12-31T00:00:00Z",
+      "family": "policy_legal",
+      "market_slug": "will-petr-yan-be-the-ufc-bantamweight-champion-on-december-31-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_f1c62145fe8e17635f733f86",
+      "signal_cohort": "policy_legal",
+      "token_id": "111543382850309041658546717463004071797230452365609295654546414763372564317909"
+    },
+    {
+      "close_time": "2026-12-31T23:59:00Z",
+      "family": "geopolitics",
+      "market_slug": "will-there-be-exactly-6-uk-parliamentary-by-elections-in-2026-20260708164636514",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_f196fba33ba96e5ed852b9ba",
+      "signal_cohort": "geopolitics",
+      "token_id": "36549363568215036316162140187997384077492937678210683242845346646489802705662"
+    },
+    {
+      "close_time": "2027-01-01T05:00:00Z",
+      "family": "crypto_btc_special",
+      "market_slug": "will-bitcoin-dip-to-45000-by-december-31-2026-674-923-755-971-998-525-926-245-316-517-544-589-965-923-986-841-815-224-586-231-289-533",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_7b50bea5be3fad10b9236535",
+      "signal_cohort": "near_miss_learning|crypto",
+      "token_id": "9894510651052373088408067031031513212801618531203062911959630395716258202132"
+    },
+    {
+      "close_time": "2027-01-01T05:00:00Z",
+      "family": "crypto_btc_special",
+      "market_slug": "will-bitcoin-reach-95000-by-december-31-2026-from-june-8",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_ea50b55f54fe39889e4884c0",
+      "signal_cohort": "structural|longshot_no|crypto_btc_special",
+      "token_id": "101492056351751833920629364005167338435431925816936377971961169353021340085257"
+    },
+    {
+      "close_time": "2027-01-31T00:00:00Z",
+      "family": "macro_economy",
+      "market_slug": "will-the-us-economy-be-in-a-soft-landing-at-the-end-of-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_4add0f7fcc628eb025631dba",
+      "signal_cohort": "near_miss_learning|macro_economy",
+      "token_id": "80335609827602144973400700286800607989091471408666208830272936565190453177519"
+    },
+    {
+      "close_time": "2027-01-31T00:00:00Z",
+      "family": "macro_economy",
+      "market_slug": "will-the-us-economy-be-in-a-soft-landing-at-the-end-of-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_5d354efbe02bf79b9356cbde",
+      "signal_cohort": "near_miss_learning|macro_economy",
+      "token_id": "46312529158416609898079553446176504311993678139330779840129310682124759689495"
+    },
+    {
+      "close_time": "2027-01-31T00:00:00Z",
+      "family": "macro_economy",
+      "market_slug": "will-the-us-economy-be-overheating-at-the-end-of-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_a4e89bf608cafa4e2e2a8094",
+      "signal_cohort": "near_miss_learning|macro_economy",
+      "token_id": "6527439894417506591879968948282318689407350936676236354099012095831027111289"
+    },
+    {
+      "close_time": "2027-01-31T00:00:00Z",
+      "family": "macro_economy",
+      "market_slug": "will-the-us-economy-be-overheating-at-the-end-of-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_acd6279101a4c6efa4f922d2",
+      "signal_cohort": "macro_economy",
+      "token_id": "6527439894417506591879968948282318689407350936676236354099012095831027111289"
+    },
+    {
+      "close_time": "2027-01-31T00:00:00Z",
+      "family": "macro_economy",
+      "market_slug": "will-the-us-economy-be-overheating-at-the-end-of-2026",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_e8bd2b423895ad5f54b4362a",
+      "signal_cohort": "macro_economy",
+      "token_id": "6527439894417506591879968948282318689407350936676236354099012095831027111289"
+    },
+    {
+      "close_time": "2027-05-31T23:59:00Z",
+      "family": "basketball_nba_match",
+      "market_slug": "will-cameron-boozer-win-the-2026-27-nba-rookie-of-the-year-20260624161716882",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_36a2474c1c15126cf5fcd7d9",
+      "signal_cohort": "near_miss_learning|basketball_nba_match",
+      "token_id": "67718828845920386088756585343739136462737819134101447980208518213153186435007"
+    },
+    {
+      "close_time": "2027-05-31T23:59:00Z",
+      "family": "policy_legal",
+      "market_slug": "will-aj-dybantsa-win-the-2026-27-nba-rookie-of-the-year-20260624161716880",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_26c6ed0d42c5644e0820e70a",
+      "signal_cohort": "near_miss_learning|policy_legal",
+      "token_id": "46567293169762615147895646425485617554441306631537089020538395786901322917919"
+    },
+    {
+      "close_time": "2027-05-31T23:59:00Z",
+      "family": "policy_legal",
+      "market_slug": "will-aj-dybantsa-win-the-2026-27-nba-rookie-of-the-year-20260624161716880",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_5abbb89849144880d95faa13",
+      "signal_cohort": "near_miss_learning|policy_legal",
+      "token_id": "46567293169762615147895646425485617554441306631537089020538395786901322917919"
+    },
+    {
+      "close_time": "2027-07-01T00:00:00Z",
+      "family": "basketball_nba_match",
+      "market_slug": "will-oklahoma-city-thunder-win-the-2027-nba-finals",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_d57fe783b1b2a6aa34ae68de",
+      "signal_cohort": "near_miss_learning|basketball_nba_match",
+      "token_id": "75380520575699614146969771004200063966336258265950378178665003767694841394115"
+    },
+    {
+      "close_time": "2028-11-07T00:00:00Z",
+      "family": "geopolitics",
+      "market_slug": "will-jd-vance-win-the-2028-republican-presidential-nomination",
+      "reason": "missing_pre_close_quote",
+      "shadow_position_id": "shadow_position_f75a3a9f3a815cb94c1cf881",
+      "signal_cohort": "geopolitics",
+      "token_id": "40081275558852222228080198821361202017557872256707631666334039001378518619916"
+    }
+  ],
+  "paper_trading_invoked": false,
+  "positions_missing_pre_close_quote": 227,
+  "positions_with_pre_close_quote": 0,
+  "pre_close_window_minutes": 30,
+  "quote_assets_seen": 58,
+  "quote_rows_seen": 60000,
+  "shadow_positions_seen": 227,
+  "status": "ok"
+}

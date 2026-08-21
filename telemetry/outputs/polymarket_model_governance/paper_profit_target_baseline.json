@@ -1,0 +1,14 @@
+{
+  "baseline_cash_usdc": 1048.631135349166,
+  "baseline_equity_usdc": 1048.631135349166,
+  "baseline_generation": 2,
+  "baseline_total_exposure_usdc": 0.0,
+  "broker_generated_at_utc": "2026-07-04T12:16:47Z",
+  "created_at_utc": "2026-07-04T12:18:04Z",
+  "historical_data_preserved": true,
+  "note": "Operator reset of the active paper-profit proof window. Historical fills, round trips, quotes, model evidence, and learning data are preserved; only post-reset closed round trips count toward active $100/month proof.",
+  "previous_baseline_created_at_utc": "2026-07-01T12:04:30Z",
+  "reset_at_utc": "2026-07-04T12:18:04Z",
+  "reset_operator": "codex",
+  "reset_reason": "strict entry quote proof gate deployed; start clean verified paper-profit window while preserving historical fills, quotes, model evidence, and learning data"
+}

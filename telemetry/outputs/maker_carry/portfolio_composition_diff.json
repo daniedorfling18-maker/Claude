@@ -1,0 +1,20 @@
+{
+  "current_run_at": "2026-08-20T10:46:56Z",
+  "departed": [
+    {
+      "condition_id": "0x3de0f3d7d7efb40cde68e814d40a0b232832083653c8e78260eb999baa967de0",
+      "disposition": "measured_not_sized",
+      "markout_measured": true,
+      "net_carry_usd_per_day": 0.1807
+    }
+  ],
+  "entered": [
+    {
+      "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb"
+    }
+  ],
+  "held": [],
+  "live_trading_invoked": false,
+  "paper_trading_invoked": false,
+  "previous_run_at": "2026-08-20T03:07:48Z"
+}

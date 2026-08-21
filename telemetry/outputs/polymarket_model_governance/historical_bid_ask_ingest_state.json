@@ -1,0 +1,3734 @@
+{
+  "deferred_future_observation_sources": [],
+  "generated_at_utc": "2026-08-20T03:05:40Z",
+  "ledger_path": "outputs/polymarket_training/historical_bid_ask_v1.csv",
+  "live_trading_invoked": false,
+  "paper_trading_invoked": false,
+  "sources": {
+    "polymarket_training/websocket_market_features.csv": {
+      "mtime_ns": 1787194991849129523,
+      "size": 25154831
+    },
+    "polymarket_training_archive/daily_training_archive_20260616_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1784371977056995232,
+      "size": 2180
+    },
+    "polymarket_training_archive/daily_training_archive_20260617_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1784459072210966852,
+      "size": 1224
+    },
+    "polymarket_training_archive/daily_training_archive_20260618_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1784546713030331717,
+      "size": 2216
+    },
+    "polymarket_training_archive/daily_training_archive_20260619_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1784633817390857725,
+      "size": 2098
+    },
+    "polymarket_training_archive/daily_training_archive_20260620_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1784721153621745346,
+      "size": 4060
+    },
+    "polymarket_training_archive/daily_training_archive_20260621_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1784808659425866140,
+      "size": 4386
+    },
+    "polymarket_training_archive/daily_training_archive_20260622_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1784808659429866144,
+      "size": 3804
+    },
+    "polymarket_training_archive/daily_training_archive_20260623_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1784983427959272059,
+      "size": 3213
+    },
+    "polymarket_training_archive/daily_training_archive_20260624_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1785071085430425176,
+      "size": 3633
+    },
+    "polymarket_training_archive/daily_training_archive_20260625_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1785158403760960848,
+      "size": 4303
+    },
+    "polymarket_training_archive/daily_training_archive_20260626_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1785245858209595118,
+      "size": 5761
+    },
+    "polymarket_training_archive/daily_training_archive_20260627_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1785335171121094132,
+      "size": 4241
+    },
+    "polymarket_training_archive/daily_training_archive_20260628_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1785448267241080987,
+      "size": 3027
+    },
+    "polymarket_training_archive/daily_training_archive_20260629_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1785448267245080991,
+      "size": 7160
+    },
+    "polymarket_training_archive/daily_training_archive_20260630_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1785448267249080995,
+      "size": 6017
+    },
+    "polymarket_training_archive/daily_training_archive_20260701_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1785710083246004449,
+      "size": 7984
+    },
+    "polymarket_training_archive/daily_training_archive_20260702_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1785797371661538228,
+      "size": 7653
+    },
+    "polymarket_training_archive/daily_training_archive_20260703_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1785797371665538232,
+      "size": 5465
+    },
+    "polymarket_training_archive/daily_training_archive_20260704_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1785448267261081008,
+      "size": 7319
+    },
+    "polymarket_training_archive/daily_training_archive_20260705_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786059573655334838,
+      "size": 5871
+    },
+    "polymarket_training_archive/daily_training_archive_20260706_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786146796325477539,
+      "size": 8587
+    },
+    "polymarket_training_archive/daily_training_archive_20260707_2a984198627e.csv.gz": {
+      "mtime_ns": 1784034542898251192,
+      "size": 658426
+    },
+    "polymarket_training_archive/daily_training_archive_20260707_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786233924264100921,
+      "size": 13361
+    },
+    "polymarket_training_archive/daily_training_archive_20260708_2a984198627e.csv.gz": {
+      "mtime_ns": 1784034544214252542,
+      "size": 495409
+    },
+    "polymarket_training_archive/daily_training_archive_20260708_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786321351015503684,
+      "size": 14922
+    },
+    "polymarket_training_archive/daily_training_archive_20260709_2a984198627e.csv.gz": {
+      "mtime_ns": 1784034544954253302,
+      "size": 260266
+    },
+    "polymarket_training_archive/daily_training_archive_20260709_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786321351023503693,
+      "size": 22454
+    },
+    "polymarket_training_archive/daily_training_archive_20260710_2a984198627e.csv.gz": {
+      "mtime_ns": 1784034546618255010,
+      "size": 720789
+    },
+    "polymarket_training_archive/daily_training_archive_20260710_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786409006475440320,
+      "size": 17084
+    },
+    "polymarket_training_archive/daily_training_archive_20260711_2a984198627e.csv.gz": {
+      "mtime_ns": 1784034580010289283,
+      "size": 10654359
+    },
+    "polymarket_training_archive/daily_training_archive_20260711_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786321351043503715,
+      "size": 13564
+    },
+    "polymarket_training_archive/daily_training_archive_20260712_2a984198627e.csv.gz": {
+      "mtime_ns": 1784046357858218731,
+      "size": 14288469
+    },
+    "polymarket_training_archive/daily_training_archive_20260712_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786583700751328744,
+      "size": 19809
+    },
+    "polymarket_training_archive/daily_training_archive_20260713_2a984198627e.csv.gz": {
+      "mtime_ns": 1784102359166506304,
+      "size": 14127567
+    },
+    "polymarket_training_archive/daily_training_archive_20260713_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786583700763328756,
+      "size": 20569
+    },
+    "polymarket_training_archive/daily_training_archive_20260714_2a984198627e.csv.gz": {
+      "mtime_ns": 1784197418234370609,
+      "size": 13439706
+    },
+    "polymarket_training_archive/daily_training_archive_20260714_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786758503529907901,
+      "size": 28407
+    },
+    "polymarket_training_archive/daily_training_archive_20260715_2a984198627e.csv.gz": {
+      "mtime_ns": 1784371988673007178,
+      "size": 7496477
+    },
+    "polymarket_training_archive/daily_training_archive_20260715_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786845758424349801,
+      "size": 57046
+    },
+    "polymarket_training_archive/daily_training_archive_20260716_2a984198627e.csv.gz": {
+      "mtime_ns": 1784372000481019322,
+      "size": 7509210
+    },
+    "polymarket_training_archive/daily_training_archive_20260716_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786933316020525482,
+      "size": 46945
+    },
+    "polymarket_training_archive/daily_training_archive_20260717_2a984198627e.csv.gz": {
+      "mtime_ns": 1784459085610980820,
+      "size": 8923498
+    },
+    "polymarket_training_archive/daily_training_archive_20260717_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786933316116525589,
+      "size": 170922
+    },
+    "polymarket_training_archive/daily_training_archive_20260718_2a984198627e.csv.gz": {
+      "mtime_ns": 1784633828370868965,
+      "size": 8308638
+    },
+    "polymarket_training_archive/daily_training_archive_20260718_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786933316224525711,
+      "size": 180981
+    },
+    "polymarket_training_archive/daily_training_archive_20260719_2a984198627e.csv.gz": {
+      "mtime_ns": 1784721161985754023,
+      "size": 6778746
+    },
+    "polymarket_training_archive/daily_training_archive_20260719_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786845758740350147,
+      "size": 148614
+    },
+    "polymarket_training_archive/daily_training_archive_20260720_2a984198627e.csv.gz": {
+      "mtime_ns": 1784808667445874472,
+      "size": 6449719
+    },
+    "polymarket_training_archive/daily_training_archive_20260720_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786845758816350230,
+      "size": 130894
+    },
+    "polymarket_training_archive/daily_training_archive_20260721_2a984198627e.csv.gz": {
+      "mtime_ns": 1784896004068184614,
+      "size": 5417801
+    },
+    "polymarket_training_archive/daily_training_archive_20260721_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786933316292525787,
+      "size": 112336
+    },
+    "polymarket_training_archive/daily_training_archive_20260722_2a984198627e.csv.gz": {
+      "mtime_ns": 1784983436139280430,
+      "size": 6074968
+    },
+    "polymarket_training_archive/daily_training_archive_20260722_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786845758936350361,
+      "size": 82755
+    },
+    "polymarket_training_archive/daily_training_archive_20260723_2a984198627e.csv.gz": {
+      "mtime_ns": 1785071092430432324,
+      "size": 5273415
+    },
+    "polymarket_training_archive/daily_training_archive_20260723_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786933316348525850,
+      "size": 92861
+    },
+    "polymarket_training_archive/daily_training_archive_20260724_2a984198627e.csv.gz": {
+      "mtime_ns": 1785158411336968803,
+      "size": 5395932
+    },
+    "polymarket_training_archive/daily_training_archive_20260724_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786933316400525908,
+      "size": 88550
+    },
+    "polymarket_training_archive/daily_training_archive_20260725_2a984198627e.csv.gz": {
+      "mtime_ns": 1785245865077602146,
+      "size": 5190579
+    },
+    "polymarket_training_archive/daily_training_archive_20260725_4d9af04c6653.csv.gz": {
+      "mtime_ns": 1786933316424525935,
+      "size": 40253
+    },
+    "polymarket_training_archive/daily_training_archive_20260726_2a984198627e.csv.gz": {
+      "mtime_ns": 1785335177681100831,
+      "size": 4998636
+    },
+    "polymarket_training_archive/daily_training_archive_20260727_2a984198627e.csv.gz": {
+      "mtime_ns": 1785340862931138127,
+      "size": 5278418
+    },
+    "polymarket_training_archive/daily_training_archive_20260728_2a984198627e.csv.gz": {
+      "mtime_ns": 1785448273873088037,
+      "size": 4587857
+    },
+    "polymarket_training_archive/daily_training_archive_20260729_2a984198627e.csv.gz": {
+      "mtime_ns": 1785622903198047452,
+      "size": 4060145
+    },
+    "polymarket_training_archive/daily_training_archive_20260730_2a984198627e.csv.gz": {
+      "mtime_ns": 1785622907522052053,
+      "size": 3454130
+    },
+    "polymarket_training_archive/daily_training_archive_20260731_2a984198627e.csv.gz": {
+      "mtime_ns": 1785710088674010194,
+      "size": 3645012
+    },
+    "polymarket_training_archive/daily_training_archive_20260801_2a984198627e.csv.gz": {
+      "mtime_ns": 1785797379061545857,
+      "size": 3928857
+    },
+    "polymarket_training_archive/daily_training_archive_20260802_2a984198627e.csv.gz": {
+      "mtime_ns": 1785884794862018277,
+      "size": 3898863
+    },
+    "polymarket_training_archive/daily_training_archive_20260803_2a984198627e.csv.gz": {
+      "mtime_ns": 1786059578923340512,
+      "size": 3715744
+    },
+    "polymarket_training_archive/daily_training_archive_20260804_2a984198627e.csv.gz": {
+      "mtime_ns": 1786146801229482790,
+      "size": 3464078
+    },
+    "polymarket_training_archive/daily_training_archive_20260805_2a984198627e.csv.gz": {
+      "mtime_ns": 1786233928536105547,
+      "size": 3132165
+    },
+    "polymarket_training_archive/daily_training_archive_20260806_2a984198627e.csv.gz": {
+      "mtime_ns": 1786233932672110017,
+      "size": 3246532
+    },
+    "polymarket_training_archive/daily_training_archive_20260807_2a984198627e.csv.gz": {
+      "mtime_ns": 1786321356251509498,
+      "size": 3476631
+    },
+    "polymarket_training_archive/daily_training_archive_20260808_2a984198627e.csv.gz": {
+      "mtime_ns": 1786409011987446306,
+      "size": 3002815
+    },
+    "polymarket_training_archive/daily_training_archive_20260809_2a984198627e.csv.gz": {
+      "mtime_ns": 1786496215422881763,
+      "size": 2833051
+    },
+    "polymarket_training_archive/daily_training_archive_20260810_2a984198627e.csv.gz": {
+      "mtime_ns": 1786583706679335045,
+      "size": 3203277
+    },
+    "polymarket_training_archive/daily_training_archive_20260811_2a984198627e.csv.gz": {
+      "mtime_ns": 1786671031271595460,
+      "size": 2871973
+    },
+    "polymarket_training_archive/daily_training_archive_20260812_2a984198627e.csv.gz": {
+      "mtime_ns": 1786758508693913366,
+      "size": 3072775
+    },
+    "polymarket_training_archive/daily_training_archive_20260813_2a984198627e.csv.gz": {
+      "mtime_ns": 1786845762960354761,
+      "size": 2681134
+    },
+    "polymarket_training_archive/daily_training_archive_20260814_2a984198627e.csv.gz": {
+      "mtime_ns": 1787020827157573356,
+      "size": 3351880
+    },
+    "polymarket_training_archive/daily_training_archive_20260815_2a984198627e.csv.gz": {
+      "mtime_ns": 1787108285847560405,
+      "size": 2834394
+    },
+    "polymarket_training_archive/daily_training_archive_20260816_2a984198627e.csv.gz": {
+      "mtime_ns": 1787108289259564207,
+      "size": 2920974
+    },
+    "polymarket_training_archive/daily_training_archive_20260817_2a984198627e.csv.gz": {
+      "mtime_ns": 1787108291199566369,
+      "size": 1315240
+    },
+    "polymarket_training_archive/features_20260818T025955446183Z.csv.gz": {
+      "mtime_ns": 1787021995442883468,
+      "size": 7016
+    },
+    "polymarket_training_archive/features_20260818T030317753787Z.csv.gz": {
+      "mtime_ns": 1787022197755109134,
+      "size": 12038
+    },
+    "polymarket_training_archive/features_20260818T030639117369Z.csv.gz": {
+      "mtime_ns": 1787022399119332528,
+      "size": 10249
+    },
+    "polymarket_training_archive/features_20260818T031000534864Z.csv.gz": {
+      "mtime_ns": 1787022600535555980,
+      "size": 8134
+    },
+    "polymarket_training_archive/features_20260818T031321996302Z.csv.gz": {
+      "mtime_ns": 1787022801999779485,
+      "size": 11944
+    },
+    "polymarket_training_archive/features_20260818T031642979899Z.csv.gz": {
+      "mtime_ns": 1787023002980002454,
+      "size": 11982
+    },
+    "polymarket_training_archive/features_20260818T032004397042Z.csv.gz": {
+      "mtime_ns": 1787023204396226467,
+      "size": 7844
+    },
+    "polymarket_training_archive/features_20260818T032329569427Z.csv.gz": {
+      "mtime_ns": 1787023409572455484,
+      "size": 14803
+    },
+    "polymarket_training_archive/features_20260818T032655310333Z.csv.gz": {
+      "mtime_ns": 1787023615312685130,
+      "size": 18671
+    },
+    "polymarket_training_archive/features_20260818T033021259237Z.csv.gz": {
+      "mtime_ns": 1787023821256915004,
+      "size": 3314
+    },
+    "polymarket_training_archive/features_20260818T033346954677Z.csv.gz": {
+      "mtime_ns": 1787024026957144605,
+      "size": 9462
+    },
+    "polymarket_training_archive/features_20260818T033708808458Z.csv.gz": {
+      "mtime_ns": 1787024228813369393,
+      "size": 14378
+    },
+    "polymarket_training_archive/features_20260818T034035426063Z.csv.gz": {
+      "mtime_ns": 1787024435425598490,
+      "size": 2273
+    },
+    "polymarket_training_archive/features_20260818T034401004314Z.csv.gz": {
+      "mtime_ns": 1787024641005826442,
+      "size": 9965
+    },
+    "polymarket_training_archive/features_20260818T034723140371Z.csv.gz": {
+      "mtime_ns": 1787024843142050576,
+      "size": 7586
+    },
+    "polymarket_training_archive/features_20260818T035044514025Z.csv.gz": {
+      "mtime_ns": 1787025044514273862,
+      "size": 7094
+    },
+    "polymarket_training_archive/features_20260818T035413797107Z.csv.gz": {
+      "mtime_ns": 1787025253798506445,
+      "size": 7217
+    },
+    "polymarket_training_archive/features_20260818T035735109712Z.csv.gz": {
+      "mtime_ns": 1787025455114731258,
+      "size": 11258
+    },
+    "polymarket_training_archive/features_20260818T040059811813Z.csv.gz": {
+      "mtime_ns": 1787025659806959841,
+      "size": 8159
+    },
+    "polymarket_training_archive/features_20260818T040421780957Z.csv.gz": {
+      "mtime_ns": 1787025861779185386,
+      "size": 7338
+    },
+    "polymarket_training_archive/features_20260818T040742065905Z.csv.gz": {
+      "mtime_ns": 1787026062067409050,
+      "size": 6162
+    },
+    "polymarket_training_archive/features_20260818T041104035742Z.csv.gz": {
+      "mtime_ns": 1787026264031634395,
+      "size": 7328
+    },
+    "polymarket_training_archive/features_20260818T041424786390Z.csv.gz": {
+      "mtime_ns": 1787026464783857827,
+      "size": 7575
+    },
+    "polymarket_training_archive/features_20260818T041746713582Z.csv.gz": {
+      "mtime_ns": 1787026666716082572,
+      "size": 10960
+    },
+    "polymarket_training_archive/features_20260818T042111687237Z.csv.gz": {
+      "mtime_ns": 1787026871684310697,
+      "size": 4778
+    },
+    "polymarket_training_archive/features_20260818T042433125083Z.csv.gz": {
+      "mtime_ns": 1787027073124534895,
+      "size": 7380
+    },
+    "polymarket_training_archive/features_20260818T042755384561Z.csv.gz": {
+      "mtime_ns": 1787027275384760417,
+      "size": 9942
+    },
+    "polymarket_training_archive/features_20260818T043116669663Z.csv.gz": {
+      "mtime_ns": 1787027476668988124,
+      "size": 6781
+    },
+    "polymarket_training_archive/features_20260818T043437957785Z.csv.gz": {
+      "mtime_ns": 1787027677957215835,
+      "size": 2551
+    },
+    "polymarket_training_archive/features_20260818T043759361414Z.csv.gz": {
+      "mtime_ns": 1787027879365443682,
+      "size": 10689
+    },
+    "polymarket_training_archive/features_20260818T044120530121Z.csv.gz": {
+      "mtime_ns": 1787028080529671253,
+      "size": 6610
+    },
+    "polymarket_training_archive/features_20260818T044450031850Z.csv.gz": {
+      "mtime_ns": 1787028290029908190,
+      "size": 2071
+    },
+    "polymarket_training_archive/features_20260818T044811350920Z.csv.gz": {
+      "mtime_ns": 1787028491354133362,
+      "size": 10428
+    },
+    "polymarket_training_archive/features_20260818T045132225555Z.csv.gz": {
+      "mtime_ns": 1787028692226358028,
+      "size": 2661
+    },
+    "polymarket_training_archive/features_20260818T045457877868Z.csv.gz": {
+      "mtime_ns": 1787028897878588040,
+      "size": 3108
+    },
+    "polymarket_training_archive/features_20260818T045827057883Z.csv.gz": {
+      "mtime_ns": 1787029107062822003,
+      "size": 17230
+    },
+    "polymarket_training_archive/features_20260818T050149344934Z.csv.gz": {
+      "mtime_ns": 1787029309347048248,
+      "size": 16267
+    },
+    "polymarket_training_archive/features_20260818T050510389574Z.csv.gz": {
+      "mtime_ns": 1787029510387273347,
+      "size": 8065
+    },
+    "polymarket_training_archive/features_20260818T050831606438Z.csv.gz": {
+      "mtime_ns": 1787029711607498669,
+      "size": 10715
+    },
+    "polymarket_training_archive/features_20260818T051153457624Z.csv.gz": {
+      "mtime_ns": 1787029913455724695,
+      "size": 4455
+    },
+    "polymarket_training_archive/features_20260818T051519337123Z.csv.gz": {
+      "mtime_ns": 1787030119335955235,
+      "size": 7231
+    },
+    "polymarket_training_archive/features_20260818T051840280532Z.csv.gz": {
+      "mtime_ns": 1787030320284180253,
+      "size": 12885
+    },
+    "polymarket_training_archive/features_20260818T052206234380Z.csv.gz": {
+      "mtime_ns": 1787030526236413985,
+      "size": 11062
+    },
+    "polymarket_training_archive/features_20260818T052531820767Z.csv.gz": {
+      "mtime_ns": 1787030731820648015,
+      "size": 8469
+    },
+    "polymarket_training_archive/features_20260818T052856936171Z.csv.gz": {
+      "mtime_ns": 1787030936940881517,
+      "size": 12265
+    },
+    "polymarket_training_archive/features_20260818T053227298922Z.csv.gz": {
+      "mtime_ns": 1787031147301120984,
+      "size": 9692
+    },
+    "polymarket_training_archive/features_20260818T053557664882Z.csv.gz": {
+      "mtime_ns": 1787031357661360191,
+      "size": 3312
+    },
+    "polymarket_training_archive/features_20260818T053920077293Z.csv.gz": {
+      "mtime_ns": 1787031560077586255,
+      "size": 7178
+    },
+    "polymarket_training_archive/features_20260818T054241940290Z.csv.gz": {
+      "mtime_ns": 1787031761945811620,
+      "size": 13990
+    },
+    "polymarket_training_archive/features_20260818T054608263918Z.csv.gz": {
+      "mtime_ns": 1787031968266041954,
+      "size": 15125
+    },
+    "polymarket_training_archive/features_20260818T054930114051Z.csv.gz": {
+      "mtime_ns": 1787032170114267296,
+      "size": 2753
+    },
+    "polymarket_training_archive/features_20260818T055250900857Z.csv.gz": {
+      "mtime_ns": 1787032370906491459,
+      "size": 16192
+    },
+    "polymarket_training_archive/features_20260818T055611330776Z.csv.gz": {
+      "mtime_ns": 1787032571330715447,
+      "size": 8529
+    },
+    "polymarket_training_archive/features_20260818T055932796215Z.csv.gz": {
+      "mtime_ns": 1787032772790940701,
+      "size": 2291
+    },
+    "polymarket_training_archive/features_20260818T060259134759Z.csv.gz": {
+      "mtime_ns": 1787032979135171414,
+      "size": 10373
+    },
+    "polymarket_training_archive/features_20260818T060619781455Z.csv.gz": {
+      "mtime_ns": 1787033179779395755,
+      "size": 5614
+    },
+    "polymarket_training_archive/features_20260818T060945247303Z.csv.gz": {
+      "mtime_ns": 1787033385243625485,
+      "size": 5352
+    },
+    "polymarket_training_archive/features_20260818T061310221165Z.csv.gz": {
+      "mtime_ns": 1787033590223854790,
+      "size": 10751
+    },
+    "polymarket_training_archive/features_20260818T061632116298Z.csv.gz": {
+      "mtime_ns": 1787033792116080705,
+      "size": 7909
+    },
+    "polymarket_training_archive/features_20260818T061952965771Z.csv.gz": {
+      "mtime_ns": 1787033992964305452,
+      "size": 3356
+    },
+    "polymarket_training_archive/features_20260818T062314368413Z.csv.gz": {
+      "mtime_ns": 1787034194372530825,
+      "size": 18422
+    },
+    "polymarket_training_archive/features_20260818T062636086419Z.csv.gz": {
+      "mtime_ns": 1787034396088756542,
+      "size": 6539
+    },
+    "polymarket_training_archive/features_20260818T063001481410Z.csv.gz": {
+      "mtime_ns": 1787034601480986462,
+      "size": 11788
+    },
+    "polymarket_training_archive/features_20260818T063323744793Z.csv.gz": {
+      "mtime_ns": 1787034803749212955,
+      "size": 11602
+    },
+    "polymarket_training_archive/features_20260818T063646172777Z.csv.gz": {
+      "mtime_ns": 1787035006177439627,
+      "size": 15713
+    },
+    "polymarket_training_archive/features_20260818T064012000981Z.csv.gz": {
+      "mtime_ns": 1787035212001670102,
+      "size": 4063
+    },
+    "polymarket_training_archive/features_20260818T064333119729Z.csv.gz": {
+      "mtime_ns": 1787035413125895314,
+      "size": 16129
+    },
+    "polymarket_training_archive/features_20260818T064655204521Z.csv.gz": {
+      "mtime_ns": 1787035615210121647,
+      "size": 20592
+    },
+    "polymarket_training_archive/features_20260818T065017079274Z.csv.gz": {
+      "mtime_ns": 1787035817082347791,
+      "size": 12059
+    },
+    "polymarket_training_archive/features_20260818T065341640470Z.csv.gz": {
+      "mtime_ns": 1787036021642576947,
+      "size": 10560
+    },
+    "polymarket_training_archive/features_20260818T065702016975Z.csv.gz": {
+      "mtime_ns": 1787036222022801421,
+      "size": 11646
+    },
+    "polymarket_training_archive/features_20260818T070030960054Z.csv.gz": {
+      "mtime_ns": 1787036430955035475,
+      "size": 7264
+    },
+    "polymarket_training_archive/features_20260818T070351989515Z.csv.gz": {
+      "mtime_ns": 1787036631991260965,
+      "size": 9498
+    },
+    "polymarket_training_archive/features_20260818T070713377870Z.csv.gz": {
+      "mtime_ns": 1787036833379487367,
+      "size": 9220
+    },
+    "polymarket_training_archive/features_20260818T071038186043Z.csv.gz": {
+      "mtime_ns": 1787037038183717609,
+      "size": 11999
+    },
+    "polymarket_training_archive/features_20260818T071402552496Z.csv.gz": {
+      "mtime_ns": 1787037242551947361,
+      "size": 10017
+    },
+    "polymarket_training_archive/features_20260818T071723428534Z.csv.gz": {
+      "mtime_ns": 1787037443432173192,
+      "size": 18128
+    },
+    "polymarket_training_archive/features_20260818T072044479500Z.csv.gz": {
+      "mtime_ns": 1787037644476398745,
+      "size": 8354
+    },
+    "polymarket_training_archive/features_20260818T072409341901Z.csv.gz": {
+      "mtime_ns": 1787037849340627348,
+      "size": 3710
+    },
+    "polymarket_training_archive/features_20260818T072731286405Z.csv.gz": {
+      "mtime_ns": 1787038051288852697,
+      "size": 17614
+    },
+    "polymarket_training_archive/features_20260818T073056250989Z.csv.gz": {
+      "mtime_ns": 1787038256249081407,
+      "size": 5520
+    },
+    "polymarket_training_archive/features_20260818T073417722455Z.csv.gz": {
+      "mtime_ns": 1787038457725306229,
+      "size": 5431
+    },
+    "polymarket_training_archive/features_20260818T073739677891Z.csv.gz": {
+      "mtime_ns": 1787038659685531566,
+      "size": 22274
+    },
+    "polymarket_training_archive/features_20260818T074100747110Z.csv.gz": {
+      "mtime_ns": 1787038860749755817,
+      "size": 9728
+    },
+    "polymarket_training_archive/features_20260818T074421917008Z.csv.gz": {
+      "mtime_ns": 1787039061917980185,
+      "size": 3960
+    },
+    "polymarket_training_archive/features_20260818T074742757465Z.csv.gz": {
+      "mtime_ns": 1787039262762204192,
+      "size": 16257
+    },
+    "polymarket_training_archive/features_20260818T075104098303Z.csv.gz": {
+      "mtime_ns": 1787039464098428747,
+      "size": 4007
+    },
+    "polymarket_training_archive/features_20260818T075425614213Z.csv.gz": {
+      "mtime_ns": 1787039665614653323,
+      "size": 2265
+    },
+    "polymarket_training_archive/features_20260818T075746913819Z.csv.gz": {
+      "mtime_ns": 1787039866914875466,
+      "size": 10986
+    },
+    "polymarket_training_archive/features_20260818T080107966148Z.csv.gz": {
+      "mtime_ns": 1787040067963097332,
+      "size": 8077
+    },
+    "polymarket_training_archive/features_20260818T080429462633Z.csv.gz": {
+      "mtime_ns": 1787040269459319692,
+      "size": 10984
+    },
+    "polymarket_training_archive/features_20260818T080753997834Z.csv.gz": {
+      "mtime_ns": 1787040473999545412,
+      "size": 10762
+    },
+    "polymarket_training_archive/features_20260818T081115010089Z.csv.gz": {
+      "mtime_ns": 1787040675007767233,
+      "size": 4994
+    },
+    "polymarket_training_archive/features_20260818T081435260797Z.csv.gz": {
+      "mtime_ns": 1787040875259990172,
+      "size": 7680
+    },
+    "polymarket_training_archive/features_20260818T081800461268Z.csv.gz": {
+      "mtime_ns": 1787041080464218641,
+      "size": 12296
+    },
+    "polymarket_training_archive/features_20260818T082121348821Z.csv.gz": {
+      "mtime_ns": 1787041281348442300,
+      "size": 8920
+    },
+    "polymarket_training_archive/features_20260818T082446370559Z.csv.gz": {
+      "mtime_ns": 1787041486368670564,
+      "size": 8981
+    },
+    "polymarket_training_archive/features_20260818T082807478520Z.csv.gz": {
+      "mtime_ns": 1787041687480894476,
+      "size": 11547
+    },
+    "polymarket_training_archive/features_20260818T083128706122Z.csv.gz": {
+      "mtime_ns": 1787041888705117060,
+      "size": 4072
+    },
+    "polymarket_training_archive/features_20260818T083453097903Z.csv.gz": {
+      "mtime_ns": 1787042093097342921,
+      "size": 3619
+    },
+    "polymarket_training_archive/features_20260818T083817568278Z.csv.gz": {
+      "mtime_ns": 1787042297569568871,
+      "size": 14618
+    },
+    "polymarket_training_archive/features_20260818T084138928140Z.csv.gz": {
+      "mtime_ns": 1787042498929791382,
+      "size": 11712
+    },
+    "polymarket_training_archive/features_20260818T084459205834Z.csv.gz": {
+      "mtime_ns": 1787042699206012696,
+      "size": 2571
+    },
+    "polymarket_training_archive/features_20260818T084819390620Z.csv.gz": {
+      "mtime_ns": 1787042899394234371,
+      "size": 17692
+    },
+    "polymarket_training_archive/features_20260818T085140550325Z.csv.gz": {
+      "mtime_ns": 1787043100554457238,
+      "size": 14266
+    },
+    "polymarket_training_archive/features_20260818T085505391462Z.csv.gz": {
+      "mtime_ns": 1787043305390684178,
+      "size": 2733
+    },
+    "polymarket_training_archive/features_20260818T085827151949Z.csv.gz": {
+      "mtime_ns": 1787043507158907719,
+      "size": 18287
+    },
+    "polymarket_training_archive/features_20260818T090148185981Z.csv.gz": {
+      "mtime_ns": 1787043708187130440,
+      "size": 11868
+    },
+    "polymarket_training_archive/features_20260818T090508701832Z.csv.gz": {
+      "mtime_ns": 1787043908699353829,
+      "size": 3554
+    },
+    "polymarket_training_archive/features_20260818T090829346242Z.csv.gz": {
+      "mtime_ns": 1787044109351577909,
+      "size": 18275
+    },
+    "polymarket_training_archive/features_20260818T091153872665Z.csv.gz": {
+      "mtime_ns": 1787044313875806314,
+      "size": 10943
+    },
+    "polymarket_training_archive/features_20260818T091519680908Z.csv.gz": {
+      "mtime_ns": 1787044519676036143,
+      "size": 2363
+    },
+    "polymarket_training_archive/features_20260818T091844595306Z.csv.gz": {
+      "mtime_ns": 1787044724596264989,
+      "size": 18872
+    },
+    "polymarket_training_archive/features_20260818T092205984690Z.csv.gz": {
+      "mtime_ns": 1787044925988489981,
+      "size": 13160
+    },
+    "polymarket_training_archive/features_20260818T092531503622Z.csv.gz": {
+      "mtime_ns": 1787045131504719631,
+      "size": 14477
+    },
+    "polymarket_training_archive/features_20260818T092852811399Z.csv.gz": {
+      "mtime_ns": 1787045332816944583,
+      "size": 17451
+    },
+    "polymarket_training_archive/features_20260818T093213927168Z.csv.gz": {
+      "mtime_ns": 1787045533929169312,
+      "size": 14678
+    },
+    "polymarket_training_archive/features_20260818T093538880222Z.csv.gz": {
+      "mtime_ns": 1787045738885398337,
+      "size": 18714
+    },
+    "polymarket_training_archive/features_20260818T093859888913Z.csv.gz": {
+      "mtime_ns": 1787045939889622957,
+      "size": 8530
+    },
+    "polymarket_training_archive/features_20260818T094220841065Z.csv.gz": {
+      "mtime_ns": 1787046140845847533,
+      "size": 10733
+    },
+    "polymarket_training_archive/features_20260818T094542034880Z.csv.gz": {
+      "mtime_ns": 1787046342034072368,
+      "size": 2174
+    },
+    "polymarket_training_archive/features_20260818T094906553959Z.csv.gz": {
+      "mtime_ns": 1787046546554300927,
+      "size": 4920
+    },
+    "polymarket_training_archive/features_20260818T095231352913Z.csv.gz": {
+      "mtime_ns": 1787046751358529804,
+      "size": 14102
+    },
+    "polymarket_training_archive/features_20260818T095552405505Z.csv.gz": {
+      "mtime_ns": 1787046952406754675,
+      "size": 9564
+    },
+    "polymarket_training_archive/features_20260818T095913454740Z.csv.gz": {
+      "mtime_ns": 1787047153450979739,
+      "size": 2350
+    },
+    "polymarket_training_archive/features_20260818T100240330918Z.csv.gz": {
+      "mtime_ns": 1787047360331211336,
+      "size": 15102
+    },
+    "polymarket_training_archive/features_20260818T100601034425Z.csv.gz": {
+      "mtime_ns": 1787047561031436015,
+      "size": 8205
+    },
+    "polymarket_training_archive/features_20260818T100925234933Z.csv.gz": {
+      "mtime_ns": 1787047765235664617,
+      "size": 3997
+    },
+    "polymarket_training_archive/features_20260818T101245930772Z.csv.gz": {
+      "mtime_ns": 1787047965931889198,
+      "size": 12365
+    },
+    "polymarket_training_archive/features_20260818T101606829650Z.csv.gz": {
+      "mtime_ns": 1787048166828113875,
+      "size": 8444
+    },
+    "polymarket_training_archive/features_20260818T101928244928Z.csv.gz": {
+      "mtime_ns": 1787048368244339135,
+      "size": 5855
+    },
+    "polymarket_training_archive/features_20260818T102249496957Z.csv.gz": {
+      "mtime_ns": 1787048569500564215,
+      "size": 14768
+    },
+    "polymarket_training_archive/features_20260818T102610287411Z.csv.gz": {
+      "mtime_ns": 1787048770284788767,
+      "size": 3370
+    },
+    "polymarket_training_archive/features_20260818T102931939325Z.csv.gz": {
+      "mtime_ns": 1787048971937014291,
+      "size": 4036
+    },
+    "polymarket_training_archive/features_20260818T103251977700Z.csv.gz": {
+      "mtime_ns": 1787049171981238019,
+      "size": 11563
+    },
+    "polymarket_training_archive/features_20260818T103612681556Z.csv.gz": {
+      "mtime_ns": 1787049372681462480,
+      "size": 7824
+    },
+    "polymarket_training_archive/features_20260818T103933410258Z.csv.gz": {
+      "mtime_ns": 1787049573409686973,
+      "size": 5016
+    },
+    "polymarket_training_archive/features_20260818T104254199603Z.csv.gz": {
+      "mtime_ns": 1787049774205911542,
+      "size": 11947
+    },
+    "polymarket_training_archive/features_20260818T104619071656Z.csv.gz": {
+      "mtime_ns": 1787049979074140856,
+      "size": 8357
+    },
+    "polymarket_training_archive/features_20260818T104939439321Z.csv.gz": {
+      "mtime_ns": 1787050179442365980,
+      "size": 9208
+    },
+    "polymarket_training_archive/features_20260818T105300277353Z.csv.gz": {
+      "mtime_ns": 1787050380282591633,
+      "size": 11465
+    },
+    "polymarket_training_archive/features_20260818T105620450420Z.csv.gz": {
+      "mtime_ns": 1787050580450816532,
+      "size": 10563
+    },
+    "polymarket_training_archive/features_20260818T105945343437Z.csv.gz": {
+      "mtime_ns": 1787050785343046739,
+      "size": 10360
+    },
+    "polymarket_training_archive/features_20260818T110306043502Z.csv.gz": {
+      "mtime_ns": 1787050986047272177,
+      "size": 16028
+    },
+    "polymarket_training_archive/features_20260818T110626864439Z.csv.gz": {
+      "mtime_ns": 1787051186859496724,
+      "size": 4069
+    },
+    "polymarket_training_archive/features_20260818T110947564514Z.csv.gz": {
+      "mtime_ns": 1787051387559721146,
+      "size": 6360
+    },
+    "polymarket_training_archive/features_20260818T111308686232Z.csv.gz": {
+      "mtime_ns": 1787051588687946046,
+      "size": 17187
+    },
+    "polymarket_training_archive/features_20260818T111633108122Z.csv.gz": {
+      "mtime_ns": 1787051793104174623,
+      "size": 7157
+    },
+    "polymarket_training_archive/features_20260818T111957730376Z.csv.gz": {
+      "mtime_ns": 1787051997728403432,
+      "size": 3113
+    },
+    "polymarket_training_archive/features_20260818T112322558854Z.csv.gz": {
+      "mtime_ns": 1787052202560632463,
+      "size": 5973
+    },
+    "polymarket_training_archive/features_20260818T112643026804Z.csv.gz": {
+      "mtime_ns": 1787052403028856613,
+      "size": 15869
+    },
+    "polymarket_training_archive/features_20260818T113003687133Z.csv.gz": {
+      "mtime_ns": 1787052603685080973,
+      "size": 6268
+    },
+    "polymarket_training_archive/features_20260818T113324089738Z.csv.gz": {
+      "mtime_ns": 1787052804093305056,
+      "size": 9291
+    },
+    "polymarket_training_archive/features_20260818T113645139966Z.csv.gz": {
+      "mtime_ns": 1787053005145529859,
+      "size": 19825
+    },
+    "polymarket_training_archive/features_20260818T114010123761Z.csv.gz": {
+      "mtime_ns": 1787053210121759008,
+      "size": 2310
+    },
+    "polymarket_training_archive/features_20260818T114331111739Z.csv.gz": {
+      "mtime_ns": 1787053411117983694,
+      "size": 15008
+    },
+    "polymarket_training_archive/features_20260818T114659740800Z.csv.gz": {
+      "mtime_ns": 1787053619746216910,
+      "size": 10777
+    },
+    "polymarket_training_archive/features_20260818T115024632021Z.csv.gz": {
+      "mtime_ns": 1787053824630445942,
+      "size": 6716
+    },
+    "polymarket_training_archive/features_20260818T115349035325Z.csv.gz": {
+      "mtime_ns": 1787054029042674445,
+      "size": 14040
+    },
+    "polymarket_training_archive/features_20260818T115709262924Z.csv.gz": {
+      "mtime_ns": 1787054229262898243,
+      "size": 12871
+    },
+    "polymarket_training_archive/features_20260818T120033874204Z.csv.gz": {
+      "mtime_ns": 1787054433871126935,
+      "size": 7830
+    },
+    "polymarket_training_archive/features_20260818T120358436470Z.csv.gz": {
+      "mtime_ns": 1787054638439355582,
+      "size": 15081
+    },
+    "polymarket_training_archive/features_20260818T120718935513Z.csv.gz": {
+      "mtime_ns": 1787054838935579678,
+      "size": 11869
+    },
+    "polymarket_training_archive/features_20260818T121044192850Z.csv.gz": {
+      "mtime_ns": 1787055044191809094,
+      "size": 2740
+    },
+    "polymarket_training_archive/features_20260818T121405171546Z.csv.gz": {
+      "mtime_ns": 1787055245168033702,
+      "size": 4803
+    },
+    "polymarket_training_archive/features_20260818T121725774400Z.csv.gz": {
+      "mtime_ns": 1787055445776257877,
+      "size": 17445
+    },
+    "polymarket_training_archive/features_20260818T122046697105Z.csv.gz": {
+      "mtime_ns": 1787055646696482401,
+      "size": 4007
+    },
+    "polymarket_training_archive/features_20260818T122411537011Z.csv.gz": {
+      "mtime_ns": 1787055851536711305,
+      "size": 7136
+    },
+    "polymarket_training_archive/features_20260818T122737786936Z.csv.gz": {
+      "mtime_ns": 1787056057788941787,
+      "size": 14571
+    },
+    "polymarket_training_archive/features_20260818T123058321546Z.csv.gz": {
+      "mtime_ns": 1787056258321164651,
+      "size": 3466
+    },
+    "polymarket_training_archive/features_20260818T123423546986Z.csv.gz": {
+      "mtime_ns": 1787056463545391109,
+      "size": 5939
+    },
+    "polymarket_training_archive/features_20260818T123744898529Z.csv.gz": {
+      "mtime_ns": 1787056664901613299,
+      "size": 16915
+    },
+    "polymarket_training_archive/features_20260818T124106027361Z.csv.gz": {
+      "mtime_ns": 1787056866025835234,
+      "size": 1758
+    },
+    "polymarket_training_archive/features_20260818T124430446704Z.csv.gz": {
+      "mtime_ns": 1787057070446060805,
+      "size": 2631
+    },
+    "polymarket_training_archive/features_20260818T124750888420Z.csv.gz": {
+      "mtime_ns": 1787057270894282662,
+      "size": 14710
+    },
+    "polymarket_training_archive/features_20260818T125111889936Z.csv.gz": {
+      "mtime_ns": 1787057471890506725,
+      "size": 3522
+    },
+    "polymarket_training_archive/features_20260818T125432205132Z.csv.gz": {
+      "mtime_ns": 1787057672206730030,
+      "size": 6833
+    },
+    "polymarket_training_archive/features_20260818T125754040436Z.csv.gz": {
+      "mtime_ns": 1787057874042955029,
+      "size": 11166
+    },
+    "polymarket_training_archive/features_20260818T130114698392Z.csv.gz": {
+      "mtime_ns": 1787058074695178708,
+      "size": 7873
+    },
+    "polymarket_training_archive/features_20260818T130435173812Z.csv.gz": {
+      "mtime_ns": 1787058275171402150,
+      "size": 7908
+    },
+    "polymarket_training_archive/features_20260818T130800047946Z.csv.gz": {
+      "mtime_ns": 1787058480047630269,
+      "size": 7759
+    },
+    "polymarket_training_archive/features_20260818T131121139030Z.csv.gz": {
+      "mtime_ns": 1787058681135854170,
+      "size": 5817
+    },
+    "polymarket_training_archive/features_20260818T131442222627Z.csv.gz": {
+      "mtime_ns": 1787058882220078067,
+      "size": 4898
+    },
+    "polymarket_training_archive/features_20260818T131803326060Z.csv.gz": {
+      "mtime_ns": 1787059083328301991,
+      "size": 12481
+    },
+    "polymarket_training_archive/features_20260818T132124276316Z.csv.gz": {
+      "mtime_ns": 1787059284272525318,
+      "size": 2506
+    },
+    "polymarket_training_archive/features_20260818T132445480920Z.csv.gz": {
+      "mtime_ns": 1787059485480668392,
+      "size": 6950
+    },
+    "polymarket_training_archive/features_20260818T132806519783Z.csv.gz": {
+      "mtime_ns": 1787059686520852115,
+      "size": 6221
+    },
+    "polymarket_training_archive/features_20260818T133129126206Z.csv.gz": {
+      "mtime_ns": 1787059889125078419,
+      "size": 7726
+    },
+    "polymarket_training_archive/features_20260818T133453904795Z.csv.gz": {
+      "mtime_ns": 1787060093905307153,
+      "size": 8885
+    },
+    "polymarket_training_archive/features_20260818T133814594234Z.csv.gz": {
+      "mtime_ns": 1787060294597531320,
+      "size": 11114
+    },
+    "polymarket_training_archive/features_20260818T134135898096Z.csv.gz": {
+      "mtime_ns": 1787060495901756370,
+      "size": 12141
+    },
+    "polymarket_training_archive/features_20260818T134500860507Z.csv.gz": {
+      "mtime_ns": 1787060700857985520,
+      "size": 6184
+    },
+    "polymarket_training_archive/features_20260818T134821594009Z.csv.gz": {
+      "mtime_ns": 1787060901598209955,
+      "size": 11705
+    },
+    "polymarket_training_archive/features_20260818T135142051349Z.csv.gz": {
+      "mtime_ns": 1787061102054434073,
+      "size": 14525
+    },
+    "polymarket_training_archive/features_20260818T135502816402Z.csv.gz": {
+      "mtime_ns": 1787061302818658536,
+      "size": 7941
+    },
+    "polymarket_training_archive/features_20260818T135823995764Z.csv.gz": {
+      "mtime_ns": 1787061503994880958,
+      "size": 6519
+    },
+    "polymarket_training_archive/features_20260818T140144774146Z.csv.gz": {
+      "mtime_ns": 1787061704775102436,
+      "size": 17271
+    },
+    "polymarket_training_archive/features_20260818T140505733953Z.csv.gz": {
+      "mtime_ns": 1787061905731324108,
+      "size": 3366
+    },
+    "polymarket_training_archive/features_20260818T140829419756Z.csv.gz": {
+      "mtime_ns": 1787062109419548794,
+      "size": 10215
+    },
+    "polymarket_training_archive/features_20260818T141150272959Z.csv.gz": {
+      "mtime_ns": 1787062310275770356,
+      "size": 14896
+    },
+    "polymarket_training_archive/features_20260818T141515002316Z.csv.gz": {
+      "mtime_ns": 1787062514999995719,
+      "size": 1819
+    },
+    "polymarket_training_archive/features_20260818T141836157708Z.csv.gz": {
+      "mtime_ns": 1787062716160216938,
+      "size": 14473
+    },
+    "polymarket_training_archive/features_20260818T142200617600Z.csv.gz": {
+      "mtime_ns": 1787062920620441786,
+      "size": 10861
+    },
+    "polymarket_training_archive/features_20260818T142525450513Z.csv.gz": {
+      "mtime_ns": 1787063125448667038,
+      "size": 6129
+    },
+    "polymarket_training_archive/features_20260818T142850673146Z.csv.gz": {
+      "mtime_ns": 1787063330676892731,
+      "size": 12294
+    },
+    "polymarket_training_archive/features_20260818T143211045553Z.csv.gz": {
+      "mtime_ns": 1787063531049105394,
+      "size": 10722
+    },
+    "polymarket_training_archive/features_20260818T143535974385Z.csv.gz": {
+      "mtime_ns": 1787063735973316685,
+      "size": 5653
+    },
+    "polymarket_training_archive/features_20260818T143900410299Z.csv.gz": {
+      "mtime_ns": 1787063940409527472,
+      "size": 6007
+    },
+    "polymarket_training_archive/features_20260818T144220668903Z.csv.gz": {
+      "mtime_ns": 1787064140673738636,
+      "size": 14174
+    },
+    "polymarket_training_archive/features_20260818T144540722329Z.csv.gz": {
+      "mtime_ns": 1787064340721957353,
+      "size": 3170
+    },
+    "polymarket_training_archive/features_20260818T144901661651Z.csv.gz": {
+      "mtime_ns": 1787064541662177547,
+      "size": 2222
+    },
+    "polymarket_training_archive/features_20260818T145221838421Z.csv.gz": {
+      "mtime_ns": 1787064741842397483,
+      "size": 10884
+    },
+    "polymarket_training_archive/features_20260818T145551321897Z.csv.gz": {
+      "mtime_ns": 1787064951322627638,
+      "size": 2946
+    },
+    "polymarket_training_archive/features_20260818T145911083459Z.csv.gz": {
+      "mtime_ns": 1787065151078847108,
+      "size": 2025
+    },
+    "polymarket_training_archive/features_20260818T150235657508Z.csv.gz": {
+      "mtime_ns": 1787065355655071875,
+      "size": 9550
+    },
+    "polymarket_training_archive/features_20260818T150604547714Z.csv.gz": {
+      "mtime_ns": 1787065564543302344,
+      "size": 7480
+    },
+    "polymarket_training_archive/features_20260818T150925301922Z.csv.gz": {
+      "mtime_ns": 1787065765299525416,
+      "size": 2216
+    },
+    "polymarket_training_archive/features_20260818T151250160280Z.csv.gz": {
+      "mtime_ns": 1787065970159753048,
+      "size": 10223
+    },
+    "polymarket_training_archive/features_20260818T151610967387Z.csv.gz": {
+      "mtime_ns": 1787066170963976174,
+      "size": 2350
+    },
+    "polymarket_training_archive/features_20260818T151931833122Z.csv.gz": {
+      "mtime_ns": 1787066371832199370,
+      "size": 1960
+    },
+    "polymarket_training_archive/features_20260818T152256895986Z.csv.gz": {
+      "mtime_ns": 1787066576896426505,
+      "size": 14732
+    },
+    "polymarket_training_archive/features_20260818T152617737037Z.csv.gz": {
+      "mtime_ns": 1787066777732646668,
+      "size": 2342
+    },
+    "polymarket_training_archive/features_20260818T152938472023Z.csv.gz": {
+      "mtime_ns": 1787066978468866723,
+      "size": 3092
+    },
+    "polymarket_training_archive/features_20260818T153303632720Z.csv.gz": {
+      "mtime_ns": 1787067183637091635,
+      "size": 9812
+    },
+    "polymarket_training_archive/features_20260818T153629081180Z.csv.gz": {
+      "mtime_ns": 1787067389081316851,
+      "size": 6852
+    },
+    "polymarket_training_archive/features_20260818T153950893795Z.csv.gz": {
+      "mtime_ns": 1787067590893537046,
+      "size": 6097
+    },
+    "polymarket_training_archive/features_20260818T154312484053Z.csv.gz": {
+      "mtime_ns": 1787067792485752010,
+      "size": 7879
+    },
+    "polymarket_training_archive/features_20260818T154637691217Z.csv.gz": {
+      "mtime_ns": 1787067997693970829,
+      "size": 10713
+    },
+    "polymarket_training_archive/features_20260818T155002548056Z.csv.gz": {
+      "mtime_ns": 1787068202546189269,
+      "size": 2140
+    },
+    "polymarket_training_archive/features_20260818T155323890647Z.csv.gz": {
+      "mtime_ns": 1787068403894403973,
+      "size": 14669
+    },
+    "polymarket_training_archive/features_20260818T155644527077Z.csv.gz": {
+      "mtime_ns": 1787068604530619682,
+      "size": 10505
+    },
+    "polymarket_training_archive/features_20260818T160004850231Z.csv.gz": {
+      "mtime_ns": 1787068804846838488,
+      "size": 2320
+    },
+    "polymarket_training_archive/features_20260818T160327000511Z.csv.gz": {
+      "mtime_ns": 1787069006999059298,
+      "size": 10241
+    },
+    "polymarket_training_archive/features_20260818T160647601949Z.csv.gz": {
+      "mtime_ns": 1787069207603278418,
+      "size": 14533
+    },
+    "polymarket_training_archive/features_20260818T161008614898Z.csv.gz": {
+      "mtime_ns": 1787069408611497979,
+      "size": 2196
+    },
+    "polymarket_training_archive/features_20260818T161329899558Z.csv.gz": {
+      "mtime_ns": 1787069609899717846,
+      "size": 10675
+    },
+    "polymarket_training_archive/features_20260818T161650449251Z.csv.gz": {
+      "mtime_ns": 1787069810451938960,
+      "size": 14559
+    },
+    "polymarket_training_archive/features_20260818T162014348830Z.csv.gz": {
+      "mtime_ns": 1787070014344163909,
+      "size": 2306
+    },
+    "polymarket_training_archive/features_20260818T162335267330Z.csv.gz": {
+      "mtime_ns": 1787070215268385582,
+      "size": 9928
+    },
+    "polymarket_training_archive/features_20260818T162656133125Z.csv.gz": {
+      "mtime_ns": 1787070416136607194,
+      "size": 14702
+    },
+    "polymarket_training_archive/features_20260818T163020161375Z.csv.gz": {
+      "mtime_ns": 1787070620160832288,
+      "size": 2205
+    },
+    "polymarket_training_archive/features_20260818T163341635516Z.csv.gz": {
+      "mtime_ns": 1787070821637058075,
+      "size": 12713
+    },
+    "polymarket_training_archive/features_20260818T163707462929Z.csv.gz": {
+      "mtime_ns": 1787071027469289379,
+      "size": 13070
+    },
+    "polymarket_training_archive/features_20260818T164032784734Z.csv.gz": {
+      "mtime_ns": 1787071232781520098,
+      "size": 2469
+    },
+    "polymarket_training_archive/features_20260818T164354911021Z.csv.gz": {
+      "mtime_ns": 1787071434913747244,
+      "size": 15649
+    },
+    "polymarket_training_archive/features_20260818T164716591539Z.csv.gz": {
+      "mtime_ns": 1787071636593973881,
+      "size": 10364
+    },
+    "polymarket_training_archive/features_20260818T165037324857Z.csv.gz": {
+      "mtime_ns": 1787071837326194054,
+      "size": 4166
+    },
+    "polymarket_training_archive/features_20260818T165401677739Z.csv.gz": {
+      "mtime_ns": 1787072041678416516,
+      "size": 6685
+    },
+    "polymarket_training_archive/features_20260818T165721898772Z.csv.gz": {
+      "mtime_ns": 1787072241902634485,
+      "size": 10633
+    },
+    "polymarket_training_archive/features_20260818T170042754483Z.csv.gz": {
+      "mtime_ns": 1787072442750853133,
+      "size": 2835
+    },
+    "polymarket_training_archive/features_20260818T170403412725Z.csv.gz": {
+      "mtime_ns": 1787072643411071576,
+      "size": 9920
+    },
+    "polymarket_training_archive/features_20260818T170727976784Z.csv.gz": {
+      "mtime_ns": 1787072847979297304,
+      "size": 10798
+    },
+    "polymarket_training_archive/features_20260818T171048156799Z.csv.gz": {
+      "mtime_ns": 1787073048155520076,
+      "size": 3266
+    },
+    "polymarket_training_archive/features_20260818T171408973601Z.csv.gz": {
+      "mtime_ns": 1787073248971743561,
+      "size": 6593
+    },
+    "polymarket_training_archive/features_20260818T171729029983Z.csv.gz": {
+      "mtime_ns": 1787073449031966205,
+      "size": 11504
+    },
+    "polymarket_training_archive/features_20260818T172049984631Z.csv.gz": {
+      "mtime_ns": 1787073649980189837,
+      "size": 2795
+    },
+    "polymarket_training_archive/features_20260818T172410979664Z.csv.gz": {
+      "mtime_ns": 1787073850976430811,
+      "size": 4190
+    },
+    "polymarket_training_archive/features_20260818T172732363499Z.csv.gz": {
+      "mtime_ns": 1787074052368694453,
+      "size": 13953
+    },
+    "polymarket_training_archive/features_20260818T173057184626Z.csv.gz": {
+      "mtime_ns": 1787074257184946346,
+      "size": 9996
+    },
+    "polymarket_training_archive/features_20260818T173418510939Z.csv.gz": {
+      "mtime_ns": 1787074458509168971,
+      "size": 2923
+    },
+    "polymarket_training_archive/features_20260818T173739356993Z.csv.gz": {
+      "mtime_ns": 1787074659361391074,
+      "size": 11126
+    },
+    "polymarket_training_archive/features_20260818T174104552464Z.csv.gz": {
+      "mtime_ns": 1787074864549634362,
+      "size": 3667
+    },
+    "polymarket_training_archive/features_20260818T174429960818Z.csv.gz": {
+      "mtime_ns": 1787075069957911185,
+      "size": 5536
+    },
+    "polymarket_training_archive/features_20260818T174755763248Z.csv.gz": {
+      "mtime_ns": 1787075275770188552,
+      "size": 15752
+    },
+    "polymarket_training_archive/features_20260818T175116897975Z.csv.gz": {
+      "mtime_ns": 1787075476898453261,
+      "size": 2794
+    },
+    "polymarket_training_archive/features_20260818T175440831704Z.csv.gz": {
+      "mtime_ns": 1787075680830679196,
+      "size": 2163
+    },
+    "polymarket_training_archive/features_20260818T175801714653Z.csv.gz": {
+      "mtime_ns": 1787075881718928364,
+      "size": 21146
+    },
+    "polymarket_training_archive/features_20260818T180122788142Z.csv.gz": {
+      "mtime_ns": 1787076082783239326,
+      "size": 2634
+    },
+    "polymarket_training_archive/features_20260818T180447716991Z.csv.gz": {
+      "mtime_ns": 1787076287711556265,
+      "size": 2631
+    },
+    "polymarket_training_archive/features_20260818T180811778523Z.csv.gz": {
+      "mtime_ns": 1787076491783841362,
+      "size": 20270
+    },
+    "polymarket_training_archive/features_20260818T181132691873Z.csv.gz": {
+      "mtime_ns": 1787076692688065175,
+      "size": 2936
+    },
+    "polymarket_training_archive/features_20260818T181457412792Z.csv.gz": {
+      "mtime_ns": 1787076897412370120,
+      "size": 3513
+    },
+    "polymarket_training_archive/features_20260818T181818667226Z.csv.gz": {
+      "mtime_ns": 1787077098672850226,
+      "size": 20017
+    },
+    "polymarket_training_archive/features_20260818T182139872015Z.csv.gz": {
+      "mtime_ns": 1787077299873094235,
+      "size": 5888
+    },
+    "polymarket_training_archive/features_20260818T182500409370Z.csv.gz": {
+      "mtime_ns": 1787077500405337434,
+      "size": 2229
+    },
+    "polymarket_training_archive/features_20260818T182820816330Z.csv.gz": {
+      "mtime_ns": 1787077700821580492,
+      "size": 15682
+    },
+    "polymarket_training_archive/features_20260818T183141790626Z.csv.gz": {
+      "mtime_ns": 1787077901793824896,
+      "size": 10275
+    },
+    "polymarket_training_archive/features_20260818T183503449565Z.csv.gz": {
+      "mtime_ns": 1787078103450079209,
+      "size": 2673
+    },
+    "polymarket_training_archive/features_20260818T183824717029Z.csv.gz": {
+      "mtime_ns": 1787078304722333038,
+      "size": 16613
+    },
+    "polymarket_training_archive/features_20260818T184146669771Z.csv.gz": {
+      "mtime_ns": 1787078506674587724,
+      "size": 10259
+    },
+    "polymarket_training_archive/features_20260818T184512182636Z.csv.gz": {
+      "mtime_ns": 1787078712178846890,
+      "size": 6313
+    },
+    "polymarket_training_archive/features_20260818T184841802637Z.csv.gz": {
+      "mtime_ns": 1787078921803110262,
+      "size": 12597
+    },
+    "polymarket_training_archive/features_20260818T185203180469Z.csv.gz": {
+      "mtime_ns": 1787079123179333178,
+      "size": 9368
+    },
+    "polymarket_training_archive/features_20260818T185531781850Z.csv.gz": {
+      "mtime_ns": 1787079331779564091,
+      "size": 6465
+    },
+    "polymarket_training_archive/features_20260818T185855831029Z.csv.gz": {
+      "mtime_ns": 1787079535831789969,
+      "size": 14527
+    },
+    "polymarket_training_archive/features_20260818T190222729909Z.csv.gz": {
+      "mtime_ns": 1787079742732021121,
+      "size": 8016
+    },
+    "polymarket_training_archive/features_20260818T190543839171Z.csv.gz": {
+      "mtime_ns": 1787079943836271289,
+      "size": 5774
+    },
+    "polymarket_training_archive/features_20260818T190912809232Z.csv.gz": {
+      "mtime_ns": 1787080152808496931,
+      "size": 2176
+    },
+    "polymarket_training_archive/features_20260818T191234331824Z.csv.gz": {
+      "mtime_ns": 1787080354332712908,
+      "size": 11316
+    },
+    "polymarket_training_archive/features_20260818T191554900087Z.csv.gz": {
+      "mtime_ns": 1787080554896927855,
+      "size": 7303
+    },
+    "polymarket_training_archive/features_20260818T191915767197Z.csv.gz": {
+      "mtime_ns": 1787080755765143129,
+      "size": 4359
+    },
+    "polymarket_training_archive/features_20260818T192240313352Z.csv.gz": {
+      "mtime_ns": 1787080960317388865,
+      "size": 10054
+    },
+    "polymarket_training_archive/features_20260818T192605294809Z.csv.gz": {
+      "mtime_ns": 1787081165293527184,
+      "size": 2412
+    },
+    "polymarket_training_archive/features_20260818T192925684838Z.csv.gz": {
+      "mtime_ns": 1787081365685692956,
+      "size": 7367
+    },
+    "polymarket_training_archive/features_20260818T193251139904Z.csv.gz": {
+      "mtime_ns": 1787081571141930201,
+      "size": 10098
+    },
+    "polymarket_training_archive/features_20260818T193617795809Z.csv.gz": {
+      "mtime_ns": 1787081777798168832,
+      "size": 7490
+    },
+    "polymarket_training_archive/features_20260818T193942269335Z.csv.gz": {
+      "mtime_ns": 1787081982270404941,
+      "size": 3577
+    },
+    "polymarket_training_archive/features_20260818T194307552371Z.csv.gz": {
+      "mtime_ns": 1787082187558637972,
+      "size": 13330
+    },
+    "polymarket_training_archive/features_20260818T194628493444Z.csv.gz": {
+      "mtime_ns": 1787082388490865075,
+      "size": 3663
+    },
+    "polymarket_training_archive/features_20260818T194949620382Z.csv.gz": {
+      "mtime_ns": 1787082589615092395,
+      "size": 1883
+    },
+    "polymarket_training_archive/features_20260818T195314354211Z.csv.gz": {
+      "mtime_ns": 1787082794355323803,
+      "size": 10559
+    },
+    "polymarket_training_archive/features_20260818T195635461039Z.csv.gz": {
+      "mtime_ns": 1787082995459551100,
+      "size": 9247
+    },
+    "polymarket_training_archive/features_20260818T195955815452Z.csv.gz": {
+      "mtime_ns": 1787083195811781369,
+      "size": 7476
+    },
+    "polymarket_training_archive/features_20260818T200317025077Z.csv.gz": {
+      "mtime_ns": 1787083397028014338,
+      "size": 11341
+    },
+    "polymarket_training_archive/features_20260818T200637761666Z.csv.gz": {
+      "mtime_ns": 1787083597764246752,
+      "size": 18361
+    },
+    "polymarket_training_archive/features_20260818T201002366275Z.csv.gz": {
+      "mtime_ns": 1787083802364483639,
+      "size": 2891
+    },
+    "polymarket_training_archive/features_20260818T201324148537Z.csv.gz": {
+      "mtime_ns": 1787084004152717270,
+      "size": 15090
+    },
+    "polymarket_training_archive/features_20260818T201644275921Z.csv.gz": {
+      "mtime_ns": 1787084204276942971,
+      "size": 11294
+    },
+    "polymarket_training_archive/features_20260818T202004947412Z.csv.gz": {
+      "mtime_ns": 1787084404945163998,
+      "size": 5523
+    },
+    "polymarket_training_archive/features_20260818T202329033263Z.csv.gz": {
+      "mtime_ns": 1787084609037388796,
+      "size": 14208
+    },
+    "polymarket_training_archive/features_20260818T202651009404Z.csv.gz": {
+      "mtime_ns": 1787084811013589445,
+      "size": 18178
+    },
+    "polymarket_training_archive/features_20260818T203011789208Z.csv.gz": {
+      "mtime_ns": 1787085011789788707,
+      "size": 3708
+    },
+    "polymarket_training_archive/features_20260818T203333396246Z.csv.gz": {
+      "mtime_ns": 1787085213402000511,
+      "size": 16760
+    },
+    "polymarket_training_archive/features_20260818T203654272336Z.csv.gz": {
+      "mtime_ns": 1787085414274220337,
+      "size": 9767
+    },
+    "polymarket_training_archive/features_20260818T204019342322Z.csv.gz": {
+      "mtime_ns": 1787085619342444756,
+      "size": 7221
+    },
+    "polymarket_training_archive/features_20260818T204343682080Z.csv.gz": {
+      "mtime_ns": 1787085823686589733,
+      "size": 10721
+    },
+    "polymarket_training_archive/features_20260818T204704579594Z.csv.gz": {
+      "mtime_ns": 1787086024582793755,
+      "size": 16405
+    },
+    "polymarket_training_archive/features_20260818T205029802232Z.csv.gz": {
+      "mtime_ns": 1787086229799013617,
+      "size": 2896
+    },
+    "polymarket_training_archive/features_20260818T205350080396Z.csv.gz": {
+      "mtime_ns": 1787086430083228656,
+      "size": 11632
+    },
+    "polymarket_training_archive/features_20260818T205708872945Z.csv.gz": {
+      "mtime_ns": 1787086628875442092,
+      "size": 14213
+    },
+    "polymarket_training_archive/features_20260818T210033739325Z.csv.gz": {
+      "mtime_ns": 1787086833735745371,
+      "size": 2105
+    },
+    "polymarket_training_archive/features_20260818T210354495772Z.csv.gz": {
+      "mtime_ns": 1787087034495995033,
+      "size": 9944
+    },
+    "polymarket_training_archive/features_20260818T210715078562Z.csv.gz": {
+      "mtime_ns": 1787087235080219366,
+      "size": 15324
+    },
+    "polymarket_training_archive/features_20260818T211036826383Z.csv.gz": {
+      "mtime_ns": 1787087436824448270,
+      "size": 2549
+    },
+    "polymarket_training_archive/features_20260818T211357405913Z.csv.gz": {
+      "mtime_ns": 1787087637408675858,
+      "size": 14794
+    },
+    "polymarket_training_archive/features_20260818T211718277185Z.csv.gz": {
+      "mtime_ns": 1787087838280904775,
+      "size": 14083
+    },
+    "polymarket_training_archive/features_20260818T212038694965Z.csv.gz": {
+      "mtime_ns": 1787088038693133618,
+      "size": 3713
+    },
+    "polymarket_training_archive/features_20260818T212359702766Z.csv.gz": {
+      "mtime_ns": 1787088239705362901,
+      "size": 9026
+    },
+    "polymarket_training_archive/features_20260818T212720963931Z.csv.gz": {
+      "mtime_ns": 1787088440969590585,
+      "size": 14382
+    },
+    "polymarket_training_archive/features_20260818T213041955535Z.csv.gz": {
+      "mtime_ns": 1787088641953817952,
+      "size": 6814
+    },
+    "polymarket_training_archive/features_20260818T213402427022Z.csv.gz": {
+      "mtime_ns": 1787088842426041690,
+      "size": 3344
+    },
+    "polymarket_training_archive/features_20260818T213723172820Z.csv.gz": {
+      "mtime_ns": 1787089043178263162,
+      "size": 12118
+    },
+    "polymarket_training_archive/features_20260818T214043852717Z.csv.gz": {
+      "mtime_ns": 1787089243854484550,
+      "size": 10366
+    },
+    "polymarket_training_archive/features_20260818T214404083860Z.csv.gz": {
+      "mtime_ns": 1787089444086708210,
+      "size": 5779
+    },
+    "polymarket_training_archive/features_20260818T214725000559Z.csv.gz": {
+      "mtime_ns": 1787089645002932741,
+      "size": 17120
+    },
+    "polymarket_training_archive/features_20260818T215049384955Z.csv.gz": {
+      "mtime_ns": 1787089849383161440,
+      "size": 6756
+    },
+    "polymarket_training_archive/features_20260818T215415192257Z.csv.gz": {
+      "mtime_ns": 1787090055187392160,
+      "size": 3622
+    },
+    "polymarket_training_archive/features_20260818T215736006304Z.csv.gz": {
+      "mtime_ns": 1787090256007617291,
+      "size": 14238
+    },
+    "polymarket_training_archive/features_20260818T220057095332Z.csv.gz": {
+      "mtime_ns": 1787090457091843171,
+      "size": 7527
+    },
+    "polymarket_training_archive/features_20260818T220418231195Z.csv.gz": {
+      "mtime_ns": 1787090658228069173,
+      "size": 2956
+    },
+    "polymarket_training_archive/features_20260818T220739607469Z.csv.gz": {
+      "mtime_ns": 1787090859608294435,
+      "size": 13470
+    },
+    "polymarket_training_archive/features_20260818T221101047049Z.csv.gz": {
+      "mtime_ns": 1787091061044517319,
+      "size": 4432
+    },
+    "polymarket_training_archive/features_20260818T221426000327Z.csv.gz": {
+      "mtime_ns": 1787091266000744098,
+      "size": 7782
+    },
+    "polymarket_training_archive/features_20260818T221746592042Z.csv.gz": {
+      "mtime_ns": 1787091466592968317,
+      "size": 10359
+    },
+    "polymarket_training_archive/features_20260818T222107573473Z.csv.gz": {
+      "mtime_ns": 1787091667573193687,
+      "size": 4331
+    },
+    "polymarket_training_archive/features_20260818T222428381046Z.csv.gz": {
+      "mtime_ns": 1787091868381419249,
+      "size": 3632
+    },
+    "polymarket_training_archive/features_20260818T222750075264Z.csv.gz": {
+      "mtime_ns": 1787092070077647499,
+      "size": 15414
+    },
+    "polymarket_training_archive/features_20260818T223111199343Z.csv.gz": {
+      "mtime_ns": 1787092271197875097,
+      "size": 2274
+    },
+    "polymarket_training_archive/features_20260818T223432612010Z.csv.gz": {
+      "mtime_ns": 1787092472614102857,
+      "size": 7797
+    },
+    "polymarket_training_archive/features_20260818T223753992040Z.csv.gz": {
+      "mtime_ns": 1787092673998330462,
+      "size": 11740
+    },
+    "polymarket_training_archive/features_20260818T224114511110Z.csv.gz": {
+      "mtime_ns": 1787092874514557086,
+      "size": 8830
+    },
+    "polymarket_training_archive/features_20260818T224440673414Z.csv.gz": {
+      "mtime_ns": 1787093080674790088,
+      "size": 2729
+    },
+    "polymarket_training_archive/features_20260818T224806118799Z.csv.gz": {
+      "mtime_ns": 1787093286119022282,
+      "size": 11605
+    },
+    "polymarket_training_archive/features_20260818T225127205150Z.csv.gz": {
+      "mtime_ns": 1787093487203247523,
+      "size": 8152
+    },
+    "polymarket_training_archive/features_20260818T225452334264Z.csv.gz": {
+      "mtime_ns": 1787093692331475284,
+      "size": 4242
+    },
+    "polymarket_training_archive/features_20260818T225816936465Z.csv.gz": {
+      "mtime_ns": 1787093896939702468,
+      "size": 10213
+    },
+    "polymarket_training_archive/features_20260818T230137937205Z.csv.gz": {
+      "mtime_ns": 1787094097939925645,
+      "size": 10154
+    },
+    "polymarket_training_archive/features_20260818T230458829778Z.csv.gz": {
+      "mtime_ns": 1787094298828148699,
+      "size": 3168
+    },
+    "polymarket_training_archive/features_20260818T230819057375Z.csv.gz": {
+      "mtime_ns": 1787094499060372308,
+      "size": 12742
+    },
+    "polymarket_training_archive/features_20260818T231140504275Z.csv.gz": {
+      "mtime_ns": 1787094700504599099,
+      "size": 11032
+    },
+    "polymarket_training_archive/features_20260818T231500863026Z.csv.gz": {
+      "mtime_ns": 1787094900860824664,
+      "size": 5106
+    },
+    "polymarket_training_archive/features_20260818T231821749818Z.csv.gz": {
+      "mtime_ns": 1787095101753050833,
+      "size": 13850
+    },
+    "polymarket_training_archive/features_20260818T232141958540Z.csv.gz": {
+      "mtime_ns": 1787095301961276232,
+      "size": 11699
+    },
+    "polymarket_training_archive/features_20260818T232506840179Z.csv.gz": {
+      "mtime_ns": 1787095506837506838,
+      "size": 2810
+    },
+    "polymarket_training_archive/features_20260818T232831617635Z.csv.gz": {
+      "mtime_ns": 1787095711621737201,
+      "size": 15298
+    },
+    "polymarket_training_archive/features_20260818T233152243265Z.csv.gz": {
+      "mtime_ns": 1787095912245962884,
+      "size": 11565
+    },
+    "polymarket_training_archive/features_20260818T233514566681Z.csv.gz": {
+      "mtime_ns": 1787096114566190476,
+      "size": 7197
+    },
+    "polymarket_training_archive/features_20260818T233839832990Z.csv.gz": {
+      "mtime_ns": 1787096319838421388,
+      "size": 12671
+    },
+    "polymarket_training_archive/features_20260818T234206054303Z.csv.gz": {
+      "mtime_ns": 1787096526058651187,
+      "size": 11031
+    },
+    "polymarket_training_archive/features_20260818T234531828569Z.csv.gz": {
+      "mtime_ns": 1787096731822870536,
+      "size": 2416
+    },
+    "polymarket_training_archive/features_20260818T234853027679Z.csv.gz": {
+      "mtime_ns": 1787096933031085029,
+      "size": 16621
+    },
+    "polymarket_training_archive/features_20260818T235214134105Z.csv.gz": {
+      "mtime_ns": 1787097134135299411,
+      "size": 12026
+    },
+    "polymarket_training_archive/features_20260818T235534557843Z.csv.gz": {
+      "mtime_ns": 1787097334555523063,
+      "size": 2906
+    },
+    "polymarket_training_archive/features_20260818T235854863450Z.csv.gz": {
+      "mtime_ns": 1787097534863744580,
+      "size": 14871
+    },
+    "polymarket_training_archive/features_20260819T000216035668Z.csv.gz": {
+      "mtime_ns": 1787097736035931558,
+      "size": 11964
+    },
+    "polymarket_training_archive/features_20260819T000536559815Z.csv.gz": {
+      "mtime_ns": 1787097936560135456,
+      "size": 7927
+    },
+    "polymarket_training_archive/features_20260819T000905818871Z.csv.gz": {
+      "mtime_ns": 1787098145816368746,
+      "size": 8013
+    },
+    "polymarket_training_archive/features_20260819T001227215847Z.csv.gz": {
+      "mtime_ns": 1787098347220593281,
+      "size": 11756
+    },
+    "polymarket_training_archive/features_20260819T001548294519Z.csv.gz": {
+      "mtime_ns": 1787098548292817447,
+      "size": 7148
+    },
+    "polymarket_training_archive/features_20260819T001908852958Z.csv.gz": {
+      "mtime_ns": 1787098748853033727,
+      "size": 7242
+    },
+    "polymarket_training_archive/features_20260819T002229578082Z.csv.gz": {
+      "mtime_ns": 1787098949581249830,
+      "size": 12256
+    },
+    "polymarket_training_archive/features_20260819T002550032935Z.csv.gz": {
+      "mtime_ns": 1787099150033465637,
+      "size": 8288
+    },
+    "polymarket_training_archive/features_20260819T002911127270Z.csv.gz": {
+      "mtime_ns": 1787099351125682132,
+      "size": 2453
+    },
+    "polymarket_training_archive/features_20260819T003232274708Z.csv.gz": {
+      "mtime_ns": 1787099552277902561,
+      "size": 14698
+    },
+    "polymarket_training_archive/features_20260819T003552960036Z.csv.gz": {
+      "mtime_ns": 1787099752958118449,
+      "size": 3786
+    },
+    "polymarket_training_archive/features_20260819T003914829418Z.csv.gz": {
+      "mtime_ns": 1787099954830334537,
+      "size": 3098
+    },
+    "polymarket_training_archive/features_20260819T004235870097Z.csv.gz": {
+      "mtime_ns": 1787100155878549742,
+      "size": 17560
+    },
+    "polymarket_training_archive/features_20260819T004605638924Z.csv.gz": {
+      "mtime_ns": 1787100365638774769,
+      "size": 5559
+    },
+    "polymarket_training_archive/features_20260819T004926223937Z.csv.gz": {
+      "mtime_ns": 1787100566218994704,
+      "size": 2554
+    },
+    "polymarket_training_archive/features_20260819T005246829767Z.csv.gz": {
+      "mtime_ns": 1787100766831214363,
+      "size": 9725
+    },
+    "polymarket_training_archive/features_20260819T005607024592Z.csv.gz": {
+      "mtime_ns": 1787100967019433447,
+      "size": 2423
+    },
+    "polymarket_training_archive/features_20260819T005928072948Z.csv.gz": {
+      "mtime_ns": 1787101168071653476,
+      "size": 7094
+    },
+    "polymarket_training_archive/features_20260819T010248305693Z.csv.gz": {
+      "mtime_ns": 1787101368307872612,
+      "size": 16271
+    },
+    "polymarket_training_archive/features_20260819T010608960884Z.csv.gz": {
+      "mtime_ns": 1787101568960092204,
+      "size": 5075
+    },
+    "polymarket_training_archive/features_20260819T010934010896Z.csv.gz": {
+      "mtime_ns": 1787101774008316558,
+      "size": 2652
+    },
+    "polymarket_training_archive/features_20260819T011255098949Z.csv.gz": {
+      "mtime_ns": 1787101975100536545,
+      "size": 13671
+    },
+    "polymarket_training_archive/features_20260819T011616091272Z.csv.gz": {
+      "mtime_ns": 1787102176088756419,
+      "size": 4449
+    },
+    "polymarket_training_archive/features_20260819T011937595391Z.csv.gz": {
+      "mtime_ns": 1787102377592976857,
+      "size": 2733
+    },
+    "polymarket_training_archive/features_20260819T012257766126Z.csv.gz": {
+      "mtime_ns": 1787102577769195842,
+      "size": 10750
+    },
+    "polymarket_training_archive/features_20260819T012622008426Z.csv.gz": {
+      "mtime_ns": 1787102782009419220,
+      "size": 3607
+    },
+    "polymarket_training_archive/features_20260819T012943163900Z.csv.gz": {
+      "mtime_ns": 1787102983165639161,
+      "size": 11581
+    },
+    "polymarket_training_archive/features_20260819T013304569667Z.csv.gz": {
+      "mtime_ns": 1787103184573859377,
+      "size": 8437
+    },
+    "polymarket_training_archive/features_20260819T013626430500Z.csv.gz": {
+      "mtime_ns": 1787103386430080083,
+      "size": 7295
+    },
+    "polymarket_training_archive/features_20260819T013951664642Z.csv.gz": {
+      "mtime_ns": 1787103591666304485,
+      "size": 3692
+    },
+    "polymarket_training_archive/features_20260819T014312562002Z.csv.gz": {
+      "mtime_ns": 1787103792566522307,
+      "size": 12281
+    },
+    "polymarket_training_archive/features_20260819T014633116040Z.csv.gz": {
+      "mtime_ns": 1787103993118736060,
+      "size": 5106
+    },
+    "polymarket_training_archive/features_20260819T014954501644Z.csv.gz": {
+      "mtime_ns": 1787104194498950696,
+      "size": 7303
+    },
+    "polymarket_training_archive/features_20260819T015315709230Z.csv.gz": {
+      "mtime_ns": 1787104395715165158,
+      "size": 14264
+    },
+    "polymarket_training_archive/features_20260819T015640551652Z.csv.gz": {
+      "mtime_ns": 1787104600551384461,
+      "size": 10097
+    },
+    "polymarket_training_archive/features_20260819T020005279200Z.csv.gz": {
+      "mtime_ns": 1787104805275611268,
+      "size": 2589
+    },
+    "polymarket_training_archive/features_20260819T020330152477Z.csv.gz": {
+      "mtime_ns": 1787105010155854304,
+      "size": 10564
+    },
+    "polymarket_training_archive/features_20260819T020651631863Z.csv.gz": {
+      "mtime_ns": 1787105211632093302,
+      "size": 10730
+    },
+    "polymarket_training_archive/features_20260819T021021152252Z.csv.gz": {
+      "mtime_ns": 1787105421148341836,
+      "size": 2168
+    },
+    "polymarket_training_archive/features_20260819T021342401283Z.csv.gz": {
+      "mtime_ns": 1787105622404562592,
+      "size": 10651
+    },
+    "polymarket_training_archive/features_20260819T021702636879Z.csv.gz": {
+      "mtime_ns": 1787105822640781663,
+      "size": 10333
+    },
+    "polymarket_training_archive/features_20260819T022028415951Z.csv.gz": {
+      "mtime_ns": 1787106028413009420,
+      "size": 7501
+    },
+    "polymarket_training_archive/features_20260819T022354006953Z.csv.gz": {
+      "mtime_ns": 1787106234009236982,
+      "size": 15388
+    },
+    "polymarket_training_archive/features_20260819T022715072807Z.csv.gz": {
+      "mtime_ns": 1787106435077459532,
+      "size": 14911
+    },
+    "polymarket_training_archive/features_20260819T023037048606Z.csv.gz": {
+      "mtime_ns": 1787106637049683083,
+      "size": 8405
+    },
+    "polymarket_training_archive/features_20260819T023402798088Z.csv.gz": {
+      "mtime_ns": 1787106842801910828,
+      "size": 10571
+    },
+    "polymarket_training_archive/features_20260819T023724870966Z.csv.gz": {
+      "mtime_ns": 1787107044874144141,
+      "size": 15785
+    },
+    "polymarket_training_archive/features_20260819T024046566156Z.csv.gz": {
+      "mtime_ns": 1787107246566377015,
+      "size": 2696
+    },
+    "polymarket_training_archive/features_20260819T024407988799Z.csv.gz": {
+      "mtime_ns": 1787107447990609580,
+      "size": 4256
+    },
+    "polymarket_training_archive/features_20260819T024729501970Z.csv.gz": {
+      "mtime_ns": 1787107649502842246,
+      "size": 18199
+    },
+    "polymarket_training_archive/features_20260819T025051219094Z.csv.gz": {
+      "mtime_ns": 1787107851219075147,
+      "size": 7316
+    },
+    "polymarket_training_archive/features_20260819T025413174344Z.csv.gz": {
+      "mtime_ns": 1787108053195301161,
+      "size": 96439
+    },
+    "polymarket_training_archive/features_20260819T025413443871Z.csv.gz": {
+      "mtime_ns": 1787108053443301437,
+      "size": 5800
+    },
+    "polymarket_training_archive/features_20260819T025736912458Z.csv.gz": {
+      "mtime_ns": 1787108256915528166,
+      "size": 17643
+    },
+    "polymarket_training_archive/features_20260819T030058749857Z.csv.gz": {
+      "mtime_ns": 1787108458747753069,
+      "size": 1843
+    },
+    "polymarket_training_archive/features_20260819T030419764673Z.csv.gz": {
+      "mtime_ns": 1787108659759977057,
+      "size": 1917
+    },
+    "polymarket_training_archive/features_20260819T030741121081Z.csv.gz": {
+      "mtime_ns": 1787108861124201438,
+      "size": 15436
+    },
+    "polymarket_training_archive/features_20260819T031102686442Z.csv.gz": {
+      "mtime_ns": 1787109062684453916,
+      "size": 7497
+    },
+    "polymarket_training_archive/features_20260819T031424140103Z.csv.gz": {
+      "mtime_ns": 1787109264136713210,
+      "size": 2560
+    },
+    "polymarket_training_archive/features_20260819T031746311497Z.csv.gz": {
+      "mtime_ns": 1787109466316973440,
+      "size": 16397
+    },
+    "polymarket_training_archive/features_20260819T032107029448Z.csv.gz": {
+      "mtime_ns": 1787109667029231782,
+      "size": 3205
+    },
+    "polymarket_training_archive/features_20260819T032428402269Z.csv.gz": {
+      "mtime_ns": 1787109868401480597,
+      "size": 6638
+    },
+    "polymarket_training_archive/features_20260819T032749537284Z.csv.gz": {
+      "mtime_ns": 1787110069541681384,
+      "size": 5831
+    },
+    "polymarket_training_archive/features_20260819T033111730804Z.csv.gz": {
+      "mtime_ns": 1787110271729873299,
+      "size": 8119
+    },
+    "polymarket_training_archive/features_20260819T033432694164Z.csv.gz": {
+      "mtime_ns": 1787110472694064051,
+      "size": 8755
+    },
+    "polymarket_training_archive/features_20260819T033753908032Z.csv.gz": {
+      "mtime_ns": 1787110673910287355,
+      "size": 10107
+    },
+    "polymarket_training_archive/features_20260819T034114841692Z.csv.gz": {
+      "mtime_ns": 1787110874842511281,
+      "size": 2358
+    },
+    "polymarket_training_archive/features_20260819T034436330916Z.csv.gz": {
+      "mtime_ns": 1787111076330739496,
+      "size": 6382
+    },
+    "polymarket_training_archive/features_20260819T034757683886Z.csv.gz": {
+      "mtime_ns": 1787111277682970137,
+      "size": 13619
+    },
+    "polymarket_training_archive/features_20260819T035118671423Z.csv.gz": {
+      "mtime_ns": 1787111478667200356,
+      "size": 2973
+    },
+    "polymarket_training_archive/features_20260819T035440756264Z.csv.gz": {
+      "mtime_ns": 1787111680751431836,
+      "size": 2916
+    },
+    "polymarket_training_archive/features_20260819T035802226246Z.csv.gz": {
+      "mtime_ns": 1787111882227662619,
+      "size": 15258
+    },
+    "polymarket_training_archive/features_20260819T040128021901Z.csv.gz": {
+      "mtime_ns": 1787112088019901034,
+      "size": 3267
+    },
+    "polymarket_training_archive/features_20260819T040453203887Z.csv.gz": {
+      "mtime_ns": 1787112293200141445,
+      "size": 1752
+    },
+    "polymarket_training_archive/features_20260819T040812932296Z.csv.gz": {
+      "mtime_ns": 1787112492928375468,
+      "size": 1808
+    },
+    "polymarket_training_archive/features_20260819T041134721107Z.csv.gz": {
+      "mtime_ns": 1787112694716611904,
+      "size": 4256
+    },
+    "polymarket_training_archive/features_20260819T041459503121Z.csv.gz": {
+      "mtime_ns": 1787112899500851851,
+      "size": 4706
+    },
+    "polymarket_training_archive/features_20260819T041820938881Z.csv.gz": {
+      "mtime_ns": 1787113100937082890,
+      "size": 1381
+    },
+    "polymarket_training_archive/features_20260819T042141800600Z.csv.gz": {
+      "mtime_ns": 1787113301797305732,
+      "size": 1957
+    },
+    "polymarket_training_archive/features_20260819T042506381517Z.csv.gz": {
+      "mtime_ns": 1787113506377532700,
+      "size": 1769
+    },
+    "polymarket_training_archive/features_20260819T042827166579Z.csv.gz": {
+      "mtime_ns": 1787113707165755462,
+      "size": 1495
+    },
+    "polymarket_training_archive/features_20260819T043147756709Z.csv.gz": {
+      "mtime_ns": 1787113907753978001,
+      "size": 1550
+    },
+    "polymarket_training_archive/features_20260819T043513745708Z.csv.gz": {
+      "mtime_ns": 1787114113746207619,
+      "size": 1787
+    },
+    "polymarket_training_archive/features_20260819T043838495384Z.csv.gz": {
+      "mtime_ns": 1787114318494438760,
+      "size": 6680
+    },
+    "polymarket_training_archive/features_20260819T044203820932Z.csv.gz": {
+      "mtime_ns": 1787114523818670551,
+      "size": 2126
+    },
+    "polymarket_training_archive/features_20260819T044525246960Z.csv.gz": {
+      "mtime_ns": 1787114725242897940,
+      "size": 5627
+    },
+    "polymarket_training_archive/features_20260819T044846677774Z.csv.gz": {
+      "mtime_ns": 1787114926675125338,
+      "size": 2635
+    },
+    "polymarket_training_archive/features_20260819T045208148177Z.csv.gz": {
+      "mtime_ns": 1787115128143352991,
+      "size": 1346
+    },
+    "polymarket_training_archive/features_20260819T045532931114Z.csv.gz": {
+      "mtime_ns": 1787115332927585248,
+      "size": 1888
+    },
+    "polymarket_training_archive/features_20260819T045858592107Z.csv.gz": {
+      "mtime_ns": 1787115538587818498,
+      "size": 1566
+    },
+    "polymarket_training_archive/features_20260819T050219767909Z.csv.gz": {
+      "mtime_ns": 1787115739764046663,
+      "size": 1958
+    },
+    "polymarket_training_archive/features_20260819T050541351957Z.csv.gz": {
+      "mtime_ns": 1787115941348275291,
+      "size": 1302
+    },
+    "polymarket_training_archive/features_20260819T050906497080Z.csv.gz": {
+      "mtime_ns": 1787116146492507425,
+      "size": 3614
+    },
+    "polymarket_training_archive/features_20260819T051228228479Z.csv.gz": {
+      "mtime_ns": 1787116348224733019,
+      "size": 4208
+    },
+    "polymarket_training_archive/features_20260819T051549005812Z.csv.gz": {
+      "mtime_ns": 1787116549004957548,
+      "size": 2020
+    },
+    "polymarket_training_archive/features_20260819T051909690230Z.csv.gz": {
+      "mtime_ns": 1787116749689181971,
+      "size": 2195
+    },
+    "polymarket_training_archive/features_20260819T052231309453Z.csv.gz": {
+      "mtime_ns": 1787116951305407435,
+      "size": 1929
+    },
+    "polymarket_training_archive/features_20260819T052552225430Z.csv.gz": {
+      "mtime_ns": 1787117152221631833,
+      "size": 1310
+    },
+    "polymarket_training_archive/features_20260819T052913797763Z.csv.gz": {
+      "mtime_ns": 1787117353797852427,
+      "size": 1521
+    },
+    "polymarket_training_archive/features_20260819T053235530217Z.csv.gz": {
+      "mtime_ns": 1787117555530073191,
+      "size": 996
+    },
+    "polymarket_training_archive/features_20260819T053555734549Z.csv.gz": {
+      "mtime_ns": 1787117755734292283,
+      "size": 2945
+    },
+    "polymarket_training_archive/features_20260819T053917508765Z.csv.gz": {
+      "mtime_ns": 1787117957506513092,
+      "size": 5427
+    },
+    "polymarket_training_archive/features_20260819T054238691383Z.csv.gz": {
+      "mtime_ns": 1787118158690733256,
+      "size": 7381
+    },
+    "polymarket_training_archive/features_20260819T054604047175Z.csv.gz": {
+      "mtime_ns": 1787118364042964607,
+      "size": 1398
+    },
+    "polymarket_training_archive/features_20260819T054925376918Z.csv.gz": {
+      "mtime_ns": 1787118565371191897,
+      "size": 1558
+    },
+    "polymarket_training_archive/features_20260819T055246801869Z.csv.gz": {
+      "mtime_ns": 1787118766799419300,
+      "size": 2984
+    },
+    "polymarket_training_archive/features_20260819T055608121667Z.csv.gz": {
+      "mtime_ns": 1787118968119646580,
+      "size": 2580
+    },
+    "polymarket_training_archive/features_20260819T055930307158Z.csv.gz": {
+      "mtime_ns": 1787119170303874836,
+      "size": 6518
+    },
+    "polymarket_training_archive/features_20260819T060252161771Z.csv.gz": {
+      "mtime_ns": 1787119372160101809,
+      "size": 1957
+    },
+    "polymarket_training_archive/features_20260819T060613890684Z.csv.gz": {
+      "mtime_ns": 1787119573888328479,
+      "size": 2487
+    },
+    "polymarket_training_archive/features_20260819T060936268722Z.csv.gz": {
+      "mtime_ns": 1787119776268555882,
+      "size": 7014
+    },
+    "polymarket_training_archive/features_20260819T061301599164Z.csv.gz": {
+      "mtime_ns": 1787119981596786597,
+      "size": 4257
+    },
+    "polymarket_training_archive/features_20260819T061624005820Z.csv.gz": {
+      "mtime_ns": 1787120184005014031,
+      "size": 5235
+    },
+    "polymarket_training_archive/features_20260819T061949934052Z.csv.gz": {
+      "mtime_ns": 1787120389933243511,
+      "size": 2583
+    },
+    "polymarket_training_archive/features_20260819T062316099318Z.csv.gz": {
+      "mtime_ns": 1787120596097472617,
+      "size": 2705
+    },
+    "polymarket_training_archive/features_20260819T062645166539Z.csv.gz": {
+      "mtime_ns": 1787120805165704951,
+      "size": 1863
+    },
+    "polymarket_training_archive/features_20260819T063011957462Z.csv.gz": {
+      "mtime_ns": 1787121011957934755,
+      "size": 2797
+    },
+    "polymarket_training_archive/features_20260819T063333983806Z.csv.gz": {
+      "mtime_ns": 1787121213986159265,
+      "size": 7793
+    },
+    "polymarket_training_archive/features_20260819T063655720597Z.csv.gz": {
+      "mtime_ns": 1787121415722385829,
+      "size": 3559
+    },
+    "polymarket_training_archive/features_20260819T064025624619Z.csv.gz": {
+      "mtime_ns": 1787121625622622732,
+      "size": 2710
+    },
+    "polymarket_training_archive/features_20260819T064351068244Z.csv.gz": {
+      "mtime_ns": 1787121831062854601,
+      "size": 7188
+    },
+    "polymarket_training_archive/features_20260819T064712591021Z.csv.gz": {
+      "mtime_ns": 1787122032587082050,
+      "size": 6071
+    },
+    "polymarket_training_archive/features_20260819T065035052454Z.csv.gz": {
+      "mtime_ns": 1787122235051310561,
+      "size": 4457
+    },
+    "polymarket_training_archive/features_20260819T065400033423Z.csv.gz": {
+      "mtime_ns": 1787122440031544211,
+      "size": 2273
+    },
+    "polymarket_training_archive/features_20260819T065722996351Z.csv.gz": {
+      "mtime_ns": 1787122642991776904,
+      "size": 4547
+    },
+    "polymarket_training_archive/features_20260819T070045053246Z.csv.gz": {
+      "mtime_ns": 1787122845052008566,
+      "size": 5189
+    },
+    "polymarket_training_archive/features_20260819T070407600085Z.csv.gz": {
+      "mtime_ns": 1787123047596240783,
+      "size": 1957
+    },
+    "polymarket_training_archive/features_20260819T070729464389Z.csv.gz": {
+      "mtime_ns": 1787123249460472220,
+      "size": 2253
+    },
+    "polymarket_training_archive/features_20260819T071051378445Z.csv.gz": {
+      "mtime_ns": 1787123451376702900,
+      "size": 6305
+    },
+    "polymarket_training_archive/features_20260819T071413546380Z.csv.gz": {
+      "mtime_ns": 1787123653544932986,
+      "size": 3594
+    },
+    "polymarket_training_archive/features_20260819T071735405542Z.csv.gz": {
+      "mtime_ns": 1787123855405162722,
+      "size": 5638
+    },
+    "polymarket_training_archive/features_20260819T072057699509Z.csv.gz": {
+      "mtime_ns": 1787124057697392948,
+      "size": 8469
+    },
+    "polymarket_training_archive/features_20260819T072419536534Z.csv.gz": {
+      "mtime_ns": 1787124259533622656,
+      "size": 2239
+    },
+    "polymarket_training_archive/features_20260819T072742034064Z.csv.gz": {
+      "mtime_ns": 1787124462033852139,
+      "size": 3048
+    },
+    "polymarket_training_archive/features_20260819T073104102167Z.csv.gz": {
+      "mtime_ns": 1787124664102079635,
+      "size": 2690
+    },
+    "polymarket_training_archive/features_20260819T073430287286Z.csv.gz": {
+      "mtime_ns": 1787124870286311765,
+      "size": 3114
+    },
+    "polymarket_training_archive/features_20260819T073753279082Z.csv.gz": {
+      "mtime_ns": 1787125073278540301,
+      "size": 7180
+    },
+    "polymarket_training_archive/features_20260819T074116109288Z.csv.gz": {
+      "mtime_ns": 1787125276110768657,
+      "size": 4588
+    },
+    "polymarket_training_archive/features_20260819T074438219074Z.csv.gz": {
+      "mtime_ns": 1787125478214996082,
+      "size": 4871
+    },
+    "polymarket_training_archive/features_20260819T074800178527Z.csv.gz": {
+      "mtime_ns": 1787125680175223127,
+      "size": 6527
+    },
+    "polymarket_training_archive/features_20260819T075122467518Z.csv.gz": {
+      "mtime_ns": 1787125882463450540,
+      "size": 3024
+    },
+    "polymarket_training_archive/features_20260819T075432185510Z.csv.gz": {
+      "mtime_ns": 1787126072183663825,
+      "size": 4659
+    },
+    "polymarket_training_archive/features_20260819T075759607577Z.csv.gz": {
+      "mtime_ns": 1787126279603897008,
+      "size": 5385
+    },
+    "polymarket_training_archive/features_20260819T080143047023Z.csv.gz": {
+      "mtime_ns": 1787126503048148437,
+      "size": 8695
+    },
+    "polymarket_training_archive/features_20260819T080511241839Z.csv.gz": {
+      "mtime_ns": 1787126711240383412,
+      "size": 7224
+    },
+    "polymarket_training_archive/features_20260819T080839775388Z.csv.gz": {
+      "mtime_ns": 1787126919772618771,
+      "size": 1359
+    },
+    "polymarket_training_archive/features_20260819T081206239697Z.csv.gz": {
+      "mtime_ns": 1787127126236851796,
+      "size": 2955
+    },
+    "polymarket_training_archive/features_20260819T081539844573Z.csv.gz": {
+      "mtime_ns": 1787127339841092880,
+      "size": 2761
+    },
+    "polymarket_training_archive/features_20260819T081907450961Z.csv.gz": {
+      "mtime_ns": 1787127547449327520,
+      "size": 7750
+    },
+    "polymarket_training_archive/features_20260819T082240419267Z.csv.gz": {
+      "mtime_ns": 1787127760417569182,
+      "size": 9461
+    },
+    "polymarket_training_archive/features_20260819T082604454711Z.csv.gz": {
+      "mtime_ns": 1787127964453800709,
+      "size": 2928
+    },
+    "polymarket_training_archive/features_20260819T082927076519Z.csv.gz": {
+      "mtime_ns": 1787128167074030629,
+      "size": 2078
+    },
+    "polymarket_training_archive/features_20260819T083250576480Z.csv.gz": {
+      "mtime_ns": 1787128370578261552,
+      "size": 7542
+    },
+    "polymarket_training_archive/features_20260819T083617721546Z.csv.gz": {
+      "mtime_ns": 1787128577722496054,
+      "size": 7261
+    },
+    "polymarket_training_archive/features_20260819T083941504611Z.csv.gz": {
+      "mtime_ns": 1787128781502725344,
+      "size": 6834
+    },
+    "polymarket_training_archive/features_20260819T084304603069Z.csv.gz": {
+      "mtime_ns": 1787128984598953864,
+      "size": 4020
+    },
+    "polymarket_training_archive/features_20260819T084635361376Z.csv.gz": {
+      "mtime_ns": 1787129195359191007,
+      "size": 2577
+    },
+    "polymarket_training_archive/features_20260819T084958760409Z.csv.gz": {
+      "mtime_ns": 1787129398755419865,
+      "size": 6798
+    },
+    "polymarket_training_archive/features_20260819T085321229485Z.csv.gz": {
+      "mtime_ns": 1787129601227646855,
+      "size": 4266
+    },
+    "polymarket_training_archive/features_20260819T085644180273Z.csv.gz": {
+      "mtime_ns": 1787129804175871108,
+      "size": 5781
+    },
+    "polymarket_training_archive/features_20260819T090011732376Z.csv.gz": {
+      "mtime_ns": 1787130011728100449,
+      "size": 2820
+    },
+    "polymarket_training_archive/features_20260819T090334763233Z.csv.gz": {
+      "mtime_ns": 1787130214760324796,
+      "size": 6065
+    },
+    "polymarket_training_archive/features_20260819T090658894494Z.csv.gz": {
+      "mtime_ns": 1787130418892550358,
+      "size": 1205
+    },
+    "polymarket_training_archive/features_20260819T091026941726Z.csv.gz": {
+      "mtime_ns": 1787130626940780404,
+      "size": 1459
+    },
+    "polymarket_training_archive/features_20260819T091351270874Z.csv.gz": {
+      "mtime_ns": 1787130831269007170,
+      "size": 1606
+    },
+    "polymarket_training_archive/features_20260819T091719208075Z.csv.gz": {
+      "mtime_ns": 1787131039205237941,
+      "size": 1290
+    },
+    "polymarket_training_archive/features_20260819T092047340092Z.csv.gz": {
+      "mtime_ns": 1787131247337468930,
+      "size": 3357
+    },
+    "polymarket_training_archive/features_20260819T092411751591Z.csv.gz": {
+      "mtime_ns": 1787131451749695790,
+      "size": 5099
+    },
+    "polymarket_training_archive/features_20260819T092736097670Z.csv.gz": {
+      "mtime_ns": 1787131656097923081,
+      "size": 1827
+    },
+    "polymarket_training_archive/features_20260819T093100747399Z.csv.gz": {
+      "mtime_ns": 1787131860746153457,
+      "size": 6057
+    },
+    "polymarket_training_archive/features_20260819T093424435556Z.csv.gz": {
+      "mtime_ns": 1787132064434382752,
+      "size": 2904
+    },
+    "polymarket_training_archive/features_20260819T093748156731Z.csv.gz": {
+      "mtime_ns": 1787132268154612083,
+      "size": 6054
+    },
+    "polymarket_training_archive/features_20260819T094111892416Z.csv.gz": {
+      "mtime_ns": 1787132471886841427,
+      "size": 1961
+    },
+    "polymarket_training_archive/features_20260819T094439570661Z.csv.gz": {
+      "mtime_ns": 1787132679567075196,
+      "size": 2531
+    },
+    "polymarket_training_archive/features_20260819T094811595072Z.csv.gz": {
+      "mtime_ns": 1787132891591313581,
+      "size": 1586
+    },
+    "polymarket_training_archive/features_20260819T095134650409Z.csv.gz": {
+      "mtime_ns": 1787133094647541883,
+      "size": 1262
+    },
+    "polymarket_training_archive/features_20260819T095502060228Z.csv.gz": {
+      "mtime_ns": 1787133302055775077,
+      "size": 2057
+    },
+    "polymarket_training_archive/features_20260819T095825445428Z.csv.gz": {
+      "mtime_ns": 1787133505440003748,
+      "size": 1694
+    },
+    "polymarket_training_archive/features_20260819T100149831093Z.csv.gz": {
+      "mtime_ns": 1787133709828233547,
+      "size": 5982
+    },
+    "polymarket_training_archive/features_20260819T100513888424Z.csv.gz": {
+      "mtime_ns": 1787133913884462976,
+      "size": 2893
+    },
+    "polymarket_training_archive/features_20260819T100841588908Z.csv.gz": {
+      "mtime_ns": 1787134121584696502,
+      "size": 5892
+    },
+    "polymarket_training_archive/features_20260819T101205206228Z.csv.gz": {
+      "mtime_ns": 1787134325204925441,
+      "size": 4361
+    },
+    "polymarket_training_archive/features_20260819T101528522393Z.csv.gz": {
+      "mtime_ns": 1787134528521154038,
+      "size": 4097
+    },
+    "polymarket_training_archive/features_20260819T101852431084Z.csv.gz": {
+      "mtime_ns": 1787134732429383307,
+      "size": 1329
+    },
+    "polymarket_training_archive/features_20260819T102215875716Z.csv.gz": {
+      "mtime_ns": 1787134935873612449,
+      "size": 1529
+    },
+    "polymarket_training_archive/features_20260819T102543993429Z.csv.gz": {
+      "mtime_ns": 1787135143989846852,
+      "size": 1351
+    },
+    "polymarket_training_archive/features_20260819T102908210154Z.csv.gz": {
+      "mtime_ns": 1787135348210076868,
+      "size": 1583
+    },
+    "polymarket_training_archive/features_20260819T103236374532Z.csv.gz": {
+      "mtime_ns": 1787135556374311326,
+      "size": 3552
+    },
+    "polymarket_training_archive/features_20260819T103600202599Z.csv.gz": {
+      "mtime_ns": 1787135760202540900,
+      "size": 5453
+    },
+    "polymarket_training_archive/features_20260819T103923697382Z.csv.gz": {
+      "mtime_ns": 1787135963694771259,
+      "size": 3566
+    },
+    "polymarket_training_archive/features_20260819T104248073837Z.csv.gz": {
+      "mtime_ns": 1787136168071002694,
+      "size": 5653
+    },
+    "polymarket_training_archive/features_20260819T104616431625Z.csv.gz": {
+      "mtime_ns": 1787136376427238637,
+      "size": 2200
+    },
+    "polymarket_training_archive/features_20260819T104940726318Z.csv.gz": {
+      "mtime_ns": 1787136580723469982,
+      "size": 2227
+    },
+    "polymarket_training_archive/features_20260819T105308135510Z.csv.gz": {
+      "mtime_ns": 1787136788131704851,
+      "size": 4391
+    },
+    "polymarket_training_archive/features_20260819T105632587798Z.csv.gz": {
+      "mtime_ns": 1787136992583935006,
+      "size": 4634
+    },
+    "polymarket_training_archive/features_20260819T105956828298Z.csv.gz": {
+      "mtime_ns": 1787137196824164832,
+      "size": 2377
+    },
+    "polymarket_training_archive/features_20260819T110321004156Z.csv.gz": {
+      "mtime_ns": 1787137401000394586,
+      "size": 2501
+    },
+    "polymarket_training_archive/features_20260819T110644854467Z.csv.gz": {
+      "mtime_ns": 1787137604852623976,
+      "size": 5186
+    },
+    "polymarket_training_archive/features_20260819T111013013073Z.csv.gz": {
+      "mtime_ns": 1787137813008858208,
+      "size": 4294
+    },
+    "polymarket_training_archive/features_20260819T111340922277Z.csv.gz": {
+      "mtime_ns": 1787138020921093686,
+      "size": 2096
+    },
+    "polymarket_training_archive/features_20260819T111704371347Z.csv.gz": {
+      "mtime_ns": 1787138224373324283,
+      "size": 9494
+    },
+    "polymarket_training_archive/features_20260819T112033289389Z.csv.gz": {
+      "mtime_ns": 1787138433289561073,
+      "size": 6648
+    },
+    "polymarket_training_archive/features_20260819T112357464469Z.csv.gz": {
+      "mtime_ns": 1787138637465792491,
+      "size": 3710
+    },
+    "polymarket_training_archive/features_20260819T112722124541Z.csv.gz": {
+      "mtime_ns": 1787138842122024453,
+      "size": 1366
+    },
+    "polymarket_training_archive/features_20260819T113045750841Z.csv.gz": {
+      "mtime_ns": 1787139045750255420,
+      "size": 4757
+    },
+    "polymarket_training_archive/features_20260819T113414745587Z.csv.gz": {
+      "mtime_ns": 1787139254746492502,
+      "size": 4935
+    },
+    "polymarket_training_archive/features_20260819T113739807052Z.csv.gz": {
+      "mtime_ns": 1787139459806725119,
+      "size": 1470
+    },
+    "polymarket_training_archive/features_20260819T114104918949Z.csv.gz": {
+      "mtime_ns": 1787139664914957790,
+      "size": 1994
+    },
+    "polymarket_training_archive/features_20260819T114432989546Z.csv.gz": {
+      "mtime_ns": 1787139872983193820,
+      "size": 1818
+    },
+    "polymarket_training_archive/features_20260819T114757597136Z.csv.gz": {
+      "mtime_ns": 1787140077591425727,
+      "size": 1315
+    },
+    "polymarket_training_archive/features_20260819T115122474909Z.csv.gz": {
+      "mtime_ns": 1787140282471657908,
+      "size": 7317
+    },
+    "polymarket_training_archive/features_20260819T115450340161Z.csv.gz": {
+      "mtime_ns": 1787140490339893476,
+      "size": 8027
+    },
+    "polymarket_training_archive/features_20260819T115818870687Z.csv.gz": {
+      "mtime_ns": 1787140698868129791,
+      "size": 1856
+    },
+    "polymarket_training_archive/features_20260819T120142758068Z.csv.gz": {
+      "mtime_ns": 1787140902756360848,
+      "size": 9329
+    },
+    "polymarket_training_archive/features_20260819T120510636784Z.csv.gz": {
+      "mtime_ns": 1787141110632596300,
+      "size": 1979
+    },
+    "polymarket_training_archive/features_20260819T120838660800Z.csv.gz": {
+      "mtime_ns": 1787141318660831906,
+      "size": 8233
+    },
+    "polymarket_training_archive/features_20260819T121203510615Z.csv.gz": {
+      "mtime_ns": 1787141523509063910,
+      "size": 7646
+    },
+    "polymarket_training_archive/features_20260819T121532220830Z.csv.gz": {
+      "mtime_ns": 1787141732217300286,
+      "size": 2235
+    },
+    "polymarket_training_archive/features_20260819T121856918201Z.csv.gz": {
+      "mtime_ns": 1787141936917532123,
+      "size": 1774
+    },
+    "polymarket_training_archive/features_20260819T122221058439Z.csv.gz": {
+      "mtime_ns": 1787142141057762100,
+      "size": 1450
+    },
+    "polymarket_training_archive/features_20260819T122545546036Z.csv.gz": {
+      "mtime_ns": 1787142345545992330,
+      "size": 7598
+    },
+    "polymarket_training_archive/features_20260819T122914582587Z.csv.gz": {
+      "mtime_ns": 1787142554582227681,
+      "size": 1544
+    },
+    "polymarket_training_archive/features_20260819T123242926668Z.csv.gz": {
+      "mtime_ns": 1787142762926462252,
+      "size": 2348
+    },
+    "polymarket_training_archive/features_20260819T123611485095Z.csv.gz": {
+      "mtime_ns": 1787142971482697062,
+      "size": 2479
+    },
+    "polymarket_training_archive/features_20260819T123936480631Z.csv.gz": {
+      "mtime_ns": 1787143176474927102,
+      "size": 1906
+    },
+    "polymarket_training_archive/features_20260819T124301294146Z.csv.gz": {
+      "mtime_ns": 1787143381291156866,
+      "size": 8074
+    },
+    "polymarket_training_archive/features_20260819T124629459033Z.csv.gz": {
+      "mtime_ns": 1787143589455390387,
+      "size": 4507
+    },
+    "polymarket_training_archive/features_20260819T124953554245Z.csv.gz": {
+      "mtime_ns": 1787143793551619344,
+      "size": 3696
+    },
+    "polymarket_training_archive/features_20260819T125318539087Z.csv.gz": {
+      "mtime_ns": 1787143998535849297,
+      "size": 2175
+    },
+    "polymarket_training_archive/features_20260819T125643521888Z.csv.gz": {
+      "mtime_ns": 1787144203520071093,
+      "size": 6770
+    },
+    "polymarket_training_archive/features_20260819T130007905282Z.csv.gz": {
+      "mtime_ns": 1787144407900291163,
+      "size": 1917
+    },
+    "polymarket_training_archive/features_20260819T130336463689Z.csv.gz": {
+      "mtime_ns": 1787144616460515734,
+      "size": 3091
+    },
+    "polymarket_training_archive/features_20260819T130700693071Z.csv.gz": {
+      "mtime_ns": 1787144820692735644,
+      "size": 4943
+    },
+    "polymarket_training_archive/features_20260819T131029083480Z.csv.gz": {
+      "mtime_ns": 1787145029080966594,
+      "size": 4543
+    },
+    "polymarket_training_archive/features_20260819T131359214572Z.csv.gz": {
+      "mtime_ns": 1787145239213203076,
+      "size": 7721
+    },
+    "polymarket_training_archive/features_20260819T131724691511Z.csv.gz": {
+      "mtime_ns": 1787145444689434343,
+      "size": 2169
+    },
+    "polymarket_training_archive/features_20260819T132053289526Z.csv.gz": {
+      "mtime_ns": 1787145653289669126,
+      "size": 3358
+    },
+    "polymarket_training_archive/features_20260819T132417802572Z.csv.gz": {
+      "mtime_ns": 1787145857801899309,
+      "size": 6169
+    },
+    "polymarket_training_archive/features_20260819T132743418760Z.csv.gz": {
+      "mtime_ns": 1787146063418130733,
+      "size": 2484
+    },
+    "polymarket_training_archive/features_20260819T133112220234Z.csv.gz": {
+      "mtime_ns": 1787146272222365624,
+      "size": 7443
+    },
+    "polymarket_training_archive/features_20260819T133437823644Z.csv.gz": {
+      "mtime_ns": 1787146477822596883,
+      "size": 3011
+    },
+    "polymarket_training_archive/features_20260819T133802864472Z.csv.gz": {
+      "mtime_ns": 1787146682866827517,
+      "size": 7767
+    },
+    "polymarket_training_archive/features_20260819T134129656356Z.csv.gz": {
+      "mtime_ns": 1787146889659060117,
+      "size": 17643
+    },
+    "polymarket_training_archive/features_20260819T134459231499Z.csv.gz": {
+      "mtime_ns": 1787147099227295839,
+      "size": 8183
+    },
+    "polymarket_training_archive/features_20260819T134825029361Z.csv.gz": {
+      "mtime_ns": 1787147305027527244,
+      "size": 8019
+    },
+    "polymarket_training_archive/features_20260819T135149660194Z.csv.gz": {
+      "mtime_ns": 1787147509655757310,
+      "size": 2092
+    },
+    "polymarket_training_archive/features_20260819T135518644627Z.csv.gz": {
+      "mtime_ns": 1787147718639992274,
+      "size": 2854
+    },
+    "polymarket_training_archive/features_20260819T135847306181Z.csv.gz": {
+      "mtime_ns": 1787147927304226877,
+      "size": 7797
+    },
+    "polymarket_training_archive/features_20260819T140217474669Z.csv.gz": {
+      "mtime_ns": 1787148137472463172,
+      "size": 7370
+    },
+    "polymarket_training_archive/features_20260819T140547498639Z.csv.gz": {
+      "mtime_ns": 1787148347496699142,
+      "size": 6631
+    },
+    "polymarket_training_archive/features_20260819T140916731960Z.csv.gz": {
+      "mtime_ns": 1787148556728934190,
+      "size": 1778
+    },
+    "polymarket_training_archive/features_20260819T141243392880Z.csv.gz": {
+      "mtime_ns": 1787148763389166348,
+      "size": 1455
+    },
+    "polymarket_training_archive/features_20260819T141608694065Z.csv.gz": {
+      "mtime_ns": 1787148968697396987,
+      "size": 19141
+    },
+    "polymarket_training_archive/features_20260819T141934264219Z.csv.gz": {
+      "mtime_ns": 1787149174265627919,
+      "size": 3565
+    },
+    "polymarket_training_archive/features_20260819T142259235631Z.csv.gz": {
+      "mtime_ns": 1787149379233845557,
+      "size": 7704
+    },
+    "polymarket_training_archive/features_20260819T142624656326Z.csv.gz": {
+      "mtime_ns": 1787149584658061908,
+      "size": 11399
+    },
+    "polymarket_training_archive/features_20260819T142952908151Z.csv.gz": {
+      "mtime_ns": 1787149792906281233,
+      "size": 3731
+    },
+    "polymarket_training_archive/features_20260819T143318119097Z.csv.gz": {
+      "mtime_ns": 1787149998118497361,
+      "size": 6701
+    },
+    "polymarket_training_archive/features_20260819T143642597107Z.csv.gz": {
+      "mtime_ns": 1787150202598725066,
+      "size": 7492
+    },
+    "polymarket_training_archive/features_20260819T144007583473Z.csv.gz": {
+      "mtime_ns": 1787150407578954951,
+      "size": 7602
+    },
+    "polymarket_training_archive/features_20260819T144332814339Z.csv.gz": {
+      "mtime_ns": 1787150612811185069,
+      "size": 3457
+    },
+    "polymarket_training_archive/features_20260819T144657776652Z.csv.gz": {
+      "mtime_ns": 1787150817771414883,
+      "size": 3406
+    },
+    "polymarket_training_archive/features_20260819T145022846377Z.csv.gz": {
+      "mtime_ns": 1787151022843644822,
+      "size": 6747
+    },
+    "polymarket_training_archive/features_20260819T145351954440Z.csv.gz": {
+      "mtime_ns": 1787151231951879287,
+      "size": 7334
+    },
+    "polymarket_training_archive/features_20260819T145717293276Z.csv.gz": {
+      "mtime_ns": 1787151437292103771,
+      "size": 7008
+    },
+    "polymarket_training_archive/features_20260819T150042561903Z.csv.gz": {
+      "mtime_ns": 1787151642560326958,
+      "size": 2745
+    },
+    "polymarket_training_archive/features_20260819T150408599247Z.csv.gz": {
+      "mtime_ns": 1787151848600550984,
+      "size": 9610
+    },
+    "polymarket_training_archive/features_20260819T150738244468Z.csv.gz": {
+      "mtime_ns": 1787152058240778925,
+      "size": 2347
+    },
+    "polymarket_training_archive/features_20260819T151103704081Z.csv.gz": {
+      "mtime_ns": 1787152263701002320,
+      "size": 5242
+    },
+    "polymarket_training_archive/features_20260819T151428355219Z.csv.gz": {
+      "mtime_ns": 1787152468353158575,
+      "size": 7827
+    },
+    "polymarket_training_archive/features_20260819T151753100224Z.csv.gz": {
+      "mtime_ns": 1787152673097318895,
+      "size": 1837
+    },
+    "polymarket_training_archive/features_20260819T152117908423Z.csv.gz": {
+      "mtime_ns": 1787152877905547470,
+      "size": 1832
+    },
+    "polymarket_training_archive/features_20260819T152444270389Z.csv.gz": {
+      "mtime_ns": 1787153084269777781,
+      "size": 3174
+    },
+    "polymarket_training_archive/features_20260819T152809583890Z.csv.gz": {
+      "mtime_ns": 1787153289586006922,
+      "size": 7217
+    },
+    "polymarket_training_archive/features_20260819T153139294390Z.csv.gz": {
+      "mtime_ns": 1787153499294240912,
+      "size": 2790
+    },
+    "polymarket_training_archive/features_20260819T153504785406Z.csv.gz": {
+      "mtime_ns": 1787153704782470173,
+      "size": 1424
+    },
+    "polymarket_training_archive/features_20260819T153830030696Z.csv.gz": {
+      "mtime_ns": 1787153910034699172,
+      "size": 11853
+    },
+    "polymarket_training_archive/features_20260819T154155443587Z.csv.gz": {
+      "mtime_ns": 1787154115438928339,
+      "size": 3152
+    },
+    "polymarket_training_archive/features_20260819T154526177353Z.csv.gz": {
+      "mtime_ns": 1787154326175163455,
+      "size": 6817
+    },
+    "polymarket_training_archive/features_20260819T154856357819Z.csv.gz": {
+      "mtime_ns": 1787154536355398047,
+      "size": 4032
+    },
+    "polymarket_training_archive/features_20260819T155221604408Z.csv.gz": {
+      "mtime_ns": 1787154741599627155,
+      "size": 3227
+    },
+    "polymarket_training_archive/features_20260819T155552508187Z.csv.gz": {
+      "mtime_ns": 1787154952503862581,
+      "size": 8093
+    },
+    "polymarket_training_archive/features_20260819T155917938586Z.csv.gz": {
+      "mtime_ns": 1787155157936091899,
+      "size": 3473
+    },
+    "polymarket_training_archive/features_20260819T160244352792Z.csv.gz": {
+      "mtime_ns": 1787155364352322316,
+      "size": 2292
+    },
+    "polymarket_training_archive/features_20260819T160610731909Z.csv.gz": {
+      "mtime_ns": 1787155570728553510,
+      "size": 3307
+    },
+    "polymarket_training_archive/features_20260819T160936522456Z.csv.gz": {
+      "mtime_ns": 1787155776520784213,
+      "size": 8027
+    },
+    "polymarket_training_archive/features_20260819T161302735540Z.csv.gz": {
+      "mtime_ns": 1787155982737015391,
+      "size": 8490
+    },
+    "polymarket_training_archive/features_20260819T161627935802Z.csv.gz": {
+      "mtime_ns": 1787156187933245425,
+      "size": 7668
+    },
+    "polymarket_training_archive/features_20260819T161953706376Z.csv.gz": {
+      "mtime_ns": 1787156393705476105,
+      "size": 2101
+    },
+    "polymarket_training_archive/features_20260819T162319213976Z.csv.gz": {
+      "mtime_ns": 1787156599213710546,
+      "size": 1082
+    },
+    "polymarket_training_archive/features_20260819T162644930342Z.csv.gz": {
+      "mtime_ns": 1787156804929946223,
+      "size": 7292
+    },
+    "polymarket_training_archive/features_20260819T163014542063Z.csv.gz": {
+      "mtime_ns": 1787157014542186364,
+      "size": 2538
+    },
+    "polymarket_training_archive/features_20260819T163344788078Z.csv.gz": {
+      "mtime_ns": 1787157224790427234,
+      "size": 6100
+    },
+    "polymarket_training_archive/features_20260819T163711060887Z.csv.gz": {
+      "mtime_ns": 1787157431062663549,
+      "size": 6881
+    },
+    "polymarket_training_archive/features_20260819T164041304656Z.csv.gz": {
+      "mtime_ns": 1787157641302904170,
+      "size": 3442
+    },
+    "polymarket_training_archive/features_20260819T164407428870Z.csv.gz": {
+      "mtime_ns": 1787157847427140025,
+      "size": 6174
+    },
+    "polymarket_training_archive/features_20260819T164733260988Z.csv.gz": {
+      "mtime_ns": 1787158053259375547,
+      "size": 5272
+    },
+    "polymarket_training_archive/features_20260819T165103151734Z.csv.gz": {
+      "mtime_ns": 1787158263147615709,
+      "size": 3190
+    },
+    "polymarket_training_archive/features_20260819T165429052222Z.csv.gz": {
+      "mtime_ns": 1787158469047851308,
+      "size": 3052
+    },
+    "polymarket_training_archive/features_20260819T165754600874Z.csv.gz": {
+      "mtime_ns": 1787158674596083852,
+      "size": 3489
+    },
+    "polymarket_training_archive/features_20260819T170120897729Z.csv.gz": {
+      "mtime_ns": 1787158880896316617,
+      "size": 7259
+    },
+    "polymarket_training_archive/features_20260819T170446653407Z.csv.gz": {
+      "mtime_ns": 1787159086652548767,
+      "size": 3714
+    },
+    "polymarket_training_archive/features_20260819T170811668265Z.csv.gz": {
+      "mtime_ns": 1787159291664780078,
+      "size": 2346
+    },
+    "polymarket_training_archive/features_20260819T171138390773Z.csv.gz": {
+      "mtime_ns": 1787159498389013321,
+      "size": 4820
+    },
+    "polymarket_training_archive/features_20260819T171507554329Z.csv.gz": {
+      "mtime_ns": 1787159707553278668,
+      "size": 5851
+    },
+    "polymarket_training_archive/features_20260819T171833701509Z.csv.gz": {
+      "mtime_ns": 1787159913701550339,
+      "size": 2195
+    },
+    "polymarket_training_archive/features_20260819T172203089986Z.csv.gz": {
+      "mtime_ns": 1787160123089826279,
+      "size": 7496
+    },
+    "polymarket_training_archive/features_20260819T172538403368Z.csv.gz": {
+      "mtime_ns": 1787160338402071467,
+      "size": 6821
+    },
+    "polymarket_training_archive/features_20260819T172907722742Z.csv.gz": {
+      "mtime_ns": 1787160547722306103,
+      "size": 3803
+    },
+    "polymarket_training_archive/features_20260819T173237327930Z.csv.gz": {
+      "mtime_ns": 1787160757326535373,
+      "size": 3807
+    },
+    "polymarket_training_archive/features_20260819T173604960178Z.csv.gz": {
+      "mtime_ns": 1787160964958761460,
+      "size": 5415
+    },
+    "polymarket_training_archive/features_20260819T173930858039Z.csv.gz": {
+      "mtime_ns": 1787161170854985656,
+      "size": 2176
+    },
+    "polymarket_training_archive/features_20260819T174256035893Z.csv.gz": {
+      "mtime_ns": 1787161376031209069,
+      "size": 2104
+    },
+    "polymarket_training_archive/features_20260819T174625745155Z.csv.gz": {
+      "mtime_ns": 1787161585743437420,
+      "size": 2579
+    },
+    "polymarket_training_archive/features_20260819T174955221864Z.csv.gz": {
+      "mtime_ns": 1787161795219672265,
+      "size": 10824
+    },
+    "polymarket_training_archive/features_20260819T175322013846Z.csv.gz": {
+      "mtime_ns": 1787162002011905534,
+      "size": 5439
+    },
+    "polymarket_training_archive/features_20260819T175647603535Z.csv.gz": {
+      "mtime_ns": 1787162207600137445,
+      "size": 7024
+    },
+    "polymarket_training_archive/features_20260819T180013252335Z.csv.gz": {
+      "mtime_ns": 1787162413248369424,
+      "size": 2136
+    },
+    "polymarket_training_archive/features_20260819T180339199797Z.csv.gz": {
+      "mtime_ns": 1787162619200601745,
+      "size": 4708
+    },
+    "polymarket_training_archive/features_20260819T180705494290Z.csv.gz": {
+      "mtime_ns": 1787162825492837462,
+      "size": 7709
+    },
+    "polymarket_training_archive/features_20260819T181036295924Z.csv.gz": {
+      "mtime_ns": 1787163036297079268,
+      "size": 9754
+    },
+    "polymarket_training_archive/features_20260819T181403310374Z.csv.gz": {
+      "mtime_ns": 1787163243309316724,
+      "size": 4371
+    },
+    "polymarket_training_archive/features_20260819T181730044240Z.csv.gz": {
+      "mtime_ns": 1787163450045553864,
+      "size": 3743
+    },
+    "polymarket_training_archive/features_20260819T182057155978Z.csv.gz": {
+      "mtime_ns": 1787163657153791430,
+      "size": 7012
+    },
+    "polymarket_training_archive/features_20260819T182428457302Z.csv.gz": {
+      "mtime_ns": 1787163868458030116,
+      "size": 7539
+    },
+    "polymarket_training_archive/features_20260819T182754746042Z.csv.gz": {
+      "mtime_ns": 1787164074746262332,
+      "size": 6180
+    },
+    "polymarket_training_archive/features_20260819T183121422604Z.csv.gz": {
+      "mtime_ns": 1787164281422494984,
+      "size": 6933
+    },
+    "polymarket_training_archive/features_20260819T183448668243Z.csv.gz": {
+      "mtime_ns": 1787164488666728276,
+      "size": 1673
+    },
+    "polymarket_training_archive/features_20260819T183819590781Z.csv.gz": {
+      "mtime_ns": 1787164699586965706,
+      "size": 2034
+    },
+    "polymarket_training_archive/features_20260819T184147406750Z.csv.gz": {
+      "mtime_ns": 1787164907403199163,
+      "size": 6369
+    },
+    "polymarket_training_archive/features_20260819T184519434710Z.csv.gz": {
+      "mtime_ns": 1787165119431437261,
+      "size": 4127
+    },
+    "polymarket_training_archive/features_20260819T184851022295Z.csv.gz": {
+      "mtime_ns": 1787165331019674865,
+      "size": 2566
+    },
+    "polymarket_training_archive/features_20260819T185217553759Z.csv.gz": {
+      "mtime_ns": 1787165537551906791,
+      "size": 6895
+    },
+    "polymarket_training_archive/features_20260819T185547432826Z.csv.gz": {
+      "mtime_ns": 1787165747428142473,
+      "size": 3522
+    },
+    "polymarket_training_archive/features_20260819T185914229803Z.csv.gz": {
+      "mtime_ns": 1787165954228374168,
+      "size": 5475
+    },
+    "polymarket_training_archive/features_20260819T190245128536Z.csv.gz": {
+      "mtime_ns": 1787166165128610391,
+      "size": 2946
+    },
+    "polymarket_training_archive/features_20260819T190611701637Z.csv.gz": {
+      "mtime_ns": 1787166371700841767,
+      "size": 3385
+    },
+    "polymarket_training_archive/features_20260819T190941937931Z.csv.gz": {
+      "mtime_ns": 1787166581937077246,
+      "size": 7088
+    },
+    "polymarket_training_archive/features_20260819T191313307089Z.csv.gz": {
+      "mtime_ns": 1787166793305313993,
+      "size": 8620
+    },
+    "polymarket_training_archive/features_20260819T191642958798Z.csv.gz": {
+      "mtime_ns": 1787167002957537790,
+      "size": 5426
+    },
+    "polymarket_training_archive/features_20260819T192009006152Z.csv.gz": {
+      "mtime_ns": 1787167209005757008,
+      "size": 3061
+    },
+    "polymarket_training_archive/features_20260819T192335376649Z.csv.gz": {
+      "mtime_ns": 1787167415373977529,
+      "size": 2722
+    },
+    "polymarket_training_archive/features_20260819T192705381588Z.csv.gz": {
+      "mtime_ns": 1787167625382215179,
+      "size": 2594
+    },
+    "polymarket_training_archive/features_20260819T193032271246Z.csv.gz": {
+      "mtime_ns": 1787167832270449298,
+      "size": 9986
+    },
+    "polymarket_training_archive/features_20260819T193359251989Z.csv.gz": {
+      "mtime_ns": 1787168039250683503,
+      "size": 7867
+    },
+    "polymarket_training_archive/features_20260819T193726631480Z.csv.gz": {
+      "mtime_ns": 1787168246626918156,
+      "size": 2942
+    },
+    "polymarket_training_archive/features_20260819T194054729122Z.csv.gz": {
+      "mtime_ns": 1787168454727153627,
+      "size": 2690
+    },
+    "polymarket_training_archive/features_20260819T194427075313Z.csv.gz": {
+      "mtime_ns": 1787168667071393901,
+      "size": 2698
+    },
+    "polymarket_training_archive/features_20260819T194754923874Z.csv.gz": {
+      "mtime_ns": 1787168874919629080,
+      "size": 3079
+    },
+    "polymarket_training_archive/features_20260819T195121946529Z.csv.gz": {
+      "mtime_ns": 1787169081943862314,
+      "size": 5950
+    },
+    "polymarket_training_archive/features_20260819T195456434411Z.csv.gz": {
+      "mtime_ns": 1787169296432103957,
+      "size": 11049
+    },
+    "polymarket_training_archive/features_20260819T195822654858Z.csv.gz": {
+      "mtime_ns": 1787169502652336285,
+      "size": 3989
+    },
+    "polymarket_training_archive/features_20260819T200149062800Z.csv.gz": {
+      "mtime_ns": 1787169709060568824,
+      "size": 3765
+    },
+    "polymarket_training_archive/features_20260819T200520886233Z.csv.gz": {
+      "mtime_ns": 1787169920884807445,
+      "size": 2433
+    },
+    "polymarket_training_archive/features_20260819T200851749681Z.csv.gz": {
+      "mtime_ns": 1787170131749044245,
+      "size": 7723
+    },
+    "polymarket_training_archive/features_20260819T201223637048Z.csv.gz": {
+      "mtime_ns": 1787170343633282191,
+      "size": 3024
+    },
+    "polymarket_training_archive/features_20260819T201550766750Z.csv.gz": {
+      "mtime_ns": 1787170550765514801,
+      "size": 11742
+    },
+    "polymarket_training_archive/features_20260819T201917375062Z.csv.gz": {
+      "mtime_ns": 1787170757373746822,
+      "size": 2347
+    },
+    "polymarket_training_archive/features_20260819T202245461980Z.csv.gz": {
+      "mtime_ns": 1787170965461980052,
+      "size": 3315
+    },
+    "polymarket_training_archive/features_20260819T202617680793Z.csv.gz": {
+      "mtime_ns": 1787171177682212475,
+      "size": 3179
+    },
+    "polymarket_training_archive/features_20260819T202944695174Z.csv.gz": {
+      "mtime_ns": 1787171384694439195,
+      "size": 1978
+    },
+    "polymarket_training_archive/features_20260819T203311999307Z.csv.gz": {
+      "mtime_ns": 1787171591998666234,
+      "size": 7120
+    },
+    "polymarket_training_archive/features_20260819T203639098801Z.csv.gz": {
+      "mtime_ns": 1787171799094893046,
+      "size": 2260
+    },
+    "polymarket_training_archive/features_20260819T204010548074Z.csv.gz": {
+      "mtime_ns": 1787172010543131316,
+      "size": 2109
+    },
+    "polymarket_training_archive/features_20260819T204341841353Z.csv.gz": {
+      "mtime_ns": 1787172221839369176,
+      "size": 7914
+    },
+    "polymarket_training_archive/features_20260819T204713788903Z.csv.gz": {
+      "mtime_ns": 1787172433787607769,
+      "size": 6954
+    },
+    "polymarket_training_archive/features_20260819T205040440249Z.csv.gz": {
+      "mtime_ns": 1787172640435840396,
+      "size": 2820
+    },
+    "polymarket_training_archive/features_20260819T205417272703Z.csv.gz": {
+      "mtime_ns": 1787172857272084493,
+      "size": 3650
+    },
+    "polymarket_training_archive/features_20260819T205744268172Z.csv.gz": {
+      "mtime_ns": 1787173064264321126,
+      "size": 4791
+    },
+    "polymarket_training_archive/features_20260819T210112126072Z.csv.gz": {
+      "mtime_ns": 1787173272124567798,
+      "size": 3454
+    },
+    "polymarket_training_archive/features_20260819T210439441437Z.csv.gz": {
+      "mtime_ns": 1787173479440813825,
+      "size": 2083
+    },
+    "polymarket_training_archive/features_20260819T210810370841Z.csv.gz": {
+      "mtime_ns": 1787173690369064138,
+      "size": 3021
+    },
+    "polymarket_training_archive/features_20260819T211138060933Z.csv.gz": {
+      "mtime_ns": 1787173898061310610,
+      "size": 6182
+    },
+    "polymarket_training_archive/features_20260819T211505628354Z.csv.gz": {
+      "mtime_ns": 1787174105629551841,
+      "size": 8472
+    },
+    "polymarket_training_archive/features_20260819T211832718719Z.csv.gz": {
+      "mtime_ns": 1787174312717781753,
+      "size": 2641
+    },
+    "polymarket_training_archive/features_20260819T212159915114Z.csv.gz": {
+      "mtime_ns": 1787174519914011785,
+      "size": 2706
+    },
+    "polymarket_training_archive/features_20260819T212531287924Z.csv.gz": {
+      "mtime_ns": 1787174731286246454,
+      "size": 4979
+    },
+    "polymarket_training_archive/features_20260819T212859167249Z.csv.gz": {
+      "mtime_ns": 1787174939166477245,
+      "size": 5025
+    },
+    "polymarket_training_archive/features_20260819T213230863218Z.csv.gz": {
+      "mtime_ns": 1787175150862713284,
+      "size": 2394
+    },
+    "polymarket_training_archive/features_20260819T213558190034Z.csv.gz": {
+      "mtime_ns": 1787175358186946185,
+      "size": 2590
+    },
+    "polymarket_training_archive/features_20260819T213925509973Z.csv.gz": {
+      "mtime_ns": 1787175565507179081,
+      "size": 7933
+    },
+    "polymarket_training_archive/features_20260819T214252412563Z.csv.gz": {
+      "mtime_ns": 1787175772407411506,
+      "size": 7245
+    },
+    "polymarket_training_archive/features_20260819T214619764418Z.csv.gz": {
+      "mtime_ns": 1787175979763644443,
+      "size": 3375
+    },
+    "polymarket_training_archive/features_20260819T214950378682Z.csv.gz": {
+      "mtime_ns": 1787176190375880469,
+      "size": 7817
+    },
+    "polymarket_training_archive/features_20260819T215321429662Z.csv.gz": {
+      "mtime_ns": 1787176401428116211,
+      "size": 2444
+    },
+    "polymarket_training_archive/features_20260819T215648506369Z.csv.gz": {
+      "mtime_ns": 1787176608504347513,
+      "size": 9079
+    },
+    "polymarket_training_archive/features_20260819T220020106474Z.csv.gz": {
+      "mtime_ns": 1787176820104583868,
+      "size": 6239
+    },
+    "polymarket_training_archive/features_20260819T220347451226Z.csv.gz": {
+      "mtime_ns": 1787177027448815469,
+      "size": 3863
+    },
+    "polymarket_training_archive/features_20260819T220722480003Z.csv.gz": {
+      "mtime_ns": 1787177242477056391,
+      "size": 2467
+    },
+    "polymarket_training_archive/features_20260819T221054835356Z.csv.gz": {
+      "mtime_ns": 1787177454833295059,
+      "size": 2166
+    },
+    "polymarket_training_archive/features_20260819T221426019075Z.csv.gz": {
+      "mtime_ns": 1787177666017532409,
+      "size": 7917
+    },
+    "polymarket_training_archive/features_20260819T221753413191Z.csv.gz": {
+      "mtime_ns": 1787177873413765501,
+      "size": 2971
+    },
+    "polymarket_training_archive/features_20260819T222120667855Z.csv.gz": {
+      "mtime_ns": 1787178080665998432,
+      "size": 6715
+    },
+    "polymarket_training_archive/features_20260819T222451786737Z.csv.gz": {
+      "mtime_ns": 1787178291786235565,
+      "size": 7924
+    },
+    "polymarket_training_archive/features_20260819T222818864483Z.csv.gz": {
+      "mtime_ns": 1787178498866468053,
+      "size": 8452
+    },
+    "polymarket_training_archive/features_20260819T223146306696Z.csv.gz": {
+      "mtime_ns": 1787178706306700945,
+      "size": 2458
+    },
+    "polymarket_training_archive/features_20260819T223517534908Z.csv.gz": {
+      "mtime_ns": 1787178917530938085,
+      "size": 8567
+    },
+    "polymarket_training_archive/features_20260819T223848029146Z.csv.gz": {
+      "mtime_ns": 1787179128027174408,
+      "size": 7751
+    },
+    "polymarket_training_archive/features_20260819T224219787233Z.csv.gz": {
+      "mtime_ns": 1787179339783411964,
+      "size": 3068
+    },
+    "polymarket_training_archive/features_20260819T224546254916Z.csv.gz": {
+      "mtime_ns": 1787179546251643484,
+      "size": 7265
+    },
+    "polymarket_training_archive/features_20260819T224913505973Z.csv.gz": {
+      "mtime_ns": 1787179753503875884,
+      "size": 3885
+    },
+    "polymarket_training_archive/features_20260819T225239967241Z.csv.gz": {
+      "mtime_ns": 1787179959968107400,
+      "size": 11066
+    },
+    "polymarket_training_archive/features_20260819T225611020914Z.csv.gz": {
+      "mtime_ns": 1787180171020344061,
+      "size": 8467
+    },
+    "polymarket_training_archive/features_20260819T225938029714Z.csv.gz": {
+      "mtime_ns": 1787180378028576679,
+      "size": 3150
+    },
+    "polymarket_training_archive/features_20260819T230305304648Z.csv.gz": {
+      "mtime_ns": 1787180585304809871,
+      "size": 7596
+    },
+    "polymarket_training_archive/features_20260819T230632006199Z.csv.gz": {
+      "mtime_ns": 1787180792005042415,
+      "size": 9125
+    },
+    "polymarket_training_archive/features_20260819T231002915699Z.csv.gz": {
+      "mtime_ns": 1787181002913279693,
+      "size": 7037
+    },
+    "polymarket_training_archive/features_20260819T231330183437Z.csv.gz": {
+      "mtime_ns": 1787181210181512876,
+      "size": 3614
+    },
+    "polymarket_training_archive/features_20260819T231657097586Z.csv.gz": {
+      "mtime_ns": 1787181417097745723,
+      "size": 2551
+    },
+    "polymarket_training_archive/features_20260819T232024084298Z.csv.gz": {
+      "mtime_ns": 1787181624085978682,
+      "size": 8382
+    },
+    "polymarket_training_archive/features_20260819T232354742615Z.csv.gz": {
+      "mtime_ns": 1787181834742215770,
+      "size": 4600
+    },
+    "polymarket_training_archive/features_20260819T232726008904Z.csv.gz": {
+      "mtime_ns": 1787182046010453546,
+      "size": 7168
+    },
+    "polymarket_training_archive/features_20260819T233054146848Z.csv.gz": {
+      "mtime_ns": 1787182254146687798,
+      "size": 3179
+    },
+    "polymarket_training_archive/features_20260819T233421547544Z.csv.gz": {
+      "mtime_ns": 1787182461546922186,
+      "size": 8253
+    },
+    "polymarket_training_archive/features_20260819T233748288777Z.csv.gz": {
+      "mtime_ns": 1787182668283156294,
+      "size": 1937
+    },
+    "polymarket_training_archive/features_20260819T234115356382Z.csv.gz": {
+      "mtime_ns": 1787182875351390778,
+      "size": 7381
+    },
+    "polymarket_training_archive/features_20260819T234446311643Z.csv.gz": {
+      "mtime_ns": 1787183086307629665,
+      "size": 7838
+    },
+    "polymarket_training_archive/features_20260819T234812792007Z.csv.gz": {
+      "mtime_ns": 1787183292791863487,
+      "size": 4887
+    },
+    "polymarket_training_archive/features_20260819T235139585320Z.csv.gz": {
+      "mtime_ns": 1787183499584097837,
+      "size": 4018
+    },
+    "polymarket_training_archive/features_20260819T235506047448Z.csv.gz": {
+      "mtime_ns": 1787183706044331897,
+      "size": 7042
+    },
+    "polymarket_training_archive/features_20260819T235832392551Z.csv.gz": {
+      "mtime_ns": 1787183912388565825,
+      "size": 2683
+    },
+    "polymarket_training_archive/features_20260820T000203023914Z.csv.gz": {
+      "mtime_ns": 1787184123020804615,
+      "size": 3179
+    },
+    "polymarket_training_archive/features_20260820T000533893876Z.csv.gz": {
+      "mtime_ns": 1787184333893043677,
+      "size": 3431
+    },
+    "polymarket_training_archive/features_20260820T000909743190Z.csv.gz": {
+      "mtime_ns": 1787184549741288444,
+      "size": 8239
+    },
+    "polymarket_training_archive/features_20260820T001243505968Z.csv.gz": {
+      "mtime_ns": 1787184763505530869,
+      "size": 4174
+    },
+    "polymarket_training_archive/features_20260820T001614608495Z.csv.gz": {
+      "mtime_ns": 1787184974609770278,
+      "size": 9455
+    },
+    "polymarket_training_archive/features_20260820T001942096966Z.csv.gz": {
+      "mtime_ns": 1787185182098005585,
+      "size": 3343
+    },
+    "polymarket_training_archive/features_20260820T002313259188Z.csv.gz": {
+      "mtime_ns": 1787185393258245057,
+      "size": 1491
+    },
+    "polymarket_training_archive/features_20260820T002640077591Z.csv.gz": {
+      "mtime_ns": 1787185600078479536,
+      "size": 7745
+    },
+    "polymarket_training_archive/features_20260820T003006379035Z.csv.gz": {
+      "mtime_ns": 1787185806378713418,
+      "size": 7085
+    },
+    "polymarket_training_archive/features_20260820T003337442802Z.csv.gz": {
+      "mtime_ns": 1787186017438952696,
+      "size": 2678
+    },
+    "polymarket_training_archive/features_20260820T003704341204Z.csv.gz": {
+      "mtime_ns": 1787186224339187258,
+      "size": 2413
+    },
+    "polymarket_training_archive/features_20260820T004039273392Z.csv.gz": {
+      "mtime_ns": 1787186439271430926,
+      "size": 3138
+    },
+    "polymarket_training_archive/features_20260820T004406125270Z.csv.gz": {
+      "mtime_ns": 1787186646123665571,
+      "size": 7739
+    },
+    "polymarket_training_archive/features_20260820T004740293552Z.csv.gz": {
+      "mtime_ns": 1787186860291908524,
+      "size": 2490
+    },
+    "polymarket_training_archive/features_20260820T005107245862Z.csv.gz": {
+      "mtime_ns": 1787187067244143290,
+      "size": 2450
+    },
+    "polymarket_training_archive/features_20260820T005438077069Z.csv.gz": {
+      "mtime_ns": 1787187278072382453,
+      "size": 3018
+    },
+    "polymarket_training_archive/features_20260820T005809102811Z.csv.gz": {
+      "mtime_ns": 1787187489100621843,
+      "size": 7115
+    },
+    "polymarket_training_archive/features_20260820T010136784272Z.csv.gz": {
+      "mtime_ns": 1787187696780857401,
+      "size": 5104
+    },
+    "polymarket_training_archive/features_20260820T010502965373Z.csv.gz": {
+      "mtime_ns": 1787187902965091262,
+      "size": 5262
+    },
+    "polymarket_training_archive/features_20260820T010829506878Z.csv.gz": {
+      "mtime_ns": 1787188109505325526,
+      "size": 2189
+    },
+    "polymarket_training_archive/features_20260820T011155437586Z.csv.gz": {
+      "mtime_ns": 1787188315437559100,
+      "size": 2997
+    },
+    "polymarket_training_archive/features_20260820T011527171325Z.csv.gz": {
+      "mtime_ns": 1787188527169799263,
+      "size": 6999
+    },
+    "polymarket_training_archive/features_20260820T011855146924Z.csv.gz": {
+      "mtime_ns": 1787188735146035400,
+      "size": 2474
+    },
+    "polymarket_training_archive/features_20260820T012221799207Z.csv.gz": {
+      "mtime_ns": 1787188941798270034,
+      "size": 1911
+    },
+    "polymarket_training_archive/features_20260820T012552451608Z.csv.gz": {
+      "mtime_ns": 1787189152454509215,
+      "size": 11436
+    },
+    "polymarket_training_archive/features_20260820T012919686284Z.csv.gz": {
+      "mtime_ns": 1787189359686744507,
+      "size": 2567
+    },
+    "polymarket_training_archive/features_20260820T013246416706Z.csv.gz": {
+      "mtime_ns": 1787189566410979195,
+      "size": 2483
+    },
+    "polymarket_training_archive/features_20260820T013613653890Z.csv.gz": {
+      "mtime_ns": 1787189773651214050,
+      "size": 3589
+    },
+    "polymarket_training_archive/features_20260820T013940787247Z.csv.gz": {
+      "mtime_ns": 1787189980783448784,
+      "size": 6630
+    },
+    "polymarket_training_archive/features_20260820T014306978796Z.csv.gz": {
+      "mtime_ns": 1787190186975682452,
+      "size": 2629
+    },
+    "polymarket_training_archive/features_20260820T014633824836Z.csv.gz": {
+      "mtime_ns": 1787190393819916859,
+      "size": 2365
+    },
+    "polymarket_training_archive/features_20260820T015001282125Z.csv.gz": {
+      "mtime_ns": 1787190601280151972,
+      "size": 8002
+    },
+    "polymarket_training_archive/features_20260820T015328694774Z.csv.gz": {
+      "mtime_ns": 1787190808692387308,
+      "size": 7798
+    },
+    "polymarket_training_archive/features_20260820T015655335154Z.csv.gz": {
+      "mtime_ns": 1787191015332621767,
+      "size": 2028
+    },
+    "polymarket_training_archive/features_20260820T020030578968Z.csv.gz": {
+      "mtime_ns": 1787191230576865989,
+      "size": 2936
+    },
+    "polymarket_training_archive/features_20260820T020357289802Z.csv.gz": {
+      "mtime_ns": 1787191437289100531,
+      "size": 7239
+    },
+    "polymarket_training_archive/features_20260820T020728298753Z.csv.gz": {
+      "mtime_ns": 1787191648297339991,
+      "size": 2968
+    },
+    "polymarket_training_archive/features_20260820T021054624545Z.csv.gz": {
+      "mtime_ns": 1787191854621574460,
+      "size": 1950
+    },
+    "polymarket_training_archive/features_20260820T021425766683Z.csv.gz": {
+      "mtime_ns": 1787192065765814407,
+      "size": 6882
+    },
+    "polymarket_training_archive/features_20260820T021752843267Z.csv.gz": {
+      "mtime_ns": 1787192272842049731,
+      "size": 5695
+    },
+    "polymarket_training_archive/features_20260820T022119747691Z.csv.gz": {
+      "mtime_ns": 1787192479746284860,
+      "size": 3294
+    },
+    "polymarket_training_archive/features_20260820T022447523492Z.csv.gz": {
+      "mtime_ns": 1787192687522520981,
+      "size": 2236
+    },
+    "polymarket_training_archive/features_20260820T022814545336Z.csv.gz": {
+      "mtime_ns": 1787192894542756254,
+      "size": 1478
+    },
+    "polymarket_training_archive/features_20260820T023142280246Z.csv.gz": {
+      "mtime_ns": 1787193102278992340,
+      "size": 9955
+    },
+    "polymarket_training_archive/features_20260820T023509266490Z.csv.gz": {
+      "mtime_ns": 1787193309263227572,
+      "size": 2531
+    },
+    "polymarket_training_archive/features_20260820T023840813568Z.csv.gz": {
+      "mtime_ns": 1787193520811467991,
+      "size": 2956
+    },
+    "polymarket_training_archive/features_20260820T024213435575Z.csv.gz": {
+      "mtime_ns": 1787193733431709261,
+      "size": 6771
+    },
+    "polymarket_training_archive/features_20260820T024545003616Z.csv.gz": {
+      "mtime_ns": 1787193944999947924,
+      "size": 5945
+    },
+    "polymarket_training_archive/features_20260820T024912413968Z.csv.gz": {
+      "mtime_ns": 1787194152412181898,
+      "size": 3215
+    },
+    "polymarket_training_archive/features_20260820T025239611289Z.csv.gz": {
+      "mtime_ns": 1787194359608415629,
+      "size": 2430
+    },
+    "polymarket_training_archive/features_20260820T025614021063Z.csv.gz": {
+      "mtime_ns": 1787194574016657496,
+      "size": 1457
+    },
+    "polymarket_training_archive/features_20260820T025940750669Z.csv.gz": {
+      "mtime_ns": 1787194780748890841,
+      "size": 6644
+    },
+    "polymarket_training_archive/features_20260820T030307235842Z.csv.gz": {
+      "mtime_ns": 1787194987233124304,
+      "size": 4110
+    }
+  },
+  "work_order": "WO-101"
+}

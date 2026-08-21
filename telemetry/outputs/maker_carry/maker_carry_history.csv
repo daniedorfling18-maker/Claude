@@ -1,0 +1,140 @@
+generated_at_utc,share_model,universe_scan_mode,universe_rewarded_markets,universe_pot_usd_per_day,portfolio_markets,portfolio_capital_usd,portfolio_net_carry_usd_per_day,portfolio_markout_measured,top_portfolio_market,top_portfolio_question,clears_100_per_month_target,study_trigger
+2026-07-10T08:14:07Z,,,131,33017.0,3,483.6,58.99,,,,True,
+2026-07-11T07:49:49Z,published_v2,,143,39605.0,1,452.0,0.93,,,,False,
+2026-07-11T18:45:16Z,published_v2,yield_first_v1,123,36830.0,1,465.0,8.77,,0xee988394101418666c2ce23d471dfbf9c695725fe61f0c74356fa0f712e16e30,Argentina vs. Switzerland: Both Teams to Score in First Half,True,
+2026-07-12T07:51:19Z,published_v2,yield_first_v1,122,30843.0,1,405.0,4.53,,0xb12f5e328a7d9f7a26e0a074625ea775025104e673c776d575dab422a472ef59,Israel closes its airspace by July 31?,True,
+2026-07-12T18:46:58Z,published_v2,yield_first_v1,107,23843.0,1,496.0,10.79,,0xa08a5ce99e14ce0b22767af6f16c08a2ab012249444c20887193a9a3e98e11fc,Strait of Hormuz traffic returns to normal by September 30?,True,
+2026-07-13T08:19:28Z,published_v2,yield_first_v1,102,25078.0,2,460.0,9.45,,0x12aa595f4883b1a856dcf8155b87e89a8d098b5ad8a7781c75804fd13d166718,Israel closes its airspace by August 31?,True,
+2026-07-13T17:45:47Z,published_v2,yield_first_v1,102,22395.0,3,499.8,35.81,,0xa3b36b2d6104d34af4e6c6215fc818e43352e78a748fbfb0b85e3a35f71dec9a,Will there be no change in Fed interest rates after the September 2026 meeting?,True,
+2026-07-13T18:05:40Z,published_v2,yield_first_v1,105,24756.0,2,473.5,16.0,,0x7618e80c410d107b9929455007e4ccf649630ac6aec6a76ebcd04ae9946dd514,Will the Fed decide differently in the next three decisions (Apr–Jun–Jul)?,True,
+2026-07-13T18:32:37Z,published_v2,yield_first_v1,107,24864.0,1,388.0,0.68,,0x876506d8b2bd7a0d3fa4fe18c024eee6e1dd81ee24c26795dadd6cfe4a7b5d0d,Will the Fed increase interest rates by 25 bps after the September 2026 meeting?,False,
+2026-07-13T19:16:28Z,published_v2,yield_first_v1,113,29942.0,1,370.0,9.03,,0x3a869359895989c1dee6f920c203f12791f03c206e86ce48353c46626ee743b1,Will WTI Crude Oil (WTI) hit (HIGH) $85 in July?,True,
+2026-07-14T08:24:22Z,published_v2,yield_first_v1,96,27369.0,1,463.2,53.45,,0xaf12bd1a9ec448b428e5879f180b9b05d17cdf6a6af3c20d8a4b7327ca6bfd37,Will LeBron James play for the Golden State Warriors in 2026-27?,True,
+2026-07-14T08:52:51Z,published_v2,yield_first_v1,91,25515.0,1,464.0,50.2,,0xaf12bd1a9ec448b428e5879f180b9b05d17cdf6a6af3c20d8a4b7327ca6bfd37,Will LeBron James play for the Golden State Warriors in 2026-27?,True,
+2026-07-14T10:46:27Z,published_v2,yield_first_v1,88,23876.0,3,490.2,25.77,,0x4c63863c9f4449243981ae1748c5ee9d4d8c8f22e25f708a9afd4c86e124f360,Will WTI Crude Oil (WTI) hit (HIGH) $90 in July?,True,
+2026-07-14T11:23:16Z,published_v2,yield_first_v1,91,25285.0,2,496.8,6.45,,0xb12f5e328a7d9f7a26e0a074625ea775025104e673c776d575dab422a472ef59,Israel closes its airspace by July 31?,True,
+2026-07-14T12:45:34Z,published_v2,yield_first_v1,89,26196.0,2,449.5,4.12,,0x4c63863c9f4449243981ae1748c5ee9d4d8c8f22e25f708a9afd4c86e124f360,Will WTI Crude Oil (WTI) hit (HIGH) $90 in July?,True,
+2026-07-14T13:19:35Z,published_v2,yield_first_v1,83,24862.0,1,440.0,2.27,,0xa08a5ce99e14ce0b22767af6f16c08a2ab012249444c20887193a9a3e98e11fc,Strait of Hormuz traffic returns to normal by September 30?,False,
+2026-07-14T19:16:48Z,published_v2,yield_first_v1,92,27434.0,2,480.0,35.72,,0x4c63863c9f4449243981ae1748c5ee9d4d8c8f22e25f708a9afd4c86e124f360,Will WTI Crude Oil (WTI) hit (HIGH) $90 in July?,True,
+2026-07-15T07:48:31Z,published_v2,yield_first_v1,95,22319.0,2,457.6,6.86,,0x4c63863c9f4449243981ae1748c5ee9d4d8c8f22e25f708a9afd4c86e124f360,Will WTI Crude Oil (WTI) hit (HIGH) $90 in July?,True,
+2026-07-15T07:54:39Z,published_v2,yield_first_v1,93,21908.0,2,447.7,8.48,,0xde72dd287ba34b31dc69066931b7c0074f8267132bf7d6752e2f736429ae98af,Will LeBron James play for the Philadelphia 76ers in 2026-27?,True,
+2026-07-15T08:12:02Z,published_v2,yield_first_v1,92,21354.0,2,459.0,3.06,,0xde72dd287ba34b31dc69066931b7c0074f8267132bf7d6752e2f736429ae98af,Will LeBron James play for the Philadelphia 76ers in 2026-27?,False,
+2026-07-15T08:28:28Z,published_v2,yield_first_v1,92,21375.0,2,460.0,5.11,,0xde72dd287ba34b31dc69066931b7c0074f8267132bf7d6752e2f736429ae98af,Will LeBron James play for the Philadelphia 76ers in 2026-27?,True,
+2026-07-15T08:45:05Z,published_v2,yield_first_v1,92,21503.0,1,490.0,1.54,,0xa08a5ce99e14ce0b22767af6f16c08a2ab012249444c20887193a9a3e98e11fc,Strait of Hormuz traffic returns to normal by September 30?,False,
+2026-07-15T09:01:02Z,published_v2,yield_first_v1,88,19491.0,2,454.0,2.14,,0xde72dd287ba34b31dc69066931b7c0074f8267132bf7d6752e2f736429ae98af,Will LeBron James play for the Philadelphia 76ers in 2026-27?,False,
+2026-07-15T09:15:14Z,published_v2,yield_first_v1,93,21665.0,1,490.0,1.67,,0xa08a5ce99e14ce0b22767af6f16c08a2ab012249444c20887193a9a3e98e11fc,Strait of Hormuz traffic returns to normal by September 30?,False,
+2026-07-15T09:31:50Z,published_v2,yield_first_v1,93,21670.0,1,490.0,2.47,,0xa08a5ce99e14ce0b22767af6f16c08a2ab012249444c20887193a9a3e98e11fc,Strait of Hormuz traffic returns to normal by September 30?,False,
+2026-07-15T09:44:12Z,published_v2,yield_first_v1,90,21391.0,1,490.0,1.69,,0xa08a5ce99e14ce0b22767af6f16c08a2ab012249444c20887193a9a3e98e11fc,Strait of Hormuz traffic returns to normal by September 30?,False,
+2026-07-15T10:06:07Z,published_v2,yield_first_v1,93,21885.0,1,490.0,1.59,,0xa08a5ce99e14ce0b22767af6f16c08a2ab012249444c20887193a9a3e98e11fc,Strait of Hormuz traffic returns to normal by September 30?,False,
+2026-07-15T14:46:41Z,published_v2,yield_first_v1,87,19275.0,2,470.0,12.71,,0x4c63863c9f4449243981ae1748c5ee9d4d8c8f22e25f708a9afd4c86e124f360,Will WTI Crude Oil (WTI) hit (HIGH) $90 in July?,True,
+2026-07-15T17:54:08Z,published_v2,yield_first_v1,90,21839.0,2,415.6,9.3,,0xa38f0aba5b78cfc9894826c431dc6c8b16e1dff8bb1f4ff3b9ab51d35e12cd55,Will NVIDIA be the largest company in the world by market cap on July 31?,True,
+2026-07-15T18:19:01Z,published_v2,yield_first_v1,90,21975.0,2,415.8,9.66,,0xa38f0aba5b78cfc9894826c431dc6c8b16e1dff8bb1f4ff3b9ab51d35e12cd55,Will NVIDIA be the largest company in the world by market cap on July 31?,True,
+2026-07-15T21:14:15Z,published_v2,yield_first_v1,90,22873.0,2,395.7,34.11,,0x7034c00a24f9edbf325fd5a0b9a63412e469fc8cd2aa9b060fb5ba8e10d7ebef,Will Lionel Messi win the 2026 Ballon d'Or?,True,
+2026-07-16T10:19:47Z,published_v2,yield_first_v1,102,27295.0,2,456.0,5.92,,0x9cb23d04b2ded06147482076688b69b487a8d982c63ebdda2ab3678cf27cf390,Clarity Act signed into law in 2026?,True,
+2026-07-16T21:28:30Z,published_v2,yield_first_v1,94,24008.0,1,460.0,1.68,,0xa08a5ce99e14ce0b22767af6f16c08a2ab012249444c20887193a9a3e98e11fc,Strait of Hormuz traffic returns to normal by September 30?,False,
+2026-07-17T04:37:03Z,published_v2,yield_first_v1,80,22433.0,2,492.0,3.38,,0x60a4dc3f3fccac5c29571f9f4bb8067fecdbcac17f337aac62ea0fe5cd476435,"Will Russia capture Mala Tokmachka by September 30, 2026?",True,
+2026-07-17T10:33:30Z,published_v2,yield_first_v1,76,22060.0,1,436.0,8.13,,0x3a869359895989c1dee6f920c203f12791f03c206e86ce48353c46626ee743b1,Will WTI Crude Oil (WTI) hit (HIGH) $85 in July?,True,
+2026-07-17T21:40:04Z,published_v2,yield_first_v1,88,27863.0,3,498.2,7.21,,0xcbbefb6e894b7301aeca22d8d0444a556ac63428f56750e4fa1dedd72af95687,Valorant: Team Envy vs Evil Geniuses - Map 2 Winner,True,
+2026-07-18T10:48:42Z,published_v2,yield_first_v1,79,20142.0,2,484.5,11.35,,0x4c63863c9f4449243981ae1748c5ee9d4d8c8f22e25f708a9afd4c86e124f360,Will WTI Crude Oil (WTI) hit (HIGH) $90 in July?,True,
+2026-07-18T12:00:47Z,published_v2,yield_first_v1,79,19240.0,3,476.3,19.91,,0xbad91c213787a7542345b8abd72a1d55754987c47ba82ef5d4aa625ac046f024,Iran full airspace closure by August 31?,True,
+2026-07-18T12:30:57Z,published_v2,yield_first_v1,78,19823.0,1,223.5,1.1,,0x7d352ec1d718dd1f2d2fdb93d65fd3908cf34755d1aa45a8697a84d2b5ae1e8e,Will WTI Crude Oil (WTI) hit (HIGH) $95 in July?,False,
+2026-07-18T13:03:31Z,published_v2,yield_first_v1,75,19288.0,3,499.9,2.66,,0xde72dd287ba34b31dc69066931b7c0074f8267132bf7d6752e2f736429ae98af,Will LeBron James play for the Philadelphia 76ers in 2026-27?,False,
+2026-07-18T13:52:12Z,published_v2,yield_first_v1,67,17729.0,3,417.8,2.48,,0x7d352ec1d718dd1f2d2fdb93d65fd3908cf34755d1aa45a8697a84d2b5ae1e8e,Will WTI Crude Oil (WTI) hit (HIGH) $95 in July?,False,
+2026-07-18T14:06:57Z,published_v2,yield_first_v1,70,18301.0,2,433.6,5.9,,0x7d352ec1d718dd1f2d2fdb93d65fd3908cf34755d1aa45a8697a84d2b5ae1e8e,Will WTI Crude Oil (WTI) hit (HIGH) $95 in July?,True,
+2026-07-18T21:54:18Z,published_v2,yield_first_v1,83,33640.0,2,353.75,11.61,,0x21c77725363b6717538157cf5ce5cf9c69571120870d6def4233257566e07db4,Will WTI Crude Oil (WTI) hit (HIGH) $100 in July?,True,
+2026-07-19T10:07:33Z,published_v2,yield_first_v1,76,22149.0,2,482.0,2.78,,0x5c79dfde05559b79a9cb9f7c4187e4d49632dd042572ae676952f812732591cc,Strait of Hormuz traffic returns to normal by December 31?,False,
+2026-07-19T10:37:16Z,published_v2,yield_first_v1,80,22542.0,1,404.0,1.97,,0x5c79dfde05559b79a9cb9f7c4187e4d49632dd042572ae676952f812732591cc,Strait of Hormuz traffic returns to normal by December 31?,False,
+2026-07-19T11:00:47Z,published_v2,yield_first_v1,79,23580.0,1,404.0,2.17,,0x5c79dfde05559b79a9cb9f7c4187e4d49632dd042572ae676952f812732591cc,Strait of Hormuz traffic returns to normal by December 31?,False,
+2026-07-19T11:31:18Z,published_v2,yield_first_v1,77,22159.0,3,486.9,14.38,,0xe802435286a79c0086810443a824d596619a6f34f901c112f0b70e4e140d6165,"Iran leadership change by June 30, 2027?",True,
+2026-07-19T18:20:11Z,published_v2,yield_first_v1,74,22966.0,3,433.2,12.48,,0xbad91c213787a7542345b8abd72a1d55754987c47ba82ef5d4aa625ac046f024,Iran full airspace closure by August 31?,True,
+2026-07-19T18:44:13Z,published_v2,yield_first_v1,135,30265.0,3,484.5,35.83,True,0xc0b7319f73f248310b059c231fb069e64dbd68ca81dd9933728ca192b54c3cc4,Will Trump be in the WC Champions Photo?,True,
+2026-07-19T22:08:26Z,published_v2,yield_first_v1,135,29188.0,1,412.0,9.8,True,0x4c63863c9f4449243981ae1748c5ee9d4d8c8f22e25f708a9afd4c86e124f360,Will WTI Crude Oil (WTI) hit (HIGH) $90 in July?,True,
+2026-07-20T11:21:18Z,published_v2,yield_first_v1,152,29102.0,1,420.4,2.85,True,0xdbe93b5a701f36076a560fa4b9ba59e365a6e8e2ea6a83764640010657277ca4,Will Gadi Eizenkot be the next Prime Minister of Israel?,False,
+2026-07-20T16:03:26Z,published_v2,yield_first_v1,167,30934.0,1,424.0,8.9,True,0x5db999fad322cea2914535aae5517060c3f80ad6d8c0231cde2124a434d16846,Will the U.S. invade Iran before 2027?,True,
+2026-07-20T22:29:41Z,published_v2,yield_first_v1,167,32061.0,1,388.0,20.58,True,0x0ff22cf1f7f86a8f6a1f46ebff9afc02d2f2f8be82ed1655a079fd2f8b8d450e,Will LeBron James play for the Miami Heat in 2026-27?,True,
+2026-07-21T11:33:02Z,published_v2,yield_first_v1,130,25158.0,1,452.0,2.02,True,0x5c79dfde05559b79a9cb9f7c4187e4d49632dd042572ae676952f812732591cc,Strait of Hormuz traffic returns to normal by December 31?,False,
+2026-07-21T22:40:44Z,published_v2,yield_first_v1,177,32479.0,0,0.0,0,False,,,False,
+2026-07-22T11:48:30Z,published_v2,yield_first_v1,141,31626.0,1,94.0,10.21,True,0xbad91c213787a7542345b8abd72a1d55754987c47ba82ef5d4aa625ac046f024,Iran full airspace closure by August 31?,True,
+2026-07-22T22:55:39Z,published_v2,yield_first_v1,169,33266.0,0,0.0,0,False,,,False,
+2026-07-23T12:06:27Z,published_v2,yield_first_v1,115,26517.0,2,490.2,32.51,True,0x7d352ec1d718dd1f2d2fdb93d65fd3908cf34755d1aa45a8697a84d2b5ae1e8e,Will WTI Crude Oil (WTI) hit (HIGH) $95 in July?,True,
+2026-07-23T23:16:00Z,published_v2,yield_first_v1,190,32945.0,1,432.0,11.95,True,0xb12f5e328a7d9f7a26e0a074625ea775025104e673c776d575dab422a472ef59,Israel closes its airspace by July 31?,True,
+2026-07-24T12:23:12Z,published_v2,yield_first_v1,165,28649.0,0,0.0,0,False,,,False,
+2026-07-24T23:28:38Z,published_v2,yield_first_v1,170,25643.0,0,0.0,0,False,,,False,
+2026-07-25T12:39:33Z,published_v2,yield_first_v1,124,20443.0,1,428.0,0.58,True,0x5c79dfde05559b79a9cb9f7c4187e4d49632dd042572ae676952f812732591cc,Strait of Hormuz traffic returns to normal by December 31?,False,
+2026-07-25T23:48:51Z,published_v2,yield_first_v1,157,25128.0,1,416.0,5.07,True,0xa08a5ce99e14ce0b22767af6f16c08a2ab012249444c20887193a9a3e98e11fc,Strait of Hormuz traffic returns to normal by September 30?,True,
+2026-07-26T13:00:35Z,published_v2,yield_first_v1,136,20276.0,1,464.0,4.47,True,0xa08a5ce99e14ce0b22767af6f16c08a2ab012249444c20887193a9a3e98e11fc,Strait of Hormuz traffic returns to normal by September 30?,True,
+2026-07-27T00:08:09Z,published_v2,yield_first_v1,134,19618.0,0,0.0,0,False,,,False,
+2026-07-27T13:15:40Z,published_v2,yield_first_v1,130,19950.0,1,444.0,1.29,True,0x5c79dfde05559b79a9cb9f7c4187e4d49632dd042572ae676952f812732591cc,Strait of Hormuz traffic returns to normal by December 31?,False,
+2026-07-28T00:24:24Z,published_v2,yield_first_v1,109,16734.0,1,64.0,9.71,True,0xbad91c213787a7542345b8abd72a1d55754987c47ba82ef5d4aa625ac046f024,Iran full airspace closure by August 31?,True,
+2026-07-28T12:51:15Z,published_v2,yield_first_v1,114,15939.0,1,420.0,0.73,True,0xa3b36b2d6104d34af4e6c6215fc818e43352e78a748fbfb0b85e3a35f71dec9a,Will there be no change in Fed interest rates after the September 2026 meeting?,False,
+2026-07-28T13:32:52Z,published_v2,yield_first_v1,115,16521.0,1,420.0,0.89,True,0xa3b36b2d6104d34af4e6c6215fc818e43352e78a748fbfb0b85e3a35f71dec9a,Will there be no change in Fed interest rates after the September 2026 meeting?,False,
+2026-07-29T00:39:24Z,published_v2,yield_first_v1,110,11693.0,0,0.0,0,False,,,False,
+2026-07-29T10:53:10Z,published_v2,yield_first_v1,112,11346.0,1,486.0,2.28,True,0xa3b36b2d6104d34af4e6c6215fc818e43352e78a748fbfb0b85e3a35f71dec9a,Will there be no change in Fed interest rates after the September 2026 meeting?,False,
+2026-07-29T11:24:12Z,published_v2,yield_first_v1,111,11487.0,1,474.0,5.76,True,0xa3b36b2d6104d34af4e6c6215fc818e43352e78a748fbfb0b85e3a35f71dec9a,Will there be no change in Fed interest rates after the September 2026 meeting?,True,
+2026-07-29T14:13:59Z,published_v2,yield_first_v1,104,10860.0,1,452.0,0.56,True,0x876506d8b2bd7a0d3fa4fe18c024eee6e1dd81ee24c26795dadd6cfe4a7b5d0d,Will the Fed increase interest rates by 25 bps after the September 2026 meeting?,False,
+2026-07-29T14:41:36Z,published_v2,yield_first_v1,99,11276.0,0,0.0,0,False,,,False,
+2026-07-29T15:39:57Z,published_v2,yield_first_v1,105,11593.0,1,444.0,28.63,True,0x876506d8b2bd7a0d3fa4fe18c024eee6e1dd81ee24c26795dadd6cfe4a7b5d0d,Will the Fed increase interest rates by 25 bps after the September 2026 meeting?,True,
+2026-07-29T16:40:16Z,published_v2,yield_first_v1,100,11067.0,1,462.0,5.74,True,0xa3b36b2d6104d34af4e6c6215fc818e43352e78a748fbfb0b85e3a35f71dec9a,Will there be no change in Fed interest rates after the September 2026 meeting?,True,
+2026-07-29T17:37:54Z,published_v2,yield_first_v1,97,10712.0,1,462.0,1.97,True,0xa3b36b2d6104d34af4e6c6215fc818e43352e78a748fbfb0b85e3a35f71dec9a,Will there be no change in Fed interest rates after the September 2026 meeting?,False,
+2026-07-29T18:39:35Z,published_v2,yield_first_v1,96,10870.0,0,0.0,0,False,,,False,
+2026-07-29T19:35:37Z,published_v2,yield_first_v1,102,26392.0,1,460.0,65.66,True,0x12aa13b3da17ceae1b0a59b5d5b77121e91bb79b4bb0b52bf6543ed3f8d0953b,Will the Fed increase interest rates by 25 bps after the October 2026 meeting?,True,
+2026-07-29T20:22:55Z,published_v2,yield_first_v1,105,39470.0,0,0.0,0,False,,,False,
+2026-07-29T21:09:45Z,published_v2,yield_first_v1,106,38707.0,0,0.0,0,False,,,False,
+2026-07-29T21:32:16Z,published_v2,yield_first_v1,110,38785.0,0,0.0,0,False,,,False,
+2026-07-30T08:37:35Z,published_v2,yield_first_v1,114,15017.0,0,0.0,0,False,,,False,
+2026-07-30T21:47:29Z,published_v2,yield_first_v1,129,16300.0,0,0.0,0,False,,,False,
+2026-07-31T07:06:02Z,published_v2,yield_first_v1,114,13493.0,0,0.0,0,False,,,False,
+2026-07-31T08:51:49Z,published_v2,yield_first_v1,108,12391.0,0,0.0,0,False,,,False,
+2026-07-31T22:02:09Z,published_v2,yield_first_v1,127,18264.0,0,0.0,0,False,,,False,
+2026-08-01T09:08:24Z,published_v2,yield_first_v1,130,17415.0,1,452.0,2.55,True,0x684e5b72d4e407695397a79ed75ef37273c2655ca2548791a4153233d3744696,Will NVIDIA be the largest company in the world by market cap on December 31?,False,
+2026-08-01T09:51:30Z,published_v2,yield_first_v1,124,17328.0,1,452.0,1.43,True,0x684e5b72d4e407695397a79ed75ef37273c2655ca2548791a4153233d3744696,Will NVIDIA be the largest company in the world by market cap on December 31?,False,
+2026-08-01T22:17:57Z,published_v2,yield_first_v1,121,16693.0,0,0.0,0,False,,,False,
+2026-08-02T09:23:51Z,published_v2,yield_first_v1,134,14900.0,1,408.0,2.93,True,0xa08a5ce99e14ce0b22767af6f16c08a2ab012249444c20887193a9a3e98e11fc,Strait of Hormuz traffic returns to normal by September 30?,False,
+2026-08-02T22:29:50Z,published_v2,yield_first_v1,130,14300.0,1,470.0,8.81,True,0xa08a5ce99e14ce0b22767af6f16c08a2ab012249444c20887193a9a3e98e11fc,Strait of Hormuz traffic returns to normal by September 30?,True,
+2026-08-03T09:37:13Z,published_v2,yield_first_v1,125,14506.0,1,450.0,2.16,True,0xa08a5ce99e14ce0b22767af6f16c08a2ab012249444c20887193a9a3e98e11fc,Strait of Hormuz traffic returns to normal by September 30?,False,
+2026-08-03T22:45:28Z,published_v2,yield_first_v1,124,14649.0,0,0.0,0,False,,,False,
+2026-08-04T09:51:49Z,published_v2,yield_first_v1,107,13159.0,1,490.0,0.41,True,0xa08a5ce99e14ce0b22767af6f16c08a2ab012249444c20887193a9a3e98e11fc,Strait of Hormuz traffic returns to normal by September 30?,False,
+2026-08-04T12:36:21Z,published_v2,yield_first_v1,102,12630.0,1,440.0,3.06,True,0xa08a5ce99e14ce0b22767af6f16c08a2ab012249444c20887193a9a3e98e11fc,Strait of Hormuz traffic returns to normal by September 30?,False,
+2026-08-04T23:02:13Z,published_v2,yield_first_v1,121,17986.0,0,0.0,0,False,,,False,
+2026-08-05T06:40:19Z,published_v2,yield_first_v1,117,16097.0,0,0.0,0,False,,,False,cli
+2026-08-05T09:54:13Z,published_v2,yield_first_v1,111,16131.0,0,0.0,0,False,,,False,intraday_job
+2026-08-05T15:57:53Z,published_v2,yield_first_v1,95,14510.0,0,0.0,0,False,,,False,cli
+2026-08-05T16:15:35Z,published_v2,yield_first_v1,103,16318.0,0,0.0,0,False,,,False,cli
+2026-08-05T23:17:01Z,published_v2,yield_first_v1,130,17141.0,1,376.0,3.48,True,0x73d8a8208d23a74937d114a713d6a56cd4161a1068056c52ac74c8419c99da7c,Fed Rate Hike by September 2026 Meeting?,True,harvest_step
+2026-08-06T09:57:43Z,published_v2,yield_first_v1,105,12324.0,0,0.0,0,False,,,False,intraday_job
+2026-08-06T23:35:23Z,published_v2,yield_first_v1,122,14626.0,0,0.0,0,False,,,False,harvest_step
+2026-08-07T08:12:46Z,published_v2,yield_first_v1,115,13841.0,1,330.0,0.91,True,0x377e7fe65cf198a7fc4fdae3f2136b74729279267858daaf96718b23bc2a5607,Iran leadership change by December 31?,False,cli
+2026-08-07T10:00:15Z,published_v2,yield_first_v1,114,13315.0,1,468.0,1.42,True,0x5c79dfde05559b79a9cb9f7c4187e4d49632dd042572ae676952f812732591cc,Strait of Hormuz traffic returns to normal by December 31?,False,intraday_job
+2026-08-07T11:24:14Z,published_v2,yield_first_v1,107,12718.0,1,432.0,4.44,True,0xa08a5ce99e14ce0b22767af6f16c08a2ab012249444c20887193a9a3e98e11fc,Strait of Hormuz traffic returns to normal by September 30?,True,cli
+2026-08-07T12:33:24Z,published_v2,yield_first_v1,100,12508.0,1,496.0,6.29,True,0xa3b36b2d6104d34af4e6c6215fc818e43352e78a748fbfb0b85e3a35f71dec9a,Will there be no change in Fed interest rates after the September 2026 meeting?,True,cli
+2026-08-07T13:38:39Z,published_v2,yield_first_v1,104,13293.0,1,470.0,6.45,True,0x12aa13b3da17ceae1b0a59b5d5b77121e91bb79b4bb0b52bf6543ed3f8d0953b,Will the Fed increase interest rates by 25 bps after the October 2026 meeting?,True,cli
+2026-08-07T23:49:07Z,published_v2,yield_first_v1,133,18824.66,0,0.0,0,False,,,False,harvest_step
+2026-08-08T10:03:12Z,published_v2,yield_first_v1,118,13727.0,0,0.0,0,False,,,False,intraday_job
+2026-08-09T00:01:28Z,published_v2,yield_first_v1,99,12067.0,0,0.0,0,False,,,False,harvest_step
+2026-08-09T10:07:25Z,published_v2,yield_first_v1,99,12325.0,0,0.0,0,False,,,False,intraday_job
+2026-08-10T00:17:01Z,published_v2,yield_first_v1,107,12802.0,1,380.0,1.57,True,0x5c79dfde05559b79a9cb9f7c4187e4d49632dd042572ae676952f812732591cc,Strait of Hormuz traffic returns to normal by December 31?,False,harvest_step
+2026-08-10T10:11:24Z,published_v2,yield_first_v1,115,13677.0,1,380.0,1.32,True,0x5c79dfde05559b79a9cb9f7c4187e4d49632dd042572ae676952f812732591cc,Strait of Hormuz traffic returns to normal by December 31?,False,intraday_job
+2026-08-11T00:37:43Z,published_v2,yield_first_v1,87,10223.0,2,475.0,2.56,True,0x3de0f3d7d7efb40cde68e814d40a0b232832083653c8e78260eb999baa967de0,US strike on Cuba by December 31?,False,harvest_step
+2026-08-11T10:16:39Z,published_v2,yield_first_v1,94,11094.0,0,0.0,0,False,,,False,intraday_job
+2026-08-11T15:46:04Z,published_v2,yield_first_v1,105,11934.0,1,370.0,1.98,True,0xa08a5ce99e14ce0b22767af6f16c08a2ab012249444c20887193a9a3e98e11fc,Strait of Hormuz traffic returns to normal by September 30?,False,cli
+2026-08-12T00:52:06Z,published_v2,yield_first_v1,97,10486.0,0,0.0,0,False,,,False,harvest_step
+2026-08-12T10:16:57Z,published_v2,yield_first_v1,89,10913.0,1,388.0,0.57,True,0x059db22dae2d735516017d47d1def0ea43e5d7221259c3aaa60c090d32566d4e,Fed Rate Hike by October 2026 Meeting?,False,intraday_job
+2026-08-13T01:10:02Z,published_v2,yield_first_v1,80,10716.0,0,0.0,0,False,,,False,harvest_step
+2026-08-13T10:18:10Z,published_v2,yield_first_v1,91,11655.0,0,0.0,0,False,,,False,intraday_job
+2026-08-14T01:24:23Z,published_v2,yield_first_v1,86,10099.0,1,486.0,0.81,True,0x059db22dae2d735516017d47d1def0ea43e5d7221259c3aaa60c090d32566d4e,Fed Rate Hike by October 2026 Meeting?,False,harvest_step
+2026-08-14T10:25:49Z,published_v2,yield_first_v1,76,9403.0,0,0.0,0,False,,,False,intraday_job
+2026-08-15T01:43:28Z,published_v2,yield_first_v1,82,9303.0,0,0.0,0,False,,,False,harvest_step
+2026-08-15T09:26:46Z,published_v2,yield_first_v1,88,9133.0,0,0.0,0,False,,,False,cli
+2026-08-15T10:17:09Z,published_v2,yield_first_v1,83,8849.0,0,0.0,0,False,,,False,cli
+2026-08-15T10:30:25Z,published_v2,yield_first_v1,83,8838.0,0,0.0,0,False,,,False,intraday_job
+2026-08-15T12:17:36Z,published_v2,yield_first_v1,72,8159.0,0,0.0,0,False,,,False,cli
+2026-08-16T01:56:28Z,published_v2,yield_first_v1,65,8426.0,1,450.0,5.2,True,0x15d2e66dcf1d63c5695d6d0e9e2f8e06dd246d00fd5dfc254f2b22baa33bfa1b,Mitch McConnell steps down from Senate before his term ends?,True,harvest_step
+2026-08-16T10:32:43Z,published_v2,yield_first_v1,74,8965.0,1,390.0,6.67,True,0x15d2e66dcf1d63c5695d6d0e9e2f8e06dd246d00fd5dfc254f2b22baa33bfa1b,Mitch McConnell steps down from Senate before his term ends?,True,intraday_job
+2026-08-17T02:15:52Z,published_v2,yield_first_v1,93,10111.0,2,441.0,9.04,True,0x15d2e66dcf1d63c5695d6d0e9e2f8e06dd246d00fd5dfc254f2b22baa33bfa1b,Mitch McConnell steps down from Senate before his term ends?,True,harvest_step
+2026-08-17T10:39:43Z,published_v2,yield_first_v1,86,9166.0,1,250.0,0.84,True,0xabe0e41540b70f3535b0d9325a19bc6f8c6bcce0ce27c28636a2e1d5c0c4eda8,"Will GPT-6 be released by August 31, 2026?",False,intraday_job
+2026-08-18T02:34:17Z,published_v2,yield_first_v1,88,9952.0,1,185.0,1.58,True,0x07414b5c367c107a563491fe8b354abd5b07f099fce3b25cd57e80110ce780ff,Will another city host the final of the 2030 FIFA World Cup?,False,harvest_step
+2026-08-18T10:41:31Z,published_v2,yield_first_v1,80,9289.0,1,468.0,0.39,True,0x059db22dae2d735516017d47d1def0ea43e5d7221259c3aaa60c090d32566d4e,Fed Rate Hike by October 2026 Meeting?,False,intraday_job
+2026-08-19T02:52:52Z,published_v2,yield_first_v1,99,14472.0,0,0.0,0,False,,,False,harvest_step
+2026-08-19T10:45:31Z,published_v2,yield_first_v1,87,13804.0,1,414.0,1.18,True,0x5c79dfde05559b79a9cb9f7c4187e4d49632dd042572ae676952f812732591cc,Strait of Hormuz traffic returns to normal by December 31?,False,intraday_job
+2026-08-20T03:07:48Z,published_v2,yield_first_v1,71,11595.0,1,165.0,1.47,True,0x3de0f3d7d7efb40cde68e814d40a0b232832083653c8e78260eb999baa967de0,US strike on Cuba by December 31?,False,harvest_step
+2026-08-20T10:46:56Z,published_v2,yield_first_v1,80,11820.0,1,470.0,1.68,True,0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb,Mojtaba Khamenei seen in public by December 31?,False,intraday_job

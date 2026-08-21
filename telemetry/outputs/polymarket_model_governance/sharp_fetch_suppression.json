@@ -1,0 +1,72 @@
+{
+  "config_changed": false,
+  "decision_use": "paid API request pacing only; never a model, governance, sizing, or trading input",
+  "families": [
+    {
+      "action": "slow_probe",
+      "classification": "no_mappable_market",
+      "coverage_observed_at_utc": "2026-08-15T10:46:41Z",
+      "coverage_source": "sharp_anchor_coverage.json",
+      "last_probe_at_utc": "2026-08-19T07:59:41Z",
+      "market_key": "outrights",
+      "next_probe_due_at_utc": "2026-08-20T07:59:41Z",
+      "probe_attempted_this_run": true,
+      "reason": "14 consecutive fetched cycles produced zero joins; slow-probe every 24h",
+      "rows_mapped": 0,
+      "sport": "basketball_nba_championship_winner",
+      "suppressed": true,
+      "zero_join_streak": 14
+    },
+    {
+      "action": "fetch",
+      "classification": "collecting_coverage_evidence",
+      "coverage_observed_at_utc": "2026-08-15T10:46:41Z",
+      "coverage_source": "sharp_anchor_coverage.json",
+      "last_probe_at_utc": null,
+      "market_key": "h2h",
+      "next_probe_due_at_utc": null,
+      "probe_attempted_this_run": false,
+      "reason": "below suppression evidence threshold",
+      "rows_mapped": 0,
+      "sport": "soccer_fifa_world_cup",
+      "suppressed": false,
+      "zero_join_streak": 0
+    },
+    {
+      "action": "fetch",
+      "classification": "collecting_coverage_evidence",
+      "coverage_observed_at_utc": "2026-08-15T10:46:41Z",
+      "coverage_source": "sharp_anchor_coverage.json",
+      "last_probe_at_utc": null,
+      "market_key": "outrights",
+      "next_probe_due_at_utc": null,
+      "probe_attempted_this_run": false,
+      "reason": "below suppression evidence threshold",
+      "rows_mapped": 0,
+      "sport": "soccer_fifa_world_cup_winner",
+      "suppressed": false,
+      "zero_join_streak": 1
+    }
+  ],
+  "families_attempted_this_run": [
+    "basketball_nba_championship_winner|outrights"
+  ],
+  "generated_at_utc": "2026-08-19T07:59:41Z",
+  "live_trading_invoked": false,
+  "normal_family_count": 2,
+  "paper_trading_invoked": false,
+  "requests_suppressed_this_run": 0,
+  "settings": {
+    "enabled": true,
+    "suppressed_probe_interval_hours": 24.0,
+    "zero_join_cycles_before_suppression": 5
+  },
+  "slow_probe_family_count": 1,
+  "source_artifacts": [
+    "outputs/polymarket_model_governance/sharp_anchor_coverage.json",
+    "outputs/polymarket_model_governance/sharp_anchor_coverage_history.csv"
+  ],
+  "status": "active",
+  "suppressed_family_count": 0,
+  "work_order": "WO-71"
+}

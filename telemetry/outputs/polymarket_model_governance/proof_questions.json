@@ -1,0 +1,38 @@
+{
+  "decision_use": "one_glance_profit_proof_contract_not_trade_authorisation",
+  "generated_at_utc": "2026-08-21T01:59:04Z",
+  "live_trading_invoked": false,
+  "paper_trading_invoked": false,
+  "questions": [
+    {
+      "answer": "No: 30 fetched row(s) produced zero mapped token rows. Flagged zero-join markets: 1.",
+      "decision_use": "Confirms the highest-prior bookmaker edge is reaching Polymarket tokens and current candidates.",
+      "key_metric": "fetched=30; mapped=0; scored_hits=4; zero_join_flags=1",
+      "question": "Sharp-anchor rows mapped?",
+      "severity": "bad"
+    },
+    {
+      "answer": "None found: zero complete/persistent baskets. That is the expected state of an efficient book (not an operational fault); the scanner keeps watching dry-run.",
+      "decision_use": "Mechanical edge candidate; still dry-run only until execution/fill reality is reviewed.",
+      "key_metric": "persistent=0; complete_now=0; best_ask_sum=-",
+      "question": "Dutch-arb persistent opportunities?",
+      "severity": "warn"
+    },
+    {
+      "answer": "No: focus CLV has enough final lines (70) but mean final CLV is 0.0023.",
+      "decision_use": "Excludes frozen crypto up/down diagnostics and measures whether focus cohorts beat later market lines.",
+      "key_metric": "focus_final=70/12; focus_mean_final_clv=0.002319; positive=0",
+      "question": "Focus-view CLV positive with enough samples?",
+      "severity": "warn"
+    },
+    {
+      "answer": "No: quote-supported decision P&L is $0.00; proof status=unverified_paper_run_rate; trips 0/5.",
+      "decision_use": "Only quote-supported paper P&L can move the $100 goal; raw ledger run-rate is not proof.",
+      "key_metric": "decision_pnl=0.0; evidence_trips=0/5; proof_status=unverified_paper_run_rate",
+      "question": "Audited paper P&L positive after governed probes?",
+      "severity": "warn"
+    }
+  ],
+  "status": "bad",
+  "summary": "Sharp-anchor rows mapped? bad; Dutch-arb persistent opportunities? warn; Focus-view CLV positive with enough samples? warn; Audited paper P&L positive after governed probes? warn"
+}

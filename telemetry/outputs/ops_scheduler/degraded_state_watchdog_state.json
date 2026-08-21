@@ -1,0 +1,250 @@
+{
+  "active_incident_ids": [
+    "degraded_e4bc9c9d9b3df54cb1ae268d"
+  ],
+  "carry_forward_cycles": 0,
+  "carry_forward_started_at": null,
+  "counters": {
+    "maker_replay_insufficient_coverage": {
+      "consecutive_degraded_observations": 0,
+      "currently_degraded": false,
+      "episode_start_token": "",
+      "last_observation_token": "2026-08-21T01:42:15Z"
+    },
+    "official_book_snapshot_partial": {
+      "consecutive_degraded_observations": 0,
+      "currently_degraded": false,
+      "episode_start_token": "",
+      "last_observation_token": "2026-08-21T01:41:57Z"
+    },
+    "requote_missing_inputs": {
+      "consecutive_degraded_observations": 0,
+      "currently_degraded": false,
+      "episode_start_token": "",
+      "last_observation_token": "2026-08-21T01:41:36Z"
+    },
+    "wallet_reconciliation_not_clean": {
+      "consecutive_degraded_observations": 0,
+      "currently_degraded": false,
+      "episode_start_token": "",
+      "last_observation_token": "2026-08-20T03:12:14Z"
+    }
+  },
+  "episode_anchors": {
+    "operating_state_slo_breach|operating_state_slo": "2026-08-20T19:58:56Z"
+  },
+  "episode_observation_counts": {
+    "operating_state_slo_breach|operating_state_slo": 135
+  },
+  "generated_at_utc": "2026-08-21T01:55:03Z",
+  "live_trading_invoked": false,
+  "notified_entities": {
+    "official_book_snapshot_partial|official_book_snapshot": "2026-08-20T23:14:02Z",
+    "operating_state_slo_breach|operating_state_slo": "2026-08-20T19:59:11Z",
+    "publication_bridge_unhealthy|telemetry": "2026-08-20T13:00:51Z",
+    "scheduler_completion_freshness|book_pulse": "2026-08-20T03:11:10Z",
+    "scheduler_completion_freshness|trade_prints": "2026-08-20T03:05:57Z"
+  },
+  "operating_rows": {
+    "a1_sweep_advisory": "NOT_REQUIRED",
+    "autonomous_execution": "BLOCKED",
+    "degraded_state_watchdog": "INCIDENT",
+    "deploy_acceptance": "PASS",
+    "executor_dead_man": "ABSENT",
+    "executor_exposure_vs_stage_cap": "ABSENT",
+    "executor_freshness_slo": "ABSENT",
+    "executor_kill_criteria": "ABSENT",
+    "executor_last_action_age": "ABSENT",
+    "executor_mode": "ABSENT",
+    "executor_open_orders": "ABSENT",
+    "executor_wallet_monitoring": "A1_SINGLE_PROJECT_WALLET:EXECUTOR_WINDOW_INACTIVE:ok",
+    "governed_paper_authorisation": "NOT_GRANTED",
+    "human_live_test": "OPERATOR_DOMAIN_MONITORED_READ_ONLY",
+    "latest_deployed_sha": "036d09be26a0d0f7d9cba5a049e468b688decd70",
+    "latest_verified_evidence": "2026-08-21T01:54:46Z",
+    "live_orders_submitted": "UNKNOWN",
+    "live_wallet_monitoring": "ACTIVE_READ_ONLY:ok",
+    "mechanical_paper_capability": "READY",
+    "operator_wallet_monitoring": "ACTIVE_READ_ONLY:ok",
+    "paper_activity": "RECORDED_FILLS=49",
+    "research_mode": "ACTIVE_SHADOW_PAPER_GATED",
+    "source_vs_deployed_sha": "ALIGNED"
+  },
+  "operating_unknown_episodes": {},
+  "paper_trading_invoked": false,
+  "publication_bridge_first_unobserved": {},
+  "scheduler_freshness": {
+    "book_pulse": {
+      "age_seconds": 4.318,
+      "currently_stale": false,
+      "failed_cycles_total_observed": 0,
+      "first_unobserved_at_utc": "",
+      "last_success_utc": "2026-08-21T01:54:58.681568+00:00",
+      "maximum_age_seconds": 900
+    },
+    "clv_snapshot": {
+      "age_seconds": 12702.691,
+      "currently_stale": false,
+      "failed_cycles_total_observed": 0,
+      "first_unobserved_at_utc": "",
+      "last_success_utc": "2026-08-20T22:23:20.309219+00:00",
+      "maximum_age_seconds": 32400
+    },
+    "degraded_state_watchdog": {
+      "age_seconds": 9.441,
+      "currently_stale": false,
+      "failed_cycles_total_observed": 0,
+      "first_unobserved_at_utc": "",
+      "last_success_utc": "2026-08-21T01:54:53.559038+00:00",
+      "maximum_age_seconds": 900
+    },
+    "executor_ops_monitor": {
+      "age_seconds": 1.712,
+      "currently_stale": false,
+      "failed_cycles_total_observed": 0,
+      "first_unobserved_at_utc": "",
+      "last_success_utc": "2026-08-21T01:55:01.288477+00:00",
+      "maximum_age_seconds": 900
+    },
+    "governance_refresh": {
+      "age_seconds": 21373.692,
+      "currently_stale": false,
+      "failed_cycles_total_observed": 1,
+      "first_unobserved_at_utc": "",
+      "last_success_utc": "2026-08-20T19:58:49.308350+00:00",
+      "maximum_age_seconds": 25200
+    },
+    "ledger_anchor": {
+      "age_seconds": 37990.062,
+      "currently_stale": false,
+      "failed_cycles_total_observed": 0,
+      "first_unobserved_at_utc": "",
+      "last_success_utc": "2026-08-20T15:21:52.938234+00:00",
+      "maximum_age_seconds": 93600
+    },
+    "locked_card_refresh": {
+      "age_seconds": 37677.819,
+      "currently_stale": false,
+      "failed_cycles_total_observed": 3,
+      "first_unobserved_at_utc": "",
+      "last_success_utc": "2026-08-20T15:27:05.180597+00:00",
+      "maximum_age_seconds": 46800
+    },
+    "maker_safety_refresh": {
+      "age_seconds": 799.316,
+      "currently_stale": false,
+      "failed_cycles_total_observed": 0,
+      "first_unobserved_at_utc": "",
+      "last_success_utc": "2026-08-21T01:41:43.684117+00:00",
+      "maximum_age_seconds": 3600
+    },
+    "maker_study_intraday": {
+      "age_seconds": 54346.635,
+      "currently_stale": false,
+      "failed_cycles_total_observed": 0,
+      "first_unobserved_at_utc": "",
+      "last_success_utc": "2026-08-20T10:49:16.365043+00:00",
+      "maximum_age_seconds": 90000
+    },
+    "trade_prints": {
+      "age_seconds": 681.884,
+      "currently_stale": false,
+      "failed_cycles_total_observed": 0,
+      "first_unobserved_at_utc": "",
+      "last_success_utc": "2026-08-21T01:43:41.115590+00:00",
+      "maximum_age_seconds": 1200
+    },
+    "training_harvest": {
+      "age_seconds": 81608.443,
+      "currently_stale": false,
+      "failed_cycles_total_observed": 14,
+      "first_unobserved_at_utc": "",
+      "last_success_utc": "2026-08-20T03:14:54.557001+00:00",
+      "maximum_age_seconds": 90000
+    }
+  },
+  "scheduler_jobs": {
+    "book_pulse": {
+      "currently_degraded": false,
+      "episode_start_token": "",
+      "last_exit_code": 0,
+      "last_observation_token": "2026-08-21T01:54:58.681568+00:00"
+    },
+    "clv_snapshot": {
+      "currently_degraded": false,
+      "episode_start_token": "",
+      "last_exit_code": 0,
+      "last_observation_token": "2026-08-20T22:23:20.309219+00:00"
+    },
+    "degraded_state_watchdog": {
+      "currently_degraded": false,
+      "episode_start_token": "",
+      "last_exit_code": 0,
+      "last_observation_token": "2026-08-21T01:54:53.559038+00:00"
+    },
+    "executor_ops_monitor": {
+      "currently_degraded": false,
+      "episode_start_token": "",
+      "last_exit_code": 0,
+      "last_observation_token": "2026-08-21T01:55:01.288477+00:00"
+    },
+    "governance_refresh": {
+      "currently_degraded": false,
+      "episode_start_token": "",
+      "last_exit_code": 0,
+      "last_observation_token": "2026-08-20T19:58:49.308350+00:00"
+    },
+    "ledger_anchor": {
+      "currently_degraded": false,
+      "episode_start_token": "",
+      "last_exit_code": 0,
+      "last_observation_token": "2026-08-20T15:21:52.938234+00:00"
+    },
+    "locked_card_refresh": {
+      "currently_degraded": false,
+      "episode_start_token": "",
+      "last_exit_code": 0,
+      "last_observation_token": "2026-08-20T15:27:05.180597+00:00"
+    },
+    "maker_safety_refresh": {
+      "currently_degraded": false,
+      "episode_start_token": "",
+      "last_exit_code": 0,
+      "last_observation_token": "2026-08-21T01:41:43.684117+00:00"
+    },
+    "maker_study_intraday": {
+      "currently_degraded": false,
+      "episode_start_token": "",
+      "last_exit_code": 0,
+      "last_observation_token": "2026-08-20T10:49:16.365043+00:00"
+    },
+    "scheduler": {
+      "currently_degraded": false,
+      "episode_start_token": "",
+      "last_exit_code": 0,
+      "last_observation_token": "2026-08-15T12:19:22.283711+00:00"
+    },
+    "trade_prints": {
+      "currently_degraded": false,
+      "episode_start_token": "",
+      "last_exit_code": 0,
+      "last_observation_token": "2026-08-21T01:43:41.115590+00:00"
+    },
+    "training_harvest": {
+      "currently_degraded": false,
+      "episode_start_token": "",
+      "last_exit_code": 0,
+      "last_observation_token": "2026-08-20T03:14:54.557001+00:00"
+    },
+    "training_harvest_anchor_tail": {
+      "currently_degraded": false,
+      "episode_start_token": "",
+      "last_exit_code": 0,
+      "last_observation_token": "2026-08-20T03:14:54.675593+00:00"
+    }
+  },
+  "slo_first_unobserved": {},
+  "undelivered_incident_entities": [],
+  "undelivered_incident_ids": [],
+  "undelivered_incident_registrations": []
+}

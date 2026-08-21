@@ -1,0 +1,18 @@
+{
+  "backend_url": "http://127.0.0.1:8765",
+  "blockers": [],
+  "docker_bindings": [
+    "127.0.0.1:8765"
+  ],
+  "generated_at_utc": "2026-08-15T12:19:19.478192+00:00",
+  "live_trading_invoked": false,
+  "paper_trading_invoked": false,
+  "private_https_reachable": true,
+  "private_url": "https://polymarket-trader.tailab4bb1.ts.net/",
+  "public_listener_present": false,
+  "serve_target_verified": true,
+  "status": "PASS",
+  "tailnet_authenticated": true,
+  "transport": "tailscale_serve_https",
+  "work_order": "dashboard-transport"
+}

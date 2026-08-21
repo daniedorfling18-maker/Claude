@@ -1,0 +1,13 @@
+{
+  "feature_rows": 63,
+  "generated_at_utc": "2026-08-21T01:59:31Z",
+  "metadata_hit_rate": 0.19047619047619047,
+  "metadata_hits": 12,
+  "rewrote_feature_file": false,
+  "snapshot_path": "outputs/polymarket/market_snapshot.csv",
+  "snapshot_paths": [
+    "outputs/polymarket/market_snapshot.csv"
+  ],
+  "snapshot_tokens": 1304,
+  "status": "ok"
+}

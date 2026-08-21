@@ -1,0 +1,54 @@
+{
+  "docs_created": [],
+  "docs_verified": [
+    "POLYMARKET_ACTUARIAL_MODEL_GOVERNANCE.md",
+    "POLYMARKET_DATA_QUALITY_STANDARD.md",
+    "POLYMARKET_DOCKER_SAFETY_AUDIT.md",
+    "POLYMARKET_LIVE_TRADING_APPROVAL_CHECKLIST.md",
+    "POLYMARKET_MODEL_VALIDATION_STANDARD.md",
+    "POLYMARKET_RISK_CONTROL_STANDARD.md"
+  ],
+  "document_manifest": [
+    {
+      "byte_length": 712,
+      "name": "POLYMARKET_ACTUARIAL_MODEL_GOVERNANCE.md",
+      "sha256": "6ca61c048b213447bd0edf804bdc8a1e6a15cff4bd2437bab0713249515df9f3",
+      "source": "docs/POLYMARKET_ACTUARIAL_MODEL_GOVERNANCE.md"
+    },
+    {
+      "byte_length": 155,
+      "name": "POLYMARKET_DATA_QUALITY_STANDARD.md",
+      "sha256": "ece6b93e358037ea7892912ebc4559679617ce156b644efb82ca64b0cdd78a2c",
+      "source": "docs/POLYMARKET_DATA_QUALITY_STANDARD.md"
+    },
+    {
+      "byte_length": 163,
+      "name": "POLYMARKET_MODEL_VALIDATION_STANDARD.md",
+      "sha256": "0abd53be2b637eb54aa102dd7f4e35344dbdb3b7b8f00715f590eda8e219920f",
+      "source": "docs/POLYMARKET_MODEL_VALIDATION_STANDARD.md"
+    },
+    {
+      "byte_length": 166,
+      "name": "POLYMARKET_RISK_CONTROL_STANDARD.md",
+      "sha256": "de83bbbb911f217d6221d799dc0135e04f1c08bda1a816703658beaf4f59c556",
+      "source": "docs/POLYMARKET_RISK_CONTROL_STANDARD.md"
+    },
+    {
+      "byte_length": 290,
+      "name": "POLYMARKET_LIVE_TRADING_APPROVAL_CHECKLIST.md",
+      "sha256": "7caa8757d33c1dca404b63be9472616b91d319da2a5589a28db055a805795c52",
+      "source": "docs/POLYMARKET_LIVE_TRADING_APPROVAL_CHECKLIST.md"
+    },
+    {
+      "byte_length": 170,
+      "name": "POLYMARKET_DOCKER_SAFETY_AUDIT.md",
+      "sha256": "1d57111c504f5510a8b01528c6a56b560a608b96ad0acaa251d6c9e1d75ac02b",
+      "source": "docs/POLYMARKET_DOCKER_SAFETY_AUDIT.md"
+    }
+  ],
+  "generated_at": "2026-08-20T19:58:34Z",
+  "generated_at_utc": "2026-08-20T19:58:34Z",
+  "live_trading_approved": false,
+  "source_docs_mutated": false,
+  "status": "ok"
+}

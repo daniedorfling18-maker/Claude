@@ -1,0 +1,17 @@
+{
+  "feature_rows_indexed": 2444536,
+  "feature_rows_scanned": 5286234,
+  "generated_at_utc": "2026-08-20T03:10:37Z",
+  "live_trading_invoked": false,
+  "markets_scored": 530,
+  "max_toxicity_score": 1.0,
+  "missing_wallet_data": false,
+  "note": "Flow-toxicity is quote-sheet conditioning only. It does not modify maker adverse charges, net carry, gates, sizing, or any order path.",
+  "output_path": "outputs/maker_carry/flow_toxicity.csv",
+  "paper_trading_invoked": false,
+  "price_index_disk_bytes": 541376512,
+  "price_index_strategy": "disk_backed_streaming_sqlite",
+  "status": "ok",
+  "trades_seen": 198555,
+  "work_order": "WO-49"
+}

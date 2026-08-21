@@ -1,0 +1,146 @@
+{
+  "candidate": {
+    "candidate_condition_id": "0x15d2e66dcf1d63c5695d6d0e9e2f8e06dd246d00fd5dfc254f2b22baa33bfa1b",
+    "candidate_token_id": null,
+    "source_freshness": {
+      "candidate_flow_toxicity": {
+        "age_seconds": 81066.342,
+        "fresh": true,
+        "generated_at_utc": "2026-08-20T03:10:37Z",
+        "maximum_age_seconds": 93600
+      },
+      "decision_policy": {
+        "age_seconds": 9.342,
+        "fresh": true,
+        "generated_at_utc": "2026-08-21T01:41:34Z",
+        "maximum_age_seconds": 1800
+      },
+      "maker_carry_study": {
+        "age_seconds": 53687.342,
+        "fresh": true,
+        "generated_at_utc": "2026-08-20T10:46:56Z",
+        "maximum_age_seconds": 93600
+      },
+      "maker_fill_replay": {
+        "age_seconds": 1092.342,
+        "fresh": true,
+        "generated_at_utc": "2026-08-21T01:23:31Z",
+        "maximum_age_seconds": 1800
+      },
+      "requote_alerts": {
+        "age_seconds": 7.342,
+        "fresh": true,
+        "generated_at_utc": "2026-08-21T01:41:36Z",
+        "maximum_age_seconds": 1800
+      },
+      "sharp_linking_qualification": {
+        "age_seconds": 3.342,
+        "fresh": true,
+        "generated_at_utc": "2026-08-21T01:41:40Z",
+        "maximum_age_seconds": 1800
+      },
+      "wallet_reconciliation": {
+        "age_seconds": 80969.342,
+        "fresh": true,
+        "generated_at_utc": "2026-08-20T03:12:14Z",
+        "maximum_age_seconds": 93600
+      }
+    }
+  },
+  "candidate_changed_while_eligible": false,
+  "candidate_condition_id": "0x15d2e66dcf1d63c5695d6d0e9e2f8e06dd246d00fd5dfc254f2b22baa33bfa1b",
+  "candidate_token_id": null,
+  "conditions": [
+    {
+      "condition": "funding_governance_reconciled",
+      "detail": "registry H1 sharp-anchor requirement vs WO-93-revert generic-carry record must be reconciled by one dated owner decision before funding",
+      "passed": true
+    },
+    {
+      "condition": "fund_action_indicated_and_kill_clear",
+      "detail": "indicated_action=defer_funding_continue_study; kill=clear",
+      "passed": false
+    },
+    {
+      "condition": "candidate_in_current_portfolio",
+      "detail": "candidate=0x15d2e66dcf1d63c5695d6d0e9e2f8e06dd246d00fd5dfc254f2b22baa33bfa1b; token=missing; portfolio_matches=0",
+      "passed": false
+    },
+    {
+      "condition": "decision_policy_source_fresh",
+      "detail": "generated_at=2026-08-21T01:41:34Z; age=9.3s; max=1800s",
+      "passed": true
+    },
+    {
+      "condition": "maker_carry_study_source_fresh",
+      "detail": "generated_at=2026-08-20T10:46:56Z; age=53687.3s; max=93600s",
+      "passed": true
+    },
+    {
+      "condition": "candidate_flow_toxicity_source_fresh",
+      "detail": "generated_at=2026-08-20T03:10:37Z; age=81066.3s; max=93600s",
+      "passed": true
+    },
+    {
+      "condition": "wallet_reconciliation_source_fresh",
+      "detail": "generated_at=2026-08-20T03:12:14Z; age=80969.3s; max=93600s",
+      "passed": true
+    },
+    {
+      "condition": "requote_alerts_source_fresh",
+      "detail": "generated_at=2026-08-21T01:41:36Z; age=7.3s; max=1800s",
+      "passed": true
+    },
+    {
+      "condition": "maker_fill_replay_source_fresh",
+      "detail": "generated_at=2026-08-21T01:23:31Z; age=1092.3s; max=1800s",
+      "passed": true
+    },
+    {
+      "condition": "sharp_linking_qualification_source_fresh",
+      "detail": "generated_at=2026-08-21T01:41:40Z; age=3.3s; max=1800s",
+      "passed": true
+    },
+    {
+      "condition": "kill_inputs_fresh",
+      "detail": "kill_input_freshness=fresh",
+      "passed": true
+    },
+    {
+      "condition": "reconciliation_clean_or_explained",
+      "detail": "reconciliation_status=clean",
+      "passed": true
+    },
+    {
+      "condition": "policy_and_study_same_run",
+      "detail": "study_generated=2026-08-20T10:46:56Z; policy_consumed=2026-08-20T10:46:56Z",
+      "passed": true
+    },
+    {
+      "condition": "requote_not_pulling_candidate",
+      "detail": "candidate_requote_state=missing",
+      "passed": false
+    },
+    {
+      "condition": "sharp_linking_qualified",
+      "detail": "qualified=False; qual_candidate=0x15d2e66dcf1d63c5695d6d0e9e2f8e06dd246d00fd5dfc254f2b22baa33bfa1b; qual_token=missing; expected_token=missing; age=3.3s (max 1800); version_bound=True; policy_generated=2026-08-21T01:41:34Z; qual_policy_generated=2026-08-21T01:41:34Z; policy_version=474eee542a4fdd1db02c86d179c85b8c45ba7792e67a0fca0f2a9ebe0cc6e944; qual_policy_version=474eee542a4fdd1db02c86d179c85b8c45ba7792e67a0fca0f2a9ebe0cc6e944; first_failing=candidate_market_identified",
+      "passed": false
+    }
+  ],
+  "first_failing_condition": "fund_action_indicated_and_kill_clear",
+  "generated_at_utc": "2026-08-21T01:41:43Z",
+  "live_trading_invoked": false,
+  "note": "reporting only; no gate, sizing, or order surface reads this artifact",
+  "notification": {
+    "attempted": false,
+    "channel_configured": true
+  },
+  "paper_trading_invoked": false,
+  "previous_candidate_condition_id": "0x15d2e66dcf1d63c5695d6d0e9e2f8e06dd246d00fd5dfc254f2b22baa33bfa1b",
+  "previous_candidate_token_id": null,
+  "previous_state": "not_eligible",
+  "revoked": false,
+  "state": "not_eligible",
+  "transitioned_to_eligible": false,
+  "work_order": "WO-99"
+}

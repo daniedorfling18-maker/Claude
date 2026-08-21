@@ -1,0 +1,33 @@
+{
+  "alpha_model_status": "trained",
+  "alpha_model_version": "pm-mispricing-alpha-v1",
+  "bookmaker_cross_check_failures": 62,
+  "crypto_model_enabled": true,
+  "crypto_model_scored": 0,
+  "crypto_model_status_counts": {
+    "not_crypto_updown": 17294,
+    "outside_time_to_close_window": 24,
+    "row_budget_exhausted": 94,
+    "too_close_to_resolution": 8
+  },
+  "edge_field_for_trading": "edge_lower_bound",
+  "fundamental_probabilities_loaded": 4,
+  "fundamental_probability_hits": 4,
+  "fundamental_probability_sources": [
+    "/app/outputs/polymarket/repo_worldcup_winner_probabilities.csv"
+  ],
+  "generated_at_utc": "2026-08-15T10:49:39Z",
+  "microstructure_filter_failures": 10192,
+  "near_miss_learning_candidates": 25,
+  "predictions": 17420,
+  "risk_aware_target_note": "Final target pace is computed after strategy/risk approval in forward_paper_cycle.json.",
+  "rows_missing_rolling_volatility": 7274,
+  "rows_with_rolling_volatility": 10146,
+  "scored": 17420,
+  "shadow_trade_candidates": 0,
+  "status": "scored",
+  "target_monthly_profit_usdc": 100.0,
+  "trade_candidates": 15,
+  "unrisked_lower_bound_ev_per_100usdc_if_all_candidates": 7435.695419820906,
+  "volatility_penalty_sum": 99.46908981842101
+}

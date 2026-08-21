@@ -1,0 +1,17 @@
+{
+  "best_net_violation_by_class": {},
+  "classified_legs": 0,
+  "deviation_threshold_per_basket": 0.005,
+  "errors": [],
+  "events_scanned": 300,
+  "flagged_by_class": {},
+  "flagged_deviations": 0,
+  "generated_at_utc": "2026-08-21T01:43:31Z",
+  "ledger_path": "outputs/implication_consistency/implication_deviations.csv",
+  "ledger_rows": 0,
+  "live_trading_invoked": false,
+  "note": "Measurement-only Frechet/Boole implication consistency scan. Rows are structural deviation evidence only; no signals, gates, order placement, amendment, or cancellation are invoked.",
+  "paper_trading_invoked": false,
+  "status": "ok",
+  "work_order": "WO-41"
+}

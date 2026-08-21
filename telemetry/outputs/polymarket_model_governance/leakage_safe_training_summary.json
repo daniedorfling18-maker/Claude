@@ -1,0 +1,66 @@
+{
+  "coverage": {
+    "clean_resolution_tokens": 64882,
+    "eligible_thinned_quote_rows": 1344,
+    "quote_at_or_after_label_time": 5538,
+    "quote_outside_registered_lookback": 86452,
+    "quote_rows_seen": 2090033,
+    "quote_without_clean_resolution": 1938099,
+    "resolution_label_not_available_by_assembly_clock": 954,
+    "resolution_not_clean_closed": 1296,
+    "resolution_rows_seen": 67166
+  },
+  "feature_file_contains_resolution_fields": false,
+  "generated_at_utc": "2026-08-20T03:06:56Z",
+  "hypothesis_mapping": "H3 structural-bias diagnostic substrate only",
+  "input_artifacts": {
+    "historical_bid_ask": {
+      "byte_length": 889498355,
+      "path": "outputs/polymarket_training/historical_bid_ask_v1.csv",
+      "present": true,
+      "sha256": "5637e716885772b1a127527162c6af881744c1ea9587964e51d5dbe1bc49eaf0"
+    },
+    "resolution_corpus": {
+      "byte_length": 47827300,
+      "path": "outputs/polymarket_training/resolution_corpus_v1.csv",
+      "present": true,
+      "sha256": "f9b2f133b06cb20d7f1cf8b58d236a67bb6cbfc8a27e1e44ae6e4752e30b0fd2"
+    }
+  },
+  "live_trading_invoked": false,
+  "midpoint_only_rows_accepted": 0,
+  "next_unmet_condition": "collect exact bid/ask rows that later join to non-overlapping clean resolutions, at least 10 distinct validation markets, and both train target classes",
+  "outputs": {
+    "features": "outputs/polymarket_training/resolved_corpus_features_v1.csv",
+    "labels": "outputs/polymarket_training/resolved_corpus_labels_v1.csv",
+    "split_audit": "outputs/polymarket_training/resolved_corpus_split_v1.csv"
+  },
+  "paper_trading_invoked": false,
+  "promotion_authority": false,
+  "registered_h3_verdict_authority": false,
+  "settings": {
+    "embargo_hours": 24.0,
+    "max_lookback_hours": 168.0,
+    "minimum_validation_markets": 10,
+    "thin_bucket_seconds": 3600.0,
+    "validation_fraction": 0.3
+  },
+  "split": {
+    "embargo_cutoff_utc": "",
+    "independent_market_unit": "canonical_market_id_whole_market",
+    "market_overlap": [],
+    "market_overlap_count": 0,
+    "markets_total": 4,
+    "minimum_validation_markets_required": 10,
+    "purged_markets": 4,
+    "train_markets": 0,
+    "train_rows": 0,
+    "train_target_classes": [],
+    "validation_feature_start_utc": "",
+    "validation_markets": 0,
+    "validation_rows": 0
+  },
+  "split_policy": "whole-market chronological validation tail with at least 10 distinct validation markets; purge training labels overlapping validation feature start plus embargo",
+  "status": "collecting",
+  "work_order": "WO-101"
+}

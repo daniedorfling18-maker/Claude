@@ -1,0 +1,13 @@
+{
+  "generated_at_utc": "2026-08-21T01:41:57Z",
+  "live_trading_invoked": false,
+  "paper_trading_invoked": false,
+  "reporting_only": true,
+  "tier_counts": {
+    "persistent": 25,
+    "portfolio": 1,
+    "seed": 11
+  },
+  "watchlist_size": 37,
+  "work_order": "WO-148"
+}

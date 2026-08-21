@@ -1,0 +1,324 @@
+{
+  "advance_composite_draw_split": 0.5,
+  "advance_composite_enabled": true,
+  "advance_composite_targets_available": 0,
+  "advance_composite_token_joins": 0,
+  "ambiguous_rows": 0,
+  "coverage_by_sport_market": [
+    {
+      "advance_composite_token_joins": 0,
+      "direct_token_joins": 0,
+      "fundamental_rows": 0,
+      "h2h_public_search_token_joins": 0,
+      "incomplete_market_rows": 0,
+      "market_key": "outrights",
+      "priced_rows": 30,
+      "rows_in": 30,
+      "skipped_no_token": 30,
+      "skipped_unpriced": 0,
+      "sport": "basketball_nba_championship_winner",
+      "token_map_joins": 0,
+      "worldcup_winner_token_joins": 0
+    }
+  ],
+  "devig_method": "power",
+  "direct_token_joins": 0,
+  "fundamental_rows": 0,
+  "generated_at_utc": "2026-08-19T07:59:44Z",
+  "h2h_public_search": {
+    "enabled": true,
+    "queries": 0,
+    "tokens": 0
+  },
+  "h2h_public_search_token_joins": 0,
+  "h2h_public_search_tokens_available": 0,
+  "incomplete_market_samples": [],
+  "input_path": "inputs/polymarket/sharp_odds.csv",
+  "live_trading_invoked": false,
+  "mapping_audit_conservation_ok": true,
+  "mapping_audit_path": "outputs/polymarket_model_governance/sharp_anchor_mapping_audit.csv",
+  "mapping_audit_rows": 30,
+  "markets": 1,
+  "max_market_implied_sum": 2.0,
+  "mean_overround_removed": 0.4989,
+  "min_market_implied_sum": 0.9,
+  "min_outcomes_per_market": 2,
+  "note": "De-vigged sharp-book fair probabilities in the fundamental contract. Point mispricing_alpha.fundamental_probability_paths at output_file to use as the anchor.",
+  "output_file": "outputs/polymarket_training/sharp_fundamental_probabilities.csv",
+  "paper_trading_invoked": false,
+  "rows_in": 30,
+  "skipped_incomplete_market_rows": 0,
+  "skipped_incomplete_markets": 0,
+  "skipped_no_token": 30,
+  "skipped_no_token_samples": [
+    {
+      "market_key": "outrights",
+      "market_slug": "basketball-nba-championship-winner",
+      "outcome": "Oklahoma City Thunder",
+      "reason": "unmapped_sharp_anchor_row",
+      "sport": "basketball_nba_championship_winner"
+    },
+    {
+      "market_key": "outrights",
+      "market_slug": "basketball-nba-championship-winner",
+      "outcome": "San Antonio Spurs",
+      "reason": "unmapped_sharp_anchor_row",
+      "sport": "basketball_nba_championship_winner"
+    },
+    {
+      "market_key": "outrights",
+      "market_slug": "basketball-nba-championship-winner",
+      "outcome": "Philadelphia 76ers",
+      "reason": "unmapped_sharp_anchor_row",
+      "sport": "basketball_nba_championship_winner"
+    },
+    {
+      "market_key": "outrights",
+      "market_slug": "basketball-nba-championship-winner",
+      "outcome": "New York Knicks",
+      "reason": "unmapped_sharp_anchor_row",
+      "sport": "basketball_nba_championship_winner"
+    },
+    {
+      "market_key": "outrights",
+      "market_slug": "basketball-nba-championship-winner",
+      "outcome": "Boston Celtics",
+      "reason": "unmapped_sharp_anchor_row",
+      "sport": "basketball_nba_championship_winner"
+    },
+    {
+      "market_key": "outrights",
+      "market_slug": "basketball-nba-championship-winner",
+      "outcome": "Miami Heat",
+      "reason": "unmapped_sharp_anchor_row",
+      "sport": "basketball_nba_championship_winner"
+    },
+    {
+      "market_key": "outrights",
+      "market_slug": "basketball-nba-championship-winner",
+      "outcome": "Denver Nuggets",
+      "reason": "unmapped_sharp_anchor_row",
+      "sport": "basketball_nba_championship_winner"
+    },
+    {
+      "market_key": "outrights",
+      "market_slug": "basketball-nba-championship-winner",
+      "outcome": "Cleveland Cavaliers",
+      "reason": "unmapped_sharp_anchor_row",
+      "sport": "basketball_nba_championship_winner"
+    },
+    {
+      "market_key": "outrights",
+      "market_slug": "basketball-nba-championship-winner",
+      "outcome": "Toronto Raptors",
+      "reason": "unmapped_sharp_anchor_row",
+      "sport": "basketball_nba_championship_winner"
+    },
+    {
+      "market_key": "outrights",
+      "market_slug": "basketball-nba-championship-winner",
+      "outcome": "Minnesota Timberwolves",
+      "reason": "unmapped_sharp_anchor_row",
+      "sport": "basketball_nba_championship_winner"
+    },
+    {
+      "market_key": "outrights",
+      "market_slug": "basketball-nba-championship-winner",
+      "outcome": "Detroit Pistons",
+      "reason": "unmapped_sharp_anchor_row",
+      "sport": "basketball_nba_championship_winner"
+    },
+    {
+      "market_key": "outrights",
+      "market_slug": "basketball-nba-championship-winner",
+      "outcome": "Golden State Warriors",
+      "reason": "unmapped_sharp_anchor_row",
+      "sport": "basketball_nba_championship_winner"
+    },
+    {
+      "market_key": "outrights",
+      "market_slug": "basketball-nba-championship-winner",
+      "outcome": "Los Angeles Lakers",
+      "reason": "unmapped_sharp_anchor_row",
+      "sport": "basketball_nba_championship_winner"
+    },
+    {
+      "market_key": "outrights",
+      "market_slug": "basketball-nba-championship-winner",
+      "outcome": "Indiana Pacers",
+      "reason": "unmapped_sharp_anchor_row",
+      "sport": "basketball_nba_championship_winner"
+    },
+    {
+      "market_key": "outrights",
+      "market_slug": "basketball-nba-championship-winner",
+      "outcome": "Houston Rockets",
+      "reason": "unmapped_sharp_anchor_row",
+      "sport": "basketball_nba_championship_winner"
+    },
+    {
+      "market_key": "outrights",
+      "market_slug": "basketball-nba-championship-winner",
+      "outcome": "Atlanta Hawks",
+      "reason": "unmapped_sharp_anchor_row",
+      "sport": "basketball_nba_championship_winner"
+    },
+    {
+      "market_key": "outrights",
+      "market_slug": "basketball-nba-championship-winner",
+      "outcome": "Orlando Magic",
+      "reason": "unmapped_sharp_anchor_row",
+      "sport": "basketball_nba_championship_winner"
+    },
+    {
+      "market_key": "outrights",
+      "market_slug": "basketball-nba-championship-winner",
+      "outcome": "Portland Trail Blazers",
+      "reason": "unmapped_sharp_anchor_row",
+      "sport": "basketball_nba_championship_winner"
+    },
+    {
+      "market_key": "outrights",
+      "market_slug": "basketball-nba-championship-winner",
+      "outcome": "Charlotte Hornets",
+      "reason": "unmapped_sharp_anchor_row",
+      "sport": "basketball_nba_championship_winner"
+    },
+    {
+      "market_key": "outrights",
+      "market_slug": "basketball-nba-championship-winner",
+      "outcome": "Washington Wizards",
+      "reason": "unmapped_sharp_anchor_row",
+      "sport": "basketball_nba_championship_winner"
+    }
+  ],
+  "skipped_unpriced": 0,
+  "status": "built",
+  "token_join": "market_outcome_map",
+  "token_map_h2h_blocked_samples": [
+    {
+      "market_slug": "atp-tirante-mensik-2026-08-19-set-totals-2pt5",
+      "outcome": "Over 2.5",
+      "question": "Thiago Agustin Tirante vs. Jakub Mensik: Total Sets O/U 2.5",
+      "reason": "ambiguous_market_shape"
+    },
+    {
+      "market_slug": "atp-tirante-mensik-2026-08-19-set-totals-2pt5",
+      "outcome": "Under 2.5",
+      "question": "Thiago Agustin Tirante vs. Jakub Mensik: Total Sets O/U 2.5",
+      "reason": "ambiguous_market_shape"
+    },
+    {
+      "market_slug": "atp-tirante-mensik-2026-08-19-set-2-total-8pt5",
+      "outcome": "Over",
+      "question": "Tirante vs. Mensik: Set 2 Games O/U 8.5",
+      "reason": "ambiguous_market_shape"
+    },
+    {
+      "market_slug": "atp-tirante-mensik-2026-08-19-set-2-total-8pt5",
+      "outcome": "Under",
+      "question": "Tirante vs. Mensik: Set 2 Games O/U 8.5",
+      "reason": "ambiguous_market_shape"
+    },
+    {
+      "market_slug": "atp-tirante-mensik-2026-08-19-first-set-total-8pt5",
+      "outcome": "Over",
+      "question": "Tirante vs. Mensik: Set 1 Games O/U 8.5",
+      "reason": "ambiguous_market_shape"
+    },
+    {
+      "market_slug": "atp-tirante-mensik-2026-08-19-first-set-total-8pt5",
+      "outcome": "Under",
+      "question": "Tirante vs. Mensik: Set 1 Games O/U 8.5",
+      "reason": "ambiguous_market_shape"
+    },
+    {
+      "market_slug": "atp-tirante-mensik-2026-08-19-match-total-21pt5",
+      "outcome": "Over",
+      "question": "Tirante vs. Mensik: Match O/U 21.5",
+      "reason": "ambiguous_market_shape"
+    },
+    {
+      "market_slug": "atp-tirante-mensik-2026-08-19-match-total-21pt5",
+      "outcome": "Under",
+      "question": "Tirante vs. Mensik: Match O/U 21.5",
+      "reason": "ambiguous_market_shape"
+    },
+    {
+      "market_slug": "atp-tirante-mensik-2026-08-19-set-handicap-home-1pt5",
+      "outcome": "Tirante",
+      "question": "Set Handicap: Tirante (-1.5) vs Mensik (+1.5)",
+      "reason": "ambiguous_market_shape"
+    },
+    {
+      "market_slug": "atp-tirante-mensik-2026-08-19-set-handicap-home-1pt5",
+      "outcome": "Mensik",
+      "question": "Set Handicap: Tirante (-1.5) vs Mensik (+1.5)",
+      "reason": "ambiguous_market_shape"
+    },
+    {
+      "market_slug": "atp-tirante-mensik-2026-08-19-first-set-total-9pt5",
+      "outcome": "Over",
+      "question": "Tirante vs. Mensik: Set 1 Games O/U 9.5",
+      "reason": "ambiguous_market_shape"
+    },
+    {
+      "market_slug": "atp-tirante-mensik-2026-08-19-first-set-total-9pt5",
+      "outcome": "Under",
+      "question": "Tirante vs. Mensik: Set 1 Games O/U 9.5",
+      "reason": "ambiguous_market_shape"
+    },
+    {
+      "market_slug": "atp-tirante-mensik-2026-08-19-match-total-22pt5",
+      "outcome": "Over",
+      "question": "Tirante vs. Mensik: Match O/U 22.5",
+      "reason": "ambiguous_market_shape"
+    },
+    {
+      "market_slug": "atp-tirante-mensik-2026-08-19-match-total-22pt5",
+      "outcome": "Under",
+      "question": "Tirante vs. Mensik: Match O/U 22.5",
+      "reason": "ambiguous_market_shape"
+    },
+    {
+      "market_slug": "atp-tirante-mensik-2026-08-19-set-2-total-9pt5",
+      "outcome": "Over",
+      "question": "Tirante vs. Mensik: Set 2 Games O/U 9.5",
+      "reason": "ambiguous_market_shape"
+    },
+    {
+      "market_slug": "atp-tirante-mensik-2026-08-19-set-2-total-9pt5",
+      "outcome": "Under",
+      "question": "Tirante vs. Mensik: Set 2 Games O/U 9.5",
+      "reason": "ambiguous_market_shape"
+    },
+    {
+      "market_slug": "atp-tirante-mensik-2026-08-19-set-handicap-away-1pt5",
+      "outcome": "Mensik",
+      "question": "Set Handicap: Mensik (-1.5) vs Tirante (+1.5)",
+      "reason": "ambiguous_market_shape"
+    },
+    {
+      "market_slug": "atp-tirante-mensik-2026-08-19-set-handicap-away-1pt5",
+      "outcome": "Tirante",
+      "question": "Set Handicap: Mensik (-1.5) vs Tirante (+1.5)",
+      "reason": "ambiguous_market_shape"
+    },
+    {
+      "market_slug": "atp-tirante-mensik-2026-08-19-first-set-total-10pt5",
+      "outcome": "Over",
+      "question": "Tirante vs. Mensik: Set 1 Games O/U 10.5",
+      "reason": "ambiguous_market_shape"
+    },
+    {
+      "market_slug": "atp-tirante-mensik-2026-08-19-first-set-total-10pt5",
+      "outcome": "Under",
+      "question": "Tirante vs. Mensik: Set 1 Games O/U 10.5",
+      "reason": "ambiguous_market_shape"
+    }
+  ],
+  "token_map_joins": 0,
+  "unmapped_or_rejected_rows": 30,
+  "worldcup_winner_token_joins": 0,
+  "worldcup_winner_tokens_available": 2
+}

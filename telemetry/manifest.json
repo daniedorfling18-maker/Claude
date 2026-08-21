@@ -1,0 +1,12 @@
+{
+  "checkout_git_rev": "036d09be26a0d0f7d9cba5a049e468b688decd70",
+  "deployed_git_rev": "036d09be26a0d0f7d9cba5a049e468b688decd70",
+  "disk_used_percent": "65%",
+  "divergence_started_at_utc": "",
+  "host": "polymarket-trader",
+  "live_trading_invoked": false,
+  "paper_trading_invoked": false,
+  "pushed_at_utc": "2026-08-21T02:00:09Z",
+  "source_git_rev": "036d09be26a0d0f7d9cba5a049e468b688decd70",
+  "source_observed_at_utc": "2026-08-21T02:00:09Z"
+}

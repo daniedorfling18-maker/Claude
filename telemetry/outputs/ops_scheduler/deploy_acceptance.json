@@ -1,0 +1,190 @@
+{
+  "baseline_captured_at_utc": "2026-07-19T18:36:07.430229+00:00",
+  "baseline_path": "outputs/ops_scheduler/deploy_acceptance_baseline.json",
+  "body_file": "outputs/ops_scheduler/deploy_acceptance_notification.md",
+  "checks": [
+    {
+      "defects": [],
+      "documents": [
+        {
+          "path": "AGENTS.md",
+          "readable": true,
+          "required_text_present": true
+        },
+        {
+          "path": "CLAUDE.md",
+          "readable": true,
+          "required_text_present": true
+        },
+        {
+          "path": "docs/KEY_CUSTODY_DESIGN_WO67_P5.md",
+          "readable": true,
+          "required_text_present": true
+        }
+      ],
+      "expected_container_mode": "read_only_bind_mount",
+      "id": "governance_documents_mounted_read_only",
+      "status": "PASS"
+    },
+    {
+      "commands": {
+        "collect_maker_replay_data": {
+          "duration_seconds": 9,
+          "exit_code": 0
+        },
+        "decision_policy": {
+          "duration_seconds": 2,
+          "exit_code": 0
+        },
+        "executor_ops_monitor": {
+          "duration_seconds": 2,
+          "exit_code": 0
+        },
+        "maker_carry_study": {
+          "duration_seconds": 68,
+          "exit_code": 0
+        },
+        "maker_fill_replay": {
+          "duration_seconds": 2,
+          "exit_code": 0
+        },
+        "maker_live_test": {
+          "duration_seconds": 4,
+          "exit_code": 0
+        },
+        "operating_state": {
+          "duration_seconds": 3,
+          "exit_code": 0
+        },
+        "reconcile_wallet": {
+          "duration_seconds": 5,
+          "exit_code": 0
+        },
+        "requote_alerts": {
+          "duration_seconds": 3,
+          "exit_code": 0
+        }
+      },
+      "defects": [],
+      "id": "real_current_data_producer_cycle",
+      "observed_at_utc": "2026-08-15T12:19:11Z",
+      "status": "PASS"
+    },
+    {
+      "attribution_history_fresh": true,
+      "attribution_history_rows": 2593,
+      "configured": true,
+      "defects": [],
+      "fills_last_24h_raw": 0.0,
+      "id": "maker_live_test_attribution_freshness",
+      "maker_test_fills_last_24h": 0.0,
+      "observed_at_utc": "2026-08-15T12:18:55Z",
+      "owner_activity_fills_last_24h": 0.0,
+      "producer_status": "ok",
+      "status": "PASS"
+    },
+    {
+      "coverage": "not_applicable_empty_portfolio",
+      "defects": [],
+      "id": "quote_sheet_ticket_completeness",
+      "portfolio_tickets": 0,
+      "quote_sheet_age_seconds": 99.972,
+      "requote_rows": 0,
+      "status": "PASS"
+    },
+    {
+      "collection_windows": 0,
+      "defects": [],
+      "id": "maker_replay_exact_portfolio_collection",
+      "observed_at_utc": "2026-08-15T12:18:44Z",
+      "portfolio_markets": 0,
+      "status": "PASS",
+      "windows_covered": 0
+    },
+    {
+      "alert_state": "quotes_ok",
+      "defects": [],
+      "id": "requote_evaluator_state",
+      "kill_criteria_triggered": [],
+      "legitimate_blocker_rules": [],
+      "missing_input_rules": [],
+      "observed_at_utc": "2026-08-15T12:19:00Z",
+      "producer_status": "inert_empty_quote_sheet",
+      "reason": "inert_empty_quote_sheet",
+      "status": "PASS",
+      "unknown_rules": []
+    },
+    {
+      "defects": [],
+      "id": "three_way_wallet_reconciliation",
+      "legs": {
+        "data_api": {
+          "nav_usd": 12.730349,
+          "status": "reconstruction_incomplete_external_deposit"
+        },
+        "internal": {
+          "nav_usd": 12.923349,
+          "status": "ok"
+        },
+        "onchain": {
+          "nav_usd": 12.730349,
+          "status": "ok"
+        }
+      },
+      "observed_at_utc": "2026-08-15T12:19:03Z",
+      "reconciliation_status": "clean",
+      "status": "PASS"
+    },
+    {
+      "defects": [],
+      "id": "operating_state_unknown_regression",
+      "ignored_self_referential_rows": [
+        "deploy_acceptance"
+      ],
+      "missing_previously_known_rows": [],
+      "new_unknown_rows": [],
+      "observed_at_utc": "2026-08-15T12:19:10Z",
+      "post_deploy_rows": 23,
+      "pre_deploy_rows": 23,
+      "status": "PASS"
+    }
+  ],
+  "contract_registry_status": "PASS",
+  "decision_use": "deployment acceptance and owner alerting only",
+  "diffs": {
+    "governance_documents_mounted_read_only": [],
+    "maker_live_test_attribution_freshness": [],
+    "maker_replay_exact_portfolio_collection": [],
+    "operating_state_unknown_regression": [],
+    "quote_sheet_ticket_completeness": [],
+    "real_current_data_producer_cycle": [],
+    "requote_evaluator_state": [],
+    "three_way_wallet_reconciliation": []
+  },
+  "generated_at_utc": "2026-08-15T12:19:15Z",
+  "live_trading_invoked": false,
+  "notification": {
+    "body_file": "outputs/ops_scheduler/deploy_acceptance_notification.md",
+    "digest": "e19ccab2402c2bd8fc8f0aec95b080723fae5d94fae0a90e9d35827f149af3ec",
+    "eligible": false,
+    "enabled": true,
+    "notify": false,
+    "pattern": "superbru_score_change_state_digest",
+    "state_changed": false,
+    "subject": "Polymarket deploy acceptance: PASS"
+  },
+  "notify": false,
+  "order_amendment_invoked": false,
+  "order_cancellation_invoked": false,
+  "order_placement_invoked": false,
+  "paper_trading_invoked": false,
+  "protected_control_paths_count": 28,
+  "protected_control_paths_hash": "ff29fd2b79ea8d1837cae1933c20e46cf0823e7b40acbf00f45e45ac1c2328b1",
+  "read_only": true,
+  "real_current_data": true,
+  "rollback_ref": "f528adb8937ffc0aac036d4971eb3fd20bd587c0",
+  "state_changed": false,
+  "status": "PASS",
+  "target_deploy_sha": "f160b9caf3816d6f467bdb0811cff3ffead186d9",
+  "work_order": "WO-79"
+}

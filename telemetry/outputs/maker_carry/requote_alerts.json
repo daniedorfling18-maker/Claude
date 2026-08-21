@@ -1,0 +1,83 @@
+{
+  "alert_state": "quotes_ok",
+  "body_file": "outputs/maker_carry/requote_alert_notification.md",
+  "decision_use": "human decision support only; never order authorisation or execution",
+  "generated_at_utc": "2026-08-21T01:41:36Z",
+  "headline": "All quoted markets pass the current read-only checks.",
+  "keyless": true,
+  "kill_criteria_triggered": [],
+  "live_trading_invoked": false,
+  "markets": [
+    {
+      "alert_state": "quotes_ok",
+      "alerts": [],
+      "capital_usd": 470.0,
+      "condition_id": "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+      "end_date_utc": "2026-12-31",
+      "event_start_time_utc": "",
+      "hours_to_scheduled_event": 3166.306,
+      "live_ask": 0.24,
+      "live_bid": 0.23,
+      "live_midpoint": 0.235,
+      "live_price_source": "rest_book_fallback",
+      "live_quote_age_seconds": 0.0,
+      "market_url": "https://polymarket.com/event/mojtaba-khamenei-public-appearance-by",
+      "order_price_min_tick_size": 0.01,
+      "order_ticket_status": "exact",
+      "outcome": "Yes",
+      "question": "Mojtaba Khamenei seen in public by December 31?",
+      "quote_ask_price": 0.25,
+      "quote_bid_price": 0.22,
+      "quote_size_shares": 1000.0,
+      "ticket_metadata_sources": [
+        "maker_carry_study"
+      ],
+      "token_id": "106352973084247809978722887479381361784509565887960822996102387300658431649079",
+      "toxicity_score": 0.448015,
+      "uma_resolution_status": ""
+    }
+  ],
+  "markets_checked": 1,
+  "markets_requiring_action": 0,
+  "notification": {
+    "body_file": "outputs/maker_carry/requote_alert_notification.md",
+    "eligible": false,
+    "enabled": false,
+    "notify": false,
+    "pattern": "superbru_score_change_state_digest",
+    "state_changed": false,
+    "subject": "Polymarket maker quotes: quotes_ok"
+  },
+  "notify": false,
+  "order_amendment_invoked": false,
+  "order_cancellation_invoked": false,
+  "order_placement_invoked": false,
+  "paper_trading_invoked": false,
+  "quote_sheet_generated_at_utc": "2026-08-20T10:46:56Z",
+  "quote_sheet_path": "outputs/maker_carry/maker_quote_sheet.md",
+  "read_only": true,
+  "resolution_lookup_errors": [],
+  "rest_book_fallback": {
+    "books_received": 1,
+    "enabled": true,
+    "errors": [],
+    "missing_tokens": [],
+    "request_limit_per_cycle": 1,
+    "requests_made": 1,
+    "tokens_deferred": [],
+    "tokens_needed": 1,
+    "tokens_requested": 1
+  },
+  "state_changed": false,
+  "status": "ok",
+  "thresholds": {
+    "max_live_quote_age_seconds": 1800.0,
+    "mid_drift_distance_multiple": 1.0,
+    "quote_band_max": 0.9,
+    "quote_band_min": 0.1,
+    "scheduled_event_hours": 24.0,
+    "toxicity_threshold": 0.9
+  },
+  "ticket_completeness_work_order": "WO-77",
+  "work_order": "WO-66"
+}

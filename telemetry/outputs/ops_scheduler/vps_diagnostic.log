@@ -1,0 +1,333 @@
+VPS DIAGNOSTIC 2026-07-11T09:54:20Z host=polymarket-trader
+
+==================== HOST: kernel / uptime / load ====================
+Linux polymarket-trader 6.12.0-203.76.7.3.el9uek.aarch64 #2 SMP Fri Jun  5 00:07:22 PDT 2026 aarch64 aarch64 aarch64 GNU/Linux
+ 09:54:20 up 9 days, 22:05,  1 user,  load average: 1.96, 2.06, 2.30
+
+==================== HOST: memory (MB) ====================
+               total        used        free      shared  buff/cache   available
+Mem:            5642        1018         386           7        4432        4624
+Swap:           4095         359        3736
+
+==================== HOST: disk ====================
+Filesystem                  Size  Used Avail Use% Mounted on
+/dev/mapper/ocivolume-root   30G   22G  8.4G  72% /
+-- largest outputs dirs --
+1.4G	outputs/polymarket_training
+377M	outputs/pregame_checks
+131M	outputs/polymarket_model_governance
+90M	outputs/polymarket_websocket
+48M	outputs/polymarket_price_action
+38M	outputs/polymarket_portfolio
+32M	outputs/polymarket_predictions
+2.7M	outputs/polymarket
+2.3M	outputs/polymarket_training_archive
+1.8M	outputs/polymarket_dashboard
+520K	outputs/ops_scheduler
+460K	outputs/polymarket_shadow
+
+==================== HOST: top 12 processes by CPU ====================
+USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+root     1417382 53.9  7.5 841276 437036 ?       Rl   09:52   0:46 python scripts/run_polymarket_local_live_loop.py --config /app/polymarket_predictive_config.example.yaml --iterations 0 --websocket-seconds 20 --sleep-seconds 10 --prediction-cycle-seconds 30 --prediction-mode paper-bridge --discovery-cycle-seconds 300 --governance-refresh-seconds 120 --prediction-governance-block-seconds 90 --discovery-governance-block-seconds 90 --discovery-max-runtime-seconds 900 --prediction-max-runtime-seconds 600 --governance-max-runtime-seconds 600 --max-assets 80 --paper-source websocket --optimize-model
+root     1417557  0.5  0.0   2408  1488 ?        Ss   09:54   0:00 sh -c sh scripts/run_vps_ops_scheduler.sh
+root       46081  0.4  1.4 2050288 82284 ?       Ssl  Jul01  59:48 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+root           1  0.1  0.2 396144 15672 ?        Ss   Jul01  22:39 /usr/lib/systemd/systemd --switched-root --system --deserialize 28
+root          29  0.1  0.0      0     0 ?        S    Jul01  16:51 [kcompactd0]
+root     1415925  0.1  0.0      0     0 ?        I    09:45   0:00 [kworker/0:3-xfs-buf/dm-0]
+root           2  0.0  0.0      0     0 ?        S    Jul01   0:00 [kthreadd]
+root           3  0.0  0.0      0     0 ?        S    Jul01   0:00 [pool_workqueue_release]
+root           4  0.0  0.0      0     0 ?        I<   Jul01   0:00 [kworker/R-kvfree_rcu_reclaim]
+root           5  0.0  0.0      0     0 ?        I<   Jul01   0:00 [kworker/R-rcu_gp]
+root           6  0.0  0.0      0     0 ?        I<   Jul01   0:00 [kworker/R-sync_wq]
+root           7  0.0  0.0      0     0 ?        I<   Jul01   0:00 [kworker/R-slub_flushwq]
+
+==================== HOST: top 12 processes by memory ====================
+USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+root     1417382 53.9  7.5 841276 437036 ?       Rl   09:52   0:46 python scripts/run_polymarket_local_live_loop.py --config /app/polymarket_predictive_config.example.yaml --iterations 0 --websocket-seconds 20 --sleep-seconds 10 --prediction-cycle-seconds 30 --prediction-mode paper-bridge --discovery-cycle-seconds 300 --governance-refresh-seconds 120 --prediction-governance-block-seconds 90 --discovery-governance-block-seconds 90 --discovery-max-runtime-seconds 900 --prediction-max-runtime-seconds 600 --governance-max-runtime-seconds 600 --max-assets 80 --paper-source websocket --optimize-model
+root       46081  0.4  1.4 2050288 82284 ?       Ssl  Jul01  59:48 /usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+root       46073  0.0  0.6 1883388 39096 ?       Ssl  Jul01  11:51 /usr/bin/containerd
+root     1417624  0.0  0.3 239256 21236 pts/0    S+   09:54   0:00 sudo sh scripts/vps_diagnostic.sh
+oracle-+ 1005795  0.0  0.3 1241140 17540 ?       Sl   Jul07   2:10 /usr/libexec/oracle-cloud-agent/plugins/unifiedmonitoring/unifiedmonitoring
+oracle-+ 1005746  0.0  0.2 1240796 16388 ?       Sl   Jul07   4:07 /usr/libexec/oracle-cloud-agent/plugins/gomon/gomon
+root        1486  0.0  0.2 582780 16100 ?        Ssl  Jul01   0:42 /usr/bin/python3 -s /usr/sbin/firewalld --nofork --nopid
+oracle-+ 1005709  0.0  0.2 1240724 15848 ?       Ssl  Jul07   0:16 /usr/libexec/oracle-cloud-agent/agent
+root           1  0.1  0.2 396144 15672 ?        Ss   Jul01  22:39 /usr/lib/systemd/systemd --switched-root --system --deserialize 28
+root        6753  0.0  0.2 251456 14628 ?        S    Jul01   0:10 /usr/bin/python3 /var/lib/pcp/pmdas/nfsclient/pmdanfsclient.python
+root        1629  0.0  0.2 477344 14012 ?        Ssl  Jul01   0:34 /usr/sbin/NetworkManager --no-daemon
+root     1413064  0.0  0.2 253760 13420 ?        S    09:22   0:00 python scripts/serve_polymarket_dashboard.py --directory /app/outputs/polymarket_dashboard --host 0.0.0.0 --port 8765
+
+==================== HOST: failed systemd units ====================
+  UNIT LOAD ACTIVE SUB DESCRIPTION
+0 loaded units listed.
+
+==================== HOST: journal errors, last 24h (tail 25) ====================
+Jul 10 20:37:13 polymarket-trader sshd[1351858]: error: kex_exchange_identification: Connection closed by remote host
+Jul 10 20:37:19 polymarket-trader sshd[1351861]: error: kex_exchange_identification: Connection closed by remote host
+Jul 10 21:16:58 polymarket-trader sshd[1354429]: error: kex_exchange_identification: Connection closed by remote host
+Jul 10 21:56:59 polymarket-trader sshd[1357694]: error: kex_exchange_identification: Connection closed by remote host
+Jul 10 22:31:52 polymarket-trader sshd[1360084]: error: kex_exchange_identification: Connection closed by remote host
+Jul 10 23:18:56 polymarket-trader sshd[1362949]: error: kex_exchange_identification: Connection closed by remote host
+Jul 10 23:24:50 polymarket-trader sshd[1363144]: error: kex_exchange_identification: read: Connection reset by peer
+Jul 10 23:46:21 polymarket-trader sshd[1364918]: error: kex_exchange_identification: Connection closed by remote host
+Jul 10 23:47:49 polymarket-trader sshd[1364986]: error: kex_exchange_identification: Connection closed by remote host
+Jul 11 00:35:38 polymarket-trader sshd[1369312]: error: kex_exchange_identification: Connection closed by remote host
+Jul 11 00:44:55 polymarket-trader sshd[1369599]: error: kex_exchange_identification: Connection closed by remote host
+Jul 11 02:20:51 polymarket-trader sshd[1375925]: error: kex_exchange_identification: Connection closed by remote host
+Jul 11 04:11:50 polymarket-trader sshd[2271]: error: beginning MaxStartups throttling
+Jul 11 04:23:14 polymarket-trader sshd[1385304]: error: kex_exchange_identification: read: Connection reset by peer
+Jul 11 05:04:12 polymarket-trader sshd[1388444]: error: kex_exchange_identification: banner line contains invalid characters
+Jul 11 05:09:31 polymarket-trader sshd[1388604]: error: kex_exchange_identification: Connection closed by remote host
+Jul 11 05:16:16 polymarket-trader sshd[1388852]: error: kex_exchange_identification: Connection closed by remote host
+Jul 11 05:37:25 polymarket-trader sshd[1390556]: error: kex_exchange_identification: Connection closed by remote host
+Jul 11 05:38:16 polymarket-trader sshd[1390576]: error: kex_exchange_identification: Connection closed by remote host
+Jul 11 06:27:38 polymarket-trader sshd[1394001]: error: kex_exchange_identification: Connection closed by remote host
+Jul 11 06:40:45 polymarket-trader sshd[1394635]: error: kex_exchange_identification: Connection closed by remote host
+Jul 11 07:00:02 polymarket-trader sshd[1396258]: error: kex_exchange_identification: read: Connection reset by peer
+Jul 11 07:34:19 polymarket-trader sshd[1398172]: error: kex_exchange_identification: read: Connection reset by peer
+Jul 11 08:34:39 polymarket-trader sshd[1404906]: error: kex_exchange_identification: read: Connection reset by peer
+Jul 11 09:04:11 polymarket-trader sshd[1409902]: error: kex_exchange_identification: Connection closed by remote host
+
+==================== HOST: listening sockets ====================
+State  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess                                                    
+LISTEN 0      5          127.0.0.1:4330       0.0.0.0:*    users:(("pmlogger",pid=3564,fd=7))                        
+LISTEN 0      5          127.0.0.1:44321      0.0.0.0:*    users:(("pmcd",pid=2752,fd=0))                            
+LISTEN 0      128          0.0.0.0:22         0.0.0.0:*    users:(("sshd",pid=2271,fd=3))                            
+LISTEN 0      4096         0.0.0.0:111        0.0.0.0:*    users:(("rpcbind",pid=1442,fd=4),("systemd",pid=1,fd=121))
+LISTEN 0      4096         0.0.0.0:8765       0.0.0.0:*    users:(("docker-proxy",pid=1412948,fd=8))                 
+LISTEN 0      5              [::1]:44321         [::]:*    users:(("pmcd",pid=2752,fd=3))                            
+LISTEN 0      128             [::]:22            [::]:*    users:(("sshd",pid=2271,fd=4))                            
+LISTEN 0      4096            [::]:111           [::]:*    users:(("rpcbind",pid=1442,fd=6),("systemd",pid=1,fd=123))
+LISTEN 0      5              [::1]:4330          [::]:*    users:(("pmlogger",pid=3564,fd=8))                        
+
+==================== REPO: git state ====================
+fbf1f0d
+main
+dirty files: 286
+
+==================== CRON: telemetry + user jobs ====================
+*/30 * * * * /home/opc/Claude/scripts/push_vps_telemetry.sh >> $HOME/vps_telemetry_push.log 2>&1
+-- last telemetry pushes --
+2026-07-11T08:30:02Z pushed telemetry snapshot 6c70de4783742ce4eba84e23a64e0048755d3261 to vps-telemetry
+2026-07-11T09:00:02Z pushed telemetry snapshot 85abc9d21e915ca25eef8bc72fa2f698df91903e to vps-telemetry
+2026-07-11T09:30:02Z pushed telemetry snapshot ec23ef9b3ced6940b3a0af839d31d5cae75cb42b to vps-telemetry
+
+==================== DOCKER: system df ====================
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          1         1         2.743GB   0B (0%)
+Containers      4         4         319.5kB   0B (0%)
+Local Volumes   0         0         0B        0B
+Build Cache     15        0         2.587GB   5.722MB
+
+==================== DOCKER: containers (status, restarts, health) ====================
+NAMES                         STATUS                        CREATED
+vps-ops-scheduler             Up 4 seconds                  16 seconds ago
+superbru-auto-pick-watchdog   Up 31 minutes                 31 minutes ago
+polymarket-dashboard          Up 31 minutes                 31 minutes ago
+polymarket-paper-live         Up About a minute (healthy)   32 minutes ago
+-- vps-ops-scheduler: restarts=0 health=none oom=false
+-- superbru-auto-pick-watchdog: restarts=0 health=none oom=false
+-- polymarket-dashboard: restarts=0 health=none oom=false
+-- polymarket-paper-live: restarts=2 health=healthy oom=false
+
+==================== DOCKER: live resource usage ====================
+CONTAINER ID   NAME                          CPU %     MEM USAGE / LIMIT   MEM %     NET I/O          BLOCK I/O         PIDS
+db9537fd9f6b   vps-ops-scheduler             0.00%     1012KiB / 2GiB      0.05%     586B / 126B      582kB / 34.8kB    3
+f4955a3d1c7d   superbru-auto-pick-watchdog   0.00%     35.64MiB / 1GiB     3.48%     17MB / 1.15MB    1.19GB / 343MB    3
+0f29535f1294   polymarket-dashboard          0.01%     6.668MiB / 256MiB   2.60%     1.37MB / 461MB   84.9MB / 22.1MB   2
+a9ed786d93b7   polymarket-paper-live         98.56%    384.9MiB / 4GiB     9.40%     236kB / 20kB     2.56GB / 225MB    4
+
+==================== CONTAINER vps-ops-scheduler: processes ====================
+UID                 PID                 PPID                C                   STIME               TTY                 TIME                CMD
+root                1417557             1417534             0                   09:54               ?                   00:00:00            sh -c sh scripts/run_vps_ops_scheduler.sh
+root                1417591             1417557             0                   09:54               ?                   00:00:00            sh scripts/run_vps_ops_scheduler.sh
+root                1417623             1417591             0                   09:54               ?                   00:00:00            sleep 300
+
+==================== CONTAINER vps-ops-scheduler: log tail (40) ====================
+2026-07-11T09:54:17Z vps-ops-scheduler starting: governance=21600s clv=28800s card=43200s harvest=86400s tick=300s
+
+==================== CONTAINER superbru-auto-pick-watchdog: processes ====================
+UID                 PID                 PPID                C                   STIME               TTY                 TIME                CMD
+root                1412895             1412822             0                   09:22               ?                   00:00:00            sh -c sh scripts/run_superbru_auto_pick_watchdog.sh
+root                1412974             1412895             0                   09:22               ?                   00:00:00            sh scripts/run_superbru_auto_pick_watchdog.sh
+root                1415688             1412974             0                   09:40               ?                   00:00:00            sleep 900
+
+==================== CONTAINER superbru-auto-pick-watchdog: log tail (40) ====================
+
+==================== CONTAINER polymarket-dashboard: processes ====================
+UID                 PID                 PPID                C                   STIME               TTY                 TIME                CMD
+root                1412873             1412805             0                   09:22               ?                   00:00:00            sh -c mkdir -p /app/outputs/polymarket_dashboard && python scripts/render_polymarket_dashboard.py --config /app/polymarket_predictive_config.example.yaml || true; python scripts/serve_polymarket_dashboard.py --directory /app/outputs/polymarket_dashboard --host 0.0.0.0 --port 8765
+root                1413064             1412873             0                   09:22               ?                   00:00:00            python scripts/serve_polymarket_dashboard.py --directory /app/outputs/polymarket_dashboard --host 0.0.0.0 --port 8765
+
+==================== CONTAINER polymarket-dashboard: log tail (40) ====================
+41.10.69.233 - - [11/Jul/2026 09:51:18] "GET /dashboard_data.json?proof_ts=1783763478494 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:51:18] "GET /dashboard_data.json?ts=1783763478494 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:51:23] "GET /dashboard_data.json?ts=1783763483500 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:51:23] "GET /dashboard_data.json?proof_ts=1783763483500 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:51:28] "GET /dashboard_data.json?proof_ts=1783763488499 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:51:28] "GET /dashboard_data.json?ts=1783763488499 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:51:33] "GET /dashboard_data.json?proof_ts=1783763493489 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:51:33] "GET /dashboard_data.json?ts=1783763493489 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:51:38] "GET /dashboard_data.json?ts=1783763498498 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:51:38] "GET /dashboard_data.json?proof_ts=1783763498498 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:51:43] "GET /dashboard_data.json?ts=1783763503492 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:51:43] "GET /dashboard_data.json?proof_ts=1783763503492 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:51:48] "GET /dashboard_data.json?ts=1783763508499 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:51:48] "GET /dashboard_data.json?proof_ts=1783763508499 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:51:53] "GET /dashboard_data.json?ts=1783763513513 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:51:53] "GET /dashboard_data.json?proof_ts=1783763513513 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:51:58] "GET /dashboard_data.json?ts=1783763518498 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:51:58] "GET /dashboard_data.json?proof_ts=1783763518498 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:52:03] "GET /dashboard_data.json?ts=1783763523497 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:52:03] "GET /dashboard_data.json?proof_ts=1783763523497 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:52:08] "GET /dashboard_data.json?proof_ts=1783763528498 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:52:08] "GET /dashboard_data.json?ts=1783763528498 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:52:13] "GET /dashboard_data.json?ts=1783763533497 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:52:13] "GET /dashboard_data.json?proof_ts=1783763533497 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:52:18] "GET /dashboard_data.json?proof_ts=1783763538498 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:52:18] "GET /dashboard_data.json?ts=1783763538497 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:52:23] "GET /dashboard_data.json?ts=1783763543498 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:52:23] "GET /dashboard_data.json?proof_ts=1783763543499 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:52:28] "GET /dashboard_data.json?ts=1783763548498 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:52:28] "GET /dashboard_data.json?proof_ts=1783763548498 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:52:33] "GET /dashboard_data.json?ts=1783763553494 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:52:33] "GET /dashboard_data.json?proof_ts=1783763553494 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:52:38] "GET /dashboard_data.json?ts=1783763558497 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:52:38] "GET /dashboard_data.json?proof_ts=1783763558498 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:52:43] "GET /dashboard_data.json?ts=1783763563496 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:52:43] "GET /dashboard_data.json?proof_ts=1783763563497 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:52:48] "GET /dashboard_data.json?ts=1783763568497 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:52:48] "GET /dashboard_data.json?proof_ts=1783763568497 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:53:26] "GET /dashboard_data.json?proof_ts=1783763606498 HTTP/1.1" 200 -
+41.10.69.233 - - [11/Jul/2026 09:53:26] "GET /dashboard_data.json?ts=1783763606497 HTTP/1.1" 200 -
+
+==================== CONTAINER polymarket-paper-live: processes ====================
+UID                 PID                 PPID                C                   STIME               TTY                 TIME                CMD
+root                1417351             1417327             0                   09:52               ?                   00:00:00            sh -c python scripts/run_polymarket_local_live_loop.py --config /app/polymarket_predictive_config.example.yaml --iterations ${PAPER_LOOP_ITERATIONS} --websocket-seconds ${POLYMARKET_WEBSOCKET_SECONDS} --sleep-seconds ${POLYMARKET_LIVE_LOOP_SLEEP_SECONDS} --prediction-cycle-seconds ${PAPER_PREDICTION_CYCLE_SECONDS} --prediction-mode ${POLYMARKET_PREDICTION_MODE} --discovery-cycle-seconds ${POLYMARKET_DISCOVERY_CYCLE_SECONDS} --governance-refresh-seconds ${POLYMARKET_GOVERNANCE_REFRESH_SECONDS} --prediction-governance-block-seconds ${POLYMARKET_PREDICTION_GOVERNANCE_BLOCK_SECONDS} --discovery-governance-block-seconds ${POLYMARKET_DISCOVERY_GOVERNANCE_BLOCK_SECONDS} --discovery-max-runtime-seconds ${POLYMARKET_DISCOVERY_MAX_RUNTIME_SECONDS} --prediction-max-runtime-seconds ${POLYMARKET_PREDICTION_MAX_RUNTIME_SECONDS} --governance-max-runtime-seconds ${POLYMARKET_GOVERNANCE_MAX_RUNTIME_SECONDS} --max-assets ${POLYMARKET_WEBSOCKET_MAX_ASSETS} --paper-source websocket --optimize-model
+root                1417382             1417351             54                  09:52               ?                   00:00:49            python scripts/run_polymarket_local_live_loop.py --config /app/polymarket_predictive_config.example.yaml --iterations 0 --websocket-seconds 20 --sleep-seconds 10 --prediction-cycle-seconds 30 --prediction-mode paper-bridge --discovery-cycle-seconds 300 --governance-refresh-seconds 120 --prediction-governance-block-seconds 90 --discovery-governance-block-seconds 90 --discovery-max-runtime-seconds 900 --prediction-max-runtime-seconds 600 --governance-max-runtime-seconds 600 --max-assets 80 --paper-source websocket --optimize-model
+
+==================== CONTAINER polymarket-paper-live: log tail (40) ====================
+local-live-loop: started; press Ctrl+C to stop
+local-live-loop iteration=1 messages=183 latest_features=388 retained_features=59111 snapshots_inserted=92 equity=1048.631135349166 dashboard=updated
+2026-07-11T09:25:15+00:00 discovered events=3 tokens=6 model_probabilities=2 positions=0
+2026-07-11T09:25:16+00:00 discovered events=8 tokens=220 model_probabilities=2 positions=0
+2026-07-11T09:26:07+00:00 discovered events=8 tokens=204 model_probabilities=2 positions=0
+2026-07-11T09:27:02+00:00 discovered events=8 tokens=92 model_probabilities=2 positions=0
+local-live-loop iteration=2 messages=90 latest_features=201 retained_features=59166 snapshots_inserted=73 equity=1048.631135349166 dashboard=updated
+SCAN BUY Yes edge=0.3200 price=0.1800 size_usd=5.00 Will South America (CONMEBOL) win the 2026 FIFA World Cup?
+2026-07-11T09:27:33+00:00 discovered events=8 tokens=294 model_probabilities=2 positions=0
+2026-07-11T09:28:49+00:00 discovered events=8 tokens=84 model_probabilities=2 positions=0
+2026-07-11T09:29:14+00:00 discovered events=8 tokens=316 model_probabilities=2 positions=0
+2026-07-11T09:35:36+00:00 discovered events=8 tokens=88 model_probabilities=2 positions=0
+local-live-loop iteration=3 messages=104 latest_features=230 retained_features=59396 snapshots_inserted=72 equity=1048.631135349166 dashboard=updated
+local-live-loop: started; press Ctrl+C to stop
+local-live-loop iteration=1 messages=47 latest_features=115 retained_features=59080 snapshots_inserted=61 equity=1048.631135349166 dashboard=updated
+2026-07-11T09:40:40+00:00 discovered events=4 tokens=20 model_probabilities=2 positions=0
+2026-07-11T09:40:44+00:00 discovered events=8 tokens=220 model_probabilities=2 positions=0
+2026-07-11T09:41:37+00:00 discovered events=8 tokens=204 model_probabilities=2 positions=0
+local-live-loop iteration=2 messages=59 latest_features=139 retained_features=59080 snapshots_inserted=69 equity=1048.631135349166 dashboard=updated
+2026-07-11T09:42:26+00:00 discovered events=8 tokens=92 model_probabilities=2 positions=0
+SCAN BUY Yes edge=0.3200 price=0.1800 size_usd=5.00 Will South America (CONMEBOL) win the 2026 FIFA World Cup?
+2026-07-11T09:42:48+00:00 discovered events=8 tokens=286 model_probabilities=2 positions=0
+2026-07-11T09:44:02+00:00 discovered events=8 tokens=84 model_probabilities=2 positions=0
+local-live-loop iteration=3 messages=57 latest_features=135 retained_features=59052 snapshots_inserted=63 equity=1048.631135349166 dashboard=updated
+2026-07-11T09:44:24+00:00 discovered events=8 tokens=326 model_probabilities=2 positions=0
+2026-07-11T09:45:49+00:00 discovered events=8 tokens=88 model_probabilities=2 positions=0
+local-live-loop iteration=4 messages=70 latest_features=161 retained_features=59106 snapshots_inserted=63 equity=1048.631135349166 dashboard=updated
+local-live-loop iteration=5 messages=82 latest_features=185 retained_features=59190 snapshots_inserted=77 equity=1048.631135349166 dashboard=updated
+local-live-loop iteration=6 messages=57 latest_features=135 retained_features=59174 snapshots_inserted=69 equity=1048.631135349166 dashboard=updated
+local-live-loop: started; press Ctrl+C to stop
+local-live-loop iteration=1 messages=53 latest_features=127 retained_features=59301 snapshots_inserted=55 equity=1048.631135349166 dashboard=updated
+
+==================== APP: scheduler job status ====================
+{
+  "generated_at_utc": "2026-07-11T09:54:18.033973+00:00",
+  "jobs": {
+    "clv_snapshot": {
+      "detail": "snapshot + report (extract-picks best-effort: VPS-side card edits are uncommitted)",
+      "last_exit_code": 0,
+      "last_run_utc": "2026-07-11T07:40:30.736130+00:00"
+    },
+    "governance_refresh": {
+      "detail": "refresh-governance via ops scheduler",
+      "last_exit_code": 124,
+      "last_run_utc": "2026-07-11T07:40:15.007585+00:00"
+    },
+    "locked_card_refresh": {
+      "detail": "full locked-card chain (see ops_scheduler.log)",
+      "last_exit_code": 1,
+      "last_run_utc": "2026-07-11T07:43:07.036529+00:00"
+    },
+    "scheduler": {
+      "detail": "started",
+      "last_exit_code": 0,
+      "last_run_utc": "2026-07-11T09:54:18.033925+00:00"
+    },
+    "trade_prints": {
+      "detail": "data-api /trades for tracked markets + event-group and implication consistency scans",
+      "last_exit_code": 0,
+      "last_run_utc": "2026-07-11T09:44:44.253091+00:00"
+    },
+    "training_harvest": {
+      "detail": "gamma resolved-markets backfill + clob price histories + wallet intelligence + maker-carry study + maker-fill replay + flow toxicity + reconstructed CLV study + calibration-bias study + martingale drift scan",
+      "last_exit_code": 0,
+      "last_run_utc": "2026-07-11T07:51:00.313707+00:00"
+    }
+  },
+  "mode": "vps_ops_scheduler"
+}
+
+==================== APP: scheduler log tail (30) ====================
+  "work_order": "WO-34"
+}
+{
+  "best_net_violation_by_class": {},
+  "classified_legs": 26,
+  "deviation_threshold_per_basket": 0.005,
+  "errors": [],
+  "events_scanned": 300,
+  "flagged_by_class": {},
+  "flagged_deviations": 0,
+  "generated_at_utc": "2026-07-11T09:44:21Z",
+  "ledger_path": "outputs/implication_consistency/implication_deviations.csv",
+  "ledger_rows": 0,
+  "live_trading_invoked": false,
+  "note": "Measurement-only Frechet/Boole implication consistency scan. Rows are structural deviation evidence only; no signals, gates, order placement, amendment, or cancellation are invoked.",
+  "paper_trading_invoked": false,
+  "status": "ok",
+  "work_order": "WO-41"
+}
+{
+  "generated_at_utc": "2026-07-11T09:44:43Z",
+  "how_to_enable": "set maker_live_test.wallet_address in config.yaml to the funded wallet, then recreate the containers.",
+  "live_trading_invoked": false,
+  "note": "READ-ONLY scoreboard for a human-run experiment. This system never places orders; it only watches the wallet the human chose to trade from.",
+  "paper_trading_invoked": false,
+  "status": "awaiting_wallet_address",
+  "work_order": "WO-36"
+}
+2026-07-11T09:44:44Z trade_prints: exit 0
+2026-07-11T09:54:17Z vps-ops-scheduler starting: governance=21600s clv=28800s card=43200s harvest=86400s tick=300s
+
+==================== APP: freshest decision artifacts ====================
+total 68
+drwxr-xr-x. 43 opc  opc   4096 Jul 11 09:53 ..
+drwxr-xr-x.  3 root root  4096 Jul 11 09:44 .
+-rw-r--r--.  1 root root   457 Jul 11 09:44 maker_live_test.json
+-rw-r--r--.  1 root root  2370 Jul 11 09:23 maker_quote_sheet.md
+-rw-r--r--.  1 root root  2317 Jul 11 09:23 decision_policy.json
+-rw-r--r--.  1 root root   468 Jul 11 07:50 flow_toxicity_summary.json
+-rw-r--r--.  1 root root   178 Jul 11 07:50 flow_toxicity.csv
+-rw-r--r--.  1 root root   418 Jul 11 07:50 maker_fill_replay.json
+-rw-r--r--.  1 root root   471 Jul 11 07:50 official_book_snapshot.json
+drwxr-xr-x.  2 root root    87 Jul 11 07:50 official_books
+-rw-r--r--.  1 root root   301 Jul 11 07:50 maker_carry_history.csv
+total 133696
+drwxr-xr-x.  2 opc  opc      8192 Jul 11 09:54 .
+-rw-r--r--.  1 root root      420 Jul 11 09:54 websocket_metadata_enrichment_summary.json
+-rw-r--r--.  1 root root     2255 Jul 11 09:54 websocket_feature_summary.json
+-rw-r--r--.  1 root root       90 Jul 11 09:54 websocket_feature_quality_report.csv
+-rw-r--r--.  1 root root    22055 Jul 11 09:54 websocket_liquidity_targets.csv
+-rw-r--r--.  1 root root      409 Jul 11 09:54 runtime_resource_guard.json
+-rw-r--r--.  1 root root   253073 Jul 11 09:54 live_paper_bridge_cycle.json
+
+==================== END DIAGNOSTIC ====================

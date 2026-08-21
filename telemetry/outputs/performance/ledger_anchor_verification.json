@@ -1,0 +1,19 @@
+{
+  "as_of_date": null,
+  "chain_path": "outputs/performance/ledger_anchor_chain.csv",
+  "first_broken_date": null,
+  "generated_at_utc": "2026-08-20T15:21:37Z",
+  "issues": [],
+  "ledger_prefixes_checked": 837,
+  "links_checked": 26,
+  "live_trading_invoked": false,
+  "missing_at_anchor_tolerated": 208,
+  "paper_trading_invoked": false,
+  "restore_boundary_date": null,
+  "restore_provenance_rejected": null,
+  "restore_tolerated_prefixes": [],
+  "restored_unverifiable_tolerated": 0,
+  "status": "ok",
+  "verified_chain_head": "162c8adc0bfb417c715ab5e3b601f8895a308ac40ad942eaf3cc6d2debd00663",
+  "verified_through_date": "2026-08-20"
+}

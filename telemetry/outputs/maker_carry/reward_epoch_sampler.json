@@ -1,0 +1,26 @@
+{
+  "generated_at_utc": "2026-08-20T10:47:46Z",
+  "live_trading_invoked": false,
+  "note": "Collection only: missing or empty candidates, or a missing/inactive study, append nothing and report status no_candidates/no_study; malformed numeric fields are written through unchanged; no gate, sizing, or order surface reads this artifact.",
+  "paper_trading_invoked": false,
+  "rows_sampled": 41,
+  "runtime_lock": {
+    "acquired": true,
+    "existing_payload": {},
+    "name": "reward_epoch_sampler",
+    "path": "outputs/polymarket_runtime/reward_epoch_sampler.lock",
+    "payload": {
+      "acquired_at_utc": "2026-08-20T10:47:46Z",
+      "name": "reward_epoch_sampler",
+      "pid": 264927,
+      "process_started_at_utc": "2026-08-20T10:47:44Z"
+    },
+    "stale_lock_reason": "",
+    "stale_lock_replaced": false
+  },
+  "status": "ok",
+  "study_generated_at_utc": "2026-08-20T10:46:56Z",
+  "study_status": "ok",
+  "total_rows": 2797,
+  "work_order": "WO-106"
+}

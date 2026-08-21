@@ -1,0 +1,41 @@
+{
+  "errors": [],
+  "generated_at_utc": "2026-08-20T03:07:34Z",
+  "holder_empty_successes": 0,
+  "holder_groups_seen": 80,
+  "holder_leaderboard_overlap_count": 4,
+  "holder_leaderboard_overlap_wallets": [
+    "0x44c1dfe43260c94ed4f1d00de2e1f80fb113ebc1",
+    "0x9d84ce0306f8551e02efef1680475fc0f1dc1344",
+    "0xcc500cbcc8b7cf5bd21975ebbea34f21b5644c82",
+    "0xf705fa045201391d9632b7f3cde06a5e24453ca7"
+  ],
+  "holder_payload_schema": "token_groups",
+  "holder_rows": 50041,
+  "holder_rows_added": 1418,
+  "holders_history_path": "outputs/wallet_intelligence/holders_history.csv",
+  "leaderboard_history_path": "outputs/wallet_intelligence/leaderboard_history.csv",
+  "leaderboard_probe_params": {
+    "category": "OVERALL",
+    "complete": true,
+    "orderBy": "PNL",
+    "page_limit": 50,
+    "pages": 2,
+    "path": "/v1/leaderboard",
+    "requested_limit": 100,
+    "timePeriod": "ALL"
+  },
+  "leaderboard_rows": 3609,
+  "leaderboard_rows_added": 100,
+  "live_trading_invoked": false,
+  "markets_polled": 40,
+  "note": "Collection-only wallet intelligence. Overlap between current holders and the latest leaderboard is a reporting scalar only; it does not feed gates or trading decisions.",
+  "paper_trading_invoked": false,
+  "status": "ok",
+  "tracked_market_sources": {
+    "maker_carry_candidates": 11,
+    "websocket_features": 29
+  },
+  "wallets_seen": 1146,
+  "work_order": "WO-37"
+}

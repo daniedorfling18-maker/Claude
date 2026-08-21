@@ -1,0 +1,93 @@
+{
+  "decision_use": "market_efficiency_evidence_monitoring_only_not_trade_authorisation",
+  "evidence_window_status": "collecting_market_efficiency_evidence",
+  "generated_at_utc": "2026-07-09T04:12:07.221972Z",
+  "latest_snapshot": {
+    "coverage_join_rate": null,
+    "coverage_status": "ok",
+    "coverage_total_rows_fetched": 0,
+    "coverage_total_rows_mapped": 0,
+    "coverage_zero_join_flags": 0,
+    "dashboard_port": "8765",
+    "errors": [],
+    "generated_at_utc": "2026-07-09T04:12:07.221972Z",
+    "leading_streams_good_count": 0,
+    "odds_api_requests_remaining": null,
+    "origin_main_sha": "4f9c76056615dad4f95c3acda57250502229942a",
+    "paper_stream_good": false,
+    "proof_status": "warn",
+    "question_severities": {
+      "Audited paper P&L positive after governed probes?": "warn",
+      "Dutch-arb persistent opportunities?": "warn",
+      "Focus-view CLV positive with enough samples?": "warn",
+      "Sharp-anchor rows mapped?": "warn"
+    },
+    "questions": [
+      {
+        "answer": "No fetched sharp-anchor rows yet; confirm Odds API health and the fetch cadence before judging edge.",
+        "decision_use": "Confirms the highest-prior bookmaker edge is reaching Polymarket tokens and current candidates.",
+        "key_metric": "fetched=0; mapped=0; scored_hits=20; zero_join_flags=0",
+        "question": "Sharp-anchor rows mapped?",
+        "severity": "warn"
+      },
+      {
+        "answer": "Maybe: 1 complete basket(s) appeared, but none are persistent yet. Best ask sum: 0.998.",
+        "decision_use": "Mechanical edge candidate; still dry-run only until execution/fill reality is reviewed.",
+        "key_metric": "persistent=0; complete_now=1; best_ask_sum=0.998",
+        "question": "Dutch-arb persistent opportunities?",
+        "severity": "warn"
+      },
+      {
+        "answer": "Not enough yet: focus final lines 0/12; keep collecting non-up/down CLV.",
+        "decision_use": "Excludes frozen crypto up/down diagnostics and measures whether focus cohorts beat later market lines.",
+        "key_metric": "focus_final=0/12; focus_mean_final_clv=None; positive=0",
+        "question": "Focus-view CLV positive with enough samples?",
+        "severity": "warn"
+      },
+      {
+        "answer": "No: quote-supported decision P&L is $0.00; proof status=unverified_paper_run_rate; trips 0/5.",
+        "decision_use": "Only quote-supported paper P&L can move the $100 goal; raw ledger run-rate is not proof.",
+        "key_metric": "decision_pnl=0.0; evidence_trips=0/5; proof_status=unverified_paper_run_rate",
+        "question": "Audited paper P&L positive after governed probes?",
+        "severity": "warn"
+      }
+    ],
+    "runtime_diff": [],
+    "sharp_fetch_health": "ok",
+    "sharp_fetch_status": "skipped_budget",
+    "sharp_rows_written_or_fetched": null,
+    "vps_sha": "4f9c76056615dad4f95c3acda57250502229942a",
+    "warnings": [
+      "Sharp fetch is currently skipped by fetch-interval budget; this is acceptable if recent provider data exists.",
+      "WO-31 coverage has zero fetched rows; if sharp fetch is live, this needs review after the next fetch cycle."
+    ],
+    "workflow_sha": "4f9c76056615dad4f95c3acda57250502229942a"
+  },
+  "leading_bad_counts": {
+    "Dutch-arb persistent opportunities?": 0,
+    "Focus-view CLV positive with enough samples?": 0,
+    "Sharp-anchor rows mapped?": 0
+  },
+  "leading_good_counts": {
+    "Dutch-arb persistent opportunities?": 0,
+    "Focus-view CLV positive with enough samples?": 0,
+    "Sharp-anchor rows mapped?": 27
+  },
+  "leading_warn_counts": {
+    "Dutch-arb persistent opportunities?": 29,
+    "Focus-view CLV positive with enough samples?": 29,
+    "Sharp-anchor rows mapped?": 2
+  },
+  "live_trading_invoked": false,
+  "operational_error_runs": 8,
+  "paper_trading_invoked": false,
+  "recent_observed_hours": 91.16,
+  "recent_snapshot_count": 29,
+  "recent_window_days": 21,
+  "sharp_attention_runs": 1,
+  "snapshot_path": "/home/opc/Claude/outputs/polymarket_model_governance/proof_health_snapshots.jsonl",
+  "status": "ok",
+  "summary_path": "/home/opc/Claude/outputs/polymarket_model_governance/proof_health_summary.json",
+  "total_snapshot_count": 29,
+  "zero_join_flag_runs": 9
+}

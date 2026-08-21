@@ -1,0 +1,31 @@
+source,sport,market_key,market_slug,outcome,anchor_timestamp_utc,normalized_row,priced_row,complete_market_row,polymarket_token_eligible,mapped_row,joined_row,token_id,join_source,anchor_probability,mapping_status,blocker
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Oklahoma City Thunder,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.240578,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,San Antonio Spurs,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.208508,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Philadelphia 76ers,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.102798,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,New York Knicks,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.07701,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Boston Celtics,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.053466,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Miami Heat,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.033437,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Denver Nuggets,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.031479,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Cleveland Cavaliers,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.029457,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Toronto Raptors,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.026943,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Minnesota Timberwolves,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.026794,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Detroit Pistons,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.026243,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Golden State Warriors,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.022772,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Los Angeles Lakers,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.017945,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Indiana Pacers,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.016828,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Houston Rockets,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.014004,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Atlanta Hawks,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.010203,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Orlando Magic,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.008595,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Portland Trail Blazers,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.008595,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Charlotte Hornets,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.008183,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Washington Wizards,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.007445,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Phoenix Suns,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.006382,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Dallas Mavericks,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.005289,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Utah Jazz,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.005014,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,New Orleans Pelicans,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.002445,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Los Angeles Clippers,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.00208,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Memphis Grizzlies,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.001648,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Milwaukee Bucks,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.001648,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Chicago Bulls,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.001646,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Brooklyn Nets,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.001308,unmapped,unmapped_sharp_anchor_row
+pinnacle,basketball_nba_championship_winner,outrights,basketball-nba-championship-winner,Sacramento Kings,2026-08-19T07:59:41Z,1,1,1,0,0,0,,,0.001258,unmapped,unmapped_sharp_anchor_row

@@ -1,0 +1,20 @@
+{
+  "clean_label_count": 4668,
+  "detected_leakage_columns": [],
+  "historical_feature_rows": 0,
+  "input_rows": {
+    "raw_snapshot": 229030
+  },
+  "lineage_file": "outputs/polymarket_model_governance/feature_lineage_v2_raw_snapshot.csv",
+  "normalised_rows": {
+    "raw_snapshot": 229024
+  },
+  "output_file": "outputs/polymarket_training/features_v2_raw_snapshot.csv",
+  "raw_snapshot_feature_rows": 229024,
+  "research_override": true,
+  "skipped_rows": 6,
+  "source_filter": "raw_snapshot",
+  "status": "ok",
+  "total_feature_rows": 229024,
+  "websocket_feature_rows": 0
+}

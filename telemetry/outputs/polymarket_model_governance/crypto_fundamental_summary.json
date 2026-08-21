@@ -1,0 +1,7 @@
+{
+  "fundamental_rows": 0,
+  "generated_at_utc": "2026-07-13T22:35:44Z",
+  "output_file": "outputs/polymarket_training/crypto_fundamental_probabilities.csv",
+  "status": "no_targets",
+  "targets_path": "inputs/polymarket/crypto_targets.csv"
+}

@@ -1,0 +1,100 @@
+{
+  "books_used": [
+    "pinnacle"
+  ],
+  "budget_reference_at_utc": "2026-08-19T07:59:41Z",
+  "configured_sports": [
+    {
+      "markets": [
+        "outrights"
+      ],
+      "sport": "soccer_fifa_world_cup_winner"
+    },
+    {
+      "markets": [
+        "h2h"
+      ],
+      "sport": "soccer_fifa_world_cup"
+    },
+    {
+      "markets": [
+        "outrights"
+      ],
+      "sport": "basketball_nba_championship_winner"
+    }
+  ],
+  "errors": 0,
+  "fallback_rejected_rows": 0,
+  "fallback_rejection_reasons": {},
+  "fallback_rejections_path": "outputs/polymarket_model_governance/sharp_odds_fallback_rejections.csv",
+  "fallback_rows": 0,
+  "fallback_sources": [],
+  "generated_at_utc": "2026-08-19T07:59:41Z",
+  "live_trading_invoked": false,
+  "markets": 1,
+  "max_requests_per_run": 5,
+  "note": "Run build-sharp-anchor next to de-vig these into the fundamental slot. If the provider fails, fallback_input_paths can feed manually validated bookmaker odds.",
+  "output_path": "inputs/polymarket/sharp_odds.csv",
+  "paper_trading_invoked": false,
+  "per_source_sport_market": [
+    {
+      "events_fetched": 1,
+      "fetch_status": "ok",
+      "fetched_at_utc": "2026-08-19T07:59:41Z",
+      "market_key": "outrights",
+      "normalization_rejections": 0,
+      "source": "pinnacle",
+      "source_rows_fetched": 30,
+      "source_rows_normalized": 30,
+      "sport": "basketball_nba_championship_winner"
+    }
+  ],
+  "per_sport": [
+    {
+      "markets": "outrights",
+      "rows": 0,
+      "sport": "soccer_fifa_world_cup_winner",
+      "status": "skipped_unknown_sport"
+    },
+    {
+      "markets": "h2h",
+      "rows": 0,
+      "sport": "soccer_fifa_world_cup",
+      "status": "skipped_unknown_sport"
+    },
+    {
+      "events": 1,
+      "markets": "outrights",
+      "requests_remaining": "495",
+      "rows": 30,
+      "sport": "basketball_nba_championship_winner",
+      "status": "ok"
+    }
+  ],
+  "provider_sports_status": {
+    "requests_remaining": "496",
+    "sports": 77,
+    "status": "ok"
+  },
+  "provider_status": "attempted",
+  "requests_remaining": 495,
+  "requests_used": 1,
+  "rows": 30,
+  "skipped_budget_sports": [],
+  "skipped_coverage_sports": [],
+  "skipped_unknown_sports": [
+    "soccer_fifa_world_cup_winner",
+    "soccer_fifa_world_cup"
+  ],
+  "source_rows_fetched": 30,
+  "source_rows_normalized": 30,
+  "spend_suppression": {
+    "artifact": "outputs/polymarket_model_governance/sharp_fetch_suppression.json",
+    "config_changed": false,
+    "requests_suppressed_this_run": 0,
+    "slow_probe_family_count": 1,
+    "status": "active",
+    "suppressed_family_count": 0
+  },
+  "status": "partial"
+}

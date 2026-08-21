@@ -1,0 +1,4 @@
+assumption,status
+Raw snapshots are point-in-time,requires data quality confirmation
+Latest joined snapshots are diagnostics only,enforced by design
+Live trading disabled by default,enforced by config and environment gates

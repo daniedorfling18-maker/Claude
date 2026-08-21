@@ -1,0 +1,38 @@
+{
+  "archive_branch": "vps-archive",
+  "archive_excluded_paths": [
+    "polymarket_training/"
+  ],
+  "archive_exclusion_config_error": "",
+  "archive_exclusion_reason": "excluded_by_registration: derived collection/training corpus, regenerable by re-harvest, still covered by the WO-61 anchor chain",
+  "archive_manifest_path": "outputs/performance/ledger_state_archive_manifest.json",
+  "archive_path": "outputs/performance/ledger_state_archive.tar.gz",
+  "generated_at_utc": "2026-08-21T02:00:09Z",
+  "last_remote_archive_age_hours": 7.4925,
+  "last_remote_snapshot_date": "2026-08-20",
+  "last_remote_success_at_utc": "2026-08-20T18:30:36Z",
+  "live_trading_invoked": false,
+  "next_archive_due_at_utc": "2026-08-21T14:30:36Z",
+  "paper_trading_invoked": false,
+  "remote_commit": "7e8c06161dd43abee653f53c3dd51ba502fba9ba",
+  "remote_error": "",
+  "remote_push_status": "ok",
+  "reporting_and_recovery_only": true,
+  "rpo": {
+    "active_rpo_hours": 24.0,
+    "archive_build_interval_hours": 20.0,
+    "archive_build_interval_source": "registered_default",
+    "archive_build_margin_hours": 3.5,
+    "compliant": true,
+    "configured_rpo_within_registered_ceiling": true,
+    "live_capital_context": false,
+    "maximum_rpo_hours_for_context": 168.0,
+    "observed_archive_age_hours": 7.4925,
+    "observed_within_rpo": true,
+    "paper_stage_max_rpo_hours": 168.0,
+    "pre_live_max_rpo_hours": 24.0
+  },
+  "size_cap_mb": 240.0,
+  "status": "not_due",
+  "work_order": "WO-65"
+}

@@ -2044,6 +2044,15 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
 2. The split is BY WHOLE MARKET, not by fill (AGENTS.md requires validation chronological and
    out-of-sample by market). A market whose fills straddle the split belongs to NEITHER window and is
    counted as `fills_split_spanning`.
+0a. THE LATEST LEADERBOARD SNAPSHOT IS THE LATEST INSTANT, not the latest DATE [Codex P2
+   wave-21]. Two collector runs on one UTC date share a `snapshot_date`, and
+   `wallet_intelligence_collector._dedupe_latest` retains same-day wallets that dropped out of the
+   newer top 100 — so grouping by date merged both refreshes and the rank sort could keep a stale
+   wallet while excluding a current one. `_top_wallets` selects on `snapshot_at_utc`, falling back to
+   `snapshot_date` only for rows that predate that column.
+0b. A NEGATIVE VENUE TIMESTAMP IS REJECTED at ingestion [Codex P2 wave-21], so the writer cannot
+   create a negative `split_stamp` that this module's own reader then refuses to reuse on every
+   later run. The two validators must agree.
 1a. A FILL WITHOUT A VENUE TIMESTAMP IS REJECTED [Codex P1 wave-17]. `_trade_rows` must read
    `timestamp` ONLY and never fall back to `collected_at_utc`. trade_print_collector.py:161 persists
    a BLANK timestamp when /trades omits both `timestamp` and `matchTime`, beside a collected_at_utc
@@ -2076,6 +2085,11 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    observations count as `fills_stale_price_excluded`. A 5-minute markout read from a price hours
    late measures a different horizon. The market-axis columns keep their long-standing WO-49 lookup
    unchanged — tightening a registered artifact is its own change, not a rider on this one.
+4a. A COVERAGE ROW IS NOT A SCORED WALLET [Codex P2 wave-21]. A wallet whose every forward price
+   was missing or stale is retained (rule 5) but has no markout, so it is excluded from
+   `wallets_scored`. When NO wallet has a usable label, every row is stamped `no_usable_labels`.
+   Counting coverage rows as scored let a wholly absent feature corpus publish a healthy artifact
+   claiming every observed wallet was measured.
 5. INPUT COVERAGE: wallet accounting opens BEFORE the forward-price lookup, so a wallet whose every
    fill lacks a forward price still appears, with `fills_missing_price` set. "Was not measurable" and
    "did not trade" are different facts and must not render identically.
@@ -2155,8 +2169,12 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    `wallet_intelligence_summary.json`. Availability is judged on LEADERBOARD-SPECIFIC evidence, not
    the collector's aggregate [Codex P2 wave-19]: that aggregate is "partial" when ANY request failed,
    including an unrelated HOLDER request, so keying off it discarded a leaderboard that had just
-   refreshed successfully. Membership is unknown when the status is neither "ok" nor "disabled" AND the
-   leaderboard did not demonstrably refresh; and ALWAYS when
+   refreshed successfully. Membership is unknown when the status is not "ok" AND the leaderboard did not
+   demonstrably refresh — "disabled" is INCLUDED [Codex P2 wave-21: a disabled producer refreshes
+   nothing, so the retained snapshot is of unknown currency. Note the asymmetry with rule 8, where
+   "disabled" IS a legitimate resting state: there the question is "did the ledger change", here it
+   is "is this membership current", and a disabled producer can answer the first but not the
+   second]; and ALWAYS when
    `leaderboard_probe_params.complete` is false [Codex P2 wave-20 — the collector sets that flag when
    the endpoint returned a NONEMPTY but INCOMPLETE top-100
    (wallet_intelligence_collector.py:235, :264), and a positive row count alone let a partial prefix
@@ -2204,7 +2222,7 @@ the matrix without the total), and even when the count was right the MAPPING was
 behaviour was missing from the list while another entry claimed a standalone test that did not exist.
 This list is GENERATED from the test file and verified by diffing the names in both directions, so it
 cannot omit a real test or invent one that does not exist. Anyone changing it should regenerate
-rather than hand-edit. All 45 live in
+rather than hand-edit. All 48 live in
 tests/polymarket_predictive_engine/test_flow_toxicity.py.
 
  1. `test_planted_toxic_flow_scores_above_balanced_flow`
@@ -2289,13 +2307,19 @@ tests/polymarket_predictive_engine/test_flow_toxicity.py.
     Two source rows, both rejected on basic shape: status malformed_trade_corpus, trade_source_rows 2, malformed_trade_rows_excluded 2, and a sentinel of the same name -- not the benign no_wallets_scored path.
 41. `test_an_incomplete_leaderboard_is_not_authoritative`
     leaderboard_probe_params.complete=false with 12 rows added renders membership 'unknown'; complete=true with 100 rows added under the same 'partial' status is authoritative.
-42. `test_wallet_without_any_forward_price_is_still_emitted`
+42. `test_a_malformed_corpus_does_not_clear_the_market_veto`
+    A healthy run scores one market; the next refresh is entirely corrupt. EXPECT status malformed_trade_corpus, market_axis_preserved True, and flow_toxicity.csv byte-equal to before -- the active veto survives.
+43. `test_a_disabled_leaderboard_producer_yields_unknown_membership`
+    Producer status 'disabled': membership reads 'unknown', while the market-axis tier split still uses the retained top-100 (smart_fill_count 1).
+44. `test_the_latest_intraday_snapshot_wins`
+    Two same-date snapshots at 06:00 and 18:00: fresh1 (18:00) reads True, stale1 (06:00, dropped from the newer top-100) reads False.
+45. `test_wallet_without_any_forward_price_is_still_emitted`
     A wallet whose every fill lacks a forward price is still emitted, fills_missing_price set, markets_touched credited.
-43. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
+46. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
     Disabled replaces the artifact with one sentinel carrying artifact_status=disabled and both flags false.
-44. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
+47. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
     A price outside [target, target+horizon] counts as stale-excluded, and the market-axis columns keep the parent lookup.
-45. `test_wallet_artifact_states_its_own_invocation_flags`
+48. `test_wallet_artifact_states_its_own_invocation_flags`
     The wallet CSV states both invocation flags itself.
 
 ## FAILURE PATH
@@ -2438,6 +2462,14 @@ evaluation market starting at t=1000 with a 300s horizon legitimately produce ze
 the earlier unqualified form would have FAILED a correct first production run and made this check
 unreliable. Zero embargoed fills with no market in the interval is a clean result; zero WITH one is an
 embargo that never binds, which is the defect the rule exists to close.
+
+MALFORMED CORPUS PRESERVES THE MARKET VETO [Codex P1 wave-21]. When source rows exist but none
+survive parsing, `flow_toxicity.csv` is NOT rewritten and `market_axis_preserved: true` is published.
+Writing the header-only file that an empty rows_out would otherwise produce leaves
+requote_alerts.py:502-535 with no tox_record at all, clearing the ACTIVE veto for every market on a corrupt refresh. Same reasoning
+as rule 8a and the failure path: an absent toxicity record fails OPEN, so stale-blocking is strictly
+safer than absent. A genuinely EMPTY ledger is different and does rewrite the file — no markets are
+trading, so there is nothing to veto.
 
 MALFORMED CORPUS IS NOT A VACUOUS STATE [Codex P2 wave-20]. When `trade_prints.csv` holds source
 rows but NONE survive `_trade_rows`, the summary reports `status="malformed_trade_corpus"` with

@@ -194,11 +194,28 @@ def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], bool]:
         and leaderboard_rows_added > 0
         and leaderboard_complete is not False
     )
+    # "disabled" is NOT a licence to publish definitive membership (Codex P2
+    # wave-21). A disabled producer refreshes nothing, so the retained snapshot
+    # is of unknown currency -- the same reason any other non-refresh state
+    # renders membership unknown. It remains a legitimate resting state for the
+    # TRADE-ledger rule, where the question is "did the ledger change"; here the
+    # question is "is this membership current", and a disabled producer cannot
+    # answer it.
     membership_unknown = (
-        producer_status not in {"ok", "disabled"} and not refreshed
+        producer_status != "ok" and not refreshed
     ) or leaderboard_complete is False
-    latest = max(str(row.get("snapshot_date") or row.get("snapshot_at_utc") or "") for row in rows)
-    latest_rows = [row for row in rows if str(row.get("snapshot_date") or row.get("snapshot_at_utc") or "") == latest]
+    # Select the latest INSTANT, not the latest DATE (Codex P2 wave-21). Two
+    # collector runs on the same UTC date share a snapshot_date, and
+    # _dedupe_latest retains same-day wallets that dropped out of the newer top
+    # 100 -- so grouping by date mixed both refreshes, and the rank sort could
+    # then keep stale wallets while excluding current ones. Prefer
+    # snapshot_at_utc where present; fall back to snapshot_date only for rows
+    # that predate it.
+    def _snapshot_key(row: dict[str, Any]) -> str:
+        return str(row.get("snapshot_at_utc") or row.get("snapshot_date") or "")
+
+    latest = max(_snapshot_key(row) for row in rows)
+    latest_rows = [row for row in rows if _snapshot_key(row) == latest]
     latest_rows.sort(key=lambda row: safe_float(row.get("rank")) if safe_float(row.get("rank")) is not None else 1e9)
     wallets = {
         str(row.get("wallet") or "").strip().lower()
@@ -937,6 +954,14 @@ def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int, int]:
         if not (0.0 <= price <= 1.0) or size <= 0:
             malformed_rows += 1
             continue
+        # A negative venue timestamp is not a time (Codex P2 wave-21). Left
+        # through, a first-run corpus with a negative median would write a
+        # negative split_stamp that this module's OWN reader then rejects as
+        # invalid on every later run -- a writer creating state its reader
+        # refuses. The two validators must agree.
+        if stamp < 0:
+            malformed_rows += 1
+            continue
         parsed.append(
             {
                 "market": market,
@@ -1210,7 +1235,18 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
                 "toxicity_block_reasons": ";".join(reasons),
             }
         )
-    write_csv(path, rows_out, fieldnames=TOXICITY_FIELDS)
+    if trade_source_rows and not trades:
+        # PRESERVE the previous market rows (Codex P1 wave-21). A nonempty
+        # ledger whose rows all fail parsing leaves rows_out empty, and writing
+        # a header-only flow_toxicity.csv would leave requote_alerts.py:502-535
+        # with no tox_record at all -- clearing the ACTIVE veto for every market
+        # on a corrupt refresh. Same reasoning as rule 8a: an absent toxicity
+        # record fails OPEN, so stale-blocking is strictly safer than absent.
+        # The failure is disclosed on the wallet artifact and in the summary,
+        # which are the honest places for it.
+        summary["market_axis_preserved"] = True
+    else:
+        write_csv(path, rows_out, fieldnames=TOXICITY_FIELDS)
     if invalid_horizon:
         summary["status"] = "invalid_markout_horizon"
         summary["markets_scored"] = len(rows_out)
@@ -1273,7 +1309,14 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
     wallet_path = cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv"
     # Summary aggregates are computed over the SCORED rows only; a sentinel
     # carries no window counters and must never be counted as a scored wallet.
-    scored_wallet_rows = wallet_rows
+    # A wallet retained purely for coverage -- every forward price missing or
+    # stale -- is NOT a scored wallet (Codex P2 wave-21). Counting it made
+    # wallets_scored claim a healthy artifact in which no markout exists at all.
+    # The coverage row stays; only the count and the status change.
+    scored_wallet_rows = [row for row in wallet_rows if row["fills_total"]]
+    if wallet_rows and not scored_wallet_rows:
+        for row in wallet_rows:
+            row["artifact_status"] = "no_usable_labels"
     if missing_wallet_data and wallet_rows:
         # The rows are still measured -- markouts do not depend on the
         # leaderboard -- but the artifact must say its membership column is

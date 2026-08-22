@@ -1509,6 +1509,106 @@ def test_an_incomplete_leaderboard_is_not_authoritative(tmp_path):
     assert build_flow_toxicity(cfg)["missing_wallet_data"] is False
 
 
+def test_a_malformed_corpus_does_not_clear_the_market_veto(tmp_path):
+    """A corrupt refresh must not silently un-block a toxic market.
+
+    A nonempty ledger whose rows all fail parsing leaves rows_out empty, and
+    writing a header-only flow_toxicity.csv would leave requote_alerts with no
+    tox_record at all -- clearing the ACTIVE veto for every market (Codex P1
+    wave-21). Same reasoning as the invalid-horizon path: absent fails OPEN, so
+    stale-blocking is strictly safer.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(0, 0.5), (10_000, 0.5)])
+    good = [
+        {"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": i}
+        for i in range(20)
+    ]
+    fields = ["market", "asset_id", "wallet", "side", "price", "size", "timestamp"]
+    trade_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    write_csv(trade_path, good, fieldnames=fields)
+    assert build_flow_toxicity(cfg)["status"] == "ok"
+    market_path = cfg.output_root / "maker_carry" / "flow_toxicity.csv"
+    before = read_csv_rows(market_path)
+    assert len(before) == 1
+
+    # The next refresh is entirely corrupt.
+    write_csv(
+        trade_path,
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": ""}],
+        fieldnames=fields,
+    )
+    summary = build_flow_toxicity(cfg)
+
+    assert summary["status"] == "malformed_trade_corpus"
+    assert summary["market_axis_preserved"] is True
+    assert read_csv_rows(market_path) == before, "the active veto must survive a corrupt refresh"
+
+
+def test_a_disabled_leaderboard_producer_yields_unknown_membership(tmp_path):
+    """A disabled producer refreshes nothing, so membership is not current."""
+    cfg = _config(tmp_path)
+    _leaderboard(cfg, producer_status="disabled")
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert summary["missing_wallet_data"] is True
+    assert rows["smart1"]["on_current_leaderboard"] == "unknown"
+    # The market-axis tier split still uses the retained top-100 (wave-18).
+    market = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+    assert int(market["0xa"]["smart_fill_count"]) == 1
+
+
+def test_the_latest_intraday_snapshot_wins(tmp_path):
+    """Two collector runs on one date must not be merged into one snapshot.
+
+    _dedupe_latest retains same-day wallets that dropped out of the newer top
+    100, so grouping by snapshot_date mixed both refreshes and could keep a
+    stale wallet while excluding a current one (Codex P2 wave-21).
+    """
+    cfg = _config(tmp_path)
+    write_csv(
+        cfg.output_root / "wallet_intelligence" / "leaderboard_history.csv",
+        [
+            {"snapshot_date": "2026-07-10", "snapshot_at_utc": "2026-07-10T06:00:00Z", "wallet": "stale1", "rank": "1"},
+            {"snapshot_date": "2026-07-10", "snapshot_at_utc": "2026-07-10T18:00:00Z", "wallet": "fresh1", "rank": "1"},
+        ],
+        fieldnames=["snapshot_date", "snapshot_at_utc", "wallet", "rank"],
+    )
+    write_json(
+        cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json",
+        {"status": "ok", "leaderboard_rows_added": 1, "leaderboard_probe_params": {"complete": True}},
+    )
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [
+            {"market": "0xa", "asset_id": "tok-a", "wallet": "fresh1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0},
+            {"market": "0xa", "asset_id": "tok-a", "wallet": "stale1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1},
+        ],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert rows["fresh1"]["on_current_leaderboard"] == "True"
+    assert rows["stale1"]["on_current_leaderboard"] == "False", (
+        "the 06:00 wallet dropped out of the 18:00 top-100 and is not current"
+    )
+
+
 def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):
     """A wallet with no measurable fill must appear, disclosed, not vanish.
 
@@ -1546,7 +1646,11 @@ def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):
     assert rows["w1"]["artifact_status"] == "upstream_missing", (
         "no producer summary was written in this fixture, so every row is stamped"
     )
-    assert summary["wallets_scored"] == 2
+    # w2 is retained for COVERAGE but is not a scored wallet: it has no usable
+    # label at all. Counting it made wallets_scored claim a healthy artifact in
+    # which no markout exists (Codex P2 wave-21). The row stays; the count does
+    # not include it.
+    assert summary["wallets_scored"] == 1
 
 
 def test_disabled_flow_toxicity_clears_the_wallet_artifact(tmp_path):

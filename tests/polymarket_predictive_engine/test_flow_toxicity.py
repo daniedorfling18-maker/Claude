@@ -445,6 +445,12 @@ def test_enabled_run_with_no_wallets_still_states_its_evidence_class(tmp_path):
     assert rows[0]["live_trading_invoked"] == "False"
     # The sentinel is not a scored wallet.
     assert summary["wallets_scored"] == 0
+    # An empty corpus is not an error: status is "ok", not "no_trades". The
+    # parent's "no_trades" label is a misnomer -- it fires when trades ARE
+    # present but no market scored -- and the registered vacuous-state clause
+    # says so, because the first draft of that clause asserted the opposite.
+    assert summary["status"] == "ok"
+    assert summary["markets_scored"] == 0
 
 
 def test_stale_trade_corpus_is_stamped_on_every_wallet_row(tmp_path):

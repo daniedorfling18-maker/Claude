@@ -2304,14 +2304,21 @@ withdrawn [Codex P1 wave-7: it directly contradicted this same amendment's paren
 reconciliation, which registers rule 6's non-finite rejection as a deliberate behaviour change to the
 market axis. Two incompatible statements in the binding spec left a builder or auditor unable to tell
 whether preserving previous bytes or excluding malformed rows was authoritative — EXCLUDING THEM IS
-AUTHORITATIVE]. Two differences, both registered above and neither hidden [Codex P1 wave-12 — this sentence still
-claimed "every ordering is untouched" while the parent scope registers the ordering change, and the
-two cannot both be true]: (i) rows whose price, size or timestamp parsed but was non-finite are
-absent; (ii) a feature's effective timestamp is now the LATER of its venue stamp and its collection
-stamp, and same-stamp ties break on arrival order rather than on midpoint, so on a corpus containing
-delayed or duplicate features a different quote may be selected. Every column NAME and every FORMULA
-is untouched, and on a corpus with no non-finite rows, no delayed collections and no same-stamp
-duplicates the output IS byte-identical. On the disabled path the artifact is REPLACED by a single sentinel row carrying
+AUTHORITATIVE]. THREE differences, all registered above and none hidden [Codex P1 wave-12 and wave-16 — this
+sentence first claimed "every ordering is untouched" while the parent scope registered an ordering
+change, and then still described the COLLAPSED single-clock model after the code had reverted to two
+clocks; a builder following the stale text could have reinstated the very behaviour that corrupts
+markouts]:
+  (i) rows whose price, size or timestamp parsed but was non-finite are absent;
+  (ii) rows whose trade price falls outside [0, 1], or whose size is <= 0, or whose feature midpoint
+      falls outside [0, 1], are absent — finite is not sufficient on a binary market;
+  (iii) forward-price LOOKUP still keys on the VENUE stamp, unchanged, so which market state a
+      markout measures is unchanged. What changed is only the TIE-BREAK among rows sharing a venue
+      stamp: previously midpoint (so the smaller number won), now proven-availability first, then
+      earliest available time, then arrival order. Collection time is used ONLY for ranking
+      eligibility and never for lookup or staleness.
+Every column NAME and every FORMULA is untouched, and on a corpus with no non-finite rows, no
+out-of-domain rows and no same-venue-stamp duplicates the output IS byte-identical. On the disabled path the artifact is REPLACED by a single sentinel row carrying
 `artifact_status="disabled"` and both invocation flags false — a stale ranking left on disk would read
 as current, and a header-only file names the columns while asserting nothing.
 
@@ -2339,7 +2346,21 @@ the earlier unqualified form would have FAILED a correct first production run an
 unreliable. Zero embargoed fills with no market in the interval is a clean result; zero WITH one is an
 embargo that never binds, which is the defect the rule exists to close.
 
-VACUOUS STATE: zero trade prints -> "not performed".
+VACUOUS STATE, stated to match the delivered paths [Codex P1 wave-16 — the earlier "not performed"
+contradicted rule 9, the enumerated test and the implementation, so an auditor could not satisfy both
+contracts]: an enabled run over zero trade prints is NOT an error and NOT "not performed". It emits
+summary `status="ok"`, `markets_scored` 0, `wallets_scored` 0, and a wallet artifact holding exactly
+ONE sentinel row with `artifact_status="no_wallets_scored"` and both invocation flags false.
+
+Verified against the code rather than assumed: `status` is `"ok" if rows_out or not trades else
+"no_trades"`, so an empty corpus takes the `not trades` arm and reads `"ok"`. NOTE, registered
+because it is a trap for any later reader: the parent's `"no_trades"` label is a MISNOMER — it fires
+when trades ARE present but no market was scored, never when the corpus is empty. It is left
+unrenamed because it is a registered summary key on the parent artifact, but its real meaning is
+recorded here. (My first draft of this clause asserted `"no_trades"` for the empty corpus; that was
+false, and checking it is the only reason it is not now registered as permanent specification.) The day-after check treats that state as a clean vacuous result — there
+is nothing to reconcile — but it is still a POSITIVE statement of the artifact's evidence class
+rather than an absence.
 
 # Codex batch 3 — filed 2026-07-10 (decision discipline + carry optimization)
 

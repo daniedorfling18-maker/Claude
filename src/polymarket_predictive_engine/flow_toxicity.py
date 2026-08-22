@@ -222,7 +222,7 @@ def _build_price_index(
         """
     )
     batch: list[tuple[str, float, float, float, int, int]] = []
-    tail_candidates: dict[str, tuple[float, float, int, float, int]] = {}
+    tail_candidates: dict[str, tuple[float, int, float, int, float]] = {}
     scanned_rows = 0
     indexed_rows = 0
 
@@ -323,6 +323,14 @@ def _build_price_index(
             # and the constraint aborts the whole build. Rejected before either.
             if not math.isfinite(stamp) or not math.isfinite(midpoint):
                 continue
+            # Finite is not enough on this side either (Codex P2 wave-16). A
+            # binary-market midpoint is a probability in [0, 1]; the upstream
+            # normaliser does not enforce bounds, so a malformed venue row can
+            # reach here and publish a healthy-looking markout outside the
+            # possible payoff range. Same rule the trade side already applies --
+            # the asymmetry was mine, added last wave on one boundary only.
+            if not (0.0 <= midpoint <= 1.0):
+                continue
             source_order = scanned_rows
             if stamp <= bounds[1]:
                 batch.append((token, stamp, midpoint, available, availability_known, source_order))
@@ -340,12 +348,21 @@ def _build_price_index(
             # stamp, then arrival order. This is the second tie-break site and
             # it must agree with the first, or which row is retained depends on
             # which code path saw it (the wave-9 defect, in its third form).
-            candidate = (stamp, available, source_order, midpoint, availability_known)
+            # PROVEN availability sorts ahead of unknown at the same venue
+            # stamp (Codex P2 wave-16): otherwise a legacy row with no
+            # collection time -- whose available_stamp defaults to the venue
+            # stamp, so it ties -- is selected first and then embargoed for
+            # being unproven, while a proven row at the same instant that was
+            # collected before the split and could validly rank is never
+            # considered. Negated so 1 (proven) sorts before 0 (unknown), and
+            # kept identical to the SQL ORDER BY above.
+            candidate = (stamp, -availability_known, available, source_order, midpoint)
             current = tail_candidates.get(token)
             if current is None or candidate < current:
                 tail_candidates[token] = candidate
 
-    for token, (stamp, available, source_order, midpoint, availability_known) in tail_candidates.items():
+    for token, (stamp, neg_known, available, source_order, midpoint) in tail_candidates.items():
+        availability_known = -neg_known
         batch.append((token, stamp, midpoint, available, availability_known, source_order))
     flush()
     connection.commit()
@@ -689,7 +706,8 @@ def _markout_stats(
                 # hindsight, and ordering by price makes the choice depend on
                 # which number happens to be smaller.
                 "SELECT stamp, midpoint, available_stamp, availability_known FROM feature_prices "
-                "WHERE asset_id = ? ORDER BY stamp, available_stamp, source_order",
+                "WHERE asset_id = ? "
+                "ORDER BY stamp, availability_known DESC, available_stamp, source_order",
                 (token,),
             )
         )

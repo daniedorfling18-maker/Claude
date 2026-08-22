@@ -1957,6 +1957,25 @@ def test_a_producer_just_inside_its_registered_ceiling_still_settles_membership(
     assert rows["smart1"]["on_current_leaderboard"] == "True"
 
 
+@pytest.mark.parametrize(
+    "value",
+    [-1, -1.5, "-1", "-1000", "-0.0001", "1969-12-31T23:59:00Z"],
+)
+def test_stamp_never_returns_a_negative_epoch(value):
+    """The negative rejection lives in the shared normaliser, not here.
+
+    flow_toxicity carried its own `stamp < 0` guard from wave-21, and wave-30
+    registered it as a parent-artifact difference. Both were wrong: `_stamp` is
+    utils.normalize_external_timestamp, which returns None for a negative epoch
+    on both its numeric and its parsed branch, so the guard was unreachable and
+    the parent -- using the same normaliser -- behaved identically.
+
+    This pins the contract the removed guard pretended to enforce, so a change
+    to the normaliser fails here instead of silently reopening the hole.
+    """
+    assert flow_toxicity._stamp(value) is None
+
+
 def test_the_same_leaderboard_ages_out_as_the_run_clock_advances(tmp_path, monkeypatch):
     """S1 clock-advance: the SAME evidence must expire as time passes.
 
@@ -2126,6 +2145,109 @@ def test_feature_rejections_are_counted_separately_from_trade_rejections(tmp_pat
     # trade corpus. The feature loss is disclosed by its own counter.
     assert wallet_rows["smart1"]["artifact_status"] == "ok"
     assert summary["status"] == "ok"
+
+
+def test_an_incomplete_sample_cannot_certify_a_market_clean(tmp_path):
+    """Unverified is not clean (Codex P1 wave-31).
+
+    The carry-forward rules protect a veto that already existed. A market that
+    loses rows but was CLEAN before still published toxic_blocked=false from the
+    surviving subset -- so a balanced remainder beside a rejected one-sided
+    burst reads measured-and-safe, and malformed coverage manufactures
+    clearance outright rather than merely failing to preserve it.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    for token in ("tok-a", "tok-b", "tok-c"):
+        _features(cfg, token, [(310, 0.70)])
+    prints_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    anchor_flow = _flow("0xa", "tok-a", "w1", buys=6, sells=2)
+    calm = _flow("0xc", "tok-c", "w3", buys=4, sells=4)
+    # 0xb has never been toxic, so there is no prior veto to fall back on.
+    write_csv(
+        prints_path,
+        [*anchor_flow, *calm, *_flow("0xb", "tok-b", "w2", buys=4, sells=4)],
+        fieldnames=_FLOW_FIELDS,
+    )
+    build_flow_toxicity(cfg)
+    before = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+    assert before["0xb"]["toxic_blocked"] == "False"
+
+    # 0xb's one-sided burst is rejected; the balanced remainder survives and
+    # would read clean on its own.
+    burst = [{**row, "price": 1.5} for row in _flow("0xb", "tok-b", "w2", buys=12, sells=0, start=20)]
+    write_csv(
+        prints_path,
+        [*anchor_flow, *calm, *_flow("0xb", "tok-b", "w2", buys=4, sells=4), *burst],
+        fieldnames=_FLOW_FIELDS,
+    )
+    summary = build_flow_toxicity(cfg)
+    after = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+
+    assert summary["malformed_trade_rows_excluded"] == 12
+    assert summary["market_blocks_on_unverified_sample"] == 1
+    assert after["0xb"]["toxic_blocked"] == "True"
+    assert "incomplete_sample" in after["0xb"]["toxicity_block_reasons"]
+    # 0xc lost nothing and stays measured and clean -- the block is scoped to
+    # the market whose coverage is actually in doubt.
+    assert after["0xc"]["toxic_blocked"] == "False"
+
+
+def test_a_truncated_leaderboard_request_cannot_settle_membership(tmp_path):
+    """`complete` is relative to a configurable limit (Codex P2 wave-31).
+
+    leaderboard_limit=50 yields 50 rows and a summary that truthfully reports
+    complete=true for the request it made -- while this module asks a different
+    question, "is this wallet in the top 100", and answered a definitive False
+    for every wallet the producer never fetched.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    write_json(
+        cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json",
+        {"status": "partial", "generated_at_utc": now_utc(), "leaderboard_rows_added": 50,
+         "leaderboard_probe_params": {"complete": True, "requested_limit": 50}},
+    )
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert summary["missing_wallet_data"] is True
+    assert rows["smart1"]["on_current_leaderboard"] == "unknown"
+
+
+def test_a_snapshot_shorter_than_its_own_request_cannot_settle_membership(tmp_path):
+    """Dedupe can collapse a complete request into a short snapshot (wave-31)."""
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    write_json(
+        cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json",
+        {"status": "ok", "generated_at_utc": now_utc(), "leaderboard_rows_added": 100,
+         "leaderboard_probe_params": {"complete": True, "requested_limit": 100}},
+    )
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    # The ledger carries ONE wallet at the selected instant against a request
+    # for 100 -- the shape a duplicate-heavy response leaves after dedupe.
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert summary["missing_wallet_data"] is True
+    assert rows["smart1"]["on_current_leaderboard"] == "unknown"
 
 
 def test_a_departed_market_is_not_pinned_by_an_unrelated_rejection(tmp_path):

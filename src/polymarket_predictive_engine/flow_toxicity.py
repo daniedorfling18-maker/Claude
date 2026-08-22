@@ -215,10 +215,28 @@ def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], set[str
         leaderboard_complete = raw_complete
     else:
         leaderboard_complete = False
+    # `complete` IS RELATIVE TO A CONFIGURABLE LIMIT, so it alone does not mean
+    # a full top-100 (Codex P2 wave-31). wallet_intelligence_collector.py:188
+    # takes `limit = min(100, max(1, leaderboard_limit))` and :235/:264 set
+    # complete as `len(parsed) >= limit` -- so `leaderboard_limit: 50` yields 50
+    # rows and a summary that truthfully reports complete=true for the request
+    # it made. This module then asked a DIFFERENT question, "is this wallet in
+    # the top 100", and answered a definitive False for every wallet in ranks
+    # 51-100 that the producer never fetched.
+    #
+    # The requested limit must therefore cover what THIS consumer needs. It is
+    # published in the same probe params, so no new field is required.
+    # ABSENT is the legacy path, exactly as for `complete` above: older
+    # collector summaries do not publish requested_limit, and treating that as
+    # disqualifying would render membership permanently unknown on every
+    # pre-existing summary. Present-but-too-small is the fault this catches.
+    requested_limit = _finite_number(probe.get("requested_limit") if isinstance(probe, dict) else None)
+    limit_covers_consumer = requested_limit is None or requested_limit >= limit
     refreshed = (
         leaderboard_rows_added is not None
         and leaderboard_rows_added > 0
         and leaderboard_complete is not False
+        and limit_covers_consumer
     )
     # "disabled" is NOT a licence to publish definitive membership (Codex P2
     # wave-21). A disabled producer refreshes nothing, so the retained snapshot
@@ -352,7 +370,20 @@ def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], set[str
         return str(row.get("snapshot_at_utc") or row.get("snapshot_date") or "")
 
     latest_instant = max(_instant_key(row) for row in rows)
-    current_wallets = _rank_take([row for row in rows if _instant_key(row) == latest_instant])
+    instant_rows = [row for row in rows if _instant_key(row) == latest_instant]
+    current_wallets = _rank_take(instant_rows)
+    # A COMPLETE REQUEST CAN STILL YIELD A SHORT SNAPSHOT (Codex P2 wave-31).
+    # `_dedupe_latest` keys on (snapshot_date, wallet), so a response repeating
+    # a wallet collapses to fewer unique rows than the producer fetched, while
+    # the summary -- describing the FETCH -- still reports it complete.
+    #
+    # Measured against the producer's OWN reported request, not against `limit`
+    # unconditionally: a venue that genuinely lists fewer than `limit` wallets
+    # is not a fault, and a bare `len(current_wallets) < limit` would render
+    # every such snapshot unknown forever. When requested_limit is absent we are
+    # on the legacy path and cannot make the comparison at all.
+    if requested_limit is not None and len(current_wallets) < min(requested_limit, limit):
+        membership_unknown = True
 
     # A nonempty file whose selected snapshot has no usable wallet cells is
     # UNAVAILABLE, not "nobody is on the leaderboard" (Codex P2 wave-15).
@@ -1142,15 +1173,19 @@ def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int, int, set[
             malformed_rows += 1
             rejected_markets.add(market)
             continue
-        # A negative venue timestamp is not a time (Codex P2 wave-21). Left
-        # through, a first-run corpus with a negative median would write a
-        # negative split_stamp that this module's OWN reader then rejects as
-        # invalid on every later run -- a writer creating state its reader
-        # refuses. The two validators must agree.
-        if stamp < 0:
-            malformed_rows += 1
-            rejected_markets.add(market)
-            continue
+        # NO negative-timestamp guard here, deliberately (Codex P1 wave-31).
+        # wave-21 added one and wave-30 registered it as a parent-artifact
+        # difference; both were wrong, and the branch was UNREACHABLE the whole
+        # time. `_stamp` is `utils.normalize_external_timestamp`, which returns
+        # None for a negative epoch on BOTH its numeric and its parsed branch
+        # (utils.py:57-72), so `stamp is None` above has already rejected the
+        # row. The parent used the same normaliser, so this was never a
+        # behaviour change either. Dead code shaped like a live guard is worse
+        # than no guard: it misled this spec into registering a difference that
+        # does not exist. The contract is pinned by
+        # `test_stamp_never_returns_a_negative_epoch` instead, so a future
+        # change to the normaliser breaks a test rather than silently reopening
+        # the hole this branch pretended to close.
         parsed.append(
             {
                 "market": market,
@@ -1499,6 +1534,7 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
         # stale, not a fresh measurement.
         if malformed_trade_rows:
             fresh_by_market = {str(row["market"]): row for row in rows_out}
+            fresh_rows_by_market = dict(fresh_by_market)
             # A market can lose its veto TWO ways, and wave-25 closed only one.
             #
             #   (a) every row rejected -> the market vanishes from rows_out, and
@@ -1578,8 +1614,38 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
                 # stale rather than passing as a fresh clean measurement.
                 fresh_by_market[market] = prior
                 retained_blocks += 1
-            if retained_blocks:
+            # RETAINING A VETO IS NOT ENOUGH -- an incomplete sample cannot
+            # certify CLEAN either (Codex P1 wave-31). The rules above protect a
+            # veto that already existed; a market that lost rows but was clean
+            # before, or that has no prior row at all, still published
+            # toxic_blocked=false computed from the surviving subset. A balanced
+            # remainder beside a rejected one-sided burst reads clean, and both
+            # requote_alerts.py:502-535 and stage_ticket_eligibility.py:195-218
+            # then treat that market as MEASURED and safe to quote. Malformed
+            # coverage could therefore manufacture clearance outright, not just
+            # fail to preserve it.
+            #
+            # A market whose sample is incomplete is UNVERIFIED, and unverified
+            # is not clean. It blocks until a complete sample is observed, with
+            # the reason named so the row is not mistaken for a measured
+            # toxicity finding. A freshly BLOCKING row is untouched: it already
+            # says the right thing, and its own reason stays.
+            unverified_blocks = 0
+            for market, row in fresh_by_market.items():
+                if not _lost_rows(market) or row["toxic_blocked"]:
+                    continue
+                if row is not fresh_rows_by_market.get(market):
+                    continue  # a retained prior row already carries the veto
+                row["toxic_blocked"] = True
+                reasons = [r for r in str(row["toxicity_block_reasons"] or "").split(";") if r]
+                reasons.append("incomplete_sample")
+                row["toxicity_block_reasons"] = ";".join(reasons)
+                unverified_blocks += 1
+            if unverified_blocks:
+                summary["market_blocks_on_unverified_sample"] = unverified_blocks
+            if retained_blocks or unverified_blocks:
                 rows_out = [fresh_by_market[str(row["market"])] for row in rows_out]
+            if retained_blocks:
                 summary["market_blocks_retained_on_partial_sample"] = retained_blocks
             if carried:
                 rows_out = [*rows_out, *carried]

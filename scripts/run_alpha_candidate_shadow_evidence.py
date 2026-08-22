@@ -118,6 +118,16 @@ def run(config_path: str = "polymarket_predictive_config.example.yaml") -> dict[
     candidate_file = cfg.governance_root / "alpha_candidate_shadow_evidence_inputs.csv"
     write_csv(candidate_file, alpha_shadow_rows)
     shadow_summary = update_shadow_cohort_evidence(cfg, prepared)
+    # WO-143b.1 F4 (caller-honesty contract): when the update is skipped --
+    # `skipped_shadow_lock_held` from WO-143b's internal lock, or any other
+    # `skipped_*` -- nothing reached the shadow ledger, so every count that
+    # claims rows were FORWARDED/SENT must be 0. `alpha_score_rows` and
+    # `alpha_shadow_input_rows` describe this script's own input and CSV
+    # output, which are written regardless, so they are not forwarded-count
+    # claims and do not change. The status is surfaced verbatim via
+    # `shadow_summary` below.
+    shadow_status = shadow_summary.get("status") if isinstance(shadow_summary, dict) else None
+    shadow_skipped = isinstance(shadow_status, str) and shadow_status.startswith("skipped_")
     family_counts = Counter(str(row.get("category") or "unknown") for row in alpha_shadow_rows)
     cohort_counts = Counter(str(row.get("signal_cohort") or "unknown") for row in alpha_shadow_rows)
     payload = {
@@ -126,9 +136,10 @@ def run(config_path: str = "polymarket_predictive_config.example.yaml") -> dict[
         "source_file": str(alpha_path),
         "alpha_score_rows": len(rows),
         "alpha_shadow_input_rows": len(alpha_shadow_rows),
-        "existing_shadow_rows_forwarded": existing_shadow_rows,
-        "existing_near_miss_rows_forwarded": existing_near_miss_rows,
-        "prepared_rows_sent_to_shadow_ledger": len(prepared),
+        "existing_shadow_rows_forwarded": 0 if shadow_skipped else existing_shadow_rows,
+        "existing_near_miss_rows_forwarded": 0 if shadow_skipped else existing_near_miss_rows,
+        "prepared_rows_sent_to_shadow_ledger": 0 if shadow_skipped else len(prepared),
+        "shadow_update_status": shadow_status or "not_run",
         "alpha_shadow_family_counts": dict(sorted(family_counts.items())),
         "alpha_shadow_cohort_counts": dict(sorted(cohort_counts.items())),
         "candidate_file": str(candidate_file),

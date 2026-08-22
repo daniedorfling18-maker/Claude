@@ -4,6 +4,7 @@ from __future__ import annotations
 import gzip
 from pathlib import Path
 
+import pytest
 import yaml
 
 from polymarket_predictive_engine import flow_toxicity
@@ -520,6 +521,106 @@ def test_the_ranking_split_is_frozen_across_runs(tmp_path):
 
     assert second["wallet_split_was_frozen"] is True
     assert read_json(split_path)["split_stamp"] == frozen, "the split must not move"
+
+
+def test_a_stale_corpus_never_freezes_the_split(tmp_path):
+    """Contamination must not outlive the run it happened in (Codex P1 wave-6).
+
+    A first run against a partial ledger still called the freeze path and fixed
+    the median of that contaminated corpus permanently; every later healthy run
+    then reported wallet_split_was_frozen=true while reusing the bad boundary.
+    Stamping the rows non-OK did not contain it, because the damage was in the
+    persisted state, not the rows.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg, status="partial")
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+
+    assert summary["trade_corpus_status"] == "partial"
+    assert not (cfg.output_root / "maker_carry" / "flow_toxicity_wallet_split.json").exists(), (
+        "a partial corpus must persist no split state at all"
+    )
+    assert summary["wallet_split_was_frozen"] is False
+
+
+def test_a_corrupt_frozen_split_fails_closed(tmp_path):
+    """An invalid frozen state must raise, not manufacture a new cutoff.
+
+    Treating a corrupt file as a first run would compute a fresh median from
+    data already observed as evaluation -- recreating the exact leakage the
+    persistence exists to prevent, after any corruption or partial restore
+    (Codex P1 wave-6 on #451).
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+    split_path = cfg.output_root / "maker_carry" / "flow_toxicity_wallet_split.json"
+    split_path.parent.mkdir(parents=True, exist_ok=True)
+    split_path.write_text('{"split_stamp": "not-a-number"}', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="refusing to manufacture"):
+        build_flow_toxicity(cfg)
+
+
+def test_split_artifact_states_its_own_invocation_flags(tmp_path):
+    """The split file is independently persisted, so it needs its own flags."""
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    build_flow_toxicity(cfg)
+    state = read_json(cfg.output_root / "maker_carry" / "flow_toxicity_wallet_split.json")
+
+    assert state["paper_trading_invoked"] is False
+    assert state["live_trading_invoked"] is False
+    # Published so erosion of the ranking sample is measurable against it.
+    assert state["corpus_rows_at_freeze"] == 1
+
+
+def test_non_finite_feature_midpoints_are_rejected_before_indexing(tmp_path):
+    """The wave-5 guard covered trades only; features parse "inf"/"nan" too.
+
+    An inf midpoint produced an infinite markout emitted as a successfully
+    scored wallet mean, and a nan midpoint reached an INSERT into a
+    `midpoint REAL NOT NULL` column where SQLite stores NaN as NULL and the
+    constraint aborts the whole build (Codex P1 wave-6 on #451).
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    # The inf point would be selected first; the finite one at 320 is the truth.
+    _features(cfg, "tok-a", [(310, float("inf")), (320, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert summary["status"] == "ok", "a nan/inf feature must not abort the build"
+    assert float(rows["w1"]["markout_mean_total"]) == 0.2, "scored from the finite 0.70 point"
 
 
 def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):

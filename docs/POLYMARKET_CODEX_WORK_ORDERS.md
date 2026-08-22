@@ -2070,10 +2070,55 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    `artifact_status="upstream_<status>"` instead of "ok". Stamped rather than blanked deliberately —
    ranking wallets on an undisclosed stale or partial sample is the harm, and a missing producer
    summary should let a reader reject the evidence, not silently destroy a working artifact.
-9. NO PATH EMITS A BARE HEADER: disabled, an enabled run that scores no wallets, and a not-ok
-   upstream all emit a single sentinel row carrying `artifact_status` and both invocation flags. A
-   header-only file names the columns while asserting nothing, so it cannot establish the artifact's
-   evidence class. A sentinel is never counted in `wallets_scored`.
+9. NO PATH EMITS A BARE HEADER. Exactly two states emit the single sentinel row: DISABLED, and an
+   enabled run that scores ZERO wallets. A header-only file names the columns while asserting
+   nothing, so it cannot establish the artifact's evidence class; a sentinel is never counted in
+   `wallets_scored`. A not-ok UPSTREAM is NOT a sentinel state — it is handled by rule 8, which
+   retains every scored row and stamps each one. [Codex P1 wave-6 on #451: this clause previously
+   listed the not-ok upstream as a sentinel state too, directly contradicting rule 8 immediately
+   above it, so a builder or day-after auditor could not tell whether a partial corpus preserves
+   scored rows or replaces them. Rule 8 is the binding behaviour and is what the implementation
+   does. The contradiction was mine: rule 9 was written after rule 8's remedy was varied, and I did
+   not re-read rule 8 against it.] When BOTH apply — a not-ok upstream that also scores zero wallets
+   — the sentinel is emitted with the upstream status in `artifact_status`, so the two rules compose
+   rather than compete.
+10. FREEZE ONLY ON A VALID CORPUS, AND NEVER SILENTLY RE-FREEZE. The split state in rule 7 is created
+   only when `trade_corpus_status == "ok"`; a first run against a stale or partial ledger computes an
+   in-memory split for that run and persists NOTHING, so the contamination cannot outlive the run it
+   occurred in. If the split file exists but is unparseable, is not a dict, or carries a
+   missing/non-finite `split_stamp`, the run RAISES rather than treating it as a first run —
+   overwriting it would manufacture a fresh cutoff from data already observed as evaluation, which is
+   the exact leakage rule 7 exists to prevent. The split artifact carries both invocation flags
+   itself, since it is independently persisted and the wallet CSV's flags do not establish its
+   evidence class.
+11. NON-FINITE FEATURE PRICES REJECTED AT INDEXING, alongside rule 6's trade-side guard: `safe_float`
+   parses "inf"/"nan" for a feature midpoint too, and rule 6 covered only trade fields. An `inf`
+   midpoint produces an infinite markout emitted as a successfully scored wallet mean; a `nan`
+   midpoint reaches an INSERT into a `midpoint REAL NOT NULL` column, where SQLite stores NaN as NULL
+   and the constraint aborts the entire build. Both are rejected in `_build_price_index` before the
+   row is indexed.
+
+## KNOWN LIMITATION, REGISTERED RATHER THAN ENGINEERED AWAY [Codex P1 wave-6 on #451]
+
+Rule 7 freezes the split CUTOFF but not the ranking SAMPLE, and the sample is not stable. The trade
+ledger is a rolling window: `trade_print_collector.py:236-240` keeps `combined[-max_rows:]` at
+`max_ledger_rows` = 200,000, so the rows evicted first are the OLDEST — which is precisely the
+ranking population. Backfills can also add previously unseen pre-split rows. The ranking sample can
+therefore both lose and gain markets across runs while the cutoff stays fixed, and given enough
+elapsed time it erodes toward empty, at which point the ranking window is no longer a sample of
+anything.
+
+Snapshotting the ranking rows themselves is the engineering fix and is NOT done here. The reason is
+stated rather than hidden: this artifact's registered purpose is to answer H3 (smart-flow CLV) — the
+one tested hypothesis with no measurement at all — in a BOUNDED read, and for that the frozen cutoff
+is sufficient. It is NOT sound as a long-running daily ranking system, and must not be treated as
+one. CONSEQUENCE, binding: if the wallet axis is ever promoted from a bounded read to a standing
+input, the ranking sample must be snapshotted first, as its own registered work order. Until then a
+reader must treat `wallet_split_was_frozen=true` on a run far from `frozen_at_utc` as a warning, not
+a reassurance: `corpus_rows_at_freeze` is published in the split artifact precisely so that erosion
+is measurable against it.
+
+
 
 FAIL-SAFE: diagnostic only. No gate, threshold, sizing, promotion, eligibility or order surface reads
 this artifact; `grep -rn` finds no in-repo consumer outside flow_toxicity.py. The market-axis table is

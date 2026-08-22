@@ -236,6 +236,14 @@ def _build_price_index(
             midpoint = safe_float(row.get("midpoint"))
             if stamp is None or midpoint is None or stamp < bounds[0]:
                 continue
+            # safe_float parses "inf"/"nan" here too (Codex P1 wave-6 on #451:
+            # the wave-5 fix validated only TRADE fields). An inf midpoint
+            # yields an infinite markout that is emitted as a successfully
+            # scored wallet mean; a nan midpoint reaches an INSERT into a
+            # `midpoint REAL NOT NULL` column, where SQLite stores NaN as NULL
+            # and the constraint aborts the whole build. Rejected before either.
+            if not math.isfinite(stamp) or not math.isfinite(midpoint):
+                continue
             source_order = scanned_rows
             if stamp <= bounds[1]:
                 batch.append((token, stamp, midpoint, source_order))
@@ -259,7 +267,9 @@ def _build_price_index(
     return scanned_rows, indexed_rows
 
 
-def _frozen_split_stamp(cfg: EngineConfig, trades: list[dict[str, Any]]) -> tuple[float, bool]:
+def _frozen_split_stamp(
+    cfg: EngineConfig, trades: list[dict[str, Any]], *, stamps_ok: bool
+) -> tuple[float, bool]:
     """Return the ranking/evaluation split, frozen at first computation.
 
     Recomputing the median from the CURRENT corpus on every daily rebuild moves
@@ -274,11 +284,30 @@ def _frozen_split_stamp(cfg: EngineConfig, trades: list[dict[str, Any]]) -> tupl
     behaviour an out-of-sample evaluation should have.
     """
     path = cfg.output_root / "maker_carry" / "flow_toxicity_wallet_split.json"
-    persisted = read_json(path) if path.exists() else None
-    if isinstance(persisted, dict):
-        stored = safe_float(persisted.get("split_stamp"))
+    if path.exists():
+        persisted = read_json(path)
+        stored = safe_float(persisted.get("split_stamp")) if isinstance(persisted, dict) else None
         if stored is not None and math.isfinite(stored):
             return stored, True
+        # The file exists but is unparseable, not a dict, or carries a
+        # missing/non-finite split_stamp. Silently overwriting it would
+        # manufacture a fresh cutoff from data that has ALREADY been observed as
+        # evaluation - recreating exactly the moving-split leakage this file
+        # exists to prevent, after any corruption or partial restore (Codex P1
+        # wave-6 on #451). An invalid frozen state fails closed and loudly.
+        raise ValueError(
+            f"frozen wallet split state at {path} is present but invalid; refusing to "
+            "manufacture a replacement cutoff from already-observed evaluation data. "
+            "Restore the file from backup, or delete it deliberately to re-freeze."
+        )
+    if not stamps_ok:
+        # Never freeze against a stale or partial ledger (Codex P1 wave-6 on
+        # #451): the first such run would permanently fix the median of a
+        # contaminated corpus, and every later healthy run would report
+        # wallet_split_was_frozen=true while reusing that boundary forever. The
+        # failure must be contained to the rejected run, so no state is created.
+        stamps = sorted(float(trade["stamp"]) for trade in trades)
+        return (stamps[len(stamps) // 2] if stamps else 0.0), False
     stamps = sorted(float(trade["stamp"]) for trade in trades)
     split_stamp = stamps[len(stamps) // 2] if stamps else 0.0
     if stamps:
@@ -288,6 +317,11 @@ def _frozen_split_stamp(cfg: EngineConfig, trades: list[dict[str, Any]]) -> tupl
                 "split_stamp": split_stamp,
                 "frozen_at_utc": now_utc(),
                 "corpus_rows_at_freeze": len(stamps),
+                # AGENTS.md artifact-level provenance: this is an independently
+                # persisted artifact, so the wallet CSV's flags do not establish
+                # ITS evidence class (Codex P1 wave-6 on #451).
+                "paper_trading_invoked": False,
+                "live_trading_invoked": False,
                 "note": (
                     "Frozen ranking/evaluation split. Never recompute from a later corpus: "
                     "a moving median recycles published evaluation evidence into ranking."
@@ -606,7 +640,9 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
                     connection,
                     _price_target_bounds(trades, horizon),
                 )
-                split_stamp, split_was_frozen = _frozen_split_stamp(cfg, trades)
+                split_stamp, split_was_frozen = _frozen_split_stamp(
+                    cfg, trades, stamps_ok=trade_corpus_status == "ok"
+                )
                 markout_by_market, markout_by_wallet = _markout_stats(
                     connection, trades, top_wallets, horizon, split_stamp
                 )

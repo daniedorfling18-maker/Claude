@@ -16969,8 +16969,13 @@ research_focus.py:1053-1061 priority_delta +12.0. [N6 cured: "can", not "current
 the charter WP status with a dated "Landed:" note at land time, and WP8 is the edge-attribution entry
 [Codex P1-e])
 1. src/polymarket_predictive_engine/edge_attribution.py
-   a. [R1/R2 cured] `attribution_status`: CLOSED six-value enum, evaluated in THIS registered
-      precedence, first match wins:
+   a. [R1/R2 cured] `attribution_status`: CLOSED SEVEN-value enum — SIX unattributable failure
+      reasons (1-6) PLUS the one success status "attributed" (7); all seven are legal values of the
+      field and a build that omits any of them has not implemented this enum [Codex wave-5: the
+      wave-4 amendment inserted cause 3 and renumbered 1-7 but left this descriptor reading "six",
+      so the stated count contradicted the list immediately below it and a literal builder could
+      have dropped either "attributed" or one failure reason to honour the count]. Evaluated in THIS
+      registered precedence, first match wins:
         1 "unattributable_malformed_position"  — any required position INPUT field missing/
                                                  unparseable (input keys: shadow_position_id,
                                                  entry_price, exit_price, quantity —
@@ -16997,7 +17002,16 @@ the charter WP status with a dated "Landed:" note at land time, and WP8 is the e
                                                  settlement_surprise, total_pnl, any *_usdc) is
                                                  non-finite. Covers gate-executed cases entry="nan",
                                                  exit="nan", quantity="inf", line_price="nan".
-        3 "unattributable_out_of_domain_price" — every required input parses and is finite, but
+        3 "unattributable_out_of_domain_price" — every required input EXCEPT entry_mid parses and is
+                                                 finite (the entry mid is judged ONLY at cause 6, the
+                                                 same carve-out cause 2 carries — [Codex wave-5]:
+                                                 without it, a row with no usable entry mid AND
+                                                 line_price="2.0" made cause 3's antecedent false via
+                                                 the mid and cause 6's false via the out-of-domain
+                                                 line, so the "closed" precedence assigned it NO
+                                                 status at all; tests 6 and 15 each exercised their
+                                                 defect with the other input valid, so neither caught
+                                                 the cross-case), but
                                                  entry_price, exit_price or line_price falls OUTSIDE
                                                  its registered domain [Codex wave-4]. REGISTERED
                                                  DOMAINS, with basis: a Polymarket share pays exactly
@@ -17072,7 +17086,13 @@ the charter WP status with a dated "Landed:" note at land time, and WP8 is the e
         Populated ONLY for "attributed": model_probability, model_claimed_edge_per_share,
           execution_cost_per_share/_usdc, line_movement_per_share/_usdc,
           settlement_surprise_per_share/_usdc, total_pnl_per_share/_usdc
-        Everything not populated is "" in CSV and null in JSON [N5 cured]. A literal build never
+        Everything not populated is "" in the CSV. THIS TABLE IS CSV-ONLY [Codex wave-5]: the
+        registered writes put position rows in edge_attribution_positions.csv and nothing else, while
+        edge_attribution.json carries the summary and the cohort objects and NO per-position array.
+        The earlier "and null in JSON" wording had no target — a literal builder would have to either
+        ignore half the requirement or invent an unregistered positions payload and schema, so it is
+        removed rather than left ambiguous. The null-in-JSON convention still governs the COHORT
+        objects, where 1d registers nullable metric, class and action fields. A literal build never
         computes with an unavailable input — no `entry_fill - None`, no invented 0.0.
    c. Summary JSON [unchanged, verified cured]: closed_positions_seen, attributed_positions,
       skipped_unattributable_closed preserved byte-for-name; skipped == sum of causes 1-6. NEW:
@@ -17241,6 +17261,21 @@ fresh-but-wrong. This paragraph must survive as a code comment.
     losses; AND a fully-attributed cohort (unattributable_positions == 0) still emits its class,
     its action, and class_suppressed_reason null, so the rule withholds without disabling.
 
+18. Cross-case totality [Codex wave-5 — the defect class, not just the instance]. Every registered
+    test before this one exercises ONE defect with every other input valid, which is exactly why the
+    entry-mid x out-of-domain-line cell went unassigned through four gate rounds and one review wave.
+    Two parts:
+    (a) The named cell, pinned literally: no usable entry mid (market_midpoint="junk", no valid
+        fallback) AND line_price="2.0" -> cause 3, never cause 6, never unassigned.
+    (b) TOTALITY, asserted structurally rather than case by case: over a fixture that crosses each
+        position-side defect (valid / "" / "nan" / "1.5") with each line-side defect (no row /
+        "latest_provisional" / "" / "nan" / "2.0" / valid) and each mid state (valid / missing /
+        "junk" / "0"), assert for EVERY closed position that attribution_status is present, is one
+        of the seven registered values, and that attributed + skipped == seen with the six-key
+        histogram summing to skipped. No cell may be unassigned and no cell may carry a status
+        outside the enum. This is the assertion that makes "CLOSED enum" mean something a build can
+        fail rather than a claim in prose.
+
 ## Day-after check [N7 cured]
 Read edge_attribution.json AND governance_refresh_status.json on the first post-deploy cycle:
 histogram present with ALL SIX keys; attributed + skipped == seen; skipped fraction within the literal
@@ -17249,9 +17284,14 @@ roughly 20 points each way for one cycle of drift; BELOW 0.30 is investigated as
 (the drain lowering it gradually is expected, a jump is not), ABOVE 0.70 as a coverage regression;
 either way outside the bounds the check FAILS and the cause is named before the WO closes
 [Codex P1-g]; unattributable_realised_pnl_usdc
-PRESENT and FINITE and unattributable_pnl_unparseable_count PRESENT — with skipped > 0 a null/absent
-dropped-mass sum means the core accounting this WO exists for did not ship, and the check FAILS
-[Codex P2]; governance cycle completion stamp fresh in
+PRESENT and FINITE; and unattributable_pnl_unparseable_count PRESENT, a FINITE NONNEGATIVE INTEGER,
+and <= skipped_unattributable_closed — presence alone is not a check [Codex wave-5: a build that
+hard-codes it to 0, emits null, or simply never increments it passes a presence test while concealing
+exactly the accounting defect the counter exists to expose]. It is additionally RECONCILED against the
+source: its value must equal the number of rows in edge_attribution_positions.csv whose
+attribution_status is one of the six unattributable values AND whose realised_pnl_usdc is missing,
+unparseable, or non-finite. With skipped > 0 a null/absent dropped-mass sum means the core accounting
+this WO exists for did not ship, and the check FAILS [Codex P2]; governance cycle completion stamp fresh in
 governance_refresh_status.json — the field is literally `completed_at_utc`, written by
 refresh_governance.py:146 as self._write("ok", completed_at_utc=now_utc()), and "fresh" means
 status == "ok" AND now_utc() - completed_at_utc <= 12 hours, the literal bound [Codex wave-3: an

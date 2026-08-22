@@ -1333,6 +1333,109 @@ def test_a_split_state_without_provenance_flags_is_invalid(tmp_path):
     assert build_flow_toxicity(cfg)["wallet_split_was_frozen"] is True
 
 
+def test_a_holder_failure_does_not_discard_a_fresh_leaderboard(tmp_path):
+    """Aggregate "partial" must not condemn a leaderboard that did refresh.
+
+    wallet_intelligence_collector sets "partial" when ANY request failed --
+    including an unrelated HOLDER request -- so keying off the aggregate
+    discarded a leaderboard that had just refreshed successfully and rendered
+    every membership unknown (Codex P2 wave-19). leaderboard_rows_added is the
+    per-dependency evidence.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    write_json(
+        cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json",
+        {"status": "partial", "leaderboard_rows_added": 100, "holder_rows_added": 0},
+    )
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert summary["missing_wallet_data"] is False
+    assert rows["smart1"]["on_current_leaderboard"] == "True"
+    assert rows["smart1"]["artifact_status"] == "ok"
+    # Partial with NO leaderboard rows is still unknown.
+    write_json(
+        cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json",
+        {"status": "partial", "leaderboard_rows_added": 0},
+    )
+    assert build_flow_toxicity(cfg)["missing_wallet_data"] is True
+
+
+def test_an_invalid_horizon_does_not_condemn_a_sound_split(tmp_path):
+    """One fault must not manufacture a second (Codex P2 wave-19).
+
+    An invalid horizon substitutes a 5-minute fallback purely so the
+    horizon-independent veto can rebuild. Comparing a sound persisted split
+    against that fallback falsely labelled it invalid_frozen_split_state and
+    overwrote the invalid-horizon sentinel, even though restoring the setting
+    makes the split valid again.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(130, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+    raw = yaml.safe_load(Path(cfg.path).read_text(encoding="utf-8"))
+    raw["flow_toxicity"]["markout_horizon_minutes"] = 2
+    Path(cfg.path).write_text(yaml.safe_dump(raw), encoding="utf-8")
+    assert build_flow_toxicity(load_config(Path(cfg.path)))["status"] == "ok"
+
+    raw["flow_toxicity"]["markout_horizon_minutes"] = "not-a-number"
+    Path(cfg.path).write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="finite positive number"):
+        build_flow_toxicity(load_config(Path(cfg.path)))
+
+    # The sentinel names the REAL fault, not a manufactured split failure.
+    rows = read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")
+    assert rows[0]["artifact_status"] == "invalid_markout_horizon"
+    # Restoring the setting makes the split usable again -- it was never bad.
+    raw["flow_toxicity"]["markout_horizon_minutes"] = 2
+    Path(cfg.path).write_text(yaml.safe_dump(raw), encoding="utf-8")
+    assert build_flow_toxicity(load_config(Path(cfg.path)))["wallet_split_was_frozen"] is True
+
+
+def test_an_aborted_build_invalidates_stale_wallet_evidence(tmp_path):
+    """A raise mid-build must not leave yesterday's rankings readable as ok."""
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+    wallet_path = cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv"
+    assert build_flow_toxicity(cfg)["status"] == "ok"
+    assert read_csv_rows(wallet_path)[0]["artifact_status"] == "ok"
+
+    # A truncated archive: the index build raises part-way through.
+    archive = cfg.output_root / "polymarket_training_archive"
+    archive.mkdir(parents=True, exist_ok=True)
+    (archive / "corrupt.csv.gz").write_bytes(b"not-gzip-at-all")
+
+    with pytest.raises(Exception):
+        build_flow_toxicity(cfg)
+
+    rows = read_csv_rows(wallet_path)
+    assert len(rows) == 1
+    assert rows[0]["artifact_status"] == "build_failed"
+    assert read_json(cfg.output_root / "maker_carry" / "flow_toxicity_summary.json")["status"] == "build_failed"
+
+
 def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):
     """A wallet with no measurable fill must appear, disclosed, not vanish.
 

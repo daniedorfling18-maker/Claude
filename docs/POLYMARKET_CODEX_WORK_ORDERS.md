@@ -2152,8 +2152,11 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
 8b. THE LEADERBOARD DEPENDENCY IS GATED ON ITS PRODUCER TOO [Codex P2 wave-17].
    wallet_intelligence_collector.py:366-372 KEEPS the retained history when a refresh fails, so a
    nonempty leaderboard_history.csv is not evidence that membership is current. `_top_wallets` reads
-   `wallet_intelligence_summary.json` and treats any status other than "ok"/"disabled" — including
-   absent — as unavailable, which renders `on_current_leaderboard` "unknown" and stamps rows
+   `wallet_intelligence_summary.json`. Availability is judged on LEADERBOARD-SPECIFIC evidence, not
+   the collector's aggregate [Codex P2 wave-19]: that aggregate is "partial" when ANY request failed,
+   including an unrelated HOLDER request, so keying off it discarded a leaderboard that had just
+   refreshed successfully. Membership is unknown only when the status is neither "ok" nor "disabled"
+   AND `leaderboard_rows_added` is absent or <= 0. Any other non-ok status which renders `on_current_leaderboard` "unknown" and stamps rows
    `leaderboard_unavailable`. Markouts are unaffected: they do not depend on the leaderboard.
 9. NO PATH EMITS A BARE HEADER. FOUR states emit the single sentinel row [Codex P1 wave-15 — the
    text said two while the implementation also emits one for the two invalid-state paths before
@@ -2196,7 +2199,7 @@ the matrix without the total), and even when the count was right the MAPPING was
 behaviour was missing from the list while another entry claimed a standalone test that did not exist.
 This list is GENERATED from the test file and verified by diffing the names in both directions, so it
 cannot omit a real test or invent one that does not exist. Anyone changing it should regenerate
-rather than hand-edit. All 40 live in
+rather than hand-edit. All 43 live in
 tests/polymarket_predictive_engine/test_flow_toxicity.py.
 
  1. `test_planted_toxic_flow_scores_above_balanced_flow`
@@ -2271,14 +2274,34 @@ tests/polymarket_predictive_engine/test_flow_toxicity.py.
     With the flow_toxicity runtime lock already held, the run returns skipped_locked and writes NO split state and NO wallet CSV.
 36. `test_a_split_state_without_provenance_flags_is_invalid`
     A split state with the invocation flags absent, or with either set true, is invalid and raises; the untouched original is still reusable and reports wallet_split_was_frozen True.
-37. `test_wallet_without_any_forward_price_is_still_emitted`
+37. `test_a_holder_failure_does_not_discard_a_fresh_leaderboard`
+    Aggregate status 'partial' with leaderboard_rows_added 100 keeps membership KNOWN (on_current_leaderboard True, artifact_status ok); 'partial' with 0 rows added is unknown.
+38. `test_an_invalid_horizon_does_not_condemn_a_sound_split`
+    A split frozen at a valid 2-minute horizon survives a temporarily malformed setting: the sentinel names invalid_markout_horizon, not invalid_frozen_split_state, and restoring the setting reuses the split.
+39. `test_an_aborted_build_invalidates_stale_wallet_evidence`
+    A corrupt .csv.gz aborts the build; the wallet CSV holds one build_failed sentinel and the summary status is build_failed, so yesterday's rankings are not readable as ok.
+40. `test_wallet_without_any_forward_price_is_still_emitted`
     A wallet whose every fill lacks a forward price is still emitted, fills_missing_price set, markets_touched credited.
-38. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
+41. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
     Disabled replaces the artifact with one sentinel carrying artifact_status=disabled and both flags false.
-39. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
+42. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
     A price outside [target, target+horizon] counts as stale-excluded, and the market-axis columns keep the parent lookup.
-40. `test_wallet_artifact_states_its_own_invocation_flags`
+43. `test_wallet_artifact_states_its_own_invocation_flags`
     The wallet CSV states both invocation flags itself.
+
+## FAILURE PATH
+
+Any unexpected abort inside the locked build — a truncated `.csv.gz`, a disk error — replaces the
+wallet CSV with a single `artifact_status="build_failed"` sentinel and writes a `build_failed`
+summary carrying the exception text, then RE-RAISES [Codex P2 wave-19]. Without it the exception
+escaped before either artifact was rewritten, so the resilient harvest recorded a failed step while
+YESTERDAY's rankings stayed on disk reading `artifact_status="ok"`. The two deliberate failure paths
+(invalid frozen split, invalid horizon) mark their exception as already handled so this generic path
+does not overwrite their more specific sentinels.
+
+Note the asymmetry, which is deliberate: an abort invalidates the WALLET artifact but never the
+market-axis table, for the reason registered under rule 8a — an absent toxicity record makes the veto
+fail OPEN, so a stale veto row is strictly safer than none.
 
 ## CONCURRENCY
 
@@ -2358,14 +2381,19 @@ markouts]:
       when it holds no non-finite, out-of-domain or duplicate rows [Codex P1 wave-18 — this was the
       fourth parent-artifact difference and the list claimed to be exhaustive without it, which would
       have directed a later builder to restore the fallback];
-  (iv) forward-price LOOKUP still keys on the VENUE stamp, unchanged, so which market state a
+  (iv) features whose `collected_at_utc` is PRESENT but unparseable are absent. The parent ignored
+      collection time entirely and used such a feature; rule 11 drops it, so a corpus containing one
+      changes the market markout even with no non-finite, out-of-domain, blank-stamp or duplicate
+      rows [Codex P1 wave-19 — the registered test fixture for that rule demonstrates it, moving the
+      market markout from +0.40 to +0.20];
+  (v) forward-price LOOKUP still keys on the VENUE stamp, unchanged, so which market state a
       markout measures is unchanged. What changed is only the TIE-BREAK among rows sharing a venue
       stamp: previously midpoint (so the smaller number won), now proven-availability first, then
       earliest available time, then arrival order. Collection time is used ONLY for ranking
       eligibility and never for lookup or staleness.
 Every column NAME and every FORMULA is untouched, and on a corpus with no non-finite rows, no
-out-of-domain rows, no blank venue timestamps and no same-venue-stamp duplicates the output IS
-byte-identical.
+out-of-domain rows, no blank venue timestamps, no malformed collection timestamps and no
+same-venue-stamp duplicates the output IS byte-identical.
 
 The leaderboard-producer rule (8b) deliberately does NOT change the market axis: `_top_wallets` still
 returns the RETAINED top-100 when a refresh fails, so the legacy smart/crowd tier split is unaffected.

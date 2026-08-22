@@ -171,7 +171,19 @@ def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], bool]:
     # artifact. The parent used the retained top-100 here and still does. The
     # unknown-membership signal is carried separately and affects only the NEW
     # wallet artifact's reporting column.
-    membership_unknown = producer_status not in {"ok", "disabled"}
+    # LEADERBOARD-SPECIFIC evidence, not the collector's aggregate (Codex P2
+    # wave-19). wallet_intelligence_collector.py:403-408 sets "partial" when ANY
+    # request failed -- including an unrelated HOLDER request -- so keying off
+    # the aggregate discarded a leaderboard that had just refreshed
+    # successfully and rendered every membership unknown. leaderboard_rows_added
+    # is the per-dependency evidence, so a positive count means the leaderboard
+    # itself refreshed whatever else went wrong.
+    leaderboard_rows_added = _finite_number(
+        producer.get("leaderboard_rows_added") if isinstance(producer, dict) else None
+    )
+    membership_unknown = producer_status not in {"ok", "disabled"} and not (
+        leaderboard_rows_added is not None and leaderboard_rows_added > 0
+    )
     latest = max(str(row.get("snapshot_date") or row.get("snapshot_at_utc") or "") for row in rows)
     latest_rows = [row for row in rows if str(row.get("snapshot_date") or row.get("snapshot_at_utc") or "") == latest]
     latest_rows.sort(key=lambda row: safe_float(row.get("rank")) if safe_float(row.get("rank")) is not None else 1e9)
@@ -954,7 +966,36 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
                 "paper_trading_invoked": False,
                 "live_trading_invoked": False,
             }
-        return _build_flow_toxicity_locked(cfg)
+        try:
+            return _build_flow_toxicity_locked(cfg)
+        except Exception as exc:
+            # Any unexpected abort -- a truncated .csv.gz, a disk error -- would
+            # otherwise escape before the wallet artifact or summary were
+            # rewritten, leaving YESTERDAY's rankings on disk still saying
+            # artifact_status="ok" while the resilient harvest merely records a
+            # failed step (Codex P2 wave-19). The deliberate failure paths write
+            # their own, more specific sentinels and set _HANDLED_FAILURE, so
+            # this does not overwrite them.
+            if not getattr(exc, "_flow_toxicity_handled", False):
+                out_root = cfg.output_root / "maker_carry"
+                generated_at = now_utc()
+                write_json(
+                    out_root / "flow_toxicity_summary.json",
+                    {
+                        "status": "build_failed",
+                        "generated_at_utc": generated_at,
+                        "work_order": "WO-49",
+                        "error": f"{type(exc).__name__}: {exc}",
+                        "paper_trading_invoked": False,
+                        "live_trading_invoked": False,
+                    },
+                )
+                write_csv(
+                    out_root / "flow_toxicity_wallets.csv",
+                    [_wallet_sentinel_row(generated_at, "build_failed")],
+                    fieldnames=WALLET_MARKOUT_FIELDS,
+                )
+            raise
 
 
 def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
@@ -1044,7 +1085,15 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
     if split_path.exists():
         persisted = read_json(split_path)
         stored = _split_stamp_value(persisted)
-        if stored is None or _frozen_horizon_mismatch(persisted, horizon):
+        # The horizon-mismatch check is SKIPPED when the configured horizon is
+        # itself invalid (Codex P2 wave-19). An invalid horizon substitutes an
+        # arbitrary 5-minute fallback purely so the horizon-independent veto can
+        # rebuild; comparing a sound persisted split against that fallback
+        # falsely condemned it -- a valid 2-minute split plus a temporarily
+        # malformed setting was labelled invalid_frozen_split_state, overwriting
+        # the invalid-horizon sentinel, even though restoring the setting makes
+        # the split valid again. One fault must not manufacture a second.
+        if stored is None or (not invalid_horizon and _frozen_horizon_mismatch(persisted, horizon)):
             invalid_split_state = True
             write_csv(
                 out_root / "flow_toxicity_wallets.csv",
@@ -1148,25 +1197,29 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
         summary["status"] = "invalid_markout_horizon"
         summary["markets_scored"] = len(rows_out)
         write_json(summary_path, summary)
-        raise ValueError(
+        error = ValueError(
             "flow_toxicity.markout_horizon_minutes must be a finite positive number; got "
             f"{settings.get('markout_horizon_minutes')!r}. The wallet artifact has been "
             "invalidated so no stale ranking is readable; the market-axis veto fields WERE "
             "rebuilt, with the markout columns left empty, so the toxicity veto stays current."
         )
+        error._flow_toxicity_handled = True  # type: ignore[attr-defined]
+        raise error
     if invalid_split_state:
         # The market axis is now current on disk, so the toxicity veto is not
         # frozen by a wallet-side fault. Only now does the run fail loudly.
         summary["status"] = "invalid_frozen_split_state"
         summary["markets_scored"] = len(rows_out)
         write_json(summary_path, summary)
-        raise ValueError(
+        error = ValueError(
             f"frozen wallet split state at {split_path} is present but invalid; refusing to "
             "manufacture a replacement cutoff from already-observed evaluation data. "
             "Restore the file from backup, or delete it deliberately to re-freeze. "
             "The wallet artifact has been invalidated so no stale ranking is readable; "
             "the market-axis table WAS rebuilt so the toxicity veto stays current."
         )
+        error._flow_toxicity_handled = True  # type: ignore[attr-defined]
+        raise error
 
     def _mean(total: float, count: int) -> float | None:
         return round(total / count, 6) if count else None

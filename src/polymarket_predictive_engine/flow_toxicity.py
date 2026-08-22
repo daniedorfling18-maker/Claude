@@ -348,18 +348,49 @@ def _wallet_sentinel_row(generated_at: str, status: str) -> dict[str, Any]:
     }
 
 
+# EVERY producer that writes trade_prints.csv, with the summary each reports to
+# (Codex P1 wave-7 on #451). The canonical ledger has THREE writers, not one:
+# collect_trade_prints (trade_prints_summary.json), collect_maker_replay_data
+# (trade_print_collector.py:521, same ledger, maker_portfolio_... summary) and
+# backfill_trade_prints (:563/:571, same ledger, trade_print_backfill_summary).
+# All three run in training_harvest.py:98-106 immediately before flow_toxicity,
+# and the harvest is deliberately resilient - it continues past a failed step.
+# Consulting only the first summary therefore let a stale-but-"ok" primary vouch
+# for rows another producer had just written partially, and worse, permitted the
+# permanent split freeze on that contaminated corpus.
+_TRADE_LEDGER_PRODUCER_SUMMARIES = (
+    "trade_prints_summary.json",
+    "maker_portfolio_trade_prints_summary.json",
+    "trade_print_backfill_summary.json",
+)
+
+
 def _trade_corpus_status(cfg: EngineConfig) -> str:
-    """The producer's own status for the trade-print ledger it depends on.
+    """The WORST status across every producer that writes the trade ledger.
 
     The previous run's capped ledger stays readable when a collection fails or
-    is partial, so scoring it without consulting the producer would rank wallets
+    is partial, so scoring it without consulting the producers would rank wallets
     on an undisclosed stale or incomplete sample (Codex P1 wave-5 on #451).
-    Absent/unparseable summary is treated as NOT ok - fail closed, not open.
+    Absent/unparseable summary is treated as NOT ok - fail closed, not open - and
+    "ok" is returned only when EVERY producer says ok, since any one of them can
+    have written the partial rows (Codex P1 wave-7).
     """
-    payload = read_json(cfg.output_root / "polymarket_trade_prints" / "trade_prints_summary.json")
-    if not isinstance(payload, dict):
-        return "missing"
-    return str(payload.get("status") or "missing").strip().lower()
+    root = cfg.output_root / "polymarket_trade_prints"
+    statuses: list[str] = []
+    for filename in _TRADE_LEDGER_PRODUCER_SUMMARIES:
+        payload = read_json(root / filename)
+        if not isinstance(payload, dict):
+            statuses.append("missing")
+            continue
+        statuses.append(str(payload.get("status") or "missing").strip().lower())
+    # "disabled" is a legitimate resting state for a producer that is switched
+    # off; it is not evidence of a partial write, so it does not veto. Anything
+    # else that is not "ok" does, and the first such status is reported so the
+    # stamp names what actually failed.
+    for status in statuses:
+        if status not in {"ok", "disabled"}:
+            return status
+    return "ok"
 
 
 def _markout_stats(

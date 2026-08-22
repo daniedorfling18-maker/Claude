@@ -41,12 +41,27 @@ def _features(cfg, token: str, points: list[tuple[int, float]]) -> None:
     )
 
 
-def _trade_summary(cfg, status: str = "ok") -> None:
-    """The producer status the wallet axis fails closed against."""
-    write_json(
-        cfg.output_root / "polymarket_trade_prints" / "trade_prints_summary.json",
-        {"status": status, "generated_at_utc": "2026-08-22T00:00:00Z"},
-    )
+def _trade_summary(cfg, status: str = "ok", *, only: str | None = None) -> None:
+    """Producer statuses the wallet axis fails closed against.
+
+    trade_prints.csv has THREE writers and the guard takes the worst status
+    across all of them, so a healthy fixture must state all three. `only` writes
+    the named summary alone, for testing that one bad producer vetoes.
+    """
+    root = cfg.output_root / "polymarket_trade_prints"
+    names = [
+        "trade_prints_summary.json",
+        "maker_portfolio_trade_prints_summary.json",
+        "trade_print_backfill_summary.json",
+    ]
+    for name in names:
+        write_json(
+            root / name,
+            {
+                "status": status if (only is None or name == only) else "ok",
+                "generated_at_utc": "2026-08-22T00:00:00Z",
+            },
+        )
 
 
 def _leaderboard(cfg) -> None:
@@ -427,7 +442,10 @@ def test_stale_trade_corpus_is_stamped_on_every_wallet_row(tmp_path):
     """
     cfg = _config(tmp_path)
     _leaderboard(cfg)
-    _trade_summary(cfg, status="partial")
+    # Only the BACKFILL producer is partial; the other two say ok. One bad
+    # writer of the shared ledger is enough, because any of the three can have
+    # written the partial rows (Codex P1 wave-7 on #451).
+    _trade_summary(cfg, status="partial", only="trade_print_backfill_summary.json")
     _features(cfg, "tok-a", [(310, 0.70)])
     write_csv(
         cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",

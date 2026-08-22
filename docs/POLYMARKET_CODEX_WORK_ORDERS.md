@@ -2064,8 +2064,18 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    circularity rule 1 exists to prevent, spread across runs. With the split frozen the ranking sample
    stays fixed and evaluation accumulates, which is the correct behaviour for an out-of-sample
    evaluation. `wallet_split_was_frozen` is published so a reader can tell a first run from a reuse.
-8. UPSTREAM STATE IS DISCLOSED ON EVERY ROW: the wallet path reads the producer's own
-   `trade_prints_summary.json`; when its status is anything other than "ok" (including absent or
+8. UPSTREAM STATE IS DISCLOSED ON EVERY ROW, AND EVERY PRODUCER IS CONSULTED. `trade_prints.csv`
+   has THREE writers, not one [Codex P1 wave-7]: `collect_trade_prints`
+   (`trade_prints_summary.json`), `collect_maker_replay_data` (trade_print_collector.py:521 — same
+   ledger, reports to `maker_portfolio_trade_prints_summary.json`) and `backfill_trade_prints`
+   (:563/:571 — same ledger, `trade_print_backfill_summary.json`). All three run in
+   training_harvest.py:98-106 immediately before `flow-toxicity`, and the harvest is deliberately
+   resilient, continuing past a failed step. Reading only the first summary therefore let a
+   stale-but-"ok" primary vouch for rows another producer had just written partially — and, worse,
+   permitted rule 10's permanent freeze on that contaminated corpus. The registered rule is the WORST
+   status across all three: "ok" only when every producer says "ok" ("disabled" is a legitimate
+   resting state and does not veto; anything else does, and the vetoing status is what gets stamped).
+   The wallet path reads them all; when its status is anything other than "ok" (including absent or
    unparseable, which read as "missing"), every emitted row carries
    `artifact_status="upstream_<status>"` instead of "ok". Stamped rather than blanked deliberately —
    ranking wallets on an undisclosed stale or partial sample is the harm, and a missing producer
@@ -2121,8 +2131,15 @@ is measurable against it.
 
 
 FAIL-SAFE: diagnostic only. No gate, threshold, sizing, promotion, eligibility or order surface reads
-this artifact; `grep -rn` finds no in-repo consumer outside flow_toxicity.py. The market-axis table is
-byte-identical. On the disabled path the artifact is REPLACED by a single sentinel row carrying
+this artifact; `grep -rn` finds no in-repo consumer outside flow_toxicity.py. The market-axis table
+is UNCHANGED IN SCHEMA AND IN METHOD, but is NOT byte-identical, and the earlier claim that it was is
+withdrawn [Codex P1 wave-7: it directly contradicted this same amendment's parent scope
+reconciliation, which registers rule 6's non-finite rejection as a deliberate behaviour change to the
+market axis. Two incompatible statements in the binding spec left a builder or auditor unable to tell
+whether preserving previous bytes or excluding malformed rows was authoritative — EXCLUDING THEM IS
+AUTHORITATIVE]. The only difference is the absence of rows whose price, size or timestamp parsed but
+was non-finite; every column name, ordering and formula is untouched, and on a corpus containing no
+such rows the output IS byte-identical. On the disabled path the artifact is REPLACED by a single sentinel row carrying
 `artifact_status="disabled"` and both invocation flags false — a stale ranking left on disk would read
 as current, and a header-only file names the columns while asserting nothing.
 

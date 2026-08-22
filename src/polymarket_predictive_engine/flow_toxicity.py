@@ -1103,22 +1103,35 @@ def _percentiles(raw_by_market: dict[str, float]) -> dict[str, float]:
     return {market: round(index / (len(ordered) - 1), 6) for index, (market, _) in enumerate(ordered)}
 
 
-def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int, int, set[str], int]:
-    """Parsed fills, plus WHICH markets lost rows to rejection.
+def _trade_rows(
+    cfg: EngineConfig,
+) -> tuple[list[dict[str, Any]], int, int, set[str], set[str], int]:
+    """Parsed fills, plus WHICH markets and tokens lost rows to rejection.
 
     The counts alone were not enough (Codex P1 wave-26). A market with both
     valid and rejected rows still produces a fresh toxicity row, computed from
     an incomplete sample, and that row can read CLEAN and replace a prior
     blocking one -- so knowing only that "some rows were rejected somewhere"
-    cannot protect the market that actually lost coverage. The two extra
-    returns name the affected markets and count the rejections whose `market`
-    field was itself unreadable, which cannot be attributed to any market and
-    therefore taint the whole table.
+    cannot protect the market that actually lost coverage.
+
+    Three attribution outcomes, in decreasing order of what they let the veto
+    rules do (the token tier added at wave-33):
+
+      rejected_markets  -- the row named a market. That market's sample is
+                           incomplete and only it is affected.
+      rejected_tokens   -- the row named no market but DID name a token.
+                           requote_alerts keys its toxicity map by asset_id too,
+                           so this is still addressable; treating it as wholly
+                           unattributable over-tainted the table and left a
+                           token with no other coverage with no veto at all.
+      unattributable    -- neither identifier readable. Nothing can be pinned to
+                           it, so every market's absence becomes unverifiable.
     """
     parsed: list[dict[str, Any]] = []
     malformed_rows = 0
     source_rows = 0
     rejected_markets: set[str] = set()
+    rejected_tokens: set[str] = set()
     unattributable_rejections = 0
     path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
     for row in _iter_csv_any(path):
@@ -1153,10 +1166,19 @@ def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int, int, set[
             malformed_rows += 1
             if market:
                 rejected_markets.add(market)
+            elif token:
+                # A blank market is not necessarily unattributable (Codex P2
+                # wave-33). requote_alerts.py:141 keys its toxicity map by
+                # market, asset_id AND condition_id, and :503 looks a quote up
+                # by condition_id OR token_id -- so a token alone is enough to
+                # address a veto. Treating this as wholly unattributable both
+                # over-tainted the rest of the table and, for a token with no
+                # other coverage, left NO addressable row at all.
+                rejected_tokens.add(token)
             else:
-                # No readable market means the loss cannot be attributed, so no
-                # single market's veto can be protected by it -- the whole table
-                # is unverifiable instead.
+                # Neither identifier readable: the loss cannot be attributed to
+                # anything, so no single market's veto can be protected by it
+                # and the whole table is unverifiable instead.
                 unattributable_rejections += 1
             continue
         if not math.isfinite(price) or not math.isfinite(size) or not math.isfinite(stamp):
@@ -1198,7 +1220,7 @@ def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int, int, set[
                 "wallet": _wallet(row),
             }
         )
-    return parsed, malformed_rows, source_rows, rejected_markets, unattributable_rejections
+    return parsed, malformed_rows, source_rows, rejected_markets, rejected_tokens, unattributable_rejections
 
 
 def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
@@ -1394,6 +1416,7 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
         malformed_trade_rows,
         trade_source_rows,
         rejected_markets,
+        rejected_tokens,
         unattributable_rejections,
     ) = _trade_rows(cfg)
     trade_corpus_status = _trade_corpus_status(cfg)
@@ -1591,12 +1614,31 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
             def _lost_rows(market: str) -> bool:
                 return taint_all or market in rejected_markets
             carried: list[dict[str, Any]] = []
+            carried_clean_blocked: list[str] = []
             retained_blocks = 0
+            prior_rows = read_csv_rows(path)
             prior_by_market = {
                 str(row.get("market") or ""): row
-                for row in read_csv_rows(path)
+                for row in prior_rows
                 if str(row.get("market") or "")
             }
+            # A token-only rejection is resolved to its market where the table
+            # already knows the pairing (Codex P2 wave-33), so the ordinary
+            # market rules apply to it. Only a token with NO coverage anywhere
+            # needs a token-addressable row of its own.
+            token_to_market: dict[str, str] = {}
+            for row in (*rows_out, *prior_rows):
+                token = str(row.get("asset_id") or "").strip()
+                market_name = str(row.get("market") or "").strip()
+                if token and market_name:
+                    token_to_market.setdefault(token, market_name)
+            orphan_tokens = set()
+            for token in rejected_tokens:
+                resolved = token_to_market.get(token)
+                if resolved:
+                    rejected_markets.add(resolved)
+                else:
+                    orphan_tokens.add(token)
             for prior in prior_by_market.values():
                 market = str(prior.get("market") or "")
                 if not market:
@@ -1612,6 +1654,30 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
                     # still taint everything, because then any absence could be
                     # the corruption.
                     if _lost_rows(market):
+                        # A CARRIED CLEAN ROW MUST NOT CARRY ITS CLEARANCE
+                        # (Codex P1 wave-33). This branch fires only when the
+                        # market lost rows, so its CURRENT sample is entirely
+                        # unmeasurable -- and rule 13f already says unverified
+                        # is not clean. Carrying a previously clean row verbatim
+                        # let requote_alerts.py:502-535 and
+                        # stage_ticket_eligibility.py:195-218 read an
+                        # unmeasurable market as measured and safe, which is the
+                        # rule's own text contradicted by the one path that
+                        # bypassed it. The measurement columns and the original
+                        # generated_at_utc are kept, so the stale numbers stay
+                        # visible as stale; only the verdict changes.
+                        prior_blocked_row = (
+                            str(prior.get("toxic_blocked") or "").strip().lower() == "true"
+                        )
+                        if not prior_blocked_row:
+                            prior = dict(prior)
+                            prior["toxic_blocked"] = True
+                            reasons = [
+                                r for r in str(prior.get("toxicity_block_reasons") or "").split(";") if r
+                            ]
+                            reasons.append("unmeasurable_sample")
+                            prior["toxicity_block_reasons"] = ";".join(reasons)
+                            carried_clean_blocked.append(market)
                         carried.append(prior)
                     continue
                 prior_blocked = str(prior.get("toxic_blocked") or "").strip().lower() == "true"
@@ -1669,17 +1735,22 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
             # `toxic_blocked` and the named reason, which is what the consumers
             # read; a zero score cannot itself trip the score or imbalance
             # thresholds, so the composite block is doing the work and says so.
-            unmeasurable = sorted(
-                market
-                for market in rejected_markets
+            unmeasurable = [
+                (market, "")
+                for market in sorted(rejected_markets)
                 if market not in fresh_by_market and market not in prior_by_market
-            )
-            for market in unmeasurable:
+            ]
+            # Token-addressable rows for rejections that named no market and
+            # whose token the table cannot pair with one (Codex P2 wave-33).
+            # requote_alerts keys on asset_id as well, so a blank market still
+            # reaches the quote that needs blocking.
+            unmeasurable.extend(("", token) for token in sorted(orphan_tokens))
+            for market, asset_id in unmeasurable:
                 rows_out.append(
                     {
                         "generated_at_utc": generated_at,
                         "market": market,
-                        "asset_id": "",
+                        "asset_id": asset_id,
                         "toxicity_score": 0.0,
                         "vpin_raw": 0.0,
                         "volume_buckets": 0,
@@ -1698,6 +1769,8 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
                 )
             if unmeasurable:
                 summary["market_blocks_on_unmeasurable_sample"] = len(unmeasurable)
+            if carried_clean_blocked:
+                summary["market_blocks_on_carried_clean_rows"] = len(carried_clean_blocked)
             if unverified_blocks:
                 summary["market_blocks_on_unverified_sample"] = unverified_blocks
             if retained_blocks or unverified_blocks:

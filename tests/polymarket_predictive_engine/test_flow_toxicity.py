@@ -2374,13 +2374,17 @@ def test_a_departed_market_is_not_pinned_by_an_unrelated_rejection(tmp_path):
     assert after == {"0xa", "0xb"}, "a cleanly departed market must age out"
 
 
-def test_an_unattributable_rejection_pins_every_departed_market(tmp_path):
-    """With no readable market, any absence could be the corruption.
+def test_a_token_only_rejection_is_resolved_to_its_market(tmp_path):
+    """A blank market is not necessarily unattributable (Codex P2 wave-33).
 
-    The restriction above is safe only because a rejection with a readable
-    market names the coverage it cost. A rejection whose `market` field is
-    itself unreadable names nothing, so every absence becomes unverifiable and
-    the conservative direction is to hold them all.
+    requote_alerts keys its toxicity map by asset_id as well, and the table
+    already knows this token's market, so the rejection is attributed there and
+    the ordinary market rules apply. Treating every market-less rejection as
+    wholly unattributable over-tainted the rest of the table.
+
+    This test was previously named for the unattributable case, which it stopped
+    exercising once the token tier existed; the genuinely unattributable case is
+    the test below.
     """
     cfg = _config(tmp_path)
     _leaderboard(cfg)
@@ -2412,7 +2416,88 @@ def test_an_unattributable_rejection_pins_every_departed_market(tmp_path):
 
     assert summary["malformed_trade_rows_excluded"] == 1
     assert summary["market_rows_carried_forward"] == 1
-    assert after == {"0xa", "0xc"}, "0xc is held because the rejection named no market"
+    assert after == {"0xa", "0xc"}, "0xc is held because ITS token lost the row"
+    # Carried forward AND blocked: 0xc's current sample is unmeasurable, so its
+    # prior clean verdict must not survive as clearance.
+    assert summary["market_blocks_on_carried_clean_rows"] == 1
+    carried = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+    assert carried["0xc"]["toxic_blocked"] == "True"
+    assert "unmeasurable_sample" in carried["0xc"]["toxicity_block_reasons"]
+
+
+def test_a_rejection_naming_nothing_pins_every_departed_market(tmp_path):
+    """Neither market nor token readable: every absence is unverifiable.
+
+    The market and token restrictions are safe only because such a rejection
+    names the coverage it cost. One that names nothing at all cannot be pinned
+    anywhere, so the conservative direction is to hold every departed market.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    for token in ("tok-a", "tok-c"):
+        _features(cfg, token, [(310, 0.70)])
+    prints_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    write_csv(
+        prints_path,
+        [
+            *_flow("0xa", "tok-a", "w1", buys=6, sells=2),
+            *_flow("0xc", "tok-c", "w3", buys=4, sells=4),
+        ],
+        fieldnames=_FLOW_FIELDS,
+    )
+    build_flow_toxicity(cfg)
+
+    write_csv(
+        prints_path,
+        [
+            *_flow("0xa", "tok-a", "w1", buys=6, sells=2),
+            {"market": "", "asset_id": "", "wallet": "w3",
+             "side": "BUY", "price": 0.5, "size": 100, "timestamp": 99},
+        ],
+        fieldnames=_FLOW_FIELDS,
+    )
+    summary = build_flow_toxicity(cfg)
+    after = {row["market"] for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+
+    assert summary["malformed_trade_rows_excluded"] == 1
+    assert summary["market_rows_carried_forward"] == 1
+    assert after == {"0xa", "0xc"}
+
+
+def test_an_orphan_token_rejection_gets_a_token_addressable_veto(tmp_path):
+    """A token with no coverage anywhere still needs a blockable row (wave-33).
+
+    requote_alerts.py:503 looks a quote up by condition_id OR token_id, so a row
+    carrying only the asset_id is enough to raise the block. Without it, a
+    first-seen token whose every row is rejected reached the artifact not at all.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    prints_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    write_csv(prints_path, _flow("0xa", "tok-a", "w1", buys=6, sells=2), fieldnames=_FLOW_FIELDS)
+    build_flow_toxicity(cfg)
+
+    write_csv(
+        prints_path,
+        [
+            *_flow("0xa", "tok-a", "w1", buys=6, sells=2),
+            {"market": "", "asset_id": "tok-unseen", "wallet": "w9",
+             "side": "BUY", "price": 0.5, "size": 100, "timestamp": 99},
+        ],
+        fieldnames=_FLOW_FIELDS,
+    )
+    summary = build_flow_toxicity(cfg)
+    rows = read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")
+    by_token = {row["asset_id"]: row for row in rows}
+
+    assert summary["market_blocks_on_unmeasurable_sample"] == 1
+    assert "tok-unseen" in by_token, "an orphan token must still reach the artifact"
+    assert by_token["tok-unseen"]["market"] == ""
+    assert by_token["tok-unseen"]["toxic_blocked"] == "True"
+    assert by_token["tok-unseen"]["toxicity_block_reasons"] == "wholly_rejected_sample"
 
 
 def test_a_freshly_toxic_market_still_wins_over_a_prior_clean_row(tmp_path):

@@ -205,12 +205,13 @@ def _build_price_index(
             asset_id TEXT NOT NULL,
             stamp REAL NOT NULL,
             midpoint REAL NOT NULL,
+            availability_known INTEGER NOT NULL,
             source_order INTEGER NOT NULL
         );
         """
     )
-    batch: list[tuple[str, float, float, int]] = []
-    tail_candidates: dict[str, tuple[float, int, float]] = {}
+    batch: list[tuple[str, float, float, int, int]] = []
+    tail_candidates: dict[str, tuple[float, int, float, int]] = {}
     scanned_rows = 0
     indexed_rows = 0
 
@@ -219,7 +220,8 @@ def _build_price_index(
         if not batch:
             return
         connection.executemany(
-            "INSERT INTO feature_prices(asset_id, stamp, midpoint, source_order) VALUES (?, ?, ?, ?)",
+            "INSERT INTO feature_prices(asset_id, stamp, midpoint, availability_known, source_order)"
+            " VALUES (?, ?, ?, ?, ?)",
             batch,
         )
         indexed_rows += len(batch)
@@ -267,8 +269,20 @@ def _build_price_index(
                 if collected is None or not math.isfinite(collected):
                     continue
                 stamp = max(source_stamp, collected)
+                availability_known = 1
             else:
+                # ABSENT collection time: the corpus predates the column, or the
+                # row was replayed. The venue stamp is the only evidence there
+                # is, so it is used for ordering and markout -- but availability
+                # is UNPROVEN, and an unproven availability must not earn a
+                # place in the RANKING window, whose whole purpose is that its
+                # labels were observable before the split (Codex P1 wave-13).
+                # Rejecting such rows outright would zero the artifact on any
+                # legacy archive; blocking ranking only is the narrow fix. This
+                # is one boolean feeding exactly one decision, not a second
+                # clock -- the wave-12 collapse stands.
                 stamp = source_stamp
+                availability_known = 0
             if stamp < bounds[0]:
                 continue
             # safe_float parses "inf"/"nan" here too (Codex P1 wave-6 on #451:
@@ -281,7 +295,7 @@ def _build_price_index(
                 continue
             source_order = scanned_rows
             if stamp <= bounds[1]:
-                batch.append((token, stamp, midpoint, source_order))
+                batch.append((token, stamp, midpoint, availability_known, source_order))
                 if len(batch) >= 10_000:
                     flush()
                 continue
@@ -292,18 +306,18 @@ def _build_price_index(
             # target bound it is THIS comparison that picks the single retained
             # row, and with midpoint second it picked whichever price was
             # numerically smaller (Codex P1 wave-9).
-            candidate = (stamp, source_order, midpoint)
+            candidate = (stamp, source_order, midpoint, availability_known)
             current = tail_candidates.get(token)
             if current is None or candidate < current:
                 tail_candidates[token] = candidate
 
-    for token, (stamp, source_order, midpoint) in tail_candidates.items():
-        batch.append((token, stamp, midpoint, source_order))
+    for token, (stamp, source_order, midpoint, availability_known) in tail_candidates.items():
+        batch.append((token, stamp, midpoint, availability_known, source_order))
     flush()
     connection.commit()
     connection.execute(
         "CREATE INDEX feature_prices_token_stamp_idx "
-        "ON feature_prices(asset_id, stamp, source_order, midpoint)"
+        "ON feature_prices(asset_id, stamp, source_order, midpoint, availability_known)"
     )
     connection.commit()
     return scanned_rows, indexed_rows
@@ -447,10 +461,19 @@ def _wallet_sentinel_row(generated_at: str, status: str) -> dict[str, Any]:
 # Consulting only the first summary therefore let a stale-but-"ok" primary vouch
 # for rows another producer had just written partially, and worse, permitted the
 # permanent split freeze on that contaminated corpus.
+# Mapped to the poll evidence EACH producer actually publishes (Codex P1
+# wave-13). collect_trade_prints and the explicit-market collector both always
+# initialise and publish markets_polled (trade_print_collector.py:373, :487), so
+# for those two an ABSENT count means a malformed or legacy summary and is not
+# refresh evidence. backfill_trade_prints never writes markets_polled at all --
+# it reports candidate_markets/markets_attempted -- and its no-op outcomes have
+# their own distinct statuses, so for it an "ok" status IS the evidence. The
+# earlier blanket "absent does not disqualify" rule was right for backfill and
+# wrong for the other two.
 _TRADE_LEDGER_PRODUCER_SUMMARIES = (
-    "trade_prints_summary.json",
-    "maker_portfolio_trade_prints_summary.json",
-    "trade_print_backfill_summary.json",
+    ("trade_prints_summary.json", True),
+    ("maker_portfolio_trade_prints_summary.json", True),
+    ("trade_print_backfill_summary.json", False),
 )
 
 
@@ -480,7 +503,7 @@ def _trade_corpus_status(cfg: EngineConfig) -> str:
     statuses: list[str] = []
     # Producers that both reported ok AND show evidence of an actual poll.
     refreshing: list[str] = []
-    for filename in _TRADE_LEDGER_PRODUCER_SUMMARIES:
+    for filename, polled_required in _TRADE_LEDGER_PRODUCER_SUMMARIES:
         payload = read_json(root / filename)
         if not isinstance(payload, dict):
             statuses.append("missing")
@@ -501,13 +524,16 @@ def _trade_corpus_status(cfg: EngineConfig) -> str:
         # (I wrote that broader version first; the registered tests rejected it.)
         polled = safe_float(payload.get("markets_polled"))
         source_state = str(payload.get("market_source_status") or "").strip().lower()
-        # A PRESENT count must be finite and positive. safe_float returns None
-        # for garbage and NaN makes `polled <= 0` false, so both would otherwise
-        # sail through as valid poll evidence (Codex P1 wave-12).
-        no_poll = source_state == "empty" or (
-            "markets_polled" in payload
-            and (polled is None or not math.isfinite(polled) or polled <= 0)
-        )
+        # A count must be finite and positive: safe_float returns None for
+        # garbage and NaN makes `polled <= 0` false, so both would otherwise
+        # sail through as valid poll evidence (Codex P1 wave-12). For the two
+        # producers that always publish the field, ABSENT is also disqualifying
+        # (Codex P1 wave-13).
+        bad_count = polled is None or not math.isfinite(polled) or polled <= 0
+        if polled_required:
+            no_poll = source_state == "empty" or bad_count
+        else:
+            no_poll = source_state == "empty" or ("markets_polled" in payload and bad_count)
         if status == "ok" and not no_poll:
             refreshing.append(status)
     # RESTING states are successful no-ops, not failures, and must not veto
@@ -602,7 +628,7 @@ def _markout_stats(
                 # midpoint (Codex P1 wave-9 on #451): ordering by price made
                 # both which row is selected and whether it is embargoed depend
                 # on which number happened to be smaller.
-                "SELECT stamp, midpoint FROM feature_prices "
+                "SELECT stamp, midpoint, availability_known FROM feature_prices "
                 "WHERE asset_id = ? ORDER BY stamp, source_order",
                 (token,),
             )
@@ -680,7 +706,9 @@ def _markout_stats(
                 # evaluation, so ranking on it is still look-ahead. Take the
                 # later of the two - a venue stamp after the split embargoes on
                 # its own, and so does a late collection of an early quote.
-                if window == "ranking" and float(current_feature[0]) >= split_stamp:
+                if window == "ranking" and (
+                    float(current_feature[0]) >= split_stamp or not int(current_feature[2])
+                ):
                     window = "label_embargoed"
                 if window in {"spanning", "label_embargoed"}:
                     entry["fills_split_spanning" if window == "spanning" else "fills_label_embargoed"] += 1
@@ -809,7 +837,12 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
     # comparison fail OPEN, publishing meaningless markouts and an unusable
     # frozen split. Configuration corruption must not be able to preserve or
     # manufacture apparently healthy evidence.
-    horizon_raw = safe_float(settings.get("markout_horizon_minutes"))
+    horizon_setting = settings.get("markout_horizon_minutes")
+    # safe_float(True) is 1.0, so YAML `markout_horizon_minutes: true` would
+    # silently score both axes at a ONE-MINUTE horizon and permanently freeze
+    # that unintended horizon while publishing healthy-looking artifacts (Codex
+    # P2 wave-13). Rejected before conversion, as the split-state validators do.
+    horizon_raw = None if isinstance(horizon_setting, bool) else safe_float(horizon_setting)
     if horizon_raw is None or not math.isfinite(horizon_raw) or horizon_raw <= 0:
         summary["status"] = "invalid_markout_horizon"
         write_json(summary_path, summary)

@@ -2044,6 +2044,13 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
 2. The split is BY WHOLE MARKET, not by fill (AGENTS.md requires validation chronological and
    out-of-sample by market). A market whose fills straddle the split belongs to NEITHER window and is
    counted as `fills_split_spanning`.
+2a. A LABEL WITH UNPROVEN AVAILABILITY CANNOT RANK [Codex P1 wave-13]. A feature row with no
+   `collected_at_utc` — a legacy corpus predating the column, or a replayed row — has an unknown
+   actual availability time that may fall after the split, so ranking on it is look-ahead. Such rows
+   are NOT rejected (that would zero the artifact on any legacy archive): they stay measurable and
+   count toward fills_total and the evaluation window, and are barred from the RANKING window only,
+   reported as fills_label_embargoed. A PRESENT but unparseable collection time is a different case
+   and is rejected outright.
 3. LABEL EMBARGO, two-stage, because a markout label is a price read one horizon AFTER the fill:
    (a) market level, nominal — a market ranks only when `high + horizon < split`;
    (b) fill level, EXACT — a nominally-ranking fill whose ACTUALLY SELECTED feature timestamp is
@@ -2095,12 +2102,16 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
          shows evidence of an actual poll. "ok" alone is insufficient [Codex P1 wave-11]:
          collect_maker_replay_data reaches the explicit-market collector, which reports
          market_source_status="empty" and still writes status="ok" with markets_polled=0
-         (trade_print_collector.py:406-410, 484-487) — no venue request occurred. Disqualifying
-         evidence is EXPLICIT ONLY: market_source_status == "empty", or markets_polled PRESENT and
-         <= 0. An ABSENT field does not disqualify, because backfill_trade_prints reports
-         candidate_markets/markets_attempted and never writes markets_polled — the broader form was
-         written first and the registered tests rejected it for disqualifying a producer that had
-         legitimately refreshed the ledger.
+         (trade_print_collector.py:406-410, 484-487) — no venue request occurred. Poll evidence is
+         PER PRODUCER [Codex P1 wave-13]: collect_trade_prints and the explicit-market collector both
+         ALWAYS publish markets_polled (trade_print_collector.py:373, :487), so for those two an
+         absent, unparseable, non-finite or <= 0 count disqualifies. backfill_trade_prints never
+         writes markets_polled — it reports candidate_markets/markets_attempted, and its no-ops carry
+         their own distinct statuses — so for it an "ok" status IS the evidence and only a PRESENT
+         bad count disqualifies. market_source_status == "empty" disqualifies any producer. The
+         blanket "absent never disqualifies" rule was right for backfill and wrong for the other two;
+         the blanket "absent always disqualifies" form before it was the reverse error, and the
+         registered tests rejected both.
      (d) Otherwise the aggregate is "no_producer_refreshed": disclosed on every row, not fatal.
    The wallet path reads them all; when its status is anything other than "ok" (including absent or
    unparseable, which read as "missing"), every emitted row carries
@@ -2148,10 +2159,10 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
 Required and previously absent: this amendment named the test file but enumerated no wallet-axis
 tests, and the parent's generic sentence covers only the market axis — it cannot specify the frozen
 split, embargo, staleness, sentinel or upstream-failure paths. WO-151 was found undispatchable for
-exactly this omission (see §151.1), so the same standard applies here. All THIRTY-ONE live in
+exactly this omission (see §151.1), so the same standard applies here. All THIRTY-TWO live in
 tests/polymarket_predictive_engine/test_flow_toxicity.py.
-Counted as thirty-one: items 1-24, the lettered cases 16a and 19a, and the five later additions
-enumerated as 25-29 below. All are separate test functions [S8/A7 requires a registered count to be
+Counted as thirty-two: items 1-24, the lettered cases 16a and 19a, and the six later additions
+enumerated as 25-30 below. All are separate test functions [S8/A7 requires a registered count to be
 true; this count has now been corrected three times — 24, then 26, then 31 — because each review wave
 added tests and I updated the matrix without updating the total. It is verified against
 `grep -c "^def test_"` rather than counted by hand].
@@ -2172,10 +2183,17 @@ added tests and I updated the matrix without updating the total. It is verified 
     (source 310, collected "junk", 0.90) and (source 330, collected 330, 0.70). EXPECT
     markout_mean_total == +0.20 (the junk row dropped). An ABSENT column is different and still
     falls back to the venue stamp.
-29. A malformed markout_horizon_minutes fails closed. FIXTURE: a healthy run, then set the setting to
-    "not-a-number". EXPECT the run RAISES and the wallet CSV holds one sentinel with
+29. A malformed markout_horizon_minutes fails closed. FIXTURE: a healthy run, then set the setting
+    to "not-a-number". EXPECT the run RAISES and the wallet CSV holds one sentinel with
     artifact_status "invalid_markout_horizon" — configuration corruption must not leave the previous
-    artifact_status="ok" rows readable.
+    artifact_status="ok" rows readable. YAML `true` is rejected the same way, since safe_float(True)
+    is 1.0 and would otherwise silently score both axes at a ONE-MINUTE horizon and freeze that
+    unintended horizon while publishing healthy-looking artifacts [Codex P2 wave-13].
+30. A label with unproven availability cannot rank. FIXTURE: tok-a feature (source 310,
+    collected_at_utc BLANK, 0.70) with a fill at t=0; tok-e features (1310, 1315) with fills at 1000
+    and 1010. SPLIT == 1000, so 0xa would rank on fill time (0 + 300 < 1000). EXPECT
+    fills_ranking_window == 0, fills_label_embargoed == 1, fills_total == 3,
+    fills_evaluation_window == 2 — barred from ranking, still measured.
 
  1. Planted toxic flow scores above balanced flow (parent WO-49 null test, unchanged).
  2. Wallet-tier markout split arithmetic (parent, unchanged).

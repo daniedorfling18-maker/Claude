@@ -32,12 +32,26 @@ def _config(tmp_path: Path):
 
 
 def _features(cfg, token: str, points: list[tuple[int, float]]) -> None:
+    """Feature rows in the shape the normaliser actually writes.
+
+    websocket_market_features.csv carries BOTH source_timestamp and
+    collected_at_utc (websocket_normaliser.py:37-38, :70-71). A row with no
+    collection time has unproven availability and is barred from the ranking
+    window, so a fixture that omits it is not a normal row -- the ordinary case
+    is a quote collected when it was sourced.
+    """
     existing = read_csv_rows(cfg.output_root / "polymarket_training" / "websocket_market_features.csv")
-    rows = [*existing, *[{"source_timestamp": stamp, "asset_id": token, "midpoint": price} for stamp, price in points]]
+    rows = [
+        *existing,
+        *[
+            {"source_timestamp": stamp, "collected_at_utc": stamp, "asset_id": token, "midpoint": price}
+            for stamp, price in points
+        ],
+    ]
     write_csv(
         cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
         rows,
-        fieldnames=["source_timestamp", "asset_id", "midpoint"],
+        fieldnames=["source_timestamp", "collected_at_utc", "asset_id", "midpoint"],
     )
 
 
@@ -55,13 +69,15 @@ def _trade_summary(cfg, status: str = "ok", *, only: str | None = None) -> None:
         "trade_print_backfill_summary.json",
     ]
     for name in names:
-        write_json(
-            root / name,
-            {
-                "status": status if (only is None or name == only) else "ok",
-                "generated_at_utc": "2026-08-22T00:00:00Z",
-            },
-        )
+        row_status = status if (only is None or name == only) else "ok"
+        payload = {"status": row_status, "generated_at_utc": "2026-08-22T00:00:00Z"}
+        # The two collectors ALWAYS publish markets_polled in production
+        # (trade_print_collector.py:373, :487); backfill never does. A fixture
+        # that omits it is not a healthy summary.
+        if name != "trade_print_backfill_summary.json":
+            payload["markets_polled"] = 4
+            payload["market_source_status"] = "websocket"
+        write_json(root / name, payload)
 
 
 def _leaderboard(cfg) -> None:
@@ -748,7 +764,10 @@ def test_backfill_no_op_statuses_do_not_veto_a_healthy_harvest(tmp_path):
     _features(cfg, "tok-a", [(310, 0.70)])
     root = cfg.output_root / "polymarket_trade_prints"
     # The realistic steady state: collector ok, replay disabled, backfill done.
-    write_json(root / "trade_prints_summary.json", {"status": "ok"})
+    write_json(
+        root / "trade_prints_summary.json",
+        {"status": "ok", "markets_polled": 4, "market_source_status": "websocket"},
+    )
     write_json(root / "maker_portfolio_trade_prints_summary.json", {"status": "disabled"})
     write_json(root / "trade_print_backfill_summary.json", {"status": "skipped_all_completed"})
     write_csv(
@@ -840,6 +859,12 @@ def test_an_ok_status_without_a_poll_is_not_a_refresh(tmp_path):
         {"status": "ok", "markets_polled": 3, "market_source_status": "websocket"},
     )
     assert build_flow_toxicity(cfg)["trade_corpus_status"] == "ok"
+    # And a primary summary carrying only status="ok" -- malformed or legacy,
+    # since that collector always publishes markets_polled -- is NOT evidence
+    # (Codex P1 wave-13).
+    write_json(root / "maker_portfolio_trade_prints_summary.json", {"status": "disabled"})
+    write_json(root / "trade_prints_summary.json", {"status": "ok"})
+    assert build_flow_toxicity(cfg)["trade_corpus_status"] == "no_producer_refreshed"
 
 
 def test_invalid_split_state_does_not_freeze_the_toxicity_veto(tmp_path):
@@ -979,6 +1004,51 @@ def test_a_malformed_markout_horizon_fails_closed(tmp_path):
     rows = read_csv_rows(wallet_path)
     assert len(rows) == 1
     assert rows[0]["artifact_status"] == "invalid_markout_horizon"
+
+
+def test_unproven_availability_cannot_enter_the_ranking_window(tmp_path):
+    """No collection time means no proof the label was observable pre-split.
+
+    A legacy or replayed archive row carries only a venue stamp, so its actual
+    availability is unknown and may be later than the split; ranking on it is
+    look-ahead (Codex P1 wave-13). Rejecting such rows outright would zero the
+    artifact on any legacy archive, so they stay measurable and are barred from
+    the ranking window only.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    # tok-a's feature has NO collected_at_utc; tok-e's does.
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            {"source_timestamp": 310, "collected_at_utc": "", "asset_id": "tok-a", "midpoint": 0.70},
+            {"source_timestamp": 1310, "collected_at_utc": 1310, "asset_id": "tok-e", "midpoint": 0.70},
+            {"source_timestamp": 1315, "collected_at_utc": 1315, "asset_id": "tok-e", "midpoint": 0.70},
+        ],
+        fieldnames=["source_timestamp", "collected_at_utc", "asset_id", "midpoint"],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [
+            {"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0},
+            {"market": "0xe", "asset_id": "tok-e", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1000},
+            {"market": "0xe", "asset_id": "tok-e", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1010},
+        ],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    # Market 0xa would rank on fill time (0 + 300 < split 1000), but its label
+    # has no proven availability, so it is embargoed instead.
+    assert int(rows["w1"]["fills_ranking_window"]) == 0
+    assert int(rows["w1"]["fills_label_embargoed"]) == 1
+    # Still measured: it counts toward the total and the evaluation window is
+    # unaffected.
+    assert int(rows["w1"]["fills_total"]) == 3
+    assert int(rows["w1"]["fills_evaluation_window"]) == 2
 
 
 def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):

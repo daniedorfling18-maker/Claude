@@ -16944,9 +16944,21 @@ changing what the day-after operator should actually go check:
    watchdog's own `observed_disk_used_percent`, independently; it does not
    depend on `corpus_retention` at all (subject to qualification 1, above).
 
-## WO-163 — Edge attribution fails closed on unattributable positions — `blocked_on_measurement`
-(NOT DISPATCHABLE: BLOCKER-1 in the day-after check requires one VPS measurement written into this
-text before any build is dispatched) (registered 2026-08-15 from gate-executed evidence; four-round S8 admission, blockers 4→3→2→0; adds no gate, moves no ceiling, changes no policy or sizing surface → OWNER MERGE after line-audit)
+## WO-163 (DRAFT — NOT REGISTERED) — Edge attribution fails closed on unattributable positions
+
+STATUS: `draft`. This WO is NOT registered and MUST NOT be dispatched [Codex P1 wave-8, accepted in
+full]. S8 says a draft becomes registerable only when EVERY admission rule passes, and A1 (literal
+thresholds) does not pass: BLOCKER-1 below has no literal skipped-fraction bound. Calling that a
+"blocker" on an otherwise-registered WO was a half-measure — it labelled the omission instead of
+curing it, and it contradicted this WO's own claim that four admission rounds ended at zero blockers.
+Both cannot be true. The honest state is DRAFT, and it stays draft until the VPS measurement in
+BLOCKER-1 is taken and written in as a literal; registration is a separate, later step.
+
+Everything below is the draft text, retained because the admission history and the defect evidence
+are worth preserving. The four gate rounds and eight review waves DID happen and DID close 43
+findings; what they could not do is supply a number that only live telemetry holds.
+
+Draft history (2026-08-15 from gate-executed evidence; four-round S8 admission, blockers 4→3→2→0; adds no gate, moves no ceiling, changes no policy or sizing surface → OWNER MERGE after line-audit)
 
 
 Class M (mechanical, non-frozen: telemetry honesty). Admission: FOUR independent S8 gate rounds
@@ -17068,7 +17080,15 @@ the charter WP status with a dated "Landed:" note at land time, and WP8 is the e
         5 "unattributable_unparseable_line"    — CLV row present; line_price missing/""/unparseable
         6 "unattributable_no_entry_mid"        — line parses finite and IN DOMAIN; entry mid missing, OR present-
                                                  but-unparseable, OR parseable and finite but OUTSIDE
-                                                 the open interval (0, 1) — the ONLY cause that judges
+                                                 the open interval (0, 1), OR parseable and NON-FINITE
+                                                 ("nan"/"inf") [Codex wave-8: cause 2 explicitly
+                                                 excludes the entry mid and cause 6 covered only
+                                                 missing / unparseable / finite-out-of-domain, so a
+                                                 mid of "nan" with no valid fallback matched NO
+                                                 registered cause — the third time this enum was
+                                                 declared closed while a reachable mid state fell
+                                                 outside it. _entry_mid rejects nan/inf because
+                                                 `0 < value < 1` is False for both] — the ONLY cause that judges
                                                  the MID [Codex P1-b] (the PRICES are judged at cause
                                                  3). The domain clause is registered
                                                  because _entry_mid (edge_attribution.py:91-101)
@@ -17146,7 +17166,16 @@ the charter WP status with a dated "Landed:" note at land time, and WP8 is the e
       fail test 12 — three ways to be wrong and none to be right). Emitting a raw source byte is not
       computing with it.
    d. Unattributable rows with an empty signal_cohort take the existing ""->"unknown" cohort-key
-      idiom, so no dropped mass can hide under a keyless cohort [R4-c]. Every per-cohort
+      idiom, so no dropped mass can hide under a keyless cohort [R4-c]. THAT ALONE DOES NOT FAIL
+      CLOSED, and the gap is registered shut here [Codex P1 wave-8]: routing keyless rows to
+      "unknown" leaves every NAMED cohort with unattributable_positions == 0, free to emit
+      positive_edge_confirmed and earn the research_focus +12.0 — while the dropped loss, having no
+      trustworthy cohort identity, may belong to any of them. The suppression rule in 1d is therefore
+      GLOBAL for this case: if ANY unattributable row lacks a trustworthy signal_cohort, NO cohort
+      emits a class or action for that run, and every cohort carries
+      class_suppressed_reason "unassignable_dropped_mass_present". A loss that could belong to any
+      cohort must not be allowed to clear all of them. This is deliberately the strictest arm of the
+      rule, and it is reachable in production — this very clause exists because keyless rows occur. Every per-cohort
       unattributable_realised_pnl_usdc uses the SAME parseable-AND-finite rule as the top-level sum
       in 1c — a "nan" P&L excluded from the summary but aggregated raw into its cohort would emit
       non-standard JSON one level down [Codex P1-f].
@@ -17244,7 +17273,9 @@ fresh-but-wrong. This paragraph must survive as a code comment.
 6. Valid finite line, missing entry mid -> cause 6; AND present-but-unparseable mid
    (market_midpoint="junk", no valid fallback) -> cause 6, never cause 1 [Codex P1-b];
    AND parseable-and-finite but out-of-domain mid (market_midpoint="0", separately "1",
-   separately "-0.2", separately "1.4", no valid fallback) -> cause 6, never cause 2, never cause 3
+   separately "-0.2", separately "1.4", no valid fallback) -> cause 6; AND parseable-but-NON-FINITE
+   mid (market_midpoint="nan", separately "inf", no valid fallback) -> cause 6, never cause 2
+   (cause 2 excludes the mid by construction) [Codex wave-8], never cause 2, never cause 3
    (cause 3 judges the PRICES, cause 6 the MID) and never
    "attributed" [Codex wave-3: these clear the finite guard and are rejected only by _entry_mid's
    0 < value < 1 domain check at edge_attribution.py:91-101];
@@ -17288,9 +17319,14 @@ fresh-but-wrong. This paragraph must survive as a code comment.
     the global guard [Codex wave-7: two positive 1.7e308 values overflow the TOP-LEVEL sum too and
     raise before cohort emission is ever reached, so an implementation guarding only the global
     aggregate would pass. The fixture must keep the global sum FINITE while one cohort overflows:
-    cohort A carries +1.7e308 and +1.7e308 (its own sum overflows), cohort B carries -1.7e308 and
-    -1.7e308, so the global sum is 0.0 and finite. Assert the run raises, and that it raises on the
-    COHORT path]; AND the same assertion for an ATTRIBUTED cohort aggregate — two individually valid,
+    cohort A carries +1.7e308 twice (its own sum overflows) and cohort B carries -1.7e308 twice,
+    so the global TOTAL is 0.0. The SOURCE ROW ORDER is part of the fixture and is registered as
+    A+, B-, A+, B- [Codex P2 wave-8: the module sums in row order, so the grouping A+, A+, B-, B-
+    overflows the global running sum on the SECOND A value before either negative is visited — the
+    test would then raise in the global guard and again fail to prove the cohort guard exists.
+    "The global sum is 0.0" is only true of the total, not of every prefix, and a running sum has
+    prefixes]. Interleaved, every global prefix stays finite while each cohort still overflows.
+    Assert the run raises, and that it raises on the COHORT path]; AND the same assertion for an ATTRIBUTED cohort aggregate — two individually valid,
     individually finite attributed rows in ONE cohort whose total_pnl_usdc values sum past the float
     range must raise, not emit Infinity for the cohort's total_pnl_usdc [Codex wave-4: the rule as
     registered in v4 covered only the unattributable sums, so this path was permitted].
@@ -17339,7 +17375,7 @@ fresh-but-wrong. This paragraph must survive as a code comment.
           exit_price "nan"; quantity "0"; quantity "inf"; entry_price "1.5" (the domain arm).
         LINE dimension (7): no row; line_kind "latest_provisional"; line_kind "" with line_price
           "junk"; line_price ""; line_price "nan"; line_price "2.0"; a valid closing line.
-        MID dimension (4): valid; missing; "junk"; "0".
+        MID dimension (6): valid; missing; "junk"; "0"; "nan"; "inf".
         [Codex wave-7: the counts previously read 7 and 6 while the lists held 8 and 7, so a literal
         builder could have dropped an arm to honour the number. Counts and lists now agree; if they
         ever disagree again the LIST is authoritative, since it is the thing that gets built.]
@@ -17385,8 +17421,21 @@ unparseable, or non-finite. With skipped > 0 a null/absent dropped-mass sum mean
 this WO exists for did not ship, and the check FAILS [Codex P2]; governance cycle completion stamp fresh in
 governance_refresh_status.json — the field is literally `completed_at_utc`, written by
 refresh_governance.py:146 as self._write("ok", completed_at_utc=now_utc()), and "fresh" means
-status == "ok" AND completed_at_utc >= THE DEPLOYMENT TIMESTAMP of the revision carrying this WO AND
-now_utc() - completed_at_utc <= 12 hours, both bounds literal [Codex wave-5 added the first: an age
+status == "ok" AND completed_at_utc >= THE DEPLOYMENT TIMESTAMP AND completed_at_utc <= now_utc()
+AND now_utc() - completed_at_utc <= 12 hours, all three bounds literal.
+THE DEPLOYMENT TIMESTAMP is named, not left to the operator [Codex P1 wave-8 — the procedure says to
+read only edge_attribution.json and governance_refresh_status.json, neither of which carries it, so
+the check was not deterministically executable]: it is `generated_at_utc` in
+`outputs/ops_scheduler/deploy_acceptance.json` (deploy_acceptance.py:621, OUTPUT_FILE at :41), which
+both permitted deploy paths write — the scheduler-driven acceptance run and
+`scripts/deploy_vps_paper_manual.sh`. That artifact is therefore a THIRD required read for this
+check. If it is absent, unparseable, or its `generated_at_utc` is missing or malformed, the check
+FAILS; it is never skipped and never defaulted to a permissive value.
+THE UPPER BOUND `completed_at_utc <= now_utc()` is required because without it a corrupt FUTURE stamp
+passes both other predicates — it is trivially after the deploy, and `now_utc() - completed_at_utc`
+is NEGATIVE and so satisfies `<= 12 hours` [Codex P1 wave-8]. A future stamp would report a healthy
+post-deploy cycle that never ran, and stay "fresh" until that time arrived. A future
+`completed_at_utc` is a FAIL [Codex wave-5 added the first: an age
 bound alone accepts a cycle that completed shortly BEFORE the deploy — status "ok", age under 12h,
 and no line of the new code ever executed. The check exists to prove the POST-deploy accounting did
 not raise, so it must bind to the deployed revision and not merely to the clock] [Codex wave-3: an

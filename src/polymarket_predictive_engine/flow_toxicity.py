@@ -144,7 +144,7 @@ def _iter_csv_any(path: Path) -> Iterator[dict[str, str]]:
             yield {str(k): "" if v is None else str(v) for k, v in row.items()}
 
 
-def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], bool]:
+def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], set[str], bool]:
     # The leaderboard has a producer too, and its retained rows survive a failed
     # refresh (wallet_intelligence_collector.py:366-372 keeps the old history
     # and records the error in its summary). Treating any nonempty file as
@@ -161,7 +161,7 @@ def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], bool]:
     path = cfg.output_root / "wallet_intelligence" / "leaderboard_history.csv"
     rows = read_csv_rows(path)
     if not rows:
-        return set(), True
+        return set(), set(), True
     # A failed refresh makes membership UNKNOWN FOR REPORTING, but it does not
     # make the retained top-100 disappear (Codex P1 wave-18). The wave-17 fix
     # returned an empty set in that case, and this same set feeds the LEGACY
@@ -204,30 +204,50 @@ def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], bool]:
     membership_unknown = (
         producer_status != "ok" and not refreshed
     ) or leaderboard_complete is False
-    # Select the latest INSTANT, not the latest DATE (Codex P2 wave-21). Two
-    # collector runs on the same UTC date share a snapshot_date, and
-    # _dedupe_latest retains same-day wallets that dropped out of the newer top
-    # 100 -- so grouping by date mixed both refreshes, and the rank sort could
-    # then keep stale wallets while excluding current ones. Prefer
-    # snapshot_at_utc where present; fall back to snapshot_date only for rows
-    # that predate it.
-    def _snapshot_key(row: dict[str, Any]) -> str:
+    # TWO sets, because this function has TWO consumers with DIFFERENT
+    # contracts, and returning one made every change to it silently rewrite the
+    # parent's registered artifact (Codex P1 wave-22 -- the SECOND time, after
+    # wave-18; both times a change made for the wallet axis moved
+    # smart_fill_count, crowd_fill_count and the tier markouts in
+    # flow_toxicity.csv):
+    #
+    #   tier_wallets   -> the LEGACY market-axis smart/crowd split. Must keep
+    #                     the parent's selection exactly: group by
+    #                     snapshot_date, rank-sort, take `limit`.
+    #   current_wallets -> the NEW on_current_leaderboard column only. Selects
+    #                     the latest INSTANT, because two collector runs on one
+    #                     UTC date share a snapshot_date and _dedupe_latest
+    #                     retains same-day wallets that dropped out of the newer
+    #                     top 100, so date-grouping could report a stale wallet
+    #                     as currently ranked.
+    def _rank_take(subset: list[dict[str, Any]]) -> set[str]:
+        ordered = sorted(
+            subset,
+            key=lambda row: safe_float(row.get("rank")) if safe_float(row.get("rank")) is not None else 1e9,
+        )
+        return {
+            str(row.get("wallet") or "").strip().lower()
+            for row in ordered[:limit]
+            if str(row.get("wallet") or "").strip()
+        }
+
+    latest_date = max(str(row.get("snapshot_date") or row.get("snapshot_at_utc") or "") for row in rows)
+    tier_wallets = _rank_take(
+        [row for row in rows if str(row.get("snapshot_date") or row.get("snapshot_at_utc") or "") == latest_date]
+    )
+
+    def _instant_key(row: dict[str, Any]) -> str:
         return str(row.get("snapshot_at_utc") or row.get("snapshot_date") or "")
 
-    latest = max(_snapshot_key(row) for row in rows)
-    latest_rows = [row for row in rows if _snapshot_key(row) == latest]
-    latest_rows.sort(key=lambda row: safe_float(row.get("rank")) if safe_float(row.get("rank")) is not None else 1e9)
-    wallets = {
-        str(row.get("wallet") or "").strip().lower()
-        for row in latest_rows[:limit]
-        if str(row.get("wallet") or "").strip()
-    }
+    latest_instant = max(_instant_key(row) for row in rows)
+    current_wallets = _rank_take([row for row in rows if _instant_key(row) == latest_instant])
+
     # A nonempty file whose selected snapshot has no usable wallet cells is
     # UNAVAILABLE, not "nobody is on the leaderboard" (Codex P2 wave-15).
     # Returning an empty set with missing_wallet_data False published every
     # measured wallet as definitively off-leaderboard when membership could not
     # be established at all -- the same conflation the absent-file case fixed.
-    return wallets, membership_unknown or not wallets
+    return tier_wallets, current_wallets, membership_unknown or not current_wallets
 
 
 def _feature_paths(cfg: EngineConfig) -> Iterator[Path]:
@@ -700,7 +720,7 @@ def _trade_corpus_status(cfg: EngineConfig) -> str:
 def _markout_stats(
     connection: sqlite3.Connection,
     trades: list[dict[str, Any]],
-    top_wallets: set[str],
+    tier_wallets: set[str],
     horizon_seconds: float,
     split_stamp: float,
 ) -> dict[str, dict[str, float | int]]:
@@ -837,7 +857,7 @@ def _markout_stats(
             markout = later - float(trade["price"])
             if trade["side"] == "SELL":
                 markout = -markout
-            tier = "smart" if trade["wallet"] and trade["wallet"] in top_wallets else "crowd"
+            tier = "smart" if trade["wallet"] and trade["wallet"] in tier_wallets else "crowd"
             market_stats[f"{tier}_count"] += 1
             market_stats[f"{tier}_sum"] += markout
             if entry is not None:
@@ -1145,7 +1165,7 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
             )
     trades, malformed_trade_rows, trade_source_rows = _trade_rows(cfg)
     trade_corpus_status = _trade_corpus_status(cfg)
-    top_wallets, missing_wallet_data = _top_wallets(cfg)
+    tier_wallets, current_wallets, missing_wallet_data = _top_wallets(cfg)
     by_market: dict[str, list[dict[str, Any]]] = {}
     for trade in trades:
         by_market.setdefault(trade["market"], []).append(trade)
@@ -1188,7 +1208,7 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
                         cfg, trades, stamps_ok=trade_corpus_status == "ok", horizon_seconds=horizon
                     )
                 markout_by_market, markout_by_wallet = _markout_stats(
-                    connection, trades, top_wallets, horizon, split_stamp
+                    connection, trades, tier_wallets, horizon, split_stamp
                 )
                 price_index_disk_bytes = database_path.stat().st_size
             finally:
@@ -1289,7 +1309,7 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
             # be determined", so a potentially ranked wallet was reported as
             # definitively unranked. The summary's missing_wallet_data flag does
             # not reach a reader of this CSV.
-            "on_current_leaderboard": "unknown" if missing_wallet_data else (wallet in top_wallets),
+            "on_current_leaderboard": "unknown" if missing_wallet_data else (wallet in current_wallets),
             "fills_total": entry["fills_total"],
             "markout_mean_total": _mean(entry["markout_total"], entry["fills_total"]),
             "fills_ranking_window": entry["fills_ranking"],

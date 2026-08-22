@@ -1607,6 +1607,14 @@ def test_the_latest_intraday_snapshot_wins(tmp_path):
     assert rows["stale1"]["on_current_leaderboard"] == "False", (
         "the 06:00 wallet dropped out of the 18:00 top-100 and is not current"
     )
+    # The LEGACY market-axis tier split keeps the parent's DATE grouping, so
+    # both same-day wallets remain smart there (Codex P1 wave-22). Narrowing to
+    # the latest instant for the new column must not rewrite the parent's
+    # smart_fill_count / crowd_fill_count -- that was the wave-18 defect
+    # recurring in the same function four waves later.
+    market = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+    assert int(market["0xa"]["smart_fill_count"]) == 2
+    assert int(market["0xa"]["crowd_fill_count"]) == 0
 
 
 def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):

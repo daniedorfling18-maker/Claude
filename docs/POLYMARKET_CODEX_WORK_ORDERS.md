@@ -2044,12 +2044,20 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
 2. The split is BY WHOLE MARKET, not by fill (AGENTS.md requires validation chronological and
    out-of-sample by market). A market whose fills straddle the split belongs to NEITHER window and is
    counted as `fills_split_spanning`.
-0a. THE LATEST LEADERBOARD SNAPSHOT IS THE LATEST INSTANT, not the latest DATE [Codex P2
-   wave-21]. Two collector runs on one UTC date share a `snapshot_date`, and
-   `wallet_intelligence_collector._dedupe_latest` retains same-day wallets that dropped out of the
-   newer top 100 — so grouping by date merged both refreshes and the rank sort could keep a stale
-   wallet while excluding a current one. `_top_wallets` selects on `snapshot_at_utc`, falling back to
-   `snapshot_date` only for rows that predate that column.
+0a. `_top_wallets` RETURNS TWO SETS, because it has two consumers with different contracts
+   [Codex P1 wave-22]:
+     `tier_wallets`    — the LEGACY market-axis smart/crowd split. Keeps the parent's selection
+                         EXACTLY: group by `snapshot_date`, rank-sort, take the limit.
+     `current_wallets` — the NEW `on_current_leaderboard` column ONLY. Selects the latest INSTANT
+                         (`snapshot_at_utc`, falling back to `snapshot_date` for rows predating that
+                         column), because two collector runs on one UTC date share a date and
+                         `wallet_intelligence_collector._dedupe_latest` retains same-day wallets that
+                         dropped out of the newer top 100 — so date-grouping could report a stale
+                         wallet as currently ranked.
+   Returning ONE set is why two separate wallet-axis changes silently rewrote the parent's
+   `smart_fill_count`, `crowd_fill_count` and tier markouts: the failed-refresh empty set (wave-18)
+   and the latest-instant narrowing (wave-21, caught at wave-22). Any future change to this function
+   must state which set it touches.
 0b. A NEGATIVE VENUE TIMESTAMP IS REJECTED at ingestion [Codex P2 wave-21], so the writer cannot
    create a negative `split_stamp` that this module's own reader then refuses to reuse on every
    later run. The two validators must agree.

@@ -2113,8 +2113,11 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
 Required and previously absent: this amendment named the test file but enumerated no wallet-axis
 tests, and the parent's generic sentence covers only the market axis — it cannot specify the frozen
 split, embargo, staleness, sentinel or upstream-failure paths. WO-151 was found undispatchable for
-exactly this omission (see §151.1), so the same standard applies here. All twenty-four live in
+exactly this omission (see §151.1), so the same standard applies here. All TWENTY-SIX live in
 tests/polymarket_predictive_engine/test_flow_toxicity.py.
+Counted as twenty-six because items 16a and 19a are separate test functions, not sub-cases [Codex
+P1 wave-10: the preamble said twenty-four while the matrix listed twenty-six, and S8/A7 requires a
+registered count to be true].
 
  1. Planted toxic flow scores above balanced flow (parent WO-49 null test, unchanged).
  2. Wallet-tier markout split arithmetic (parent, unchanged).

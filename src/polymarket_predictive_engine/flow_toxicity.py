@@ -286,8 +286,54 @@ def _build_price_index(
     return scanned_rows, indexed_rows
 
 
+def _split_stamp_value(persisted: Any) -> float | None:
+    """The frozen split_stamp, or None if the state is not usable.
+
+    safe_float(True) is 1.0 and safe_float(False) is 0.0, so a corrupted or
+    hand-restored file holding a JSON boolean would have passed a plain finite
+    check and been reused as a cutoff (Codex P1 wave-10 on #451) - silently
+    putting every real trade on one side of a nonsensical split while the
+    summary reported a healthy frozen state. Booleans are rejected before
+    conversion, along with anything non-numeric or negative: a split stamp is
+    epoch seconds and cannot be negative.
+    """
+    if not isinstance(persisted, dict):
+        return None
+    raw = persisted.get("split_stamp")
+    if isinstance(raw, bool):
+        return None
+    value = safe_float(raw)
+    if value is None or not math.isfinite(value) or value < 0:
+        return None
+    return value
+
+
+def _frozen_horizon_mismatch(persisted: Any, horizon_seconds: float) -> bool:
+    """True when the split was frozen under a DIFFERENT markout horizon.
+
+    The embargo in rule 3 is defined relative to the horizon, so reusing a
+    cutoff frozen under another one re-opens the leak persistence exists to
+    close (Codex P1 wave-10 on #451): shortening the horizon narrows the
+    embargo interval and can move a previously-embargoed pre-split market into
+    the ranking window AFTER its markout was published and inspectable. The
+    horizon is therefore part of the frozen state, and a change to it makes the
+    state invalid rather than silently reusable. A state written before this
+    field existed has no recorded horizon and is also treated as invalid, so it
+    fails closed rather than being assumed compatible.
+    """
+    if not isinstance(persisted, dict):
+        return True
+    recorded = persisted.get("horizon_seconds")
+    if isinstance(recorded, bool):
+        return True
+    value = safe_float(recorded)
+    if value is None or not math.isfinite(value):
+        return True
+    return abs(value - horizon_seconds) > 1e-9
+
+
 def _frozen_split_stamp(
-    cfg: EngineConfig, trades: list[dict[str, Any]], *, stamps_ok: bool
+    cfg: EngineConfig, trades: list[dict[str, Any]], *, stamps_ok: bool, horizon_seconds: float
 ) -> tuple[float, bool]:
     """Return the ranking/evaluation split, frozen at first computation.
 
@@ -305,8 +351,8 @@ def _frozen_split_stamp(
     path = cfg.output_root / "maker_carry" / "flow_toxicity_wallet_split.json"
     if path.exists():
         persisted = read_json(path)
-        stored = safe_float(persisted.get("split_stamp")) if isinstance(persisted, dict) else None
-        if stored is not None and math.isfinite(stored):
+        stored = _split_stamp_value(persisted)
+        if stored is not None:
             return stored, True
         # Unreachable in build_flow_toxicity: the early gate there validates
         # this file, invalidates the wallet artifact and raises before any of
@@ -331,6 +377,10 @@ def _frozen_split_stamp(
             path,
             {
                 "split_stamp": split_stamp,
+                # Part of the frozen state: the embargo is defined relative to
+                # the horizon, so a cutoff frozen under a different one is not
+                # reusable (Codex P1 wave-10 on #451).
+                "horizon_seconds": horizon_seconds,
                 "frozen_at_utc": now_utc(),
                 "corpus_rows_at_freeze": len(stamps),
                 # AGENTS.md artifact-level provenance: this is an independently
@@ -391,6 +441,18 @@ def _trade_corpus_status(cfg: EngineConfig) -> str:
     "ok" is returned only when EVERY producer says ok, since any one of them can
     have written the partial rows (Codex P1 wave-7).
     """
+    # KNOWN LIMITATION, registered rather than half-fixed (Codex P1 wave-10 on
+    # #451). The concern is real: the harvest is resilient, so a producer can be
+    # skipped, time out, or die before rewriting its summary, and a leftover
+    # "ok" then certifies a ledger it never saw. But the obvious remedy --
+    # requiring each summary to be newer than trade_prints.csv -- is WRONG here,
+    # and wrong in the direction that breaks the normal case: the three
+    # producers run in sequence and all write the same ledger, so after backfill
+    # rewrites it, the earlier producers' summaries are LEGITIMATELY older. That
+    # check would fire on every healthy harvest. Deciding this correctly needs
+    # the harvest's own per-step result, which this module is not given -- it is
+    # invoked as a standalone CLI command. Binding the summaries to a harvest
+    # cycle id is the real fix and is registered as a prerequisite in §49.1.
     root = cfg.output_root / "polymarket_trade_prints"
     statuses: list[str] = []
     for filename in _TRADE_LEDGER_PRODUCER_SUMMARIES:
@@ -655,6 +717,9 @@ def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int]:
 
 def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
     settings = _settings(cfg)
+    # Hoisted above the frozen-split gate below, which validates the persisted
+    # state against the horizon it was frozen under.
+    horizon = float(settings["markout_horizon_minutes"]) * 60.0
     out_root = cfg.output_root / "maker_carry"
     path = out_root / "flow_toxicity.csv"
     summary_path = out_root / "flow_toxicity_summary.json"
@@ -694,8 +759,8 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
     split_path = out_root / "flow_toxicity_wallet_split.json"
     if split_path.exists():
         persisted = read_json(split_path)
-        stored = safe_float(persisted.get("split_stamp")) if isinstance(persisted, dict) else None
-        if stored is None or not math.isfinite(stored):
+        stored = _split_stamp_value(persisted)
+        if stored is None or _frozen_horizon_mismatch(persisted, horizon):
             summary["status"] = "invalid_frozen_split_state"
             write_json(summary_path, summary)
             write_csv(
@@ -720,7 +785,6 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
         for market, rows in by_market.items()
     }
     toxicity = _percentiles(raw_vpin)
-    horizon = float(settings["markout_horizon_minutes"]) * 60.0
     markout_by_market: dict[str, dict[str, float | int]] = {}
     # Bound before the price-index block, which is skipped entirely when there
     # are no trades: an empty enabled run still publishes a summary.
@@ -740,7 +804,7 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
                     _price_target_bounds(trades, horizon),
                 )
                 split_stamp, split_was_frozen = _frozen_split_stamp(
-                    cfg, trades, stamps_ok=trade_corpus_status == "ok"
+                    cfg, trades, stamps_ok=trade_corpus_status == "ok", horizon_seconds=horizon
                 )
                 markout_by_market, markout_by_wallet = _markout_stats(
                     connection, trades, top_wallets, horizon, split_stamp

@@ -25,6 +25,7 @@ from .runtime_lock import runtime_lock
 from .utils import (
     normalize_external_timestamp,
     now_utc,
+    parse_timestamp,
     read_csv_rows,
     read_json,
     safe_float,
@@ -201,9 +202,46 @@ def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], set[str
     # TRADE-ledger rule, where the question is "did the ledger change"; here the
     # question is "is this membership current", and a disabled producer cannot
     # answer it.
+    # THE SUMMARY MUST DESCRIBE THE ROWS IT IS VOUCHING FOR (Codex P2 wave-25).
+    # The collector writes leaderboard_history.csv at
+    # wallet_intelligence_collector.py:372, then issues one holder request per
+    # tracked market, and only writes its summary at :434. A flow-toxicity run
+    # landing in that gap -- which can be minutes wide -- reads the NEW rows
+    # beside the PREVIOUS cycle's summary, and the previous summary's
+    # status="ok" and positive leaderboard_rows_added then vouch for rows it
+    # never saw. Definitive True/False membership gets published off a snapshot
+    # whose completeness is unverified.
+    #
+    # The two artifacts already share a revision id, so no new field and no
+    # change to the collector is needed: every leaderboard row carries
+    # snapshot_at_utc, set from the same `snapshot_at` the summary publishes as
+    # generated_at_utc (:344, :99-100). If the newest row in the ledger is
+    # NEWER than the summary claims to be, the summary is describing an earlier
+    # cycle and cannot speak for those rows.
+    #
+    # Only that direction is a tear. The reverse -- a summary newer than the
+    # newest row -- is the ordinary result of a cycle whose leaderboard fetch
+    # added nothing, and `refreshed` already handles it. Rows with no parseable
+    # stamp cannot be bound at all, so they are unknown too, fail-closed.
+    summary_stamp = parse_timestamp(
+        producer.get("generated_at_utc") if isinstance(producer, dict) else None
+    )
+    row_stamps = [
+        parsed
+        for parsed in (parse_timestamp(row.get("snapshot_at_utc")) for row in rows)
+        if parsed is not None
+    ]
+    newest_row_stamp = max(row_stamps) if row_stamps else None
+    revision_torn = (
+        newest_row_stamp is None
+        or summary_stamp is None
+        or newest_row_stamp > summary_stamp
+    )
     membership_unknown = (
-        producer_status != "ok" and not refreshed
-    ) or leaderboard_complete is False
+        (producer_status != "ok" and not refreshed)
+        or leaderboard_complete is False
+        or revision_torn
+    )
     # TWO sets, because this function has TWO consumers with DIFFERENT
     # contracts, and returning one made every change to it silently rewrite the
     # parent's registered artifact (Codex P1 wave-22 -- the SECOND time, after
@@ -1296,6 +1334,38 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
         # which are the honest places for it.
         summary["market_axis_preserved"] = True
     else:
+        # PARTIAL exclusions clear vetoes too (Codex P1 wave-25). The branch
+        # above catches only the all-rejected corpus. When SOME rows survive,
+        # a market whose every row was rejected this run simply vanishes from
+        # rows_out, and an absent tox_record is NO BLOCK at requote_alerts.py
+        # :502-535 -- so one bad market silently loses its veto while the run
+        # reports status "ok".
+        #
+        # The remedy is a UNION, not a wholesale preserve. Preserving the whole
+        # table would be worse than writing it: a market that just turned toxic
+        # would keep its old clean record and fail OPEN in the other direction.
+        # Fresh rows always win; a prior row is carried forward ONLY for a
+        # market the fresh table does not mention.
+        #
+        # Gated on rows actually having been excluded, because a market leaving
+        # the table is NORMAL: the ledger is a rolling window and a market with
+        # no recent fills legitimately ages out. Carrying forward unconditionally
+        # would pin every veto that ever fired, forever. Exclusions are the only
+        # condition under which absence is unverifiable rather than meaningful.
+        #
+        # A carried row keeps its ORIGINAL generated_at_utc, so its age is
+        # visible in the artifact itself -- it is a stale veto, disclosed as
+        # stale, not a fresh measurement.
+        if malformed_trade_rows:
+            fresh_markets = {str(row["market"]) for row in rows_out}
+            carried = [
+                row
+                for row in read_csv_rows(path)
+                if str(row.get("market") or "") and str(row.get("market")) not in fresh_markets
+            ]
+            if carried:
+                rows_out = [*rows_out, *carried]
+                summary["market_rows_carried_forward"] = len(carried)
         write_csv(path, rows_out, fieldnames=TOXICITY_FIELDS)
     if invalid_horizon:
         summary["status"] = "invalid_markout_horizon"
@@ -1373,6 +1443,21 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
         # unresolved rather than presenting it as an ordinary result.
         for row in wallet_rows:
             row["artifact_status"] = "leaderboard_unavailable"
+    if malformed_trade_rows and wallet_rows:
+        # An incomplete sample is not a healthy one (Codex P2 wave-25). With a
+        # nominally ok producer, rows rejected HERE -- non-finite, out-of-domain,
+        # blank venue stamp -- left every surviving row reading
+        # artifact_status="ok", so a consumer could rank wallets on a sample
+        # missing another wallet's every fill, with the exclusion visible only
+        # in a summary counter it never has to read. The row itself now says so.
+        #
+        # Inserted between leaderboard_unavailable and upstream_*, so the
+        # registered precedence is EXTENDED and never reordered: upstream_* wins
+        # over this, this wins over leaderboard_unavailable, which wins over
+        # no_usable_labels. A broken dependency outranks an incomplete sample,
+        # which outranks one unresolved column, which outranks having no markout.
+        for row in wallet_rows:
+            row["artifact_status"] = "partial_malformed_trade_corpus"
     if trade_corpus_status != "ok":
         # The dependency is stale, partial, or unreported. Every row is STAMPED
         # with the upstream state rather than the artifact being blanked (Codex

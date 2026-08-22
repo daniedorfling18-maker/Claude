@@ -318,7 +318,7 @@ def _build_price_index(
     cfg: EngineConfig,
     connection: sqlite3.Connection,
     target_bounds: dict[str, tuple[float, float]],
-) -> tuple[int, int]:
+) -> tuple[int, int, int]:
     """Stream feature corpora into a bounded, disk-backed lookup index.
 
     Only points inside a token's required markout interval are retained. One
@@ -326,6 +326,13 @@ def _build_price_index(
     marked when its next observation falls after the interval. This preserves
     the original first-midpoint-at-or-after lookup without holding every
     decompressed archive row in RAM.
+
+    Returns (scanned, indexed, MALFORMED). The third count is only the rows
+    rejected as INVALID -- blank or unparseable venue stamp, unparseable or
+    non-finite midpoint, out-of-domain midpoint, unparseable collection time --
+    and never the rows skipped legitimately for being outside a token's markout
+    interval or for belonging to a token nothing targets (Codex P1 wave-28).
+    `scanned - indexed` conflates the two and is not a malformed count.
     """
 
     connection.executescript(
@@ -349,6 +356,7 @@ def _build_price_index(
     tail_candidates: dict[str, tuple[float, int, float, int, float]] = {}
     scanned_rows = 0
     indexed_rows = 0
+    malformed_rows = 0
 
     def flush() -> None:
         nonlocal indexed_rows
@@ -383,6 +391,7 @@ def _build_price_index(
             source_stamp = _stamp(row.get("source_timestamp"))
             midpoint = safe_float(row.get("midpoint"))
             if source_stamp is None or midpoint is None:
+                malformed_rows += 1
                 continue
             # ONE effective stamp, not two interacting ones.
             #
@@ -429,6 +438,7 @@ def _build_price_index(
             if str(raw_collected or "").strip():
                 collected = _stamp(raw_collected)
                 if collected is None or not math.isfinite(collected):
+                    malformed_rows += 1
                     continue
                 stamp = source_stamp
                 available = max(source_stamp, collected)
@@ -456,6 +466,7 @@ def _build_price_index(
             # `midpoint REAL NOT NULL` column, where SQLite stores NaN as NULL
             # and the constraint aborts the whole build. Rejected before either.
             if not math.isfinite(stamp) or not math.isfinite(midpoint):
+                malformed_rows += 1
                 continue
             # Finite is not enough on this side either (Codex P2 wave-16). A
             # binary-market midpoint is a probability in [0, 1]; the upstream
@@ -464,6 +475,7 @@ def _build_price_index(
             # possible payoff range. Same rule the trade side already applies --
             # the asymmetry was mine, added last wave on one boundary only.
             if not (0.0 <= midpoint <= 1.0):
+                malformed_rows += 1
                 continue
             source_order = scanned_rows
             if stamp <= bounds[1]:
@@ -505,7 +517,7 @@ def _build_price_index(
         "ON feature_prices(asset_id, stamp, source_order, midpoint, available_stamp, availability_known)"
     )
     connection.commit()
-    return scanned_rows, indexed_rows
+    return scanned_rows, indexed_rows, malformed_rows
 
 
 def _finite_number(value: Any) -> float | None:
@@ -1278,6 +1290,7 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
     markout_by_wallet: dict[str, dict[str, Any]] = {}
     feature_rows_scanned = 0
     feature_rows_indexed = 0
+    malformed_feature_rows = 0
     price_index_disk_bytes = 0
     # Skipped entirely on an invalid horizon: every markout is defined relative
     # to it, so none can be computed. The veto fields below come from trade
@@ -1287,7 +1300,7 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
             database_path = Path(temp_dir) / "price_index.sqlite3"
             connection = sqlite3.connect(database_path)
             try:
-                feature_rows_scanned, feature_rows_indexed = _build_price_index(
+                feature_rows_scanned, feature_rows_indexed, malformed_feature_rows = _build_price_index(
                     cfg,
                     connection,
                     _price_target_bounds(trades, horizon),
@@ -1564,38 +1577,43 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
     # wallets_scored claim a healthy artifact in which no markout exists at all.
     # The coverage row stays; only the count and the status change.
     scored_wallet_rows = [row for row in wallet_rows if row["fills_total"]]
-    if wallet_rows and not scored_wallet_rows:
-        for row in wallet_rows:
-            row["artifact_status"] = "no_usable_labels"
-    if missing_wallet_data and wallet_rows:
-        # The rows are still measured -- markouts do not depend on the
-        # leaderboard -- but the artifact must say its membership column is
-        # unresolved rather than presenting it as an ordinary result.
-        for row in wallet_rows:
-            row["artifact_status"] = "leaderboard_unavailable"
-    if malformed_trade_rows and wallet_rows:
-        # An incomplete sample is not a healthy one (Codex P2 wave-25). With a
-        # nominally ok producer, rows rejected HERE -- non-finite, out-of-domain,
-        # blank venue stamp -- left every surviving row reading
-        # artifact_status="ok", so a consumer could rank wallets on a sample
-        # missing another wallet's every fill, with the exclusion visible only
-        # in a summary counter it never has to read. The row itself now says so.
-        #
-        # Inserted between leaderboard_unavailable and upstream_*, so the
-        # registered precedence is EXTENDED and never reordered: upstream_* wins
-        # over this, this wins over leaderboard_unavailable, which wins over
-        # no_usable_labels. A broken dependency outranks an incomplete sample,
-        # which outranks one unresolved column, which outranks having no markout.
-        for row in wallet_rows:
-            row["artifact_status"] = "partial_malformed_trade_corpus"
-    if trade_corpus_status != "ok":
-        # The dependency is stale, partial, or unreported. Every row is STAMPED
-        # with the upstream state rather than the artifact being blanked (Codex
-        # P1 wave-5 on #451): ranking wallets on an undisclosed stale sample is
-        # the harm, and stamping every row lets a reader reject the artifact
-        # without a missing producer summary silently destroying a working one.
-        for row in wallet_rows:
-            row["artifact_status"] = f"upstream_{trade_corpus_status}"
+    # ONE pass with an explicit precedence ladder, rather than four blanket
+    # overwrites (Codex P2 wave-28). The sequential form could only express
+    # statuses that apply to EVERY row, which is why `no_usable_labels` fired
+    # only when NO wallet was scored: in a healthy mixed corpus a coverage row
+    # -- a wallet whose every forward price was missing or stale -- kept
+    # artifact_status="ok" while representing an unmeasured wallet. The row that
+    # exists precisely to disclose "not measurable" was claiming healthy
+    # evidence. It is a PER-ROW fact and is now decided per row.
+    #
+    # The registered precedence is unchanged, only made explicit, weakest first:
+    #   no_usable_labels  <  leaderboard_unavailable  <  partial_malformed  <  upstream_*
+    # A broken dependency outranks an incomplete sample, which outranks one
+    # unresolved column, which outranks having no markout. The all-unscored case
+    # still stamps every row, because under a per-row rule every row qualifies.
+    for row in wallet_rows:
+        status = "ok"
+        if not row["fills_total"]:
+            status = "no_usable_labels"
+        if missing_wallet_data:
+            # Still measured -- markouts do not depend on the leaderboard -- but
+            # the artifact must say its membership column is unresolved rather
+            # than presenting it as an ordinary result.
+            status = "leaderboard_unavailable"
+        if malformed_trade_rows:
+            # An incomplete sample is not a healthy one (Codex P2 wave-25):
+            # trade rows rejected at ingestion leave no per-wallet trace, so a
+            # consumer could otherwise rank on a sample missing another wallet's
+            # every fill with the exclusion visible only in a summary counter.
+            status = "partial_malformed_trade_corpus"
+        if trade_corpus_status != "ok":
+            # The dependency is stale, partial, or unreported. Rows are STAMPED
+            # rather than the artifact being blanked (Codex P1 wave-5): ranking
+            # on an undisclosed stale sample is the harm, and stamping lets a
+            # reader reject the artifact without a missing producer summary
+            # silently destroying a working one.
+            status = f"upstream_{trade_corpus_status}"
+        row["artifact_status"] = status
     if not wallet_rows:
         # An enabled run with no trades, or with trades carrying no wallet
         # attribution, must still state its evidence class rather than emit a
@@ -1645,6 +1663,17 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
             "price_index_strategy": "disk_backed_streaming_sqlite",
             "feature_rows_scanned": feature_rows_scanned,
             "feature_rows_indexed": feature_rows_indexed,
+            # Feature-side rejections get their own counter (Codex P1 wave-28).
+            # They are NOT folded into malformed_trade_rows_excluded and do NOT
+            # set partial_malformed_trade_corpus, because the two losses are
+            # disclosed differently: a rejected TRADE row leaves no per-wallet
+            # trace at all, while a rejected FEATURE row shows up per wallet as
+            # fills_missing_price or fills_stale_price_excluded. The residual
+            # the coverage columns do NOT catch is a fill that silently falls
+            # through to a DIFFERENT valid feature, so the count is published
+            # here rather than left to `scanned - indexed`, which conflates
+            # invalid rows with rows legitimately outside a markout interval.
+            "malformed_feature_rows_excluded": malformed_feature_rows,
             "price_index_disk_bytes": price_index_disk_bytes,
             "max_toxicity_score": max([safe_float(row.get("toxicity_score")) or 0.0 for row in rows_out], default=0.0),
             "output_path": str(path),

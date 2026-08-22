@@ -1803,6 +1803,105 @@ def test_a_partly_parsed_market_keeps_its_prior_block(tmp_path, monkeypatch):
     assert after["0xc"]["generated_at_utc"] == "2026-08-23T00:00:00Z"
 
 
+def test_an_unmeasured_wallet_row_does_not_claim_healthy_evidence(tmp_path):
+    """A coverage row must say it is unmeasured, even in a healthy corpus.
+
+    `no_usable_labels` fired only when EVERY wallet lacked a label, so in a
+    mixed corpus a wallet whose every forward price was missing kept
+    artifact_status="ok" -- the row that exists precisely to disclose "not
+    measurable" was claiming healthy evidence (Codex P2 wave-28).
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    # A forward price exists for tok-a only. tok-b's wallet is retained for
+    # coverage with no markout at all.
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [
+            {"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0},
+            {"market": "0xb", "asset_id": "tok-b", "wallet": "w2", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1},
+        ],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert summary["wallets_scored"] == 1
+    assert rows["smart1"]["artifact_status"] == "ok"
+    assert int(rows["smart1"]["fills_total"]) == 1
+    assert rows["w2"]["artifact_status"] == "no_usable_labels"
+    assert int(rows["w2"]["fills_total"]) == 0
+    assert int(rows["w2"]["fills_missing_price"]) == 1
+
+
+def test_a_stronger_status_outranks_the_per_row_unmeasured_one(tmp_path):
+    """The precedence ladder is unchanged by making no_usable_labels per-row.
+
+    upstream_* beats partial_malformed beats leaderboard_unavailable beats
+    no_usable_labels. A coverage row under a stale producer must report the
+    producer, which is the more actionable fault.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg, status="stale")
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [
+            {"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0},
+            {"market": "0xb", "asset_id": "tok-b", "wallet": "w2", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1},
+        ],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert rows["w2"]["artifact_status"] == "upstream_stale"
+    assert rows["smart1"]["artifact_status"] == "upstream_stale"
+
+
+def test_feature_rejections_are_counted_separately_from_trade_rejections(tmp_path):
+    """Feature-side losses get their own counter and do not set the trade status.
+
+    Rule 14 named rule 1b and the feature domain bound among the rejections that
+    stamp `partial_malformed_trade_corpus`, but the status is derived from the
+    TRADE counter alone -- so the registered text demanded an outcome the code
+    could not produce, and an existing registered test asserted the opposite
+    (Codex P1 wave-28). The two losses are disclosed differently and are now
+    counted differently.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    # One out-of-domain midpoint and one blank venue stamp, plus a good row so
+    # the wallet is still scored.
+    _features(cfg, "tok-a", [(310, 0.70)])
+    features_path = cfg.output_root / "polymarket_training" / "websocket_market_features.csv"
+    rows = read_csv_rows(features_path)
+    rows.append({"source_timestamp": "320", "collected_at_utc": "320", "asset_id": "tok-a", "midpoint": "1.5"})
+    rows.append({"source_timestamp": "", "collected_at_utc": "330", "asset_id": "tok-a", "midpoint": "0.6"})
+    write_csv(features_path, rows, fieldnames=["source_timestamp", "collected_at_utc", "asset_id", "midpoint"])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    wallet_rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert summary["malformed_feature_rows_excluded"] == 2
+    assert summary["malformed_trade_rows_excluded"] == 0
+    # The trade sample is complete, so the row is NOT stamped as a partial
+    # trade corpus. The feature loss is disclosed by its own counter.
+    assert wallet_rows["smart1"]["artifact_status"] == "ok"
+    assert summary["status"] == "ok"
+
+
 def test_a_departed_market_is_not_pinned_by_an_unrelated_rejection(tmp_path):
     """Carry-forward is restricted to markets that actually lost rows.
 

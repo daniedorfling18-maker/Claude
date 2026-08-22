@@ -2061,6 +2061,13 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
 0b. A NEGATIVE VENUE TIMESTAMP IS REJECTED at ingestion [Codex P2 wave-21], so the writer cannot
    create a negative `split_stamp` that this module's own reader then refuses to reuse on every
    later run. The two validators must agree.
+1b. A FEATURE WITHOUT A VENUE TIMESTAMP IS REJECTED [Codex P1 wave-23], for the same reason and by
+   the same rule as 1a. websocket_normaliser.py:165-170 persists a BLANK `source_timestamp` when an
+   event omits `timestamp`, so falling back to `collected_at_utc` made a delayed event with an
+   UNKNOWN venue time count as the market state at its collection instant — a fill targeting 300
+   would accept it as a t=301 price and publish a markout on both axes. This was the THIRD instance
+   of the same `or collected_at_utc` idiom (trade timestamps at wave-17 were the second) and is the
+   last one in the module.
 1a. A FILL WITHOUT A VENUE TIMESTAMP IS REJECTED [Codex P1 wave-17]. `_trade_rows` must read
    `timestamp` ONLY and never fall back to `collected_at_utc`. trade_print_collector.py:161 persists
    a BLANK timestamp when /trades omits both `timestamp` and `matchTime`, beside a collected_at_utc
@@ -2230,7 +2237,7 @@ the matrix without the total), and even when the count was right the MAPPING was
 behaviour was missing from the list while another entry claimed a standalone test that did not exist.
 This list is GENERATED from the test file and verified by diffing the names in both directions, so it
 cannot omit a real test or invent one that does not exist. Anyone changing it should regenerate
-rather than hand-edit. All 48 live in
+rather than hand-edit. All 49 live in
 tests/polymarket_predictive_engine/test_flow_toxicity.py.
 
  1. `test_planted_toxic_flow_scores_above_balanced_flow`
@@ -2321,13 +2328,15 @@ tests/polymarket_predictive_engine/test_flow_toxicity.py.
     Producer status 'disabled': membership reads 'unknown', while the market-axis tier split still uses the retained top-100 (smart_fill_count 1).
 44. `test_the_latest_intraday_snapshot_wins`
     Two same-date snapshots at 06:00 and 18:00: fresh1 (18:00) reads True, stale1 (06:00, dropped from the newer top-100) reads False.
-45. `test_wallet_without_any_forward_price_is_still_emitted`
+45. `test_a_feature_without_a_venue_timestamp_is_rejected`
+    A feature with a BLANK source_timestamp collected at 301 must not become a t=301 price for a fill targeting 300: the known-venue 0.70 row at 330 is used instead, markout +0.20.
+46. `test_wallet_without_any_forward_price_is_still_emitted`
     A wallet whose every fill lacks a forward price is still emitted, fills_missing_price set, markets_touched credited.
-46. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
+47. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
     Disabled replaces the artifact with one sentinel carrying artifact_status=disabled and both flags false.
-47. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
+48. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
     A price outside [target, target+horizon] counts as stale-excluded, and the market-axis columns keep the parent lookup.
-48. `test_wallet_artifact_states_its_own_invocation_flags`
+49. `test_wallet_artifact_states_its_own_invocation_flags`
     The wallet CSV states both invocation flags itself.
 
 ## FAILURE PATH
@@ -2353,13 +2362,22 @@ compute DIFFERENT medians from different atomic revisions of `trade_prints.csv`,
 artifact replacements — leaving one process's wallet rows paired with the other's persisted cutoff,
 so the published windows could not be reproduced from the state on disk. A contended run writes
 NOTHING and returns `status="skipped_locked"` with the lock payload, matching the registered idiom in
-cost_ledger.py:310. The lock's stale bound is a LITERAL 3600s, deliberately DOUBLE the harvest's own
-step timeout (training_harvest.py:32, `DEFAULT_STEP_TIMEOUT_SECONDS = 30 * 60`), so the lock can
-never be judged stale while its owner is still alive under the harvest [Codex P2 wave-18 — the
-runtime default of 1800s was exactly EQUAL to that timeout, so a long feature-corpus scan could have
-its live lock unlinked by the next invocation, reinstating the very interleaving the lock exists to
-prevent]. A manual run with no `timeout` wrapper can still exceed 3600s, at which point the process
-is wedged and stealing the lock is the correct outcome.
+cost_ledger.py:310. AGE-BASED STEALING IS DISABLED ENTIRELY: `stale_after_seconds=0.0` [Codex P2
+wave-18 and wave-23]. No literal ceiling can be correct here — the harvest step timeout is
+configurable with no upper bound (training_harvest.py:145-159) and manual invocations are unbounded,
+so any number is exceedable by a LEGITIMATE build, and runtime_lock.py:144-164 unlinks a still-live
+lock on age ALONE with no liveness check. (1800s, the runtime default, was exactly equal to the
+harvest step timeout; 3600s, tried next, merely moved the boundary.) Passing 0 disables the age and
+corrupt-payload steal paths while leaving the same-pid orphan check intact.
+
+THE TRADE-OFF, stated rather than hidden: a process that dies HARD leaves this lock behind and every
+later run returns `skipped_locked` until an operator removes
+`outputs/polymarket_runtime/flow_toxicity.lock`. That is the correct direction for this artifact — a
+stuck lock leaves the market veto intact and merely stale, whereas a stolen lock produces interleaved
+writes and wallet rows paired with another process's cutoff, which is unreproducible and silent.
+PREREQUISITE, registered: promoting the wallet axis to a standing input wants a liveness-checking
+lease in `runtime_lock` itself, which is a shared module with many callers and needs its own work
+order.
 
 ## SECOND KNOWN LIMITATION: producer summaries are not bound to a harvest cycle
 

@@ -1289,7 +1289,9 @@ def test_a_contended_run_writes_nothing(tmp_path):
         fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
     )
 
-    held = acquire_runtime_lock(cfg, "flow_toxicity")
+    # Held with the same no-age-steal contract the build uses, so this proves
+    # the lock is respected rather than merely young (Codex P2 wave-23).
+    held = acquire_runtime_lock(cfg, "flow_toxicity", stale_after_seconds=0.0)
     try:
         summary = build_flow_toxicity(cfg)
     finally:
@@ -1615,6 +1617,40 @@ def test_the_latest_intraday_snapshot_wins(tmp_path):
     market = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
     assert int(market["0xa"]["smart_fill_count"]) == 2
     assert int(market["0xa"]["crowd_fill_count"]) == 0
+
+
+def test_a_feature_without_a_venue_timestamp_is_rejected(tmp_path):
+    """Collection time must never stand in for the venue time on features.
+
+    websocket_normaliser.py:165-170 persists a BLANK source_timestamp when an
+    event omits `timestamp`, so the fallback made a delayed event with an
+    UNKNOWN venue time count as the market state at its collection instant: a
+    fill targeting 300 would accept it as a t=301 price (Codex P1 wave-23).
+    Third instance of this `or` idiom -- trade timestamps were the second.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            # Unknown venue time, collected at 301: must NOT become a t=301 price.
+            {"source_timestamp": "", "collected_at_utc": 301, "asset_id": "tok-a", "midpoint": 0.90},
+            {"source_timestamp": 330, "collected_at_utc": 330, "asset_id": "tok-a", "midpoint": 0.70},
+        ],
+        fieldnames=["source_timestamp", "collected_at_utc", "asset_id", "midpoint"],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    # The 0.70 row at a KNOWN venue time of 330 is used: 0.70 - 0.50 = 0.20.
+    assert float(rows["w1"]["markout_mean_total"]) == 0.2
 
 
 def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):

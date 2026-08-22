@@ -332,7 +332,17 @@ def _build_price_index(
             bounds = target_bounds.get(token)
             if bounds is None:
                 continue
-            source_stamp = _stamp(row.get("source_timestamp") or row.get("collected_at_utc"))
+            # VENUE timestamp only -- no fallback to collection time (Codex
+            # P1 wave-23). websocket_normaliser.py:165-170 persists a BLANK
+            # source_timestamp when an event omits `timestamp`, so the fallback
+            # made a delayed event with an UNKNOWN venue time count as the
+            # market state at its collection instant: a fill targeting 300 would
+            # accept it as a t=301 price and publish a markout for both axes.
+            # This is the THIRD instance of this `or` idiom -- trade timestamps
+            # (wave-17) and now feature timestamps -- and it is the last one in
+            # this module; `grep -n 'collected_at_utc'` finds only the
+            # deliberate availability read below.
+            source_stamp = _stamp(row.get("source_timestamp"))
             midpoint = safe_float(row.get("midpoint"))
             if source_stamp is None or midpoint is None:
                 continue
@@ -1010,16 +1020,24 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
     writes nothing and returns skipped_locked, matching the idiom in
     cost_ledger.py:310.
     """
-    # 3600s, deliberately DOUBLE the harvest's own step timeout
-    # (training_harvest.py:32, DEFAULT_STEP_TIMEOUT_SECONDS = 30 * 60), so the
-    # lock can never be judged stale while its owner is still alive under the
-    # harvest (Codex P2 wave-18 -- the default 1800s was exactly equal to that
-    # timeout, so a long feature-corpus scan could have its live lock unlinked
-    # by the next invocation, reinstating the interleaving this exists to
-    # prevent). A manual run with no `timeout` wrapper could still exceed it, at
-    # which point the process is wedged and stealing the lock is the correct
-    # outcome.
-    with runtime_lock(cfg, "flow_toxicity", stale_after_seconds=3600.0) as lock:
+    # NO age-based stealing at all (Codex P2 wave-23). A literal ceiling cannot
+    # work here: the harvest step timeout is configurable with no upper bound
+    # (training_harvest.py:145-159) and manual invocations are unbounded, so any
+    # number I pick can be exceeded by a legitimate build -- and
+    # runtime_lock.py:144-164 unlinks a still-live lock on age ALONE, with no
+    # liveness check. Passing 0 disables the age and corrupt-payload steal paths
+    # while leaving the same-pid orphan check intact.
+    #
+    # The trade-off is stated rather than hidden: a process that dies HARD
+    # leaves this lock behind and every later run returns skipped_locked until
+    # an operator removes outputs/polymarket_runtime/flow_toxicity.lock. That is
+    # the correct direction for this artifact -- a stuck lock leaves the market
+    # veto intact and merely stale, whereas a stolen lock produces interleaved
+    # writes and wallet rows paired with another process's cutoff, which is
+    # unreproducible and silent. PREREQUISITE, registered: promoting the wallet
+    # axis to a standing input wants a liveness-checking lease in runtime_lock
+    # itself, which is a shared module with many callers and its own work order.
+    with runtime_lock(cfg, "flow_toxicity", stale_after_seconds=0.0) as lock:
         if not lock.acquired:
             return {
                 "status": "skipped_locked",

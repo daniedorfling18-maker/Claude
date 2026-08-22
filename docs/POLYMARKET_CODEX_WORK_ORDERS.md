@@ -2088,7 +2088,10 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
 7. THE SPLIT IS FROZEN AT FIRST COMPUTATION, persisted to
    `outputs/maker_carry/flow_toxicity_wallet_split.json` and never recomputed. The persisted payload
    carries `split_stamp`, `horizon_seconds`, `frozen_at_utc`, `corpus_rows_at_freeze` and both
-   invocation flags. `horizon_seconds` is BINDING [Codex P1 wave-15 — implemented but never
+   invocation flags. The flags are VALIDATED ON READ, not merely written [Codex P1 wave-18]: both
+   must be PRESENT and exactly `false`, or the state is invalid and takes the rule-10 path. A state
+   whose flags are absent, or with either set true, was otherwise reused indefinitely and reported as
+   frozen while the artifact itself asserted an unknown or forbidden evidence class. `horizon_seconds` is BINDING [Codex P1 wave-15 — implemented but never
    registered, so a builder following this text could have omitted it and recreated the leak]: the
    embargo in rule 3 is defined relative to the horizon, so a cutoff frozen under a different one is
    not reusable. Shortening the horizon narrows the embargo interval and can move a
@@ -2193,7 +2196,7 @@ the matrix without the total), and even when the count was right the MAPPING was
 behaviour was missing from the list while another entry claimed a standalone test that did not exist.
 This list is GENERATED from the test file and verified by diffing the names in both directions, so it
 cannot omit a real test or invent one that does not exist. Anyone changing it should regenerate
-rather than hand-edit. All 39 live in
+rather than hand-edit. All 40 live in
 tests/polymarket_predictive_engine/test_flow_toxicity.py.
 
  1. `test_planted_toxic_flow_scores_above_balanced_flow`
@@ -2266,13 +2269,15 @@ tests/polymarket_predictive_engine/test_flow_toxicity.py.
     With the leaderboard producer status 'failed', smart1 IS in the retained file but reads on_current_leaderboard 'unknown' and artifact_status leaderboard_unavailable.
 35. `test_a_contended_run_writes_nothing`
     With the flow_toxicity runtime lock already held, the run returns skipped_locked and writes NO split state and NO wallet CSV.
-36. `test_wallet_without_any_forward_price_is_still_emitted`
+36. `test_a_split_state_without_provenance_flags_is_invalid`
+    A split state with the invocation flags absent, or with either set true, is invalid and raises; the untouched original is still reusable and reports wallet_split_was_frozen True.
+37. `test_wallet_without_any_forward_price_is_still_emitted`
     A wallet whose every fill lacks a forward price is still emitted, fills_missing_price set, markets_touched credited.
-37. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
+38. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
     Disabled replaces the artifact with one sentinel carrying artifact_status=disabled and both flags false.
-38. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
+39. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
     A price outside [target, target+horizon] counts as stale-excluded, and the market-axis columns keep the parent lookup.
-39. `test_wallet_artifact_states_its_own_invocation_flags`
+40. `test_wallet_artifact_states_its_own_invocation_flags`
     The wallet CSV states both invocation flags itself.
 
 ## CONCURRENCY
@@ -2284,7 +2289,13 @@ compute DIFFERENT medians from different atomic revisions of `trade_prints.csv`,
 artifact replacements — leaving one process's wallet rows paired with the other's persisted cutoff,
 so the published windows could not be reproduced from the state on disk. A contended run writes
 NOTHING and returns `status="skipped_locked"` with the lock payload, matching the registered idiom in
-cost_ledger.py:310.
+cost_ledger.py:310. The lock's stale bound is a LITERAL 3600s, deliberately DOUBLE the harvest's own
+step timeout (training_harvest.py:32, `DEFAULT_STEP_TIMEOUT_SECONDS = 30 * 60`), so the lock can
+never be judged stale while its owner is still alive under the harvest [Codex P2 wave-18 — the
+runtime default of 1800s was exactly EQUAL to that timeout, so a long feature-corpus scan could have
+its live lock unlinked by the next invocation, reinstating the very interleaving the lock exists to
+prevent]. A manual run with no `timeout` wrapper can still exceed 3600s, at which point the process
+is wedged and stealing the lock is the correct outcome.
 
 ## SECOND KNOWN LIMITATION: producer summaries are not bound to a harvest cycle
 
@@ -2341,13 +2352,27 @@ markouts]:
   (i) rows whose price, size or timestamp parsed but was non-finite are absent;
   (ii) rows whose trade price falls outside [0, 1], or whose size is <= 0, or whose feature midpoint
       falls outside [0, 1], are absent — finite is not sufficient on a binary market;
-  (iii) forward-price LOOKUP still keys on the VENUE stamp, unchanged, so which market state a
+  (iii) fills with a BLANK venue timestamp are absent. The parent's `_trade_rows` fell back to
+      `collected_at_utc`; rule 1a rejects the row instead, so a corpus containing a blank venue
+      timestamp beside a valid collection time changes `trades_seen`, VPIN and the tier markouts even
+      when it holds no non-finite, out-of-domain or duplicate rows [Codex P1 wave-18 — this was the
+      fourth parent-artifact difference and the list claimed to be exhaustive without it, which would
+      have directed a later builder to restore the fallback];
+  (iv) forward-price LOOKUP still keys on the VENUE stamp, unchanged, so which market state a
       markout measures is unchanged. What changed is only the TIE-BREAK among rows sharing a venue
       stamp: previously midpoint (so the smaller number won), now proven-availability first, then
       earliest available time, then arrival order. Collection time is used ONLY for ranking
       eligibility and never for lookup or staleness.
 Every column NAME and every FORMULA is untouched, and on a corpus with no non-finite rows, no
-out-of-domain rows and no same-venue-stamp duplicates the output IS byte-identical. On the disabled path the artifact is REPLACED by a single sentinel row carrying
+out-of-domain rows, no blank venue timestamps and no same-venue-stamp duplicates the output IS
+byte-identical.
+
+The leaderboard-producer rule (8b) deliberately does NOT change the market axis: `_top_wallets` still
+returns the RETAINED top-100 when a refresh fails, so the legacy smart/crowd tier split is unaffected.
+Only the new wallet artifact's `on_current_leaderboard` column reads "unknown" [Codex P1 wave-18 —
+the first version of 8b returned an empty set, which reclassified every formerly smart fill as crowd
+and silently rewrote smart_fill_count, crowd_fill_count and both tier markouts. "Membership is
+unknown for reporting" and "there is no leaderboard for classifying" are different claims]. On the disabled path the artifact is REPLACED by a single sentinel row carrying
 `artifact_status="disabled"` and both invocation flags false — a stale ranking left on disk would read
 as current, and a header-only file names the columns while asserting nothing.
 

@@ -160,8 +160,18 @@ def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], bool]:
     )
     path = cfg.output_root / "wallet_intelligence" / "leaderboard_history.csv"
     rows = read_csv_rows(path)
-    if not rows or producer_status not in {"ok", "disabled"}:
+    if not rows:
         return set(), True
+    # A failed refresh makes membership UNKNOWN FOR REPORTING, but it does not
+    # make the retained top-100 disappear (Codex P1 wave-18). The wave-17 fix
+    # returned an empty set in that case, and this same set feeds the LEGACY
+    # market-axis tier split at :779 -- so every formerly smart fill was
+    # reclassified as crowd, silently rewriting smart_fill_count,
+    # crowd_fill_count and both tier markouts in the parent's registered
+    # artifact. The parent used the retained top-100 here and still does. The
+    # unknown-membership signal is carried separately and affects only the NEW
+    # wallet artifact's reporting column.
+    membership_unknown = producer_status not in {"ok", "disabled"}
     latest = max(str(row.get("snapshot_date") or row.get("snapshot_at_utc") or "") for row in rows)
     latest_rows = [row for row in rows if str(row.get("snapshot_date") or row.get("snapshot_at_utc") or "") == latest]
     latest_rows.sort(key=lambda row: safe_float(row.get("rank")) if safe_float(row.get("rank")) is not None else 1e9)
@@ -175,7 +185,7 @@ def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], bool]:
     # Returning an empty set with missing_wallet_data False published every
     # measured wallet as definitively off-leaderboard when membership could not
     # be established at all -- the same conflation the absent-file case fixed.
-    return wallets, not wallets
+    return wallets, membership_unknown or not wallets
 
 
 def _feature_paths(cfg: EngineConfig) -> Iterator[Path]:
@@ -421,6 +431,15 @@ def _split_stamp_value(persisted: Any) -> float | None:
         return None
     value = _finite_number(persisted.get("split_stamp"))
     if value is None or value < 0:
+        return None
+    # The artifact must also assert its own evidence class (Codex P1 wave-18).
+    # A persisted split with the flags absent, or with either set true, was
+    # reused indefinitely and reported as frozen while the file itself claimed
+    # an unknown or forbidden provenance. Both must be PRESENT and exactly
+    # False, or the state takes the invalid-frozen-state path.
+    if persisted.get("paper_trading_invoked") is not False:
+        return None
+    if persisted.get("live_trading_invoked") is not False:
         return None
     return value
 
@@ -916,7 +935,16 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
     writes nothing and returns skipped_locked, matching the idiom in
     cost_ledger.py:310.
     """
-    with runtime_lock(cfg, "flow_toxicity") as lock:
+    # 3600s, deliberately DOUBLE the harvest's own step timeout
+    # (training_harvest.py:32, DEFAULT_STEP_TIMEOUT_SECONDS = 30 * 60), so the
+    # lock can never be judged stale while its owner is still alive under the
+    # harvest (Codex P2 wave-18 -- the default 1800s was exactly equal to that
+    # timeout, so a long feature-corpus scan could have its live lock unlinked
+    # by the next invocation, reinstating the interleaving this exists to
+    # prevent). A manual run with no `timeout` wrapper could still exceed it, at
+    # which point the process is wedged and stealing the lock is the correct
+    # outcome.
+    with runtime_lock(cfg, "flow_toxicity", stale_after_seconds=3600.0) as lock:
         if not lock.acquired:
             return {
                 "status": "skipped_locked",

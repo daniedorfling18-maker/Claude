@@ -1260,6 +1260,14 @@ def test_a_failed_leaderboard_refresh_renders_membership_unknown(tmp_path):
     assert summary["missing_wallet_data"] is True
     assert rows["smart1"]["on_current_leaderboard"] == "unknown"
     assert rows["smart1"]["artifact_status"] == "leaderboard_unavailable"
+    # The LEGACY market-axis tier split must be untouched: smart1 is in the
+    # retained top-100, so its fill is still classified smart. Returning an
+    # empty wallet set here would silently rewrite smart_fill_count,
+    # crowd_fill_count and both tier markouts in the parent's registered
+    # artifact (Codex P1 wave-18).
+    market = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+    assert int(market["0xa"]["smart_fill_count"]) == 1
+    assert int(market["0xa"]["crowd_fill_count"]) == 0
 
 
 def test_a_contended_run_writes_nothing(tmp_path):
@@ -1287,6 +1295,42 @@ def test_a_contended_run_writes_nothing(tmp_path):
     # Nothing was written: no split state can have been created by the loser.
     assert not (cfg.output_root / "maker_carry" / "flow_toxicity_wallet_split.json").exists()
     assert not (cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv").exists()
+
+
+def test_a_split_state_without_provenance_flags_is_invalid(tmp_path):
+    """The split artifact must assert its own evidence class to be reused.
+
+    A persisted split with the invocation flags absent -- or with either set
+    true -- was reused indefinitely and reported as frozen, while the file
+    itself claimed an unknown or forbidden provenance (Codex P1 wave-18).
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+    assert build_flow_toxicity(cfg)["status"] == "ok"
+    split_path = cfg.output_root / "maker_carry" / "flow_toxicity_wallet_split.json"
+    state = read_json(split_path)
+
+    # Flags absent.
+    stripped = {k: v for k, v in state.items() if not k.endswith("_trading_invoked")}
+    write_json(split_path, stripped)
+    with pytest.raises(ValueError, match="refusing to manufacture"):
+        build_flow_toxicity(cfg)
+
+    # Flag present but true.
+    write_json(split_path, {**state, "live_trading_invoked": True})
+    with pytest.raises(ValueError, match="refusing to manufacture"):
+        build_flow_toxicity(cfg)
+
+    # The untouched original is still reusable.
+    write_json(split_path, state)
+    assert build_flow_toxicity(cfg)["wallet_split_was_frozen"] is True
 
 
 def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):

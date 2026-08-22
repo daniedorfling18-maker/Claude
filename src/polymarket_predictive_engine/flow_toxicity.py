@@ -1499,6 +1499,15 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
                 "toxicity_block_reasons": ";".join(reasons),
             }
         )
+    # COUNTED BEFORE any carry, retention or synthetic block is added (Codex P2
+    # wave-32). `len(rows_out)` at the end includes rows the current corpus did
+    # NOT produce -- a carried prior row, a retained prior blocking row, a
+    # synthetic row for a market nothing could be measured on -- so coverage
+    # telemetry reported them as markets this run scored. One freshly measured
+    # market beside one carried veto read markets_scored 2. The separate
+    # carry/retention/unmeasurable counters stay; this one now means what its
+    # name says.
+    markets_freshly_scored = len(rows_out)
     if trade_source_rows and not trades:
         # PRESERVE the previous market rows (Codex P1 wave-21). A nonempty
         # ledger whose rows all fail parsing leaves rows_out empty, and writing
@@ -1583,7 +1592,12 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
                 return taint_all or market in rejected_markets
             carried: list[dict[str, Any]] = []
             retained_blocks = 0
-            for prior in read_csv_rows(path):
+            prior_by_market = {
+                str(row.get("market") or ""): row
+                for row in read_csv_rows(path)
+                if str(row.get("market") or "")
+            }
+            for prior in prior_by_market.values():
                 market = str(prior.get("market") or "")
                 if not market:
                     continue
@@ -1641,10 +1655,55 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
                 reasons.append("incomplete_sample")
                 row["toxicity_block_reasons"] = ";".join(reasons)
                 unverified_blocks += 1
+            # A WHOLLY REJECTED NEW MARKET HAS NO ROW TO CORRECT (Codex P1
+            # wave-32). Both loops above iterate over rows that already exist --
+            # the prior CSV, or the fresh table. A market seen for the FIRST
+            # time whose every row is rejected is in neither, so it simply never
+            # reaches flow_toxicity.csv, and an absent tox_record is NO BLOCK at
+            # requote_alerts.py:502-535. That is the same fail-open the whole
+            # carry-forward arc exists to close, reached by the one path where
+            # there is nothing to carry and nothing to correct.
+            #
+            # A synthetic blocking row is emitted instead. Its measurement
+            # columns are zero because nothing was measurable -- the point is
+            # `toxic_blocked` and the named reason, which is what the consumers
+            # read; a zero score cannot itself trip the score or imbalance
+            # thresholds, so the composite block is doing the work and says so.
+            unmeasurable = sorted(
+                market
+                for market in rejected_markets
+                if market not in fresh_by_market and market not in prior_by_market
+            )
+            for market in unmeasurable:
+                rows_out.append(
+                    {
+                        "generated_at_utc": generated_at,
+                        "market": market,
+                        "asset_id": "",
+                        "toxicity_score": 0.0,
+                        "vpin_raw": 0.0,
+                        "volume_buckets": 0,
+                        "trades_seen": 0,
+                        "smart_fill_count": 0,
+                        "crowd_fill_count": 0,
+                        "smart_fill_markout": None,
+                        "crowd_fill_markout": None,
+                        "missing_price_points": 0,
+                        "raw_imbalance_block": False,
+                        "percentile_block": False,
+                        "markout_coverage_ratio": 0.0,
+                        "toxic_blocked": True,
+                        "toxicity_block_reasons": "wholly_rejected_sample",
+                    }
+                )
+            if unmeasurable:
+                summary["market_blocks_on_unmeasurable_sample"] = len(unmeasurable)
             if unverified_blocks:
                 summary["market_blocks_on_unverified_sample"] = unverified_blocks
             if retained_blocks or unverified_blocks:
-                rows_out = [fresh_by_market[str(row["market"])] for row in rows_out]
+                rows_out = [
+                    fresh_by_market.get(str(row["market"]), row) for row in rows_out
+                ]
             if retained_blocks:
                 summary["market_blocks_retained_on_partial_sample"] = retained_blocks
             if carried:
@@ -1653,7 +1712,7 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
         write_csv(path, rows_out, fieldnames=TOXICITY_FIELDS)
     if invalid_horizon:
         summary["status"] = "invalid_markout_horizon"
-        summary["markets_scored"] = len(rows_out)
+        summary["markets_scored"] = markets_freshly_scored
         write_json(summary_path, summary)
         error = ValueError(
             "flow_toxicity.markout_horizon_minutes must be a finite positive number; got "
@@ -1667,7 +1726,7 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
         # The market axis is now current on disk, so the toxicity veto is not
         # frozen by a wallet-side fault. Only now does the run fail loudly.
         summary["status"] = "invalid_frozen_split_state"
-        summary["markets_scored"] = len(rows_out)
+        summary["markets_scored"] = markets_freshly_scored
         write_json(summary_path, summary)
         # The recovery instruction used to read "or delete it deliberately to
         # re-freeze" (Codex P1 wave-27). Following it causes the exact leakage
@@ -1794,7 +1853,7 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
                 else "no_trades"
             ),
             "trade_source_rows": trade_source_rows,
-            "markets_scored": len(rows_out),
+            "markets_scored": markets_freshly_scored,
             "wallets_scored": len(scored_wallet_rows),
             # Published so the sample is visible before any ranking is trusted:
             # a wallet ranked on the earlier window must be judged on the later

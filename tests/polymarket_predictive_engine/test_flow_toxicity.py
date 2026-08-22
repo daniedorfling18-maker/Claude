@@ -2250,6 +2250,83 @@ def test_a_snapshot_shorter_than_its_own_request_cannot_settle_membership(tmp_pa
     assert rows["smart1"]["on_current_leaderboard"] == "unknown"
 
 
+def test_a_wholly_rejected_new_market_still_gets_a_veto(tmp_path):
+    """Nothing to carry and nothing to correct (Codex P1 wave-32).
+
+    Both preservation loops iterate rows that already exist -- the prior CSV or
+    the fresh table. A market seen for the FIRST time whose every row is
+    rejected is in neither, so it never reached flow_toxicity.csv at all and an
+    absent tox_record is NO BLOCK at requote_alerts.py:502-535.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    for token in ("tok-a", "tok-b"):
+        _features(cfg, token, [(310, 0.70)])
+    prints_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    write_csv(
+        prints_path,
+        _flow("0xa", "tok-a", "w1", buys=6, sells=2),
+        fieldnames=_FLOW_FIELDS,
+    )
+    build_flow_toxicity(cfg)
+    assert {row["market"] for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")} == {"0xa"}
+
+    # 0xb appears for the first time and every one of its rows is rejected.
+    write_csv(
+        prints_path,
+        [
+            *_flow("0xa", "tok-a", "w1", buys=6, sells=2),
+            *[{**row, "price": 1.5} for row in _flow("0xb", "tok-b", "w2", buys=4, sells=0)],
+        ],
+        fieldnames=_FLOW_FIELDS,
+    )
+    summary = build_flow_toxicity(cfg)
+    after = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+
+    assert summary["malformed_trade_rows_excluded"] == 4
+    assert summary["market_blocks_on_unmeasurable_sample"] == 1
+    assert "0xb" in after, "a market nothing could be measured on must still reach the artifact"
+    assert after["0xb"]["toxic_blocked"] == "True"
+    assert after["0xb"]["toxicity_block_reasons"] == "wholly_rejected_sample"
+    assert int(after["0xb"]["trades_seen"]) == 0
+    # markets_scored counts only what the CURRENT corpus measured, so the
+    # synthetic row does not inflate coverage telemetry.
+    assert summary["markets_scored"] == 1
+
+
+def test_markets_scored_excludes_carried_and_synthetic_rows(tmp_path):
+    """Coverage telemetry must not count rows this corpus did not produce."""
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    for token in ("tok-a", "tok-b"):
+        _features(cfg, token, [(310, 0.70)])
+    prints_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    write_csv(
+        prints_path,
+        [*_flow("0xa", "tok-a", "w1", buys=6, sells=2), *_flow("0xb", "tok-b", "w2", buys=4, sells=4)],
+        fieldnames=_FLOW_FIELDS,
+    )
+    build_flow_toxicity(cfg)
+
+    # 0xb loses every row this refresh; 0xa is measured normally.
+    write_csv(
+        prints_path,
+        [
+            *_flow("0xa", "tok-a", "w1", buys=6, sells=2),
+            *[{**row, "price": 1.5} for row in _flow("0xb", "tok-b", "w2", buys=4, sells=4)],
+        ],
+        fieldnames=_FLOW_FIELDS,
+    )
+    summary = build_flow_toxicity(cfg)
+    after = {row["market"] for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+
+    assert summary["market_rows_carried_forward"] == 1
+    assert after == {"0xa", "0xb"}, "the carried row still reaches the artifact"
+    assert summary["markets_scored"] == 1, "but only 0xa was measured from this corpus"
+
+
 def test_a_departed_market_is_not_pinned_by_an_unrelated_rejection(tmp_path):
     """Carry-forward is restricted to markets that actually lost rows.
 

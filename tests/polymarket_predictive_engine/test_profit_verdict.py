@@ -15,11 +15,12 @@ from polymarket_predictive_engine.profit_verdict import (
     DEFAULT_SETTINGS,
     GATE_A_SEMANTICS_CAVEAT,
     REGISTERED_AMENDMENTS,
+    REGISTERED_EXTENSION_PROTOCOL,
     VERDICT_GATE_DEFINITIONS,
     _sign_test_p,
     build_profit_verdict,
 )
-from polymarket_predictive_engine.utils import read_json, write_csv
+from polymarket_predictive_engine.utils import now_utc, parse_timestamp, read_json, write_csv
 
 
 def _config(tmp_path: Path):
@@ -212,11 +213,22 @@ def test_true_pre_event_clv_never_guesses_when_no_point_qualifies(tmp_path):
     assert unit["finals"][0]["reason"] == "no_official_in_band_observation_at_or_before_cutoff"
 
 
-def test_correlated_finals_collapse_to_market_units(tmp_path):
+def test_correlated_finals_collapse_to_market_units(tmp_path, monkeypatch):
     """Registered amendment 1: 30 all-positive finals concentrated in 3 markets
     are 3 independent observations, not 30 - Gate A must stay pending."""
     cfg = _config(tmp_path)
     _write_finals(cfg, {f"market-{m}": [0.05] * 10 for m in range(3)})
+
+    # Clock pinned to the pre-final-read regime. The verdict string is
+    # REGIME-dependent (amendment 7/8): after the registered terminal instant
+    # 2026-08-19T23:59Z every non-all-pass read resolves to
+    # no_for_tested_edge_classes, so an unpinned assertion of
+    # "insufficient_evidence" is a time bomb that passes until that date and
+    # fails forever after. This test is about the UNIT-COLLAPSE rule, not the
+    # calendar, so it states the regime it means to test.
+    monkeypatch.setattr(
+        "polymarket_predictive_engine.profit_verdict.now_utc", lambda: "2026-07-01T00:00:00Z"
+    )
 
     verdict = build_profit_verdict(cfg)
 
@@ -227,7 +239,7 @@ def test_correlated_finals_collapse_to_market_units(tmp_path):
     assert verdict["verdict"] == "insufficient_evidence"
 
 
-def test_same_fixture_side_markets_collapse_to_one_unit(tmp_path):
+def test_same_fixture_side_markets_collapse_to_one_unit(tmp_path, monkeypatch):
     """Registered amendment 5: with per-match side markets live on Polymarket
     (daily-win, advance, totals), four all-positive markets settling on the
     SAME football match are ONE observation, not four - Gate A must not reach
@@ -249,6 +261,17 @@ def test_same_fixture_side_markets_collapse_to_one_unit(tmp_path):
         close_times={market: fixture_day for market in fixture_markets},
     )
 
+    # Clock pinned to the pre-final-read regime. The verdict string is
+    # REGIME-dependent (amendment 7/8): after the registered terminal instant
+    # 2026-08-19T23:59Z every non-all-pass read resolves to
+    # no_for_tested_edge_classes, so an unpinned assertion of
+    # "insufficient_evidence" is a time bomb that passes until that date and
+    # fails forever after. This test is about the UNIT-COLLAPSE rule, not the
+    # calendar, so it states the regime it means to test.
+    monkeypatch.setattr(
+        "polymarket_predictive_engine.profit_verdict.now_utc", lambda: "2026-07-01T00:00:00Z"
+    )
+
     verdict = build_profit_verdict(cfg)
 
     gate_a = verdict["gates"]["A_edge_exists"]
@@ -259,9 +282,20 @@ def test_same_fixture_side_markets_collapse_to_one_unit(tmp_path):
     assert verdict["verdict"] == "insufficient_evidence"
 
 
-def test_frozen_cohort_finals_are_excluded_from_units(tmp_path):
+def test_frozen_cohort_finals_are_excluded_from_units(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     _write_finals(cfg, {f"m{m}": [0.05] for m in range(20)}, cohort="crypto_updown_fast")
+
+    # Clock pinned to the pre-final-read regime. The verdict string is
+    # REGIME-dependent (amendment 7/8): after the registered terminal instant
+    # 2026-08-19T23:59Z every non-all-pass read resolves to
+    # no_for_tested_edge_classes, so an unpinned assertion of
+    # "insufficient_evidence" is a time bomb that passes until that date and
+    # fails forever after. This test is about the UNIT-COLLAPSE rule, not the
+    # calendar, so it states the regime it means to test.
+    monkeypatch.setattr(
+        "polymarket_predictive_engine.profit_verdict.now_utc", lambda: "2026-07-01T00:00:00Z"
+    )
 
     verdict = build_profit_verdict(cfg)
 
@@ -269,7 +303,7 @@ def test_frozen_cohort_finals_are_excluded_from_units(tmp_path):
     assert verdict["verdict"] == "insufficient_evidence"
 
 
-def test_position_id_fallback_cannot_inflate_gate_a_units(tmp_path):
+def test_position_id_fallback_cannot_inflate_gate_a_units(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     rows = [
         {
@@ -290,6 +324,17 @@ def test_position_id_fallback_cannot_inflate_gate_a_units(tmp_path):
         cfg.governance_root / "closing_line_final_history.csv",
         rows,
         fieldnames=list(rows[0]),
+    )
+
+    # Clock pinned to the pre-final-read regime. The verdict string is
+    # REGIME-dependent (amendment 7/8): after the registered terminal instant
+    # 2026-08-19T23:59Z every non-all-pass read resolves to
+    # no_for_tested_edge_classes, so an unpinned assertion of
+    # "insufficient_evidence" is a time bomb that passes until that date and
+    # fails forever after. This test is about the UNIT-COLLAPSE rule, not the
+    # calendar, so it states the regime it means to test.
+    monkeypatch.setattr(
+        "polymarket_predictive_engine.profit_verdict.now_utc", lambda: "2026-07-01T00:00:00Z"
     )
 
     verdict = build_profit_verdict(cfg)
@@ -409,7 +454,7 @@ def test_taker_fees_are_charged_from_entry_prices(tmp_path):
     assert verdict["gates"]["B_edge_survives_costs"]["mean_taker_fee_per_dollar"] == 0.035
 
 
-def test_frozen_cohort_entries_do_not_inflate_achievable_turnover(tmp_path):
+def test_frozen_cohort_entries_do_not_inflate_achievable_turnover(tmp_path, monkeypatch):
     cfg = _config(tmp_path)
     _write_finals(cfg, {f"m{m}": [0.06] for m in range(14)})
     start = datetime(2026, 7, 1, tzinfo=timezone.utc)
@@ -425,6 +470,17 @@ def test_frozen_cohort_entries_do_not_inflate_achievable_turnover(tmp_path):
         cfg.governance_root / "closing_line_value_positions.csv",
         rows,
         fieldnames=["shadow_position_id", "signal_cohort", "opened_at"],
+    )
+
+    # Clock pinned to the pre-final-read regime. The verdict string is
+    # REGIME-dependent (amendment 7/8): after the registered terminal instant
+    # 2026-08-19T23:59Z every non-all-pass read resolves to
+    # no_for_tested_edge_classes, so an unpinned assertion of
+    # "insufficient_evidence" is a time bomb that passes until that date and
+    # fails forever after. This test is about the UNIT-COLLAPSE rule, not the
+    # calendar, so it states the regime it means to test.
+    monkeypatch.setattr(
+        "polymarket_predictive_engine.profit_verdict.now_utc", lambda: "2026-07-01T00:00:00Z"
     )
 
     verdict = build_profit_verdict(cfg)
@@ -451,6 +507,42 @@ def test_terminal_read_forces_pending_verdict_to_no(tmp_path, monkeypatch):
     assert verdict["verdict"] == "no_for_tested_edge_classes"
     assert verdict["extension_resolution"]["regime"] == "terminal"
     assert verdict["extension_resolution"]["terminal_no_applied"] is True
+
+
+def test_registered_terminal_instant_has_passed_and_the_live_read_is_terminal(tmp_path):
+    """The live regime under the REAL clock, which nothing covered.
+
+    Five unit-collapse tests and one dashboard test asserted
+    verdict == "insufficient_evidence" without pinning the clock. That held
+    through the pre-final-read regime AND the extension window, so it looked
+    stable for months -- then the registered terminal instant
+    (extension_window_end_utc, 2026-08-19T23:59Z) passed and all six failed at
+    once, on main, blocking every PR. The gap was that no test exercised the
+    engine under the ambient clock, so nothing said out loud which regime the
+    system is actually in.
+
+    This test does, and it is stable in the only direction time runs: once the
+    terminal instant is past it stays past, so the assertion never flips back.
+    The bound is read from the registered protocol, never re-typed.
+    """
+    cfg = _config(tmp_path)
+    terminal = parse_timestamp(REGISTERED_EXTENSION_PROTOCOL["extension_window_end_utc"])
+    assert parse_timestamp(now_utc()) >= terminal, (
+        "this test encodes the post-terminal regime; before the terminal instant "
+        "the live read is legitimately insufficient_evidence"
+    )
+    _write_finals(cfg, {"m0": [0.01]})
+
+    verdict = build_profit_verdict(cfg)
+
+    # A pending Gate A is no longer deferred: the single registered extension is spent.
+    assert verdict["gates"]["A_edge_exists"]["state"] == "pending"
+    assert verdict["extension_resolution"]["regime"] == "terminal"
+    assert verdict["extension_resolution"]["terminal_no_applied"] is True
+    assert verdict["verdict"] == "no_for_tested_edge_classes"
+    # Terminal is a NO, not a licence: nothing here invokes a trading path.
+    assert verdict["paper_trading_invoked"] is False
+    assert verdict["live_trading_invoked"] is False
 
 
 def test_extension_window_defers_a_pending_read(tmp_path, monkeypatch):

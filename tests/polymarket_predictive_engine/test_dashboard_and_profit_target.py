@@ -3420,10 +3420,20 @@ def test_dashboard_attributes_stale_model_to_active_governance_stage(tmp_path):
     assert "Active refresh stage: paper_round_trip_evidence" in stale_alert["body"]
 
 
-def test_dashboard_carries_profit_verdict_and_html_panel(tmp_path):
+def test_dashboard_carries_profit_verdict_and_html_panel(tmp_path, monkeypatch):
     """The pre-registered $100/month verdict must ride every render path (same
-    clobber-proofing as proof_questions) and surface as a dashboard panel."""
+    clobber-proofing as proof_questions) and surface as a dashboard panel.
+
+    The clock is pinned to the pre-final-read regime: the verdict STRING is
+    regime-dependent (amendment 7/8 resolves any non-all-pass read terminally to
+    no_for_tested_edge_classes after 2026-08-19T23:59Z), while what this test is
+    actually about is that the verdict RIDES the render path at all. Asserting an
+    unpinned string made it a time bomb.
+    """
     cfg = _config(tmp_path)
+    monkeypatch.setattr(
+        "polymarket_predictive_engine.profit_verdict.now_utc", lambda: "2026-07-01T00:00:00Z"
+    )
 
     result = render_dashboard(cfg)
     data = read_json(result["dashboard_data"])

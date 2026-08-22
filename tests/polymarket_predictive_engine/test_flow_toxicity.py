@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import gzip
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -12,7 +13,7 @@ from polymarket_predictive_engine import maker_carry_study
 from polymarket_predictive_engine.cli import COMMANDS
 from polymarket_predictive_engine.config import load_config
 from polymarket_predictive_engine.flow_toxicity import WALLET_MARKOUT_FIELDS, build_flow_toxicity
-from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_csv, write_json
+from polymarket_predictive_engine.utils import now_utc, read_csv_rows, read_json, write_csv, write_json
 
 
 def _config(tmp_path: Path):
@@ -80,7 +81,7 @@ def _trade_summary(cfg, status: str = "ok", *, only: str | None = None) -> None:
         write_json(root / name, payload)
 
 
-def _leaderboard(cfg, producer_status: str = "ok") -> None:
+def _leaderboard(cfg, producer_status: str = "ok", *, stamp: str | None = None) -> None:
     """Leaderboard rows AND the producer summary that vouches for them.
 
     wallet_intelligence_collector keeps the retained history when a refresh
@@ -92,13 +93,20 @@ def _leaderboard(cfg, producer_status: str = "ok") -> None:
     at wallet_intelligence_collector.py:344 and written to the rows at :99-100.
     That shared stamp is what binds a summary to the rows it vouches for, so a
     fixture omitting it was not a leaderboard production can produce.
+
+    The stamp is now_utc() rather than a literal date, for the same reason:
+    production stamps its summary at the moment it runs, and the producer must
+    be within training_harvest's registered 25-hour freshness ceiling to settle
+    membership at all. A hard-coded date is a fixture that silently rots into a
+    stale producer -- the class of time bomb #452 fixed six of.
     """
+    stamp = stamp or now_utc()
     write_csv(
         cfg.output_root / "wallet_intelligence" / "leaderboard_history.csv",
         [
             {
-                "snapshot_date": "2026-08-22",
-                "snapshot_at_utc": "2026-08-22T00:00:00Z",
+                "snapshot_date": stamp[:10],
+                "snapshot_at_utc": stamp,
                 "wallet": "smart1",
                 "rank": "1",
             }
@@ -107,7 +115,7 @@ def _leaderboard(cfg, producer_status: str = "ok") -> None:
     )
     write_json(
         cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json",
-        {"status": producer_status, "generated_at_utc": "2026-08-22T00:00:00Z"},
+        {"status": producer_status, "generated_at_utc": stamp},
     )
 
 
@@ -1373,7 +1381,7 @@ def test_a_holder_failure_does_not_discard_a_fresh_leaderboard(tmp_path):
     _leaderboard(cfg)
     write_json(
         cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json",
-        {"status": "partial", "generated_at_utc": "2026-08-22T00:00:00Z",
+        {"status": "partial", "generated_at_utc": now_utc(),
          "leaderboard_rows_added": 100, "holder_rows_added": 0},
     )
     _trade_summary(cfg)
@@ -1393,7 +1401,7 @@ def test_a_holder_failure_does_not_discard_a_fresh_leaderboard(tmp_path):
     # Partial with NO leaderboard rows is still unknown.
     write_json(
         cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json",
-        {"status": "partial", "generated_at_utc": "2026-08-22T00:00:00Z",
+        {"status": "partial", "generated_at_utc": now_utc(),
          "leaderboard_rows_added": 0},
     )
     assert build_flow_toxicity(cfg)["missing_wallet_data"] is True
@@ -1803,6 +1811,152 @@ def test_a_partly_parsed_market_keeps_its_prior_block(tmp_path, monkeypatch):
     assert after["0xc"]["generated_at_utc"] == "2026-08-23T00:00:00Z"
 
 
+def test_a_finite_horizon_that_overflows_in_seconds_is_invalid(tmp_path):
+    """Finite MINUTES can still be an infinite number of SECONDS (wave-29).
+
+    markout_horizon_minutes=1e308 passes the finiteness guard and then overflows
+    when multiplied by 60. The run persisted horizon_seconds: Infinity into the
+    split state, which every later run then rejected because _finite_number
+    cannot read it back -- a writer creating state its own reader refuses.
+    """
+    cfg = _config(tmp_path)
+    raw = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    raw["flow_toxicity"]["markout_horizon_minutes"] = 1e308
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(raw), encoding="utf-8")
+    cfg = load_config(tmp_path / "config.yaml")
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    with pytest.raises(ValueError):
+        build_flow_toxicity(cfg)
+
+    rows = read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")
+    assert len(rows) == 1 and rows[0]["artifact_status"] == "invalid_markout_horizon"
+    # No split state may be written from a horizon that is not a number of
+    # seconds -- that is the state a later run could not read back.
+    assert not (cfg.output_root / "maker_carry" / "flow_toxicity_wallet_split.json").exists()
+
+
+def test_a_string_complete_flag_does_not_settle_membership(tmp_path):
+    """bool("false") is True, so only a real boolean may settle it (wave-29)."""
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    write_json(
+        cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json",
+        {"status": "ok", "generated_at_utc": now_utc(), "leaderboard_rows_added": 100,
+         "leaderboard_probe_params": {"complete": "false"}},
+    )
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert summary["missing_wallet_data"] is True
+    assert rows["smart1"]["on_current_leaderboard"] == "unknown"
+
+
+def test_one_unparseable_snapshot_stamp_makes_membership_unknown(tmp_path):
+    """A bad stamp can win the lexicographic instant selection (wave-29).
+
+    The wave-25 binding dropped unparseable stamps before taking the newest, so
+    a ledger with one good row and one bad one read as untorn -- while
+    `_instant_key` sorts lexicographically and "not-a-time" outranks any real
+    ISO timestamp, becoming the row that decides membership.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    stamp = now_utc()
+    write_csv(
+        cfg.output_root / "wallet_intelligence" / "leaderboard_history.csv",
+        [
+            {"snapshot_date": stamp[:10], "snapshot_at_utc": stamp, "wallet": "smart1", "rank": "1"},
+            {"snapshot_date": stamp[:10], "snapshot_at_utc": "not-a-time", "wallet": "w9", "rank": "2"},
+        ],
+        fieldnames=["snapshot_date", "snapshot_at_utc", "wallet", "rank"],
+    )
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert summary["missing_wallet_data"] is True
+    assert rows["smart1"]["on_current_leaderboard"] == "unknown"
+
+
+def test_a_producer_past_its_registered_ceiling_cannot_settle_membership(tmp_path):
+    """A skipped collector leaves ledger and summary mutually consistent (wave-29).
+
+    If collect_wallet_intel times out before replacing either artifact, both
+    stay internally consistent with status "ok", so every other check passes
+    even when the pair is days old. The bound is training_harvest's own
+    registered 25-hour ceiling, READ from WO-85 rather than invented here.
+    """
+    cfg = _config(tmp_path)
+    stale = (
+        datetime.now(timezone.utc)
+        - timedelta(seconds=flow_toxicity.REGISTERED_HARVEST_FRESHNESS_MAX_SECONDS + 60)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _leaderboard(cfg, stamp=stale)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert summary["missing_wallet_data"] is True
+    assert rows["smart1"]["on_current_leaderboard"] == "unknown"
+    # The MARKET axis is untouched: the retained top-100 still feeds the legacy
+    # tier split, as rule 8b requires of every membership rule.
+    market = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+    assert int(market["0xa"]["smart_fill_count"]) == 1
+
+
+def test_a_producer_just_inside_its_registered_ceiling_still_settles_membership(tmp_path):
+    """The bound is a ceiling, not a hair trigger -- the other side of wave-29."""
+    cfg = _config(tmp_path)
+    fresh = (
+        datetime.now(timezone.utc)
+        - timedelta(seconds=flow_toxicity.REGISTERED_HARVEST_FRESHNESS_MAX_SECONDS - 3600)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _leaderboard(cfg, stamp=fresh)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert summary["missing_wallet_data"] is False
+    assert rows["smart1"]["on_current_leaderboard"] == "True"
+
+
 def test_an_unmeasured_wallet_row_does_not_claim_healthy_evidence(tmp_path):
     """A coverage row must say it is unmeasured, even in a healthy corpus.
 
@@ -2199,7 +2353,7 @@ def test_an_incomplete_leaderboard_is_not_authoritative(tmp_path):
     _leaderboard(cfg)
     write_json(
         cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json",
-        {"status": "partial", "generated_at_utc": "2026-08-22T00:00:00Z",
+        {"status": "partial", "generated_at_utc": now_utc(),
          "leaderboard_rows_added": 12,
          "leaderboard_probe_params": {"complete": False}},
     )
@@ -2219,7 +2373,7 @@ def test_an_incomplete_leaderboard_is_not_authoritative(tmp_path):
     # complete=true with the same partial status IS authoritative.
     write_json(
         cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json",
-        {"status": "partial", "generated_at_utc": "2026-08-22T00:00:00Z",
+        {"status": "partial", "generated_at_utc": now_utc(),
          "leaderboard_rows_added": 100,
          "leaderboard_probe_params": {"complete": True}},
     )
@@ -2286,6 +2440,21 @@ def test_a_disabled_leaderboard_producer_yields_unknown_membership(tmp_path):
     assert int(market["0xa"]["smart_fill_count"]) == 1
 
 
+# Two collector runs on the SAME UTC date, both inside training_harvest's
+# registered 25-hour freshness ceiling. Derived from the run clock rather than
+# hard-coded, because a literal date would silently age past that ceiling and
+# turn this test into the kind of time bomb #452 fixed six of.
+_INTRADAY_STAMP = now_utc()
+# Strictly one hour earlier, so the two instants can never coincide -- slicing
+# the string to 00:00:00Z would tie with _INTRADAY_STAMP on a run that started
+# exactly at midnight. Both rows still carry the SAME snapshot_date column,
+# which is the grouping the test is about.
+_INTRADAY_EARLIER = (
+    (datetime.fromisoformat(_INTRADAY_STAMP.replace("Z", "+00:00")) - timedelta(hours=1))
+    .strftime("%Y-%m-%dT%H:%M:%SZ")
+)
+
+
 def test_the_latest_intraday_snapshot_wins(tmp_path):
     """Two collector runs on one date must not be merged into one snapshot.
 
@@ -2297,8 +2466,8 @@ def test_the_latest_intraday_snapshot_wins(tmp_path):
     write_csv(
         cfg.output_root / "wallet_intelligence" / "leaderboard_history.csv",
         [
-            {"snapshot_date": "2026-07-10", "snapshot_at_utc": "2026-07-10T06:00:00Z", "wallet": "stale1", "rank": "1"},
-            {"snapshot_date": "2026-07-10", "snapshot_at_utc": "2026-07-10T18:00:00Z", "wallet": "fresh1", "rank": "1"},
+            {"snapshot_date": _INTRADAY_STAMP[:10], "snapshot_at_utc": _INTRADAY_EARLIER, "wallet": "stale1", "rank": "1"},
+            {"snapshot_date": _INTRADAY_STAMP[:10], "snapshot_at_utc": _INTRADAY_STAMP, "wallet": "fresh1", "rank": "1"},
         ],
         fieldnames=["snapshot_date", "snapshot_at_utc", "wallet", "rank"],
     )
@@ -2306,7 +2475,7 @@ def test_the_latest_intraday_snapshot_wins(tmp_path):
         cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json",
         {
             "status": "ok",
-            "generated_at_utc": "2026-07-10T18:00:00Z",
+            "generated_at_utc": _INTRADAY_STAMP,
             "leaderboard_rows_added": 1,
             "leaderboard_probe_params": {"complete": True},
         },

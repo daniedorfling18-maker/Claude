@@ -21,6 +21,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from .config import EngineConfig, load_config
+from .degraded_state_watchdog import REGISTERED_JOB_FRESHNESS_MAX_SECONDS
 from .runtime_lock import runtime_lock
 from .utils import (
     normalize_external_timestamp,
@@ -104,6 +105,17 @@ WALLET_MARKOUT_FIELDS = [
 # raw-imbalance floor so the veto cannot drift. The composite screen is
 # strictly TIGHTEN-ONLY: a market is blocked if the percentile rule OR the
 # absolute floor fires. It never clears a market the old rule blocked.
+# READ from WO-85's registered ceiling, never redefined here (Codex P2
+# wave-29). collect_wallet_intel is a step of training_harvest
+# (training_harvest.py:88), so the job's own completion-freshness SLO is the
+# only non-invented bound on how old its summary may be. Imported rather than
+# copied so a change to WO-85 cannot leave a stale duplicate behind -- the same
+# READ-never-change discipline degraded_state_watchdog.ORPHAN_BOUND_SECONDS
+# applies to these values.
+REGISTERED_HARVEST_FRESHNESS_MAX_SECONDS = float(
+    REGISTERED_JOB_FRESHNESS_MAX_SECONDS["training_harvest"]
+)
+
 REGISTERED_RAW_IMBALANCE_FLOOR = 0.90
 REGISTERED_PERCENTILE_BLOCK = 0.90
 
@@ -188,8 +200,21 @@ def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], set[str
     # :264, published at :423). Trusting rows_added alone published ordinary
     # True/False membership off a partial prefix, so wallets outside the fetched
     # range read as definitively off the current leaderboard (Codex P2 wave-20).
+    # ONLY a real JSON boolean settles completeness (Codex P2 wave-29).
+    # bool("false") is True, so a malformed summary carrying the STRING "false"
+    # was read as a complete refresh and published definitive membership off a
+    # partial prefix -- the same truthiness hazard _finite_number exists to stop
+    # on the numeric side, on the one field here that is not a number.
+    # Absent stays None, because older collector summaries genuinely do not
+    # publish the field; PRESENT-but-not-a-boolean fails closed to False.
     probe = producer.get("leaderboard_probe_params") if isinstance(producer, dict) else None
-    leaderboard_complete = bool(probe.get("complete")) if isinstance(probe, dict) else None
+    raw_complete = probe.get("complete") if isinstance(probe, dict) else None
+    if raw_complete is None:
+        leaderboard_complete = None
+    elif isinstance(raw_complete, bool):
+        leaderboard_complete = raw_complete
+    else:
+        leaderboard_complete = False
     refreshed = (
         leaderboard_rows_added is not None
         and leaderboard_rows_added > 0
@@ -226,21 +251,57 @@ def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], set[str
     summary_stamp = parse_timestamp(
         producer.get("generated_at_utc") if isinstance(producer, dict) else None
     )
-    row_stamps = [
-        parsed
-        for parsed in (parse_timestamp(row.get("snapshot_at_utc")) for row in rows)
-        if parsed is not None
-    ]
+    # EVERY row must carry a parseable stamp, not just one of them (Codex P2
+    # wave-29). The wave-25 comprehension silently dropped unparseable stamps,
+    # so a ledger holding one good row and one bad one still computed a newest
+    # stamp from the good one and read as untorn -- while `_instant_key` below
+    # selects the latest snapshot LEXICOGRAPHICALLY, where "not-a-time" sorts
+    # above "2026-08-22T00:00:00Z" and becomes the selected instant. The row
+    # driving membership was then one that could not be bound to the summary at
+    # all. The same hazard exists for a row with a BLANK snapshot_at_utc, since
+    # `_instant_key` falls back to snapshot_date and a bare date can outsort a
+    # full timestamp. Both are unbindable, so both make membership unknown.
+    parsed_stamps = [parse_timestamp(row.get("snapshot_at_utc")) for row in rows]
+    unbindable_rows = any(parsed is None for parsed in parsed_stamps)
+    row_stamps = [parsed for parsed in parsed_stamps if parsed is not None]
     newest_row_stamp = max(row_stamps) if row_stamps else None
     revision_torn = (
         newest_row_stamp is None
         or summary_stamp is None
+        or unbindable_rows
         or newest_row_stamp > summary_stamp
+    )
+    # THE PRODUCER MUST HAVE RUN RECENTLY ENOUGH TO SPEAK FOR ITS OWN LEDGER
+    # (Codex P2 wave-29). If collect_wallet_intel times out or aborts before
+    # replacing either artifact, the retained ledger and retained summary stay
+    # mutually CONSISTENT with status "ok" -- so every check above passes even
+    # when both files are days old, and the artifact publishes definitive
+    # membership from a stale snapshot.
+    #
+    # The bound is READ, never invented, which is what the earlier attempt at
+    # this got wrong (see the SECOND KNOWN LIMITATION: comparing summaries to
+    # trade_prints.csv broke the normal case and any age threshold looked like
+    # an A1 violation). collect_wallet_intel is a STEP of training_harvest
+    # (training_harvest.py:88), and WO-85 registers that job's completion
+    # freshness ceiling as an exact 25 hours in
+    # degraded_state_watchdog.REGISTERED_JOB_FRESHNESS_MAX_SECONDS, a fixed
+    # maximum with no config path that can widen it. A summary older than its
+    # own job's registered ceiling means the harvest has already missed that SLO
+    # and raised its own incident; it cannot also certify current membership.
+    # This is an ABSOLUTE freshness read against a registered SLO, not a
+    # data-relative window -- rule 12's S1 contract governs `_markout_stats` and
+    # is untouched by it.
+    now = parse_timestamp(now_utc())
+    producer_stale = (
+        summary_stamp is None
+        or now is None
+        or (now - summary_stamp).total_seconds() > REGISTERED_HARVEST_FRESHNESS_MAX_SECONDS
     )
     membership_unknown = (
         (producer_status != "ok" and not refreshed)
         or leaderboard_complete is False
         or revision_torn
+        or producer_stale
     )
     # TWO sets, because this function has TWO consumers with DIFFERENT
     # contracts, and returning one made every change to it silently rewrite the
@@ -1217,6 +1278,20 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
     # P2 wave-13). Rejected before conversion, as the split-state validators do.
     horizon_raw = _finite_number(horizon_setting)
     invalid_horizon = horizon_raw is None or horizon_raw <= 0
+    # The CONVERTED value needs its own check, and it has to happen HERE rather
+    # than at the point of use (Codex P2 wave-29). A finite but enormous
+    # markout_horizon_minutes -- 1e308 -- passes the guard above and overflows
+    # to inf when multiplied by 60. The run then persisted
+    # horizon_seconds: Infinity into the split state, which every LATER run
+    # rejected because _finite_number cannot read it back: a writer creating
+    # state its own reader refuses, the third instance of that shape here after
+    # rule 0b's negative stamps and wave-10's boolean split. Deciding it later
+    # would set the flag AFTER the invalidation branch below has already read
+    # it, so no sentinel would be written and the fault would be silent.
+    horizon_seconds = (horizon_raw or 5.0) * 60.0
+    if not math.isfinite(horizon_seconds) or horizon_seconds <= 0:
+        invalid_horizon = True
+        horizon_seconds = 5.0 * 60.0
     if invalid_horizon:
         # DETECTED here, RAISED after the market axis is rebuilt (Codex P1
         # wave-14). Raising here left the previous flow_toxicity.csv intact,
@@ -1234,7 +1309,7 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
             [_wallet_sentinel_row(generated_at, "invalid_markout_horizon")],
             fieldnames=WALLET_MARKOUT_FIELDS,
         )
-    horizon = (horizon_raw or 5.0) * 60.0
+    horizon = horizon_seconds
 
     # DETECT here, but do NOT raise here (Codex P1 wave-11 on #451). Raising
     # before the market-axis rebuild was a safety regression I introduced in

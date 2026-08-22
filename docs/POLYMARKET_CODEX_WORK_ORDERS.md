@@ -2279,6 +2279,44 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    `market` field is itself unreadable cannot be attributed and taint EVERY market, since any of
    them could be the one that lost coverage. Retained rows keep their original `generated_at_utc`
    and the count is published as `market_blocks_retained_on_partial_sample`.
+8d. THE PRODUCER MUST BE INSIDE ITS OWN REGISTERED FRESHNESS CEILING [Codex P2 wave-29]. Rule 8c
+   binds the ledger to its summary, but a SKIPPED producer defeats both: if `collect_wallet_intel`
+   times out or aborts before replacing either artifact, the retained pair stays mutually consistent
+   with `status="ok"`, so every check passes even when both files are days old and the artifact
+   publishes definitive membership from a stale snapshot. The bound is READ, never invented — which
+   is what the earlier attempt recorded in the SECOND KNOWN LIMITATION got wrong. `collect_wallet_intel`
+   is a STEP of `training_harvest` (training_harvest.py:88), and WO-85 registers that job's completion
+   freshness ceiling as an exact 25 hours in
+   `degraded_state_watchdog.REGISTERED_JOB_FRESHNESS_MAX_SECONDS` — a fixed maximum with no config
+   path that can widen it. A summary older than its own job's ceiling means the harvest has already
+   missed that SLO and raised its own incident; it cannot also certify current membership. The value
+   is IMPORTED, not copied, so a change to WO-85 cannot leave a stale duplicate here. This is an
+   ABSOLUTE freshness read against a registered SLO, not a data-relative window: rule 12's S1
+   contract governs `_markout_stats` and is untouched.
+8e. ONLY A REAL BOOLEAN SETTLES COMPLETENESS [Codex P2 wave-29]. `bool(probe["complete"])` read the
+   STRING `"false"` as True, so a malformed summary turned a partial refresh into a complete one and
+   published definitive membership off a partial prefix — the same truthiness hazard `_finite_number`
+   exists to stop on the numeric side, on the one field here that is not a number. ABSENT stays
+   `None`, because older collector summaries genuinely do not publish the field; PRESENT-but-not-a-
+   boolean fails closed to False.
+8f. EVERY LEDGER ROW MUST CARRY A BINDABLE REVISION STAMP [Codex P2 wave-29]. Rule 8c's first
+   implementation dropped unparseable stamps before taking the newest, so a ledger holding one good
+   row and one bad one still computed a newest stamp from the good one and read as UNTORN — while
+   `_instant_key` selects the latest snapshot LEXICOGRAPHICALLY, where `"not-a-time"` sorts above any
+   real ISO timestamp and becomes the row that decides membership. The same hazard exists for a BLANK
+   `snapshot_at_utc`, since `_instant_key` falls back to `snapshot_date` and a bare date can outsort a
+   full timestamp. Both are unbindable, so ANY row lacking a parseable `snapshot_at_utc` makes
+   membership unknown.
+16. A FINITE HORIZON IN MINUTES CAN BE AN INFINITE ONE IN SECONDS [Codex P2 wave-29].
+   `markout_horizon_minutes = 1e308` passes the finiteness guard and overflows to `inf` when
+   multiplied by 60, and the run then persisted `horizon_seconds: Infinity` into the split state —
+   which every LATER run rejected because `_finite_number` cannot read it back. That is a writer
+   creating state its own reader refuses, the third instance of that shape after rule 0b's negative
+   stamps and wave-10's boolean split. The CONVERTED seconds value is validated, and validated at the
+   point `invalid_horizon` is first decided rather than at the point of use: deciding it later sets
+   the flag AFTER the invalidation branch has already read it, so no sentinel would be written and
+   the fault would be silent.
+
 13c. THE TWO BLOCK KINDS HAVE DIFFERENT BLAST RADII [Codex P1 wave-27]. Wave-26 protected only
    markets that lost rows, which is right for `raw_imbalance_block` and WRONG for
    `percentile_block`. The raw block is MARKET-LOCAL: it reads that market's own VPIN, so a market
@@ -2375,9 +2413,9 @@ the matrix without the total), and even when the count was right the MAPPING was
 behaviour was missing from the list while another entry claimed a standalone test that did not exist.
 This list is GENERATED from the test file and verified by diffing the names in both directions, so it
 cannot omit a real test or invent one that does not exist. Anyone changing it should regenerate
-rather than hand-edit. All 63 live in
-tests/polymarket_predictive_engine/test_flow_toxicity.py. That is 63 test FUNCTIONS; pytest collects
-73 cases, because the two S4 sweeps in rule 15 are parametrised (7 offsets and 5 clock shifts). An
+rather than hand-edit. All 68 live in
+tests/polymarket_predictive_engine/test_flow_toxicity.py. That is 68 test FUNCTIONS; pytest collects
+78 cases, because the two S4 sweeps in rule 15 are parametrised (7 offsets and 5 clock shifts). An
 auditor comparing this count to pytest output should expect the difference [noted at wave-26 so the
 mismatch is not later read as the drift this generated list exists to prevent].
 
@@ -2469,43 +2507,53 @@ mismatch is not later read as the drift this generated list exists to prevent].
     S4 property sweep, 5 shifts to +10 days: a whole-corpus clock translation leaves every fills_* counter identical, which is what would catch a run-clock read leaking into a data-relative window.
 44. `test_a_partly_parsed_market_keeps_its_prior_block`
     0xb's one-sided burst is rejected while its calm tail survives: 12 rows excluded, market_blocks_retained_on_partial_sample 1, 0xb's prior blocking row kept verbatim at 2026-08-22 while 0xc is re-measured at 2026-08-23.
-45. `test_an_unmeasured_wallet_row_does_not_claim_healthy_evidence`
+45. `test_a_finite_horizon_that_overflows_in_seconds_is_invalid`
+    markout_horizon_minutes 1e308: the run raises, the wallet artifact is one invalid_markout_horizon sentinel, and NO split state is written -- an infinite horizon_seconds is state no later run could read back.
+46. `test_a_string_complete_flag_does_not_settle_membership`
+    leaderboard_probe_params.complete is the STRING "false": missing_wallet_data True and membership unknown, because bool("false") is True.
+47. `test_one_unparseable_snapshot_stamp_makes_membership_unknown`
+    One good row beside a row stamped "not-a-time": membership unknown, because the bad stamp outsorts any real ISO timestamp in the lexicographic instant selection.
+48. `test_a_producer_past_its_registered_ceiling_cannot_settle_membership`
+    A summary 60s past training_harvest's registered 25-hour ceiling: membership unknown, while the market axis keeps smart_fill_count 1.
+49. `test_a_producer_just_inside_its_registered_ceiling_still_settles_membership`
+    A summary one hour inside the same ceiling: missing_wallet_data False and membership True -- the bound is a ceiling, not a hair trigger.
+50. `test_an_unmeasured_wallet_row_does_not_claim_healthy_evidence`
     A mixed corpus where only tok-a has a forward price: smart1 reads ok with fills_total 1, while w2 reads no_usable_labels with fills_total 0 and fills_missing_price 1.
-46. `test_a_stronger_status_outranks_the_per_row_unmeasured_one`
+51. `test_a_stronger_status_outranks_the_per_row_unmeasured_one`
     The same corpus under a stale producer: both the scored and the coverage row read upstream_stale -- the ladder is unchanged by making no_usable_labels per-row.
-47. `test_feature_rejections_are_counted_separately_from_trade_rejections`
+52. `test_feature_rejections_are_counted_separately_from_trade_rejections`
     One out-of-domain midpoint and one blank venue stamp beside a good feature: malformed_feature_rows_excluded 2, malformed_trade_rows_excluded 0, row status ok and summary status ok -- a feature loss is not a partial TRADE corpus.
-48. `test_a_departed_market_is_not_pinned_by_an_unrelated_rejection`
+53. `test_a_departed_market_is_not_pinned_by_an_unrelated_rejection`
     0xc departs cleanly while 0xa loses one row: market_rows_carried_forward absent and 0xc gone -- an attributable rejection names only its own market's lost coverage.
-49. `test_an_unattributable_rejection_pins_every_departed_market`
+54. `test_an_unattributable_rejection_pins_every_departed_market`
     A rejection with a BLANK market field while 0xc departs: market_rows_carried_forward 1 and 0xc held -- naming no market makes every absence unverifiable.
-50. `test_a_freshly_toxic_market_still_wins_over_a_prior_clean_row`
+55. `test_a_freshly_toxic_market_still_wins_over_a_prior_clean_row`
     0xb turns one-sided AND loses a row: 0xb's FRESH blocking row wins, while 0xa -- which lost nothing but held a percentile-ONLY block and fell from 1.0 to 0.5 -- is retained. Pins rule 13c's deliberate over-breadth.
-51. `test_a_partly_rejected_ledger_does_not_freeze_the_split`
+56. `test_a_partly_rejected_ledger_does_not_freeze_the_split`
     One valid fill and one out-of-domain fill under an ok producer: wallet_split_was_frozen False and no split-state file on disk -- a contaminated cutoff must not outlive the rejected run.
-52. `test_a_clean_run_does_not_carry_a_departed_market_forward`
+57. `test_a_clean_run_does_not_carry_a_departed_market_forward`
     A market with no fills in the new ledger and NO exclusions this run: it leaves the table, market_rows_carried_forward absent -- absence with nothing rejected is meaningful.
-53. `test_a_partly_rejected_sample_is_not_a_healthy_wallet_artifact`
+58. `test_a_partly_rejected_sample_is_not_a_healthy_wallet_artifact`
     One valid fill and one out-of-domain fill under an ok producer: the surviving row reads partial_malformed_trade_corpus, wallets_scored 1, and the rejected wallet is absent entirely.
-54. `test_a_leaderboard_newer_than_its_summary_cannot_settle_membership`
+59. `test_a_leaderboard_newer_than_its_summary_cannot_settle_membership`
     Rows stamped 2026-08-23 beside a summary generated 2026-08-22: missing_wallet_data True and membership 'unknown', while the market axis keeps smart_fill_count 1.
-55. `test_an_incomplete_leaderboard_is_not_authoritative`
+60. `test_an_incomplete_leaderboard_is_not_authoritative`
     leaderboard_probe_params.complete=false with 12 rows added renders membership 'unknown'; complete=true with 100 rows added under the same 'partial' status is authoritative.
-56. `test_a_malformed_corpus_does_not_clear_the_market_veto`
+61. `test_a_malformed_corpus_does_not_clear_the_market_veto`
     A healthy run scores one market; the next refresh is entirely corrupt. EXPECT status malformed_trade_corpus, market_axis_preserved True, and flow_toxicity.csv byte-equal to before -- the active veto survives.
-57. `test_a_disabled_leaderboard_producer_yields_unknown_membership`
+62. `test_a_disabled_leaderboard_producer_yields_unknown_membership`
     Producer status 'disabled': membership reads 'unknown', while the market-axis tier split still uses the retained top-100 (smart_fill_count 1).
-58. `test_the_latest_intraday_snapshot_wins`
+63. `test_the_latest_intraday_snapshot_wins`
     Two same-date snapshots at 06:00 and 18:00: fresh1 (18:00) reads True, stale1 (06:00, dropped from the newer top-100) reads False.
-59. `test_a_feature_without_a_venue_timestamp_is_rejected`
+64. `test_a_feature_without_a_venue_timestamp_is_rejected`
     A feature with a BLANK source_timestamp collected at 301 must not become a t=301 price for a fill targeting 300: the known-venue 0.70 row at 330 is used instead, markout +0.20.
-60. `test_wallet_without_any_forward_price_is_still_emitted`
+65. `test_wallet_without_any_forward_price_is_still_emitted`
     A wallet whose every fill lacks a forward price is still emitted, fills_missing_price set, markets_touched credited.
-61. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
+66. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
     Disabled replaces the artifact with one sentinel carrying artifact_status=disabled and both flags false.
-62. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
+67. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
     A price outside [target, target+horizon] counts as stale-excluded, and the market-axis columns keep the parent lookup.
-63. `test_wallet_artifact_states_its_own_invocation_flags`
+68. `test_wallet_artifact_states_its_own_invocation_flags`
     The wallet CSV states both invocation flags itself.
 
 ## FAILURE PATH
@@ -2586,7 +2634,14 @@ SAME ledger in sequence, so once backfill rewrites it the earlier summaries are 
 That check fires on every healthy harvest. It was implemented, caught by the registered tests, and
 reverted. Any age-threshold variant needs an invented number, which A1 forbids.
 
-The correct fix needs information this module is not given: it runs as a standalone CLI command and
+PARTIALLY CLOSED at wave-29 for the LEADERBOARD producer only: rule 8d now rejects a
+`wallet_intelligence_summary.json` older than `training_harvest`'s own registered 25-hour ceiling,
+which is a READ of WO-85 rather than the invented number this section rules out. That covers the
+skipped-producer case for the membership column. It does NOT close this limitation for the THREE
+trade-ledger producers, whose statuses rule 8 still reads without knowing which run wrote them, and
+which can still permit the rule-10 freeze on a corpus a leftover "ok" never saw.
+
+The remaining fix needs information this module is not given: it runs as a standalone CLI command and
 never sees the harvest's per-step results. PREREQUISITE, binding: before the wallet axis is promoted
 to a standing input, producers must stamp a harvest-cycle id into their summaries and rule 8 must
 require all three to carry the current one.

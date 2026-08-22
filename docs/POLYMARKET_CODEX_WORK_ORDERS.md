@@ -17387,6 +17387,30 @@ fresh-but-wrong. This paragraph must survive as a code comment.
         enum, no cell out of precedence. This is what makes "CLOSED enum" something a build can fail
         rather than a claim in prose.
 
+19. Global suppression on keyless dropped mass [Codex P1 wave-9 — 1d's strictest arm was registered
+    in wave 8 with NO test, so it was a rule a build could ignore while passing everything]. Fixture:
+    cohort "alpha" with THREE attributed rows, all positive, quantity 1.0 each, entry 0.40 exit 0.55
+    (+0.15/share, cohort total +0.45) — on its own an unambiguous positive_edge_confirmed; PLUS one
+    unattributable row with signal_cohort "" (keyless) and realised_pnl_usdc -20.0, no CLV row.
+    Assert: "alpha" has unattributable_positions == 0 and WOULD classify, yet emits attribution_class
+    JSON null, recommended_action JSON null, and class_suppressed_reason
+    "unassignable_dropped_mass_present"; the "unknown" cohort row is ALSO emitted and also carries no
+    class; and NO class upsert reaches research_focus.py:1053-1070 for either, so the +12.0 cannot be
+    earned. Then the control arm: the identical fixture with the dropped row given signal_cohort
+    "alpha" instead of "" — now "alpha" has unattributable_positions == 1 and is suppressed under the
+    ORDINARY 1d rule with class_suppressed_reason "unattributable_positions_present", proving the two
+    suppression reasons are distinguishable and neither is dead code. Without this test an
+    implementation that merely routes the keyless row to "unknown" and suppresses only THAT cohort
+    passes every other enumerated test while the named cohort still classifies around the loss.
+20. The day-after bound is reconstructible from the artifact alone [Codex P1 wave-9]:
+    `registered_baseline_skipped_fraction` is PRESENT in edge_attribution.json, is a FINITE float in
+    [0.0, 1.0], and EQUALS the literal that replaces BLOCKER-1 — asserted against that literal, not
+    against a recomputation, so a build cannot emit a self-consistent but different baseline. Missing,
+    malformed, non-finite, out-of-range, or mismatched all FAIL. Registered now and NOT satisfiable
+    until BLOCKER-1 is resolved, which is the point: the key exists so the operator can reconstruct
+    the advertised bound from the artifact, and an unasserted key is one a build can omit while
+    leaving the checker to evaluate a threshold that was never published.
+
 ## Day-after check [N7 cured]
 Read edge_attribution.json AND governance_refresh_status.json on the first post-deploy cycle:
 histogram present with ALL SIX keys; attributed + skipped == seen; skipped fraction within the bound registered at

@@ -181,9 +181,22 @@ def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], bool]:
     leaderboard_rows_added = _finite_number(
         producer.get("leaderboard_rows_added") if isinstance(producer, dict) else None
     )
-    membership_unknown = producer_status not in {"ok", "disabled"} and not (
-        leaderboard_rows_added is not None and leaderboard_rows_added > 0
+    # A positive row count is not enough: the collector records
+    # leaderboard_probe_params.complete=false when the endpoint returned a
+    # NONEMPTY but INCOMPLETE top-100 (wallet_intelligence_collector.py:235,
+    # :264, published at :423). Trusting rows_added alone published ordinary
+    # True/False membership off a partial prefix, so wallets outside the fetched
+    # range read as definitively off the current leaderboard (Codex P2 wave-20).
+    probe = producer.get("leaderboard_probe_params") if isinstance(producer, dict) else None
+    leaderboard_complete = bool(probe.get("complete")) if isinstance(probe, dict) else None
+    refreshed = (
+        leaderboard_rows_added is not None
+        and leaderboard_rows_added > 0
+        and leaderboard_complete is not False
     )
+    membership_unknown = (
+        producer_status not in {"ok", "disabled"} and not refreshed
+    ) or leaderboard_complete is False
     latest = max(str(row.get("snapshot_date") or row.get("snapshot_at_utc") or "") for row in rows)
     latest_rows = [row for row in rows if str(row.get("snapshot_date") or row.get("snapshot_at_utc") or "") == latest]
     latest_rows.sort(key=lambda row: safe_float(row.get("rank")) if safe_float(row.get("rank")) is not None else 1e9)
@@ -876,11 +889,13 @@ def _percentiles(raw_by_market: dict[str, float]) -> dict[str, float]:
     return {market: round(index / (len(ordered) - 1), 6) for index, (market, _) in enumerate(ordered)}
 
 
-def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int]:
+def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int, int]:
     parsed: list[dict[str, Any]] = []
     malformed_rows = 0
+    source_rows = 0
     path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
     for row in _iter_csv_any(path):
+        source_rows += 1
         market = str(row.get("market") or "").strip()
         token = str(row.get("asset_id") or row.get("token_id") or "").strip()
         price = safe_float(row.get("price"))
@@ -906,6 +921,9 @@ def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int]:
         # print is not a print, so this is an input-validity guard rather than
         # a change to what either metric MEANS.
         if not market or not token or price is None or size is None or stamp is None or side not in {"BUY", "SELL"}:
+            # Counted too (Codex P2 wave-20): these basic-shape rejections were
+            # silent, so a wholly malformed ledger looked like an empty one.
+            malformed_rows += 1
             continue
         if not math.isfinite(price) or not math.isfinite(size) or not math.isfinite(stamp):
             malformed_rows += 1
@@ -931,7 +949,7 @@ def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int]:
                 "wallet": _wallet(row),
             }
         )
-    return parsed, malformed_rows
+    return parsed, malformed_rows, source_rows
 
 
 def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
@@ -1100,7 +1118,7 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
                 [_wallet_sentinel_row(generated_at, "invalid_frozen_split_state")],
                 fieldnames=WALLET_MARKOUT_FIELDS,
             )
-    trades, malformed_trade_rows = _trade_rows(cfg)
+    trades, malformed_trade_rows, trade_source_rows = _trade_rows(cfg)
     trade_corpus_status = _trade_corpus_status(cfg)
     top_wallets, missing_wallet_data = _top_wallets(cfg)
     by_market: dict[str, list[dict[str, Any]]] = {}
@@ -1274,16 +1292,28 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
         # An enabled run with no trades, or with trades carrying no wallet
         # attribution, must still state its evidence class rather than emit a
         # bare header (Codex P1 wave-5 on #451).
-        wallet_rows = [
-            _wallet_sentinel_row(
-                generated_at,
-                "no_wallets_scored" if trade_corpus_status == "ok" else f"upstream_{trade_corpus_status}",
-            )
-        ]
+        if trade_source_rows and not trades:
+            sentinel_status = "malformed_trade_corpus"
+        elif trade_corpus_status == "ok":
+            sentinel_status = "no_wallets_scored"
+        else:
+            sentinel_status = f"upstream_{trade_corpus_status}"
+        wallet_rows = [_wallet_sentinel_row(generated_at, sentinel_status)]
     write_csv(wallet_path, wallet_rows, fieldnames=WALLET_MARKOUT_FIELDS)
     summary.update(
         {
-            "status": "ok" if rows_out or not trades else "no_trades",
+            # An all-rejected corpus is NOT an empty ledger (Codex P2
+            # wave-20): source rows existed and none survived parsing, which is
+            # a malformed producer output, not a quiet day. Reported distinctly
+            # so a reader cannot mistake one for the other.
+            "status": (
+                "malformed_trade_corpus"
+                if trade_source_rows and not trades
+                else "ok"
+                if rows_out or not trades
+                else "no_trades"
+            ),
+            "trade_source_rows": trade_source_rows,
             "markets_scored": len(rows_out),
             "wallets_scored": len(scored_wallet_rows),
             # Published so the sample is visible before any ranking is trusted:

@@ -2155,8 +2155,13 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    `wallet_intelligence_summary.json`. Availability is judged on LEADERBOARD-SPECIFIC evidence, not
    the collector's aggregate [Codex P2 wave-19]: that aggregate is "partial" when ANY request failed,
    including an unrelated HOLDER request, so keying off it discarded a leaderboard that had just
-   refreshed successfully. Membership is unknown only when the status is neither "ok" nor "disabled"
-   AND `leaderboard_rows_added` is absent or <= 0. Any other non-ok status which renders `on_current_leaderboard` "unknown" and stamps rows
+   refreshed successfully. Membership is unknown when the status is neither "ok" nor "disabled" AND the
+   leaderboard did not demonstrably refresh; and ALWAYS when
+   `leaderboard_probe_params.complete` is false [Codex P2 wave-20 — the collector sets that flag when
+   the endpoint returned a NONEMPTY but INCOMPLETE top-100
+   (wallet_intelligence_collector.py:235, :264), and a positive row count alone let a partial prefix
+   settle membership, so wallets outside the fetched range read as definitively OFF the leaderboard].
+   A demonstrable refresh is `leaderboard_rows_added > 0` AND completeness not false. Any other non-ok status which renders `on_current_leaderboard` "unknown" and stamps rows
    `leaderboard_unavailable`. Markouts are unaffected: they do not depend on the leaderboard.
 9. NO PATH EMITS A BARE HEADER. FOUR states emit the single sentinel row [Codex P1 wave-15 — the
    text said two while the implementation also emits one for the two invalid-state paths before
@@ -2199,7 +2204,7 @@ the matrix without the total), and even when the count was right the MAPPING was
 behaviour was missing from the list while another entry claimed a standalone test that did not exist.
 This list is GENERATED from the test file and verified by diffing the names in both directions, so it
 cannot omit a real test or invent one that does not exist. Anyone changing it should regenerate
-rather than hand-edit. All 43 live in
+rather than hand-edit. All 45 live in
 tests/polymarket_predictive_engine/test_flow_toxicity.py.
 
  1. `test_planted_toxic_flow_scores_above_balanced_flow`
@@ -2250,8 +2255,8 @@ tests/polymarket_predictive_engine/test_flow_toxicity.py.
     status=ok with markets_polled 0 / market_source_status empty is not a refresh; markets_polled 3 flips it back.
 24. `test_invalid_split_state_does_not_freeze_the_toxicity_veto`
     A wallet-side fault raises but the market-axis veto table IS rebuilt first; the wallet artifact is invalidated.
-25. `test_a_delayed_feature_does_not_hide_the_usable_one`
-    A delayed row (source 310, collected 1000) no longer masks a timely one (320): markout +0.20, stale-excluded 0.
+25. `test_a_late_collected_quote_is_still_the_right_market_state`
+    A quote sourced at 310 but collected at 1000 IS the right market state for a target of 300: markout +0.40, stale-excluded 0. Late collection bars a quote from RANKING only. (Renamed at wave-20 -- the old name described the reverted single-clock behaviour and contradicted its own assertion.)
 26. `test_features_with_invalid_collection_times_are_rejected`
     A PRESENT but unparseable collected_at_utc is dropped, not defaulted to the venue stamp.
 27. `test_a_malformed_markout_horizon_fails_closed`
@@ -2280,13 +2285,17 @@ tests/polymarket_predictive_engine/test_flow_toxicity.py.
     A split frozen at a valid 2-minute horizon survives a temporarily malformed setting: the sentinel names invalid_markout_horizon, not invalid_frozen_split_state, and restoring the setting reuses the split.
 39. `test_an_aborted_build_invalidates_stale_wallet_evidence`
     A corrupt .csv.gz aborts the build; the wallet CSV holds one build_failed sentinel and the summary status is build_failed, so yesterday's rankings are not readable as ok.
-40. `test_wallet_without_any_forward_price_is_still_emitted`
+40. `test_an_all_rejected_corpus_is_not_an_empty_ledger`
+    Two source rows, both rejected on basic shape: status malformed_trade_corpus, trade_source_rows 2, malformed_trade_rows_excluded 2, and a sentinel of the same name -- not the benign no_wallets_scored path.
+41. `test_an_incomplete_leaderboard_is_not_authoritative`
+    leaderboard_probe_params.complete=false with 12 rows added renders membership 'unknown'; complete=true with 100 rows added under the same 'partial' status is authoritative.
+42. `test_wallet_without_any_forward_price_is_still_emitted`
     A wallet whose every fill lacks a forward price is still emitted, fills_missing_price set, markets_touched credited.
-41. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
+43. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
     Disabled replaces the artifact with one sentinel carrying artifact_status=disabled and both flags false.
-42. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
+44. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
     A price outside [target, target+horizon] counts as stale-excluded, and the market-axis columns keep the parent lookup.
-43. `test_wallet_artifact_states_its_own_invocation_flags`
+45. `test_wallet_artifact_states_its_own_invocation_flags`
     The wallet CSV states both invocation flags itself.
 
 ## FAILURE PATH
@@ -2367,7 +2376,9 @@ withdrawn [Codex P1 wave-7: it directly contradicted this same amendment's paren
 reconciliation, which registers rule 6's non-finite rejection as a deliberate behaviour change to the
 market axis. Two incompatible statements in the binding spec left a builder or auditor unable to tell
 whether preserving previous bytes or excluding malformed rows was authoritative — EXCLUDING THEM IS
-AUTHORITATIVE]. THREE differences, all registered above and none hidden [Codex P1 wave-12 and wave-16 — this
+AUTHORITATIVE]. FIVE differences, all registered above and none hidden [count corrected at wave-20, which found it
+still reading THREE while enumerating (i) through (v) — implying two delivered behaviours sat outside
+the authoritative set; Codex P1 wave-12 and wave-16 — this
 sentence first claimed "every ordering is untouched" while the parent scope registered an ordering
 change, and then still described the COLLAPSED single-clock model after the code had reverted to two
 clocks; a builder following the stale text could have reinstated the very behaviour that corrupts
@@ -2427,6 +2438,14 @@ evaluation market starting at t=1000 with a 300s horizon legitimately produce ze
 the earlier unqualified form would have FAILED a correct first production run and made this check
 unreliable. Zero embargoed fills with no market in the interval is a clean result; zero WITH one is an
 embargo that never binds, which is the defect the rule exists to close.
+
+MALFORMED CORPUS IS NOT A VACUOUS STATE [Codex P2 wave-20]. When `trade_prints.csv` holds source
+rows but NONE survive `_trade_rows`, the summary reports `status="malformed_trade_corpus"` with
+`trade_source_rows` published, and the wallet artifact carries a sentinel of the same name. Reporting
+it as the benign empty-corpus path made a wholly malformed producer output indistinguishable from a
+legitimate quiet day. The basic-shape rejections (missing market, token, price, size, timestamp, or
+an unrecognised side) now increment `malformed_trade_rows_excluded` as well; they were previously
+silent, so the counter understated the damage.
 
 VACUOUS STATE, stated to match the delivered paths [Codex P1 wave-16 — the earlier "not performed"
 contradicted rule 9, the enumerated test and the implementation, so an auditor could not satisfy both

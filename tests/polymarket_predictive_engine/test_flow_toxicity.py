@@ -931,15 +931,20 @@ def test_invalid_split_state_does_not_freeze_the_toxicity_veto(tmp_path):
     assert wallet_rows[0]["artifact_status"] == "invalid_frozen_split_state"
 
 
-def test_a_delayed_feature_does_not_hide_the_usable_one(tmp_path):
-    """The cursor must not stop on a delayed row and skip a valid later one.
+def test_a_late_collected_quote_is_still_the_right_market_state(tmp_path):
+    """Late COLLECTION does not disqualify a quote from being the markout.
 
-    With venue and collection times carried separately, a source-time cursor
-    could select a feature sourced at 310 but collected at 1000, stale-exclude
-    it, and never consider a feature sourced AND collected at 320 -- the first
-    usable observation inside the window (Codex P2 wave-12). Ordering on the
-    single effective stamp fixes it by construction: the delayed row's effective
-    time is 1000, so it sorts after the timely one.
+    Renamed and rewritten (Codex P1 wave-20): this test was born under the
+    collapsed single-clock model, where a quote sourced at 310 but collected at
+    1000 was stale-excluded and a later-sourced quote won. Wave-15 restored the
+    two-clock contract and corrected the assertion to +0.40, but left the name
+    and docstring describing the reverted behaviour -- so the test asserted the
+    opposite of what it was called.
+
+    The restored contract: the VENUE stamp decides which market state a markout
+    measures, so a quote sourced at 310 IS the right price for a target of 300
+    regardless of when it was collected. Late collection bars a quote from the
+    RANKING window only, which this fixture does not exercise.
     """
     cfg = _config(tmp_path)
     _leaderboard(cfg)
@@ -1434,6 +1439,74 @@ def test_an_aborted_build_invalidates_stale_wallet_evidence(tmp_path):
     assert len(rows) == 1
     assert rows[0]["artifact_status"] == "build_failed"
     assert read_json(cfg.output_root / "maker_carry" / "flow_toxicity_summary.json")["status"] == "build_failed"
+
+
+def test_an_all_rejected_corpus_is_not_an_empty_ledger(tmp_path):
+    """Source rows that all fail parsing are a malformed producer output.
+
+    Every row failing ingestion produced no trades, which then emitted the
+    benign no_wallets_scored sentinel and summary status "ok" -- indistinguish-
+    able from a legitimate quiet day (Codex P2 wave-20). The basic-shape
+    rejections were also silent, never incrementing the malformed counter.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [
+            {"market": "", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0},
+            {"market": "0xa", "asset_id": "tok-a", "wallet": "w2", "side": "BUY", "price": 0.5, "size": 100, "timestamp": ""},
+        ],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")
+
+    assert summary["status"] == "malformed_trade_corpus"
+    assert summary["trade_source_rows"] == 2
+    assert summary["malformed_trade_rows_excluded"] == 2
+    assert len(rows) == 1 and rows[0]["artifact_status"] == "malformed_trade_corpus"
+
+
+def test_an_incomplete_leaderboard_is_not_authoritative(tmp_path):
+    """A nonempty but INCOMPLETE top-100 cannot settle membership.
+
+    The collector records leaderboard_probe_params.complete=false when the
+    endpoint returned fewer than the requested limit. Trusting rows_added alone
+    published ordinary True/False membership off a partial prefix, so wallets
+    outside the fetched range read as definitively off the leaderboard (Codex P2
+    wave-20).
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    write_json(
+        cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json",
+        {"status": "partial", "leaderboard_rows_added": 12,
+         "leaderboard_probe_params": {"complete": False}},
+    )
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert summary["missing_wallet_data"] is True
+    assert rows["smart1"]["on_current_leaderboard"] == "unknown"
+    # complete=true with the same partial status IS authoritative.
+    write_json(
+        cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json",
+        {"status": "partial", "leaderboard_rows_added": 100,
+         "leaderboard_probe_params": {"complete": True}},
+    )
+    assert build_flow_toxicity(cfg)["missing_wallet_data"] is False
 
 
 def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):

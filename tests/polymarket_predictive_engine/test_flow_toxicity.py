@@ -11,7 +11,7 @@ from polymarket_predictive_engine import maker_carry_study
 from polymarket_predictive_engine.cli import COMMANDS
 from polymarket_predictive_engine.config import load_config
 from polymarket_predictive_engine.flow_toxicity import build_flow_toxicity
-from polymarket_predictive_engine.utils import read_csv_rows, write_csv
+from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_csv, write_json
 
 
 def _config(tmp_path: Path):
@@ -37,6 +37,14 @@ def _features(cfg, token: str, points: list[tuple[int, float]]) -> None:
         cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
         rows,
         fieldnames=["source_timestamp", "asset_id", "midpoint"],
+    )
+
+
+def _trade_summary(cfg, status: str = "ok") -> None:
+    """The producer status the wallet axis fails closed against."""
+    write_json(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints_summary.json",
+        {"status": status, "generated_at_utc": "2026-08-22T00:00:00Z"},
     )
 
 
@@ -385,6 +393,135 @@ def test_ranking_fill_priced_after_the_split_is_embargoed(tmp_path):
     assert rows["w1"]["markout_mean_ranking_window"] == ""
 
 
+def test_enabled_run_with_no_wallets_still_states_its_evidence_class(tmp_path):
+    """An empty enabled run must not emit a bare header (Codex P1 wave-5)."""
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")
+
+    assert len(rows) == 1
+    assert rows[0]["artifact_status"] == "no_wallets_scored"
+    assert rows[0]["paper_trading_invoked"] == "False"
+    assert rows[0]["live_trading_invoked"] == "False"
+    # The sentinel is not a scored wallet.
+    assert summary["wallets_scored"] == 0
+
+
+def test_stale_trade_corpus_is_stamped_on_every_wallet_row(tmp_path):
+    """A partial upstream collection must be disclosed, not ranked as current.
+
+    The previous run's capped ledger stays readable when a collection fails, so
+    scoring it without consulting the producer would rank wallets on an
+    undisclosed stale sample (Codex P1 wave-5 on #451). Every row is stamped
+    rather than the artifact being blanked: a missing producer summary should
+    let a reader reject the evidence, not silently destroy a working artifact.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg, status="partial")
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert rows["w1"]["artifact_status"] == "upstream_partial"
+    assert int(rows["w1"]["fills_total"]) == 1, "the row is still measured, just disclosed"
+    assert summary["trade_corpus_status"] == "partial"
+
+
+def test_non_finite_trade_prices_are_rejected_at_ingestion(tmp_path):
+    """safe_float parses "nan"; a nan markout would score a wallet as measured.
+
+    A nan price yields a nan markout that increments fills_total and poisons
+    markout_total, so the wallet is emitted as SCORED with a nan mean instead of
+    excluded as malformed -- and nan*size poisons usd_volume and therefore VPIN
+    (Codex P1 wave-5 on #451). Rejected at the ingestion boundary, which is the
+    only place covering both the wallet axis and the market axis.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    trades = [
+        {"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0},
+        {"market": "0xa", "asset_id": "tok-a", "wallet": "wbad", "side": "BUY", "price": "nan", "size": 100, "timestamp": 1},
+        {"market": "0xa", "asset_id": "tok-a", "wallet": "wbad2", "side": "BUY", "price": 0.5, "size": "inf", "timestamp": 2},
+    ]
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        trades,
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert "wbad" not in rows and "wbad2" not in rows
+    assert "w1" in rows
+    assert summary["malformed_trade_rows_excluded"] == 2
+    # The market axis is protected by the same boundary guard.
+    market = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+    assert int(market["0xa"]["trades_seen"]) == 1
+
+
+def test_the_ranking_split_is_frozen_across_runs(tmp_path):
+    """A moving median recycles published evaluation evidence into ranking.
+
+    The split was recomputed from the current corpus on every rebuild, so later
+    fills advanced the median and a market that was EVALUATION yesterday --
+    whose markout has already been published and inspected -- could become
+    RANKING today (Codex P1 wave-5 on #451). That is the same circularity the
+    split exists to prevent, spread across runs. The split is frozen at first
+    computation and persisted.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    _features(cfg, "tok-b", [(610, 0.70)])
+    base = [
+        {"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0},
+        {"market": "0xb", "asset_id": "tok-b", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 300},
+    ]
+    trade_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    fields = ["market", "asset_id", "wallet", "side", "price", "size", "timestamp"]
+    write_csv(trade_path, base, fieldnames=fields)
+
+    first = build_flow_toxicity(cfg)
+    split_path = cfg.output_root / "maker_carry" / "flow_toxicity_wallet_split.json"
+    assert split_path.exists()
+    frozen = read_json(split_path)["split_stamp"]
+    assert first["wallet_split_was_frozen"] is False, "first run computes it"
+
+    # A later collection arrives. The median of the NEW corpus is later than the
+    # frozen split; without freezing, market 0xb would migrate windows.
+    write_csv(
+        trade_path,
+        base + [
+            {"market": "0xc", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 900},
+            {"market": "0xd", "asset_id": "tok-b", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1200},
+        ],
+        fieldnames=fields,
+    )
+    second = build_flow_toxicity(cfg)
+
+    assert second["wallet_split_was_frozen"] is True
+    assert read_json(split_path)["split_stamp"] == frozen, "the split must not move"
+
+
 def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):
     """A wallet with no measurable fill must appear, disclosed, not vanish.
 
@@ -419,7 +556,9 @@ def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):
     assert int(rows["w2"]["markets_touched"]) == 1
     assert int(rows["w1"]["fills_missing_price"]) == 0
     assert int(rows["w1"]["fills_total"]) == 1
-    assert rows["w1"]["artifact_status"] == "ok"
+    assert rows["w1"]["artifact_status"] == "upstream_missing", (
+        "no producer summary was written in this fixture, so every row is stamped"
+    )
     assert summary["wallets_scored"] == 2
 
 

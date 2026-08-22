@@ -1978,6 +1978,22 @@ Spec:
    score, balanced flow does not (constraint 6 null test), wallet-tier
    split arithmetic, missing-WO-37-data tolerance.
 
+**2026-08-22 scope reconciliation (S8/A4).** This WO's registered surface now
+covers TWO artifacts, not one. `outputs/maker_carry/flow_toxicity_wallets.csv`
+(the wallet axis) and its split-state file
+`outputs/maker_carry/flow_toxicity_wallet_split.json` are added by §49.1 below,
+which holds their columns, sample rules, fail-safe and day-after check. Recorded
+HERE rather than only in the child because a later builder reading this entry
+alone would otherwise conclude the wallet artifact is outside WO-49's registered
+surface [Codex P1 wave-5 on #451]. §49.1 also TIGHTENS this parent's inputs: a
+trade print whose price, size or timestamp parses but is non-finite is now
+rejected at the ingestion boundary (`_trade_rows`), which changes the
+long-standing market-axis columns as well — `nan` propagated into
+`smart_fill_markout`/`crowd_fill_markout` and, via `nan * size`, into
+`usd_volume` and therefore `vpin_raw`. Disclosed as a deliberate behaviour
+change to a registered artifact rather than left as an unstated rider; it is
+fail-closed and strictly removes malformed input.
+
 ### §49.1 — Wallet-axis forward markout (`flow_toxicity_wallets.csv`) — registered 2026-08-22
 
 Scoped amendment to WO-49, registered because the parent entry above covers ONLY the per-market
@@ -1986,8 +2002,19 @@ its own exclusions and its own failure modes, so shipping it under WO-49's exist
 leave its input-coverage rule, fail-safe and day-after check unregistered and therefore unreviewable
 [Codex P1 wave-4 on #451 — a correct call against my own practice: I built this as a code PR without
 amending the register, which is exactly the lifecycle step I have been enforcing elsewhere]. Class M
-(mechanical, non-frozen: diagnostic telemetry). Register and build land together in #451 rather than
-in separate PRs; stated plainly rather than presented as the ordinary two-step.
+(mechanical, non-frozen: diagnostic telemetry).
+
+LIFECYCLE DEVIATION, RECORDED AND UNRESOLVED [Codex P1 wave-5 on #451]. The binding order is
+register -> independent review -> dispatch -> build. Here the BUILD came first and this registration
+was written afterwards, so the implementation was not made from an independently-admitted design. The
+review asks that the registration land first and the implementation then be dispatched from a branch
+containing that registered `main` tip. That is the rule-faithful remedy and it is NOT applied here,
+for a stated reason: the ordering already happened, and re-arranging the two PRs now would produce
+the APPEARANCE of compliance without the property the rule protects - a design reviewed before code
+was written to it. Splitting cannot retroactively create that. What the owner has instead is an
+accurate record and a cheap choice: merge this registration and accept the existing build, or merge
+it and have the implementation rebuilt from the registered text. The review thread is deliberately
+left OPEN rather than resolved, because this is the owner's call and not mine to close.
 
 WHY: `_top_wallets` (flow_toxicity.py:94) caps "smart" at the latest leaderboard snapshot's 100
 wallets, so across ~200,000 attributed fills a trade can only be scored smart if its wallet sits on a
@@ -2023,6 +2050,30 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
 5. INPUT COVERAGE: wallet accounting opens BEFORE the forward-price lookup, so a wallet whose every
    fill lacks a forward price still appears, with `fills_missing_price` set. "Was not measurable" and
    "did not trade" are different facts and must not render identically.
+6. NON-FINITE INPUTS REJECTED AT THE BOUNDARY (S8/A2 fail-closed): `safe_float` PARSES "nan" and
+   "inf", so a nan price produced a nan markout that incremented `fills_total` and poisoned
+   `markout_total` — the wallet was emitted as SCORED with a nan mean rather than excluded as
+   malformed — and `nan * size` poisoned `usd_volume` and therefore VPIN. Rejected in `_trade_rows`
+   and counted as `malformed_trade_rows_excluded` in the summary. This is the one place that covers
+   BOTH axes; see the parent's 2026-08-22 scope reconciliation above.
+7. THE SPLIT IS FROZEN AT FIRST COMPUTATION, persisted to
+   `outputs/maker_carry/flow_toxicity_wallet_split.json` and never recomputed. Recomputing the median
+   from the CURRENT corpus each daily rebuild moved the split forward as fills arrived, so a market
+   that was EVALUATION yesterday — whose markout was already published and inspected — could become
+   RANKING today, recycling observed evaluation evidence into the ranking sample. That is the same
+   circularity rule 1 exists to prevent, spread across runs. With the split frozen the ranking sample
+   stays fixed and evaluation accumulates, which is the correct behaviour for an out-of-sample
+   evaluation. `wallet_split_was_frozen` is published so a reader can tell a first run from a reuse.
+8. UPSTREAM STATE IS DISCLOSED ON EVERY ROW: the wallet path reads the producer's own
+   `trade_prints_summary.json`; when its status is anything other than "ok" (including absent or
+   unparseable, which read as "missing"), every emitted row carries
+   `artifact_status="upstream_<status>"` instead of "ok". Stamped rather than blanked deliberately —
+   ranking wallets on an undisclosed stale or partial sample is the harm, and a missing producer
+   summary should let a reader reject the evidence, not silently destroy a working artifact.
+9. NO PATH EMITS A BARE HEADER: disabled, an enabled run that scores no wallets, and a not-ok
+   upstream all emit a single sentinel row carrying `artifact_status` and both invocation flags. A
+   header-only file names the columns while asserting nothing, so it cannot establish the artifact's
+   evidence class. A sentinel is never counted in `wallets_scored`.
 
 FAIL-SAFE: diagnostic only. No gate, threshold, sizing, promotion, eligibility or order surface reads
 this artifact; `grep -rn` finds no in-repo consumer outside flow_toxicity.py. The market-axis table is
@@ -2044,10 +2095,15 @@ summary equals the row count; and for EVERY row the two registered identities ho
       the wallet's total observed fill count is NOT emitted as a column — an identity stated only
       over the artifact's own columns would not be evaluable, and an unevaluable day-after check is
       not a check;
-`wallet_ranking_embargo_seconds` present and equal to `markout_horizon_minutes * 60`. FALSIFIER: any
-wallet whose window counters do not reconcile, or a run where `fills_label_embargoed` is 0 across the
-entire artifact while markets exist on both sides of the split — that would mean an embargo that
-never binds, which is the defect this rule exists to close, not a clean bill of health.
+`wallet_ranking_embargo_seconds` present and equal to `markout_horizon_minutes * 60`. FALSIFIER: any wallet whose window counters do not reconcile; or `fills_label_embargoed` == 0 across
+the entire artifact WHEN AT LEAST ONE INPUT MARKET ACTUALLY FALLS IN THE EMBARGO INTERVAL — i.e. some
+market has `high < split <= high + horizon`, or a nominally-ranking fill whose selected feature
+timestamp is `>= split`. The qualifier is required [Codex P2 wave-5 on #451]: markets existing on both
+sides of the split does NOT imply any fill must be embargoed — a market ending at t=0 and an
+evaluation market starting at t=1000 with a 300s horizon legitimately produce zero embargoed fills, so
+the earlier unqualified form would have FAILED a correct first production run and made this check
+unreliable. Zero embargoed fills with no market in the interval is a clean result; zero WITH one is an
+embargo that never binds, which is the defect the rule exists to close.
 
 VACUOUS STATE: zero trade prints -> "not performed".
 

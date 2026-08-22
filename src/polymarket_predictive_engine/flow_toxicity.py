@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import csv
 import gzip
+import math
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
@@ -20,7 +21,15 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from .config import EngineConfig, load_config
-from .utils import normalize_external_timestamp, now_utc, read_csv_rows, safe_float, write_csv, write_json
+from .utils import (
+    normalize_external_timestamp,
+    now_utc,
+    read_csv_rows,
+    read_json,
+    safe_float,
+    write_csv,
+    write_json,
+)
 
 TOXICITY_FIELDS = [
     "generated_at_utc",
@@ -250,11 +259,81 @@ def _build_price_index(
     return scanned_rows, indexed_rows
 
 
+def _frozen_split_stamp(cfg: EngineConfig, trades: list[dict[str, Any]]) -> tuple[float, bool]:
+    """Return the ranking/evaluation split, frozen at first computation.
+
+    Recomputing the median from the CURRENT corpus on every daily rebuild moves
+    the split forward as fills arrive, so a market that was EVALUATION yesterday
+    - and whose evaluation markout has already been published and inspected -
+    can become RANKING today (Codex P1 wave-5 on #451). That recycles observed
+    evaluation evidence back into the ranking sample, which is the same
+    circularity the split exists to prevent, just spread across runs.
+
+    The split is therefore computed once and persisted. As the corpus grows the
+    ranking sample stays fixed and evaluation accumulates, which is exactly the
+    behaviour an out-of-sample evaluation should have.
+    """
+    path = cfg.output_root / "maker_carry" / "flow_toxicity_wallet_split.json"
+    persisted = read_json(path) if path.exists() else None
+    if isinstance(persisted, dict):
+        stored = safe_float(persisted.get("split_stamp"))
+        if stored is not None and math.isfinite(stored):
+            return stored, True
+    stamps = sorted(float(trade["stamp"]) for trade in trades)
+    split_stamp = stamps[len(stamps) // 2] if stamps else 0.0
+    if stamps:
+        write_json(
+            path,
+            {
+                "split_stamp": split_stamp,
+                "frozen_at_utc": now_utc(),
+                "corpus_rows_at_freeze": len(stamps),
+                "note": (
+                    "Frozen ranking/evaluation split. Never recompute from a later corpus: "
+                    "a moving median recycles published evaluation evidence into ranking."
+                ),
+            },
+        )
+    return split_stamp, False
+
+
+def _wallet_sentinel_row(generated_at: str, status: str) -> dict[str, Any]:
+    """One row asserting the artifact's evidence class when no wallet is scored.
+
+    A header-only CSV names the columns but asserts NOTHING, so a consumer
+    cannot establish the artifact's evidence class (Codex P1 wave-4/wave-5 on
+    #451). Every non-scored state - disabled, an enabled run with no wallets,
+    and an upstream corpus that is not ok - emits this instead.
+    """
+    return {
+        "generated_at_utc": generated_at,
+        "artifact_status": status,
+        "wallet": "",
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+
+
+def _trade_corpus_status(cfg: EngineConfig) -> str:
+    """The producer's own status for the trade-print ledger it depends on.
+
+    The previous run's capped ledger stays readable when a collection fails or
+    is partial, so scoring it without consulting the producer would rank wallets
+    on an undisclosed stale or incomplete sample (Codex P1 wave-5 on #451).
+    Absent/unparseable summary is treated as NOT ok - fail closed, not open.
+    """
+    payload = read_json(cfg.output_root / "polymarket_trade_prints" / "trade_prints_summary.json")
+    if not isinstance(payload, dict):
+        return "missing"
+    return str(payload.get("status") or "missing").strip().lower()
+
+
 def _markout_stats(
     connection: sqlite3.Connection,
     trades: list[dict[str, Any]],
     top_wallets: set[str],
     horizon_seconds: float,
+    split_stamp: float,
 ) -> dict[str, dict[str, float | int]]:
     trades_by_token: dict[str, list[dict[str, Any]]] = {}
     for trade in trades:
@@ -269,8 +348,6 @@ def _markout_stats(
     # validation chronological and out-of-sample BY MARKET). A market whose
     # fills span the split belongs to NEITHER window - excluded fail-closed and
     # disclosed per wallet as fills_split_spanning, never silently scored.
-    stamps = sorted(float(trade["stamp"]) for trade in trades)
-    split_stamp = stamps[len(stamps) // 2] if stamps else 0.0
     market_bounds: dict[str, tuple[float, float]] = {}
     for trade in trades:
         market_key = str(trade["market"])
@@ -428,8 +505,9 @@ def _percentiles(raw_by_market: dict[str, float]) -> dict[str, float]:
     return {market: round(index / (len(ordered) - 1), 6) for index, (market, _) in enumerate(ordered)}
 
 
-def _trade_rows(cfg: EngineConfig) -> list[dict[str, Any]]:
+def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int]:
     parsed: list[dict[str, Any]] = []
+    malformed_rows = 0
     path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
     for row in _iter_csv_any(path):
         market = str(row.get("market") or "").strip()
@@ -438,7 +516,19 @@ def _trade_rows(cfg: EngineConfig) -> list[dict[str, Any]]:
         size = safe_float(row.get("size"))
         stamp = _stamp(row.get("timestamp") or row.get("collected_at_utc"))
         side = str(row.get("side") or "").upper()
+        # safe_float PARSES "nan" and "inf" (Codex P1 wave-5 on #451): a nan
+        # price yields a nan markout that increments fills_total and poisons
+        # markout_total, so the wallet is emitted as SCORED with a nan mean
+        # rather than excluded as malformed - and nan*size poisons usd_volume
+        # and therefore VPIN too. Rejecting at the ingestion boundary is the
+        # S8/A2 fail-closed input rule and is the only place that covers BOTH
+        # the wallet axis and the long-standing market axis; a malformed venue
+        # print is not a print, so this is an input-validity guard rather than
+        # a change to what either metric MEANS.
         if not market or not token or price is None or size is None or stamp is None or side not in {"BUY", "SELL"}:
+            continue
+        if not math.isfinite(price) or not math.isfinite(size) or not math.isfinite(stamp):
+            malformed_rows += 1
             continue
         parsed.append(
             {
@@ -452,7 +542,7 @@ def _trade_rows(cfg: EngineConfig) -> list[dict[str, Any]]:
                 "wallet": _wallet(row),
             }
         )
-    return parsed
+    return parsed, malformed_rows
 
 
 def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
@@ -482,19 +572,12 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
         # artifact is its own change, not a rider.
         write_csv(
             out_root / "flow_toxicity_wallets.csv",
-            [
-                {
-                    "generated_at_utc": generated_at,
-                    "artifact_status": "disabled",
-                    "wallet": "",
-                    "paper_trading_invoked": False,
-                    "live_trading_invoked": False,
-                }
-            ],
+            [_wallet_sentinel_row(generated_at, "disabled")],
             fieldnames=WALLET_MARKOUT_FIELDS,
         )
         return summary
-    trades = _trade_rows(cfg)
+    trades, malformed_trade_rows = _trade_rows(cfg)
+    trade_corpus_status = _trade_corpus_status(cfg)
     top_wallets, missing_wallet_data = _top_wallets(cfg)
     by_market: dict[str, list[dict[str, Any]]] = {}
     for trade in trades:
@@ -506,6 +589,9 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
     toxicity = _percentiles(raw_vpin)
     horizon = float(settings["markout_horizon_minutes"]) * 60.0
     markout_by_market: dict[str, dict[str, float | int]] = {}
+    # Bound before the price-index block, which is skipped entirely when there
+    # are no trades: an empty enabled run still publishes a summary.
+    split_was_frozen = False
     markout_by_wallet: dict[str, dict[str, Any]] = {}
     feature_rows_scanned = 0
     feature_rows_indexed = 0
@@ -520,7 +606,10 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
                     connection,
                     _price_target_bounds(trades, horizon),
                 )
-                markout_by_market, markout_by_wallet = _markout_stats(connection, trades, top_wallets, horizon)
+                split_stamp, split_was_frozen = _frozen_split_stamp(cfg, trades)
+                markout_by_market, markout_by_wallet = _markout_stats(
+                    connection, trades, top_wallets, horizon, split_stamp
+                )
                 price_index_disk_bytes = database_path.stat().st_size
             finally:
                 connection.close()
@@ -594,23 +683,49 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
         for wallet, entry in sorted(markout_by_wallet.items(), key=lambda item: -item[1]["fills_total"])
     ]
     wallet_path = cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv"
+    # Summary aggregates are computed over the SCORED rows only; a sentinel
+    # carries no window counters and must never be counted as a scored wallet.
+    scored_wallet_rows = wallet_rows
+    if trade_corpus_status != "ok":
+        # The dependency is stale, partial, or unreported. Every row is STAMPED
+        # with the upstream state rather than the artifact being blanked (Codex
+        # P1 wave-5 on #451): ranking wallets on an undisclosed stale sample is
+        # the harm, and stamping every row lets a reader reject the artifact
+        # without a missing producer summary silently destroying a working one.
+        for row in wallet_rows:
+            row["artifact_status"] = f"upstream_{trade_corpus_status}"
+    if not wallet_rows:
+        # An enabled run with no trades, or with trades carrying no wallet
+        # attribution, must still state its evidence class rather than emit a
+        # bare header (Codex P1 wave-5 on #451).
+        wallet_rows = [
+            _wallet_sentinel_row(
+                generated_at,
+                "no_wallets_scored" if trade_corpus_status == "ok" else f"upstream_{trade_corpus_status}",
+            )
+        ]
     write_csv(wallet_path, wallet_rows, fieldnames=WALLET_MARKOUT_FIELDS)
     summary.update(
         {
             "status": "ok" if rows_out or not trades else "no_trades",
             "markets_scored": len(rows_out),
-            "wallets_scored": len(wallet_rows),
+            "wallets_scored": len(scored_wallet_rows),
             # Published so the sample is visible before any ranking is trusted:
             # a wallet ranked on the earlier window must be judged on the later
             # one, and a wallet present in only one window cannot be judged at all.
             "wallets_in_both_windows": sum(
-                1 for row in wallet_rows if row["fills_ranking_window"] and row["fills_evaluation_window"]
+                1
+                for row in scored_wallet_rows
+                if row["fills_ranking_window"] and row["fills_evaluation_window"]
             ),
             "wallet_output_path": str(wallet_path),
             # States the embargo so a reader of the summary alone cannot assume
             # the chronological split is a bare median: a ranking market's label
             # window must also close before the split.
             "wallet_ranking_embargo_seconds": horizon,
+            "wallet_split_was_frozen": split_was_frozen,
+            "trade_corpus_status": trade_corpus_status,
+            "malformed_trade_rows_excluded": malformed_trade_rows,
             "trades_seen": len(trades),
             "missing_wallet_data": missing_wallet_data,
             "price_index_strategy": "disk_backed_streaming_sqlite",

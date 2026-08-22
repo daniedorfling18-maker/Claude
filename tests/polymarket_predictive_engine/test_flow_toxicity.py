@@ -1803,6 +1803,94 @@ def test_a_partly_parsed_market_keeps_its_prior_block(tmp_path, monkeypatch):
     assert after["0xc"]["generated_at_utc"] == "2026-08-23T00:00:00Z"
 
 
+def test_a_departed_market_is_not_pinned_by_an_unrelated_rejection(tmp_path):
+    """Carry-forward is restricted to markets that actually lost rows.
+
+    Wave-26 carried EVERY absent prior market whenever any row was rejected, so
+    a market that legitimately aged out of the rolling ledger was pinned
+    indefinitely and counted as protected corruption evidence -- contradicting
+    the gate rationale registered for this very rule (Codex P2 wave-27).
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    for token in ("tok-a", "tok-b", "tok-c"):
+        _features(cfg, token, [(310, 0.70)])
+    prints_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    write_csv(
+        prints_path,
+        [
+            *_flow("0xa", "tok-a", "w1", buys=6, sells=2),
+            *_flow("0xb", "tok-b", "w2", buys=4, sells=4),
+            *_flow("0xc", "tok-c", "w3", buys=4, sells=4),
+        ],
+        fieldnames=_FLOW_FIELDS,
+    )
+    build_flow_toxicity(cfg)
+    assert {row["market"] for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")} == {"0xa", "0xb", "0xc"}
+
+    # 0xc departs cleanly. 0xa loses one row. 0xc must NOT be carried: its
+    # absence is the rolling window working, and nothing about 0xa's rejection
+    # makes 0xc's absence unverifiable.
+    write_csv(
+        prints_path,
+        [
+            *_flow("0xa", "tok-a", "w1", buys=6, sells=2),
+            {"market": "0xa", "asset_id": "tok-a", "wallet": "w1",
+             "side": "BUY", "price": 1.5, "size": 100, "timestamp": 99},
+            *_flow("0xb", "tok-b", "w2", buys=4, sells=4),
+        ],
+        fieldnames=_FLOW_FIELDS,
+    )
+    summary = build_flow_toxicity(cfg)
+    after = {row["market"] for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+
+    assert summary["malformed_trade_rows_excluded"] == 1
+    assert "market_rows_carried_forward" not in summary
+    assert after == {"0xa", "0xb"}, "a cleanly departed market must age out"
+
+
+def test_an_unattributable_rejection_pins_every_departed_market(tmp_path):
+    """With no readable market, any absence could be the corruption.
+
+    The restriction above is safe only because a rejection with a readable
+    market names the coverage it cost. A rejection whose `market` field is
+    itself unreadable names nothing, so every absence becomes unverifiable and
+    the conservative direction is to hold them all.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    for token in ("tok-a", "tok-c"):
+        _features(cfg, token, [(310, 0.70)])
+    prints_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    write_csv(
+        prints_path,
+        [
+            *_flow("0xa", "tok-a", "w1", buys=6, sells=2),
+            *_flow("0xc", "tok-c", "w3", buys=4, sells=4),
+        ],
+        fieldnames=_FLOW_FIELDS,
+    )
+    build_flow_toxicity(cfg)
+
+    write_csv(
+        prints_path,
+        [
+            *_flow("0xa", "tok-a", "w1", buys=6, sells=2),
+            {"market": "", "asset_id": "tok-c", "wallet": "w3",
+             "side": "BUY", "price": 0.5, "size": 100, "timestamp": 99},
+        ],
+        fieldnames=_FLOW_FIELDS,
+    )
+    summary = build_flow_toxicity(cfg)
+    after = {row["market"] for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+
+    assert summary["malformed_trade_rows_excluded"] == 1
+    assert summary["market_rows_carried_forward"] == 1
+    assert after == {"0xa", "0xc"}, "0xc is held because the rejection named no market"
+
+
 def test_a_freshly_toxic_market_still_wins_over_a_prior_clean_row(tmp_path):
     """The retain rule is one-directional and can never hide toxicity.
 
@@ -1839,8 +1927,18 @@ def test_a_freshly_toxic_market_still_wins_over_a_prior_clean_row(tmp_path):
     after = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
 
     assert summary["malformed_trade_rows_excluded"] == 1
-    assert "market_blocks_retained_on_partial_sample" not in summary
     assert after["0xb"]["toxic_blocked"] == "True", "new toxicity must not be suppressed by a prior clean row"
+    assert after["0xb"] != before["0xb"], "0xb's row must be the FRESH measurement, not a retained one"
+    # 0xa is retained, and that is the percentile rule being deliberately
+    # over-broad rather than a defect (Codex P1 wave-27). 0xa lost no rows, but
+    # its prior block was percentile-ONLY, and 0xb going one-sided pushed 0xa
+    # from percentile 1.0 down to 0.5. Nothing in the artifact can distinguish
+    # "the ranking moved because rows were rejected" from "the ranking moved
+    # because a market genuinely got worse", so with any rejection present a
+    # percentile-only veto is held. Fail-closed is the registered direction
+    # here: a held veto is stale, a cleared one is wrong.
+    assert summary["market_blocks_retained_on_partial_sample"] == 1
+    assert after["0xa"] == before["0xa"]
 
 
 def test_a_partly_rejected_ledger_does_not_freeze_the_split(tmp_path):

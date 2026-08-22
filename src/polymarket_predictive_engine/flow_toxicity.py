@@ -1419,9 +1419,31 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
             # Rejections whose `market` field was itself unreadable cannot be
             # attributed, so they taint EVERY market: with those present, any
             # market could be the one that lost coverage.
-            tainted_markets = (
-                set(fresh_by_market) if unattributable_rejections else rejected_markets
-            )
+            #
+            # THE TWO BLOCK KINDS DO NOT HAVE THE SAME BLAST RADIUS, and wave-26
+            # treated them as if they did (Codex P1 wave-27):
+            #
+            #   raw_imbalance_block is MARKET-LOCAL -- it reads this market's own
+            #     VPIN, so a market that lost no rows still measures it correctly
+            #     no matter what happened elsewhere in the corpus.
+            #   percentile_block is UNIVERSE-RELATIVE -- `toxicity_score` comes
+            #     from _percentiles() over every surviving market, so rejecting
+            #     rows from market A changes A's VPIN, changes the ORDERING, and
+            #     can push an untouched market B from just above 0.90 to exactly
+            #     0.90. B loses its veto having lost nothing at all.
+            #
+            # So the protected set differs by kind. A market that lost rows has
+            # BOTH readings unverifiable. Every other fresh market has a
+            # trustworthy raw reading and an untrustworthy percentile one, so it
+            # is protected only where its prior block was percentile-ONLY.
+            # A FLAG, not a set: "taint everything" has to cover markets ABSENT
+            # from the fresh table too, and `set(fresh_by_market)` by
+            # construction cannot contain one -- so the set form silently failed
+            # to protect exactly the departed markets case (a) exists for.
+            taint_all = bool(unattributable_rejections)
+
+            def _lost_rows(market: str) -> bool:
+                return taint_all or market in rejected_markets
             carried: list[dict[str, Any]] = []
             retained_blocks = 0
             for prior in read_csv_rows(path):
@@ -1430,17 +1452,31 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
                     continue
                 fresh = fresh_by_market.get(market)
                 if fresh is None:
-                    carried.append(prior)  # case (a)
-                    continue
-                if market not in tainted_markets:
+                    # Case (a). Restricted to markets that actually lost rows
+                    # (Codex P2 wave-27): a market with no recent fills ages out
+                    # of the rolling ledger legitimately, and carrying every
+                    # absent market forward whenever ANY row was rejected pinned
+                    # unrelated departed markets indefinitely -- contradicting
+                    # this rule's own gate rationale. Unattributable rejections
+                    # still taint everything, because then any absence could be
+                    # the corruption.
+                    if _lost_rows(market):
+                        carried.append(prior)
                     continue
                 prior_blocked = str(prior.get("toxic_blocked") or "").strip().lower() == "true"
-                if prior_blocked and not fresh["toxic_blocked"]:
-                    # Case (b): keep the prior BLOCKING row verbatim, original
-                    # generated_at_utc included, so the retained veto is visibly
-                    # stale rather than passing as a fresh clean measurement.
-                    fresh_by_market[market] = prior
-                    retained_blocks += 1
+                if not prior_blocked or fresh["toxic_blocked"]:
+                    continue
+                if not _lost_rows(market):
+                    prior_raw_block = str(prior.get("raw_imbalance_block") or "").strip().lower() == "true"
+                    if prior_raw_block:
+                        # Market-local reading, and this market lost nothing:
+                        # the fresh measurement is trustworthy and wins.
+                        continue
+                # Case (b): keep the prior BLOCKING row verbatim, original
+                # generated_at_utc included, so the retained veto is visibly
+                # stale rather than passing as a fresh clean measurement.
+                fresh_by_market[market] = prior
+                retained_blocks += 1
             if retained_blocks:
                 rows_out = [fresh_by_market[str(row["market"])] for row in rows_out]
                 summary["market_blocks_retained_on_partial_sample"] = retained_blocks
@@ -1466,10 +1502,23 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
         summary["status"] = "invalid_frozen_split_state"
         summary["markets_scored"] = len(rows_out)
         write_json(summary_path, summary)
+        # The recovery instruction used to read "or delete it deliberately to
+        # re-freeze" (Codex P1 wave-27). Following it causes the exact leakage
+        # the error exists to refuse: with the file gone the next run is a FIRST
+        # run, and it computes a new median from a corpus whose evaluation
+        # markouts have already been published and inspected -- permanently
+        # recycling observed evaluation markets into the ranking population.
+        # Deleting the cutoff ALONE is never a valid recovery, so it is no
+        # longer offered.
         error = ValueError(
             f"frozen wallet split state at {split_path} is present but invalid; refusing to "
             "manufacture a replacement cutoff from already-observed evaluation data. "
-            "Restore the file from backup, or delete it deliberately to re-freeze. "
+            "RECOVERY: restore the original file. Do NOT delete it to re-freeze -- the next "
+            "run would then compute a fresh median from a corpus whose evaluation markouts "
+            "are already published, recycling observed evaluation markets into the ranking "
+            "population. If the original is unrecoverable, the experiment must be RESET as a "
+            "whole: discard the published wallet evidence with the cutoff, and record that the "
+            "prior read is void. "
             "The wallet artifact has been invalidated so no stale ranking is readable; "
             "the market-axis table WAS rebuilt so the toxicity veto stays current."
         )

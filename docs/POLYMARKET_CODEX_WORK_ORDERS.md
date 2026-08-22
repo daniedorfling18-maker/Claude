@@ -2279,6 +2279,31 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    `market` field is itself unreadable cannot be attributed and taint EVERY market, since any of
    them could be the one that lost coverage. Retained rows keep their original `generated_at_utc`
    and the count is published as `market_blocks_retained_on_partial_sample`.
+13c. THE TWO BLOCK KINDS HAVE DIFFERENT BLAST RADII [Codex P1 wave-27]. Wave-26 protected only
+   markets that lost rows, which is right for `raw_imbalance_block` and WRONG for
+   `percentile_block`. The raw block is MARKET-LOCAL: it reads that market's own VPIN, so a market
+   that lost nothing measures it correctly whatever happened elsewhere. The percentile block is
+   UNIVERSE-RELATIVE: `toxicity_score` comes from `_percentiles()` over every surviving market, so
+   rejecting rows from market A changes A's VPIN, changes the ORDERING, and can push an UNTOUCHED
+   market B from just above 0.90 to exactly 0.90 — B loses its veto having lost nothing. So the
+   protected set differs by kind: a market that lost rows has both readings unverifiable; every
+   other fresh market has a trustworthy raw reading and an untrustworthy percentile one, and is
+   protected only where its prior block was percentile-ONLY.
+   REGISTERED CONSEQUENCE, deliberate and not a defect: this is OVER-BROAD. Nothing in the artifact
+   distinguishes "the ranking moved because rows were rejected" from "the ranking moved because a
+   market genuinely got worse", so while any rejection is present a percentile-only veto is held
+   even when the reshuffle was legitimate. Fail-closed is the registered direction — a held veto is
+   stale, a cleared one is wrong — and `test_a_freshly_toxic_market_still_wins_over_a_prior_clean_row`
+   pins the over-breadth explicitly so it cannot later be mistaken for a bug and "fixed" open.
+13d. CARRY-FORWARD IS RESTRICTED TO MARKETS THAT LOST ROWS [Codex P2 wave-27]. Rule 13's case (a)
+   carried EVERY absent prior market whenever ANY row was rejected, so a market that legitimately
+   aged out of the rolling ledger was pinned indefinitely and counted as protected corruption
+   evidence — contradicting the gate rationale registered in rule 13 itself. An attributable
+   rejection names the coverage it cost, so only that market's absence is unverifiable. An
+   UNATTRIBUTABLE rejection names nothing, so every absence is unverifiable and all are held.
+   IMPLEMENTATION NOTE, registered because the first attempt got it wrong: "taint everything" must
+   be a FLAG, not the set of fresh markets — a departed market is by construction absent from the
+   fresh table, so the set form silently failed to protect exactly the case it was written for.
 13b. A PARTIALLY REJECTED LEDGER MUST NOT FREEZE THE SPLIT [Codex P1 wave-26]. Rule 10 says freeze
    only on a VALID corpus, and the implementation checked only `trade_corpus_status`, so a run whose
    producer was healthy but whose ledger contained locally rejected rows still persisted a median
@@ -2287,6 +2312,15 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    evaluated — the exact permanence rule 10 exists to prevent, reached through a door rule 10 did
    not name. `stamps_ok` now requires `trade_corpus_status == "ok"` AND `malformed_trade_rows == 0`,
    so a rejected run cannot outlive itself.
+13e. THE CORRUPT-SPLIT RECOVERY MUST NOT RECOMMEND DELETION [Codex P1 wave-27]. The raise for
+   `invalid_frozen_split_state` told the operator to "restore the file from backup, or delete it
+   deliberately to re-freeze". Following the second half causes the EXACT leakage the error refuses:
+   with the file gone the next run is a FIRST run and computes a new median from a corpus whose
+   evaluation markouts are already published and inspected, permanently recycling observed
+   evaluation markets into the ranking population. Deleting the cutoff ALONE is never a valid
+   recovery and is no longer offered. The message now says: restore the original; and if it is
+   unrecoverable, RESET the experiment as a whole — discard the published wallet evidence together
+   with the cutoff and record that the prior read is void.
 14. A PARTIALLY REJECTED SAMPLE IS NOT A HEALTHY ARTIFACT [Codex P2 wave-25]. With a nominally `ok`
    producer, rows rejected by rules 6, 1a, 1b or the domain bounds left every SURVIVING wallet row
    reading `artifact_status="ok"`, so a consumer could rank on a sample missing another wallet's
@@ -2323,9 +2357,9 @@ the matrix without the total), and even when the count was right the MAPPING was
 behaviour was missing from the list while another entry claimed a standalone test that did not exist.
 This list is GENERATED from the test file and verified by diffing the names in both directions, so it
 cannot omit a real test or invent one that does not exist. Anyone changing it should regenerate
-rather than hand-edit. All 58 live in
-tests/polymarket_predictive_engine/test_flow_toxicity.py. That is 58 test FUNCTIONS; pytest collects
-68 cases, because the two S4 sweeps in rule 15 are parametrised (7 offsets and 5 clock shifts). An
+rather than hand-edit. All 60 live in
+tests/polymarket_predictive_engine/test_flow_toxicity.py. That is 60 test FUNCTIONS; pytest collects
+70 cases, because the two S4 sweeps in rule 15 are parametrised (7 offsets and 5 clock shifts). An
 auditor comparing this count to pytest output should expect the difference [noted at wave-26 so the
 mismatch is not later read as the drift this generated list exists to prevent].
 
@@ -2417,33 +2451,37 @@ mismatch is not later read as the drift this generated list exists to prevent].
     S4 property sweep, 5 shifts to +10 days: a whole-corpus clock translation leaves every fills_* counter identical, which is what would catch a run-clock read leaking into a data-relative window.
 44. `test_a_partly_parsed_market_keeps_its_prior_block`
     0xb's one-sided burst is rejected while its calm tail survives: 12 rows excluded, market_blocks_retained_on_partial_sample 1, 0xb's prior blocking row kept verbatim at 2026-08-22 while 0xc is re-measured at 2026-08-23.
-45. `test_a_freshly_toxic_market_still_wins_over_a_prior_clean_row`
-    0xb turns one-sided AND loses a row in the same refresh: the fresh blocking row wins, nothing is retained -- the retain rule is one-directional and cannot hide toxicity.
-46. `test_a_partly_rejected_ledger_does_not_freeze_the_split`
+45. `test_a_departed_market_is_not_pinned_by_an_unrelated_rejection`
+    0xc departs cleanly while 0xa loses one row: market_rows_carried_forward absent and 0xc gone -- an attributable rejection names only its own market's lost coverage.
+46. `test_an_unattributable_rejection_pins_every_departed_market`
+    A rejection with a BLANK market field while 0xc departs: market_rows_carried_forward 1 and 0xc held -- naming no market makes every absence unverifiable.
+47. `test_a_freshly_toxic_market_still_wins_over_a_prior_clean_row`
+    0xb turns one-sided AND loses a row: 0xb's FRESH blocking row wins, while 0xa -- which lost nothing but held a percentile-ONLY block and fell from 1.0 to 0.5 -- is retained. Pins rule 13c's deliberate over-breadth.
+48. `test_a_partly_rejected_ledger_does_not_freeze_the_split`
     One valid fill and one out-of-domain fill under an ok producer: wallet_split_was_frozen False and no split-state file on disk -- a contaminated cutoff must not outlive the rejected run.
-47. `test_a_clean_run_does_not_carry_a_departed_market_forward`
+49. `test_a_clean_run_does_not_carry_a_departed_market_forward`
     A market with no fills in the new ledger and NO exclusions this run: it leaves the table, market_rows_carried_forward absent -- absence with nothing rejected is meaningful.
-48. `test_a_partly_rejected_sample_is_not_a_healthy_wallet_artifact`
+50. `test_a_partly_rejected_sample_is_not_a_healthy_wallet_artifact`
     One valid fill and one out-of-domain fill under an ok producer: the surviving row reads partial_malformed_trade_corpus, wallets_scored 1, and the rejected wallet is absent entirely.
-49. `test_a_leaderboard_newer_than_its_summary_cannot_settle_membership`
+51. `test_a_leaderboard_newer_than_its_summary_cannot_settle_membership`
     Rows stamped 2026-08-23 beside a summary generated 2026-08-22: missing_wallet_data True and membership 'unknown', while the market axis keeps smart_fill_count 1.
-50. `test_an_incomplete_leaderboard_is_not_authoritative`
+52. `test_an_incomplete_leaderboard_is_not_authoritative`
     leaderboard_probe_params.complete=false with 12 rows added renders membership 'unknown'; complete=true with 100 rows added under the same 'partial' status is authoritative.
-51. `test_a_malformed_corpus_does_not_clear_the_market_veto`
+53. `test_a_malformed_corpus_does_not_clear_the_market_veto`
     A healthy run scores one market; the next refresh is entirely corrupt. EXPECT status malformed_trade_corpus, market_axis_preserved True, and flow_toxicity.csv byte-equal to before -- the active veto survives.
-52. `test_a_disabled_leaderboard_producer_yields_unknown_membership`
+54. `test_a_disabled_leaderboard_producer_yields_unknown_membership`
     Producer status 'disabled': membership reads 'unknown', while the market-axis tier split still uses the retained top-100 (smart_fill_count 1).
-53. `test_the_latest_intraday_snapshot_wins`
+55. `test_the_latest_intraday_snapshot_wins`
     Two same-date snapshots at 06:00 and 18:00: fresh1 (18:00) reads True, stale1 (06:00, dropped from the newer top-100) reads False.
-54. `test_a_feature_without_a_venue_timestamp_is_rejected`
+56. `test_a_feature_without_a_venue_timestamp_is_rejected`
     A feature with a BLANK source_timestamp collected at 301 must not become a t=301 price for a fill targeting 300: the known-venue 0.70 row at 330 is used instead, markout +0.20.
-55. `test_wallet_without_any_forward_price_is_still_emitted`
+57. `test_wallet_without_any_forward_price_is_still_emitted`
     A wallet whose every fill lacks a forward price is still emitted, fills_missing_price set, markets_touched credited.
-56. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
+58. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
     Disabled replaces the artifact with one sentinel carrying artifact_status=disabled and both flags false.
-57. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
+59. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
     A price outside [target, target+horizon] counts as stale-excluded, and the market-axis columns keep the parent lookup.
-58. `test_wallet_artifact_states_its_own_invocation_flags`
+60. `test_wallet_artifact_states_its_own_invocation_flags`
     The wallet CSV states both invocation flags itself.
 
 ## FAILURE PATH

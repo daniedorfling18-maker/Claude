@@ -682,8 +682,8 @@ def test_all_producers_disabled_is_not_a_current_corpus(tmp_path):
     summary = build_flow_toxicity(cfg)
     rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
 
-    assert summary["trade_corpus_status"] == "all_producers_disabled"
-    assert rows["w1"]["artifact_status"] == "upstream_all_producers_disabled"
+    assert summary["trade_corpus_status"] == "no_producer_refreshed"
+    assert rows["w1"]["artifact_status"] == "upstream_no_producer_refreshed"
     assert not (cfg.output_root / "maker_carry" / "flow_toxicity_wallet_split.json").exists(), (
         "an all-disabled corpus must not seed the frozen split"
     )
@@ -730,6 +730,79 @@ def test_ranking_label_embargoed_by_collection_time_not_venue_stamp(tmp_path):
     )
     assert int(rows["w1"]["fills_label_embargoed"]) == 1
     assert rows["w1"]["markout_mean_ranking_window"] == ""
+
+
+def test_backfill_no_op_statuses_do_not_veto_a_healthy_harvest(tmp_path):
+    """A successful no-op producer must not fail the whole corpus.
+
+    backfill_trade_prints returns "skipped_all_completed" once its one-shot work
+    is done and "no_candidate_markets" when there is nothing to backfill -- both
+    set in an elif chain AFTER the error check, so both mean it ran and had
+    nothing to do (trade_print_collector.py:666-673). The wave-7/8 tightening
+    treated them as vetoes, which would stamp every wallet row non-OK on a
+    NORMAL steady-state daily harvest and refuse to persist the split even
+    though another producer had just refreshed the ledger (Codex P1 wave-9).
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    root = cfg.output_root / "polymarket_trade_prints"
+    # The realistic steady state: collector ok, replay disabled, backfill done.
+    write_json(root / "trade_prints_summary.json", {"status": "ok"})
+    write_json(root / "maker_portfolio_trade_prints_summary.json", {"status": "disabled"})
+    write_json(root / "trade_print_backfill_summary.json", {"status": "skipped_all_completed"})
+    write_csv(
+        root / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert summary["trade_corpus_status"] == "ok"
+    assert rows["w1"]["artifact_status"] == "ok"
+    assert (cfg.output_root / "maker_carry" / "flow_toxicity_wallet_split.json").exists(), (
+        "a healthy harvest must persist the split"
+    )
+    # The other no-op form behaves identically.
+    write_json(root / "trade_print_backfill_summary.json", {"status": "no_candidate_markets"})
+    assert build_flow_toxicity(cfg)["trade_corpus_status"] == "ok"
+
+
+def test_same_stamp_features_break_ties_by_observation_not_price(tmp_path):
+    """Which row wins must not depend on the numerical price ordering.
+
+    websocket_normaliser includes collection time in its dedup key, so two rows
+    can share a source_timestamp. Ordering the tie by midpoint made BOTH the
+    selection and the embargo decision depend on which price happened to be
+    numerically smaller (Codex P1 wave-9 on #451). Here the earlier-collected
+    quote is the LARGER price, so a midpoint tiebreak would have picked the
+    later one; observation order picks the one that was actually available.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            {"source_timestamp": 310, "collected_at_utc": 400, "asset_id": "tok-a", "midpoint": 0.60},
+            {"source_timestamp": 310, "collected_at_utc": 320, "asset_id": "tok-a", "midpoint": 0.70},
+        ],
+        fieldnames=["source_timestamp", "collected_at_utc", "asset_id", "midpoint"],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    # Collected at 320 (earlier) wins, so markout is 0.70 - 0.50 = 0.20.
+    # A midpoint tiebreak would have selected 0.60 and given 0.10.
+    assert float(rows["w1"]["markout_mean_total"]) == 0.2
 
 
 def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):

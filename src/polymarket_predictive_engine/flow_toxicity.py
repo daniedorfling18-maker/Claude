@@ -211,7 +211,7 @@ def _build_price_index(
         """
     )
     batch: list[tuple[str, float, float, float, int]] = []
-    tail_candidates: dict[str, tuple[float, float, float, int]] = {}
+    tail_candidates: dict[str, tuple[float, float, int, float]] = {}
     scanned_rows = 0
     indexed_rows = 0
 
@@ -262,18 +262,25 @@ def _build_price_index(
                 if len(batch) >= 10_000:
                     flush()
                 continue
-            candidate = (stamp, midpoint, observed, source_order)
+            # Ordered (stamp, observed, source_order, midpoint) so the tuple
+            # comparison below breaks same-stamp ties on OBSERVATION time, never
+            # on price. This is the second place that ordering mattered: the
+            # SQL ORDER BY decides among indexed rows, but for a token whose
+            # only candidates fall past the target bound it is THIS comparison
+            # that picks the single retained row, and with midpoint second it
+            # picked whichever price was numerically smaller (Codex P1 wave-9).
+            candidate = (stamp, observed, source_order, midpoint)
             current = tail_candidates.get(token)
             if current is None or candidate < current:
                 tail_candidates[token] = candidate
 
-    for token, (stamp, midpoint, observed, source_order) in tail_candidates.items():
+    for token, (stamp, observed, source_order, midpoint) in tail_candidates.items():
         batch.append((token, stamp, midpoint, observed, source_order))
     flush()
     connection.commit()
     connection.execute(
         "CREATE INDEX feature_prices_token_stamp_idx "
-        "ON feature_prices(asset_id, stamp, midpoint, observed_stamp, source_order)"
+        "ON feature_prices(asset_id, stamp, observed_stamp, source_order, midpoint)"
     )
     connection.commit()
     return scanned_rows, indexed_rows
@@ -392,20 +399,26 @@ def _trade_corpus_status(cfg: EngineConfig) -> str:
             statuses.append("missing")
             continue
         statuses.append(str(payload.get("status") or "missing").strip().lower())
-    # "disabled" is a legitimate resting state for a producer that is switched
-    # off; it is not evidence of a partial write, so it does not veto. Anything
-    # else that is not "ok" does, and the first such status is reported so the
-    # stamp names what actually failed.
+    # RESTING states are successful no-ops, not failures, and must not veto
+    # (Codex P1 wave-9 on #451 — the wave-7/8 tightening over-corrected here and
+    # would have broken the NORMAL case): "disabled" is a producer switched off;
+    # `skipped_all_completed` is what backfill_trade_prints returns once its
+    # one-shot work is done, and `no_candidate_markets` when there is nothing to
+    # backfill. Both are set in an elif chain AFTER the error check
+    # (trade_print_collector.py:666-673), so both mean the producer ran and had
+    # nothing to do. Treating them as vetoes would stamp every wallet row non-OK
+    # on a healthy steady-state daily harvest and refuse to persist the split
+    # even when another producer had just refreshed the ledger.
+    resting = {"disabled", "skipped_all_completed", "no_candidate_markets"}
     for status in statuses:
-        if status not in {"ok", "disabled"}:
+        if status != "ok" and status not in resting:
             return status
     if not any(status == "ok" for status in statuses):
-        # Every producer is disabled, so NOTHING refreshed the ledger this run
-        # while flow-toxicity itself stayed enabled (Codex P1 wave-8 on #451).
-        # Returning "ok" here would stamp retained rows as current and let them
-        # permanently seed the frozen split. At least one producer must have
-        # actually succeeded for the corpus to count as current.
-        return "all_producers_disabled"
+        # Nothing actually refreshed the ledger this run while flow-toxicity
+        # itself stayed enabled (Codex P1 wave-8). Returning "ok" would stamp
+        # retained rows as current and let them permanently seed the frozen
+        # split. Disclosed, not fatal: rows are still measured and stamped.
+        return "no_producer_refreshed"
     return "ok"
 
 
@@ -474,8 +487,18 @@ def _markout_stats(
     for token, token_trades in trades_by_token.items():
         feature_rows = iter(
             connection.execute(
+                # Ties on the venue stamp break by OBSERVATION time, never by
+                # midpoint (Codex P1 wave-9 on #451). websocket_normaliser.py
+                # includes collection time in its dedup key, so two rows can
+                # share a source_timestamp - e.g. a 0.70 quote collected before
+                # the split and a corrected 0.60 quote collected after it.
+                # Ordering by midpoint made BOTH which row is selected and
+                # whether it is embargoed depend on the numerical price
+                # ordering: swap the two prices and a different row wins. Which
+                # observation was available first is the only defensible
+                # tiebreak.
                 "SELECT stamp, midpoint, observed_stamp FROM feature_prices "
-                "WHERE asset_id = ? ORDER BY stamp, midpoint, source_order",
+                "WHERE asset_id = ? ORDER BY stamp, observed_stamp, source_order",
                 (token,),
             )
         )

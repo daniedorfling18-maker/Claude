@@ -2122,12 +2122,28 @@ tests/polymarket_predictive_engine/test_flow_toxicity.py.
  4. Feature archives and trade prints are STREAMED, not bulk-loaded (parent, 2 GiB constraint).
  5. The absolute raw-imbalance floor blocks a one-sided market the percentile would de-veto (parent).
  6. A wallet OFF the leaderboard is still measured, and marks out identically to one on it.
- 7. Whole-market window split WITH the label embargo: market A ranks, D is embargoed, B evaluates,
-    C spans; the four window counters sum to fills_total and the two window counts do NOT.
- 8. A nominally-ranking fill whose SELECTED feature timestamp is >= split is embargoed
-    (horizon 300, split 1000, market ending 600, price read at 1100).
+    FIXTURE: leaderboard holds only "smart1"; both smart1 and unranked9 BUY tok at 0.50, feature
+    0.70 inside the window. EXPECT: both rows present, on_current_leaderboard True/False
+    respectively, markout_mean_total == 0.70 - 0.50 == +0.20 for BOTH and exactly equal,
+    wallets_scored == 2.
+ 7. Whole-market window split WITH the label embargo. FIXTURE, horizon 300: A = fills at t=0,1
+    (labels 300/301, feature 310); D = fill at t=900 (label 1200, feature 1210); B = fills at
+    t=1000,1001,1005 (feature 1310); C = fills at t=2 and 1002 (features 310, 1310). Sorted stamps
+    [0,1,2,900,1000,1001,1002,1005], n=8, n//2=4 -> SPLIT == 1000.
+    EXPECT w1: fills_total 6; ranking 2 (A: 1+300 < 1000); evaluation 3 (B: low >= 1000);
+    label_embargoed 1 (D: 900 < 1000 <= 900+300); split_spanning 0. EXPECT w2 (C only):
+    fills_total 2, spanning 2, ranking 0, evaluation 0, embargoed 0. wallets_in_both_windows == 1.
+    The four window counters sum to 6; ranking + evaluation == 5 != 6.
+ 8. A nominally-ranking fill whose SELECTED feature timestamp is >= split is embargoed.
+    FIXTURE, horizon 300: tok-r fill at t=600 (target 900), its ONLY feature at t=1100 (200s late,
+    inside the 300s staleness ceiling); tok-e fills at t=1000,1010, features at 1310/1315/1320.
+    Stamps [600,1000,1010], n=3, n//2=1 -> SPLIT == 1000. Market 0xr passes the NOMINAL test
+    (600+300 == 900 < 1000). EXPECT: ranking 0, label_embargoed 1, evaluation 2, fills_total 3,
+    markout_mean_ranking_window == "" (the +0.40 move never reaches the ranking mean).
  9. A ranking label whose VENUE stamp precedes the split but whose COLLECTION stamp follows it is
-    embargoed (sourced 900, collected 1100, split 1000).
+    embargoed. FIXTURE: tok-r feature source_timestamp 900, collected_at_utc 1100; fill at t=600
+    (target 900); tok-e fills at 1000,1010 with features at 1310/1315. SPLIT == 1000.
+    EXPECT: ranking 0, label_embargoed 1, markout_mean_ranking_window == "".
 10. A wallet whose every fill lacks a forward price is still emitted, with fills_missing_price set
     and markets_touched credited.
 11. Stale prices rejected: a price outside [target, target + horizon] counts as
@@ -2137,16 +2153,35 @@ tests/polymarket_predictive_engine/test_flow_toxicity.py.
     both flags false; the previous run's rankings are gone.
 14. An enabled run scoring zero wallets emits the "no_wallets_scored" sentinel, and the sentinel is
     NOT counted in wallets_scored.
-15. A not-ok upstream STAMPS every row upstream_<status> and keeps it measured (rule 8), proven with
-    only the BACKFILL producer partial — one bad writer of the shared ledger is enough.
-16. An all-disabled producer set is NOT a current corpus: status all_producers_disabled, rows
-    stamped, and no split state seeded.
+15. A not-ok upstream STAMPS every row upstream_<status> and keeps it measured (rule 8).
+    FIXTURE: trade_prints_summary "ok", maker_portfolio "ok", backfill "partial"; one fill, one
+    feature. EXPECT: artifact_status == "upstream_partial", fills_total == 1 (still measured, not
+    blanked), summary trade_corpus_status == "partial". One bad writer of the shared ledger is
+    enough.
+16. NO PRODUCER REFRESHED is not a current corpus. FIXTURE: all three summaries "disabled".
+    EXPECT: trade_corpus_status == "no_producer_refreshed", rows stamped
+    "upstream_no_producer_refreshed", and flow_toxicity_wallet_split.json does NOT exist.
+16a. RESTING no-ops do NOT veto [wave-9]. FIXTURE: trade_prints_summary "ok", maker_portfolio
+    "disabled", backfill "skipped_all_completed". EXPECT: trade_corpus_status == "ok",
+    artifact_status == "ok", split file EXISTS. Repeat with backfill "no_candidate_markets":
+    identical result. Both are set in an elif chain AFTER the error check
+    (trade_print_collector.py:666-673) and mean the producer ran with nothing to do.
 17. Non-finite TRADE prices/sizes rejected at ingestion; malformed_trade_rows_excluded counts them;
     the market axis sees the same rejection (trades_seen excludes them).
 18. Non-finite FEATURE midpoints rejected before indexing: the build completes and scores from the
     finite point rather than aborting on the NOT NULL insert.
-19. The split is frozen across runs: first run computes and persists, second run reuses,
-    split_stamp unchanged after a later corpus arrives.
+19. The split is frozen across runs. FIXTURE: run 1 has fills at t=0 (tok-a) and t=300 (tok-b),
+    features 310/610; run 2 adds fills at t=900 and t=1200. EXPECT run 1:
+    wallet_split_was_frozen False, split file written, split_stamp recorded. EXPECT run 2:
+    wallet_split_was_frozen True and split_stamp BYTE-EQUAL to run 1's, even though the new
+    corpus median is later.
+19a. Same-stamp feature ties break on OBSERVATION time, not price [wave-9]. FIXTURE: one fill at
+    t=0 (target 300); two features both source_timestamp 310, one collected_at_utc 320 with
+    midpoint 0.70 and one collected_at_utc 400 with midpoint 0.60. EXPECT: the 320-collected row
+    wins, so markout_mean_total == 0.70 - 0.50 == +0.20. A midpoint tiebreak would select 0.60 and
+    give +0.10, so the assertion distinguishes the two orderings. Note this must hold at BOTH
+    tie-break sites: the SQL ORDER BY, and the tail_candidates tuple comparison that picks the
+    single retained row when candidates fall past the target bound.
 20. A stale corpus persists NO split state at all.
 21. A corrupt split state raises AND invalidates the wallet artifact first, so no stale "ok" row
     survives the failure.

@@ -734,20 +734,28 @@ def _markout_stats(
     horizon_seconds: float,
     split_stamp: float,
 ) -> dict[str, dict[str, float | int]]:
+    """Replay markouts over RECORDED HISTORY on a data-relative clock.
+
+    S1 CONTRACT, stated here because Engineering Standards S1 requires the
+    DOCSTRING to say it and not merely a comment in the body (Codex P2
+    wave-16): every window below -- the median split, the ranking and
+    evaluation windows, the label embargo, the staleness ceiling -- is derived
+    from the corpus's own fill and feature timestamps, NEVER from the run
+    clock. S1 permits a data-relative window only for replaying recorded
+    history, which is exactly what this is: a backward-looking replay over an
+    immutable trade ledger.
+
+    It is NOT a freshness window and must never be read as one. Nothing here
+    says whether the corpus is current; that is a separate question answered by
+    the producer-status rule, and a caller that mistakes this for a freshness
+    check will read a stale archive as live evidence.
+    """
     trades_by_token: dict[str, list[dict[str, Any]]] = {}
     for trade in trades:
         trades_by_token.setdefault(str(trade["asset_id"]), []).append(trade)
 
     stats: dict[str, dict[str, float | int]] = {}
     wallet_stats: dict[str, dict[str, Any]] = {}
-    # S1 CONTRACT: the ranking and evaluation windows here are DATA-RELATIVE --
-    # derived from the corpus median fill time and from observed fill/feature
-    # timestamps, never from the run clock. Engineering Standards S1 permits
-    # that only for replaying RECORDED HISTORY, which is exactly what this is:
-    # a backward-looking markout replay over an immutable trade ledger. It is
-    # NOT a freshness window and must never be read as one -- nothing here says
-    # anything about whether the corpus is current. Corpus currency is a
-    # separate question, answered by the producer-status rule.
     # Median fill time splits the sample chronologically, and the split is by
     # WHOLE MARKET, not by fill: a wallet trading one market on both sides of
     # the median would let market-specific effects observed during ranking
@@ -871,12 +879,16 @@ def _markout_stats(
             market_stats[f"{tier}_count"] += 1
             market_stats[f"{tier}_sum"] += markout
             if entry is not None:
-                # The ceiling applies to when the price was OBSERVED, not just
-                # when the venue stamped it (Codex P1 wave-11 on #451): a
-                # feature sourced at the target but collected hours later was
-                # accepted as fresh, so an evaluation markout could silently
-                # measure a horizon of hours instead of the configured one. Take
-                # the later of the two, which is conservative in both cases.
+                # STALENESS IS MEASURED ON THE VENUE STAMP, and this comment
+                # says so because the code says so: wave-11 changed this to the
+                # later of venue and collection time, and wave-15 REVERTED that
+                # as a correctness error -- the comment outlived the revert.
+                # Staleness asks how far past the markout target the quote's
+                # market state sits, and only the venue stamp answers that. A
+                # quote that IS the t+horizon state is not stale merely because
+                # our collector was slow; late collection makes a price unusable
+                # for RANKING, which is the look-ahead question handled below on
+                # available_stamp, and it is not a second clock here.
                 if float(current_feature[0]) - target > staleness_tolerance:
                     entry["fills_stale_price_excluded"] += 1
                     continue

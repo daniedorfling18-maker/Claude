@@ -2228,6 +2228,14 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    midpoint reaches an INSERT into a `midpoint REAL NOT NULL` column, where SQLite stores NaN as NULL
    and the constraint aborts the entire build. Both are rejected in `_build_price_index` before the
    row is indexed.
+12. THE S1 REPLAY CONTRACT LIVES IN THE DOCSTRING [Codex P2 wave-16, applied wave-24]. Every window
+   in `_markout_stats` — the median split, the ranking and evaluation windows, the label embargo,
+   rule 4's staleness ceiling — is DATA-RELATIVE, derived from the corpus's own fill and feature
+   timestamps and never from the run clock. Engineering Standards S1 permits that ONLY for replaying
+   recorded history, and requires the DOCSTRING to say so; carrying the contract in a body comment,
+   as this module did, does not satisfy the literal rule and leaves a caller free to read the
+   function as a freshness window. It is not one: nothing in it says whether the corpus is current,
+   which is rule 8's question. The docstring states both halves.
 
 ## ENUMERATED OFFLINE TESTS (S8/A10) [Codex P1 wave-8 on #451]
 

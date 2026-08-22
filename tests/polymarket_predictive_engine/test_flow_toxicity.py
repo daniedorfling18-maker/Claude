@@ -805,6 +805,88 @@ def test_same_stamp_features_break_ties_by_observation_not_price(tmp_path):
     assert float(rows["w1"]["markout_mean_total"]) == 0.2
 
 
+def test_an_ok_status_without_a_poll_is_not_a_refresh(tmp_path):
+    """status="ok" with markets_polled=0 is not evidence the ledger refreshed.
+
+    collect_maker_replay_data reaches the explicit-market collector, which
+    reports market_source_status="empty" and still writes status="ok" with
+    markets_polled=0 (trade_print_collector.py:406-410, 484-487). Treating that
+    as a refresh stamped retained rows current and could permanently freeze
+    their stale split despite no venue request occurring (Codex P1 wave-11).
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    root = cfg.output_root / "polymarket_trade_prints"
+    write_json(root / "trade_prints_summary.json", {"status": "disabled"})
+    write_json(
+        root / "maker_portfolio_trade_prints_summary.json",
+        {"status": "ok", "markets_polled": 0, "market_source_status": "empty"},
+    )
+    write_json(root / "trade_print_backfill_summary.json", {"status": "no_candidate_markets"})
+    write_csv(
+        root / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+
+    assert summary["trade_corpus_status"] == "no_producer_refreshed"
+    assert not (cfg.output_root / "maker_carry" / "flow_toxicity_wallet_split.json").exists()
+    # A producer that DID poll flips it back.
+    write_json(
+        root / "maker_portfolio_trade_prints_summary.json",
+        {"status": "ok", "markets_polled": 3, "market_source_status": "websocket"},
+    )
+    assert build_flow_toxicity(cfg)["trade_corpus_status"] == "ok"
+
+
+def test_invalid_split_state_does_not_freeze_the_toxicity_veto(tmp_path):
+    """A wallet-side fault must not stop the market axis being rebuilt.
+
+    flow_toxicity.csv feeds the toxicity VETO read by requote_alerts.py (:135,
+    :508) and stage_ticket_eligibility.py. Raising before that table was
+    rewritten -- which is what my wave-8 fix did -- meant a corrupt WALLET file
+    left a market that had since turned toxic still reading clean, on every
+    harvest, until an operator repaired an unrelated artifact (Codex P1
+    wave-11). The wallet axis fails closed; the market axis stays current.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(0, 0.5), (10_000, 0.5)])
+    trades = [
+        {"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": i}
+        for i in range(20)
+    ]
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        trades,
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+    market_path = cfg.output_root / "maker_carry" / "flow_toxicity.csv"
+    split_path = cfg.output_root / "maker_carry" / "flow_toxicity_wallet_split.json"
+
+    assert build_flow_toxicity(cfg)["status"] == "ok"
+    assert len(read_csv_rows(market_path)) == 1
+    # Corrupt the WALLET split state only.
+    split_path.write_text('{"split_stamp": true}', encoding="utf-8")
+    market_path.unlink()
+
+    with pytest.raises(ValueError, match="market-axis table WAS rebuilt"):
+        build_flow_toxicity(cfg)
+
+    # The veto table was rebuilt despite the wallet-side failure.
+    assert market_path.exists()
+    rows = read_csv_rows(market_path)
+    assert len(rows) == 1 and rows[0]["market"] == "0xa"
+    # The wallet artifact is invalidated, not left stale.
+    wallet_rows = read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")
+    assert len(wallet_rows) == 1
+    assert wallet_rows[0]["artifact_status"] == "invalid_frozen_split_state"
+
+
 def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):
     """A wallet with no measurable fill must appear, disclosed, not vanish.
 

@@ -1979,7 +1979,9 @@ Spec:
    split arithmetic, missing-WO-37-data tolerance.
 
 **2026-08-22 scope reconciliation (S8/A4).** This WO's registered surface now
-covers TWO artifacts, not one. `outputs/maker_carry/flow_toxicity_wallets.csv`
+covers FOUR artifacts [Codex P1 wave-10 — the earlier "two" counted only the additions and left the
+preamble false about its own touched outputs]: the parent's `outputs/maker_carry/flow_toxicity.csv`
+and `flow_toxicity_summary.json`, PLUS the two added here. `outputs/maker_carry/flow_toxicity_wallets.csv`
 (the wallet axis) and its split-state file
 `outputs/maker_carry/flow_toxicity_wallet_split.json` are added by §49.1 below,
 which holds their columns, sample rules, fail-safe and day-after check. Recorded
@@ -1987,12 +1989,18 @@ HERE rather than only in the child because a later builder reading this entry
 alone would otherwise conclude the wallet artifact is outside WO-49's registered
 surface [Codex P1 wave-5 on #451]. §49.1 also TIGHTENS this parent's inputs: a
 trade print whose price, size or timestamp parses but is non-finite is now
-rejected at the ingestion boundary (`_trade_rows`), which changes the
-long-standing market-axis columns as well — `nan` propagated into
+rejected at the ingestion boundary (`_trade_rows`); and SAME-VENUE-STAMP FEATURE TIES now break on
+OBSERVATION time rather than on midpoint, at both tie-break sites (the SQL ORDER BY and the
+tail_candidates tuple). BOTH change the long-standing market-axis columns — `nan` propagated into
 `smart_fill_markout`/`crowd_fill_markout` and, via `nan * size`, into
-`usd_volume` and therefore `vpin_raw`. Disclosed as a deliberate behaviour
-change to a registered artifact rather than left as an unstated rider; it is
-fail-closed and strictly removes malformed input.
+`usd_volume` and therefore `vpin_raw`. Both are disclosed as deliberate behaviour
+changes to a registered artifact rather than left as unstated riders. The non-finite rejection is
+fail-closed and strictly removes malformed input. The tie-break change was made to fix the WALLET
+axis and initially contradicted this entry's own claim that the market method was otherwise
+unchanged [Codex P1 wave-10 caught that contradiction]; it is retained rather than reverted because
+ordering same-stamp quotes by PRICE is indefensible on either axis — it makes which observation is
+used depend on which number happens to be smaller — while ordering by when a quote became available
+is correct for both. On a corpus with no same-stamp duplicates the market output is unchanged.
 
 ### §49.1 — Wallet-axis forward markout (`flow_toxicity_wallets.csv`) — registered 2026-08-22
 
@@ -2043,7 +2051,10 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    observation up to one further horizon late, so a market ending at 600 with a 300s horizon and a
    split at 1000 passes (a) while its price may be read at 1100 — inside the evaluation period.
    Both stages report as `fills_label_embargoed`, kept distinct from `fills_split_spanning`.
-4. STALENESS CEILING: a price is accepted only inside `[target, target + horizon]`; later
+4. STALENESS CEILING: a price is accepted only inside `[target, target + horizon]`, measured on the
+   LATER of its venue stamp and its collection stamp [Codex P1 wave-11 — measuring only the venue
+   stamp accepted a feature sourced at the target but collected hours later, so an evaluation markout
+   could silently measure a horizon of hours instead of the configured one]; later
    observations count as `fills_stale_price_excluded`. A 5-minute markout read from a price hours
    late measures a different horizon. The market-axis columns keep their long-standing WO-49 lookup
    unchanged — tightening a registered artifact is its own change, not a rider on this one.
@@ -2072,14 +2083,38 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    training_harvest.py:98-106 immediately before `flow-toxicity`, and the harvest is deliberately
    resilient, continuing past a failed step. Reading only the first summary therefore let a
    stale-but-"ok" primary vouch for rows another producer had just written partially — and, worse,
-   permitted rule 10's permanent freeze on that contaminated corpus. The registered rule is the WORST
-   status across all three: "ok" only when every producer says "ok" ("disabled" is a legitimate
-   resting state and does not veto; anything else does, and the vetoing status is what gets stamped).
+   permitted rule 10's permanent freeze on that contaminated corpus. THE REGISTERED RULE, stated once and
+   unambiguously [Codex P1 wave-10 — the previous wording said "ok only when EVERY producer says ok"
+   and then immediately said "disabled does not veto", which cannot both be true; a builder taking
+   the first clause literally would reject the healthy configurations this same amendment registers]:
+     (a) RESTING states never veto: "disabled", "skipped_all_completed", "no_candidate_markets".
+         The last two are backfill_trade_prints' successful no-ops, set in an elif chain AFTER its
+         error check (trade_print_collector.py:666-673).
+     (b) ANY status that is neither "ok" nor resting vetoes, and that status is what gets stamped.
+     (c) With no veto, the aggregate is "ok" only if AT LEAST ONE producer both reported "ok" AND
+         shows evidence of an actual poll. "ok" alone is insufficient [Codex P1 wave-11]:
+         collect_maker_replay_data reaches the explicit-market collector, which reports
+         market_source_status="empty" and still writes status="ok" with markets_polled=0
+         (trade_print_collector.py:406-410, 484-487) — no venue request occurred. Disqualifying
+         evidence is EXPLICIT ONLY: market_source_status == "empty", or markets_polled PRESENT and
+         <= 0. An ABSENT field does not disqualify, because backfill_trade_prints reports
+         candidate_markets/markets_attempted and never writes markets_polled — the broader form was
+         written first and the registered tests rejected it for disqualifying a producer that had
+         legitimately refreshed the ledger.
+     (d) Otherwise the aggregate is "no_producer_refreshed": disclosed on every row, not fatal.
    The wallet path reads them all; when its status is anything other than "ok" (including absent or
    unparseable, which read as "missing"), every emitted row carries
    `artifact_status="upstream_<status>"` instead of "ok". Stamped rather than blanked deliberately —
    ranking wallets on an undisclosed stale or partial sample is the harm, and a missing producer
    summary should let a reader reject the evidence, not silently destroy a working artifact.
+8a. A WALLET-SIDE FAULT DEGRADES THE WALLET AXIS ONLY [Codex P1 wave-11]. flow_toxicity.csv feeds
+   the toxicity VETO read by requote_alerts.py (:135, :508) and stage_ticket_eligibility.py, so it is
+   rebuilt on EVERY run regardless of wallet-side state. An invalid frozen split is detected early
+   and the wallet artifact invalidated immediately, but the market axis is then rebuilt normally and
+   the run raises only AFTER flow_toxicity.csv is written. Raising before it — which the wave-8 fix
+   did — left a market that had since turned toxic still reading clean on every harvest until an
+   operator repaired an unrelated wallet file. Fail-closed on the wallet axis must not mean
+   fail-stale on the veto.
 9. NO PATH EMITS A BARE HEADER. Exactly two states emit the single sentinel row: DISABLED, and an
    enabled run that scores ZERO wallets. A header-only file names the columns while asserting
    nothing, so it cannot establish the artifact's evidence class; a sentinel is never counted in
@@ -2191,6 +2226,24 @@ registered count to be true].
 22. The split artifact states its own invocation flags and publishes corpus_rows_at_freeze.
 23. CLI registration for `flow-toxicity`.
 24. The market-axis table is unchanged in schema and method across all of the above.
+
+## SECOND KNOWN LIMITATION: producer summaries are not bound to a harvest cycle
+
+[Codex P1 wave-10 on #451.] Rule 8 reads each producer's `status` but cannot tell WHICH run wrote it.
+The harvest is resilient, so a producer can be skipped, time out, or die before rewriting its
+summary, and a leftover "ok" then certifies a ledger it never saw — and could permit the rule-10
+freeze on it.
+
+The obvious remedy is rejected as WRONG, recorded so it is not re-attempted: requiring each summary
+to be newer than `trade_prints.csv` breaks the normal case, because all three producers write the
+SAME ledger in sequence, so once backfill rewrites it the earlier summaries are legitimately older.
+That check fires on every healthy harvest. It was implemented, caught by the registered tests, and
+reverted. Any age-threshold variant needs an invented number, which A1 forbids.
+
+The correct fix needs information this module is not given: it runs as a standalone CLI command and
+never sees the harvest's per-step results. PREREQUISITE, binding: before the wallet axis is promoted
+to a standing input, producers must stamp a harvest-cycle id into their summaries and rule 8 must
+require all three to carry the current one.
 
 ## KNOWN LIMITATION, REGISTERED RATHER THAN ENGINEERED AWAY [Codex P1 wave-6 on #451]
 

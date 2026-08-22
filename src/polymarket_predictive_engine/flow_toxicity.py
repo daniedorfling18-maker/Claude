@@ -455,12 +455,34 @@ def _trade_corpus_status(cfg: EngineConfig) -> str:
     # cycle id is the real fix and is registered as a prerequisite in §49.1.
     root = cfg.output_root / "polymarket_trade_prints"
     statuses: list[str] = []
+    # Producers that both reported ok AND show evidence of an actual poll.
+    refreshing: list[str] = []
     for filename in _TRADE_LEDGER_PRODUCER_SUMMARIES:
         payload = read_json(root / filename)
         if not isinstance(payload, dict):
             statuses.append("missing")
             continue
-        statuses.append(str(payload.get("status") or "missing").strip().lower())
+        status = str(payload.get("status") or "missing").strip().lower()
+        statuses.append(status)
+        # "ok" alone is not evidence that the venue was actually polled (Codex
+        # P1 wave-11 on #451): collect_maker_replay_data reaches the
+        # explicit-market collector, which reports market_source_status="empty"
+        # and still writes status="ok" with markets_polled=0
+        # (trade_print_collector.py:406-410, 484-487). A producer counts as
+        # having REFRESHED the ledger only if it also shows poll evidence.
+        # Narrow deliberately: only EXPLICIT evidence of no poll disqualifies.
+        # An absent field is not evidence of absence -- backfill_trade_prints
+        # reports candidate_markets/markets_attempted and never writes
+        # markets_polled at all, so treating a missing field as "did not poll"
+        # would disqualify a producer that legitimately refreshed the ledger.
+        # (I wrote that broader version first; the registered tests rejected it.)
+        polled = safe_float(payload.get("markets_polled"))
+        source_state = str(payload.get("market_source_status") or "").strip().lower()
+        no_poll = source_state == "empty" or (
+            "markets_polled" in payload and polled is not None and polled <= 0
+        )
+        if status == "ok" and not no_poll:
+            refreshing.append(status)
     # RESTING states are successful no-ops, not failures, and must not veto
     # (Codex P1 wave-9 on #451 — the wave-7/8 tightening over-corrected here and
     # would have broken the NORMAL case): "disabled" is a producer switched off;
@@ -475,7 +497,7 @@ def _trade_corpus_status(cfg: EngineConfig) -> str:
     for status in statuses:
         if status != "ok" and status not in resting:
             return status
-    if not any(status == "ok" for status in statuses):
+    if not any(status == "ok" for status in refreshing):
         # Nothing actually refreshed the ledger this run while flow-toxicity
         # itself stayed enabled (Codex P1 wave-8). Returning "ok" would stamp
         # retained rows as current and let them permanently seed the frozen
@@ -619,7 +641,14 @@ def _markout_stats(
             market_stats[f"{tier}_count"] += 1
             market_stats[f"{tier}_sum"] += markout
             if entry is not None:
-                if float(current_feature[0]) - target > staleness_tolerance:
+                # The ceiling applies to when the price was OBSERVED, not just
+                # when the venue stamped it (Codex P1 wave-11 on #451): a
+                # feature sourced at the target but collected hours later was
+                # accepted as fresh, so an evaluation markout could silently
+                # measure a horizon of hours instead of the configured one. Take
+                # the later of the two, which is conservative in both cases.
+                observed_age = max(float(current_feature[0]), float(current_feature[2])) - target
+                if observed_age > staleness_tolerance:
                     entry["fills_stale_price_excluded"] += 1
                     continue
                 entry["fills_total"] += 1
@@ -756,23 +785,27 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
     # PREVIOUS run's rows on disk still saying artifact_status="ok". A
     # fail-closed guard that leaves stale evidence readable fails OPEN at the
     # artifact level. Invalidate first, then raise.
+    # DETECT here, but do NOT raise here (Codex P1 wave-11 on #451). Raising
+    # before the market-axis rebuild was a safety regression I introduced in
+    # wave 8: flow_toxicity.csv feeds the toxicity VETO that requote_alerts.py
+    # (:135, :508) and stage_ticket_eligibility.py read, so a corrupt WALLET
+    # file would freeze the market-axis table and let a market that has since
+    # turned toxic keep reading clean - on every harvest, until an operator
+    # repaired an unrelated wallet artifact. A wallet-side fault must degrade
+    # the wallet axis only. The wallet artifact is invalidated immediately, the
+    # market axis is rebuilt normally, and the raise happens at the END so the
+    # harvest still records a loud failure.
     split_path = out_root / "flow_toxicity_wallet_split.json"
+    invalid_split_state = False
     if split_path.exists():
         persisted = read_json(split_path)
         stored = _split_stamp_value(persisted)
         if stored is None or _frozen_horizon_mismatch(persisted, horizon):
-            summary["status"] = "invalid_frozen_split_state"
-            write_json(summary_path, summary)
+            invalid_split_state = True
             write_csv(
                 out_root / "flow_toxicity_wallets.csv",
                 [_wallet_sentinel_row(generated_at, "invalid_frozen_split_state")],
                 fieldnames=WALLET_MARKOUT_FIELDS,
-            )
-            raise ValueError(
-                f"frozen wallet split state at {split_path} is present but invalid; refusing to "
-                "manufacture a replacement cutoff from already-observed evaluation data. "
-                "Restore the file from backup, or delete it deliberately to re-freeze. "
-                "The wallet artifact has been invalidated so no stale ranking is readable."
             )
     trades, malformed_trade_rows = _trade_rows(cfg)
     trade_corpus_status = _trade_corpus_status(cfg)
@@ -803,9 +836,18 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
                     connection,
                     _price_target_bounds(trades, horizon),
                 )
-                split_stamp, split_was_frozen = _frozen_split_stamp(
-                    cfg, trades, stamps_ok=trade_corpus_status == "ok", horizon_seconds=horizon
-                )
+                if invalid_split_state:
+                    # Already detected and the wallet artifact already
+                    # invalidated; the run will raise once the market axis is
+                    # written. Do not re-enter the freeze path, whose defensive
+                    # raise would fire here and block that rebuild.
+                    stamps = sorted(float(trade["stamp"]) for trade in trades)
+                    split_stamp = stamps[len(stamps) // 2] if stamps else 0.0
+                    split_was_frozen = False
+                else:
+                    split_stamp, split_was_frozen = _frozen_split_stamp(
+                        cfg, trades, stamps_ok=trade_corpus_status == "ok", horizon_seconds=horizon
+                    )
                 markout_by_market, markout_by_wallet = _markout_stats(
                     connection, trades, top_wallets, horizon, split_stamp
                 )
@@ -855,6 +897,19 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
             }
         )
     write_csv(path, rows_out, fieldnames=TOXICITY_FIELDS)
+    if invalid_split_state:
+        # The market axis is now current on disk, so the toxicity veto is not
+        # frozen by a wallet-side fault. Only now does the run fail loudly.
+        summary["status"] = "invalid_frozen_split_state"
+        summary["markets_scored"] = len(rows_out)
+        write_json(summary_path, summary)
+        raise ValueError(
+            f"frozen wallet split state at {split_path} is present but invalid; refusing to "
+            "manufacture a replacement cutoff from already-observed evaluation data. "
+            "Restore the file from backup, or delete it deliberately to re-freeze. "
+            "The wallet artifact has been invalidated so no stale ranking is readable; "
+            "the market-axis table WAS rebuilt so the toxicity veto stays current."
+        )
 
     def _mean(total: float, count: int) -> float | None:
         return round(total / count, 6) if count else None

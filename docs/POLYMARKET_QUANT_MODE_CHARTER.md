@@ -1,11 +1,124 @@
 # Polymarket Quant Mode Charter
 
-Last updated: 2026-07-16
+Last updated: 2026-08-22
 
 This is the **orchestration charter** for turning the Polymarket predictive engine into a full quant
 trading system. It is written for every coding agent working on this repo — Claude, Codex, or any
 other code changer. Read `AGENTS.md` first; this charter adds the quant-mode roadmap on top of it and
 never overrides its safety rules.
+
+## TERMINAL VERDICT — the registered evidence clock expired 2026-08-19
+
+**Recorded 2026-08-22.** This section is dated deliberately: the answer below was pre-committed a
+month before it was read, and it must survive any single container, agent or session. Nothing in
+this section loosens a gate; it closes a question.
+
+### What was registered, and when
+
+On **2026-07-10T21:30:00Z** amendment 7 was registered into `profit_verdict.py`
+(`REGISTERED_EXTENSION_PROTOCOL`, tighten-only): the evidence window could extend **exactly once**,
+through `extension_window_end_utc = 2026-08-19T23:59:00Z`. Amendment 8 (2026-07-17T04:30:00Z) closed
+the pending-on-significance gap, so that at the terminal read **all three gates passing is the only
+outcome that is not a NO** — a failing gate, a pending gate, and an unmet unit floor all resolve to
+`no_for_tested_edge_classes`.
+
+That instant has passed. Checked against the real clock on 2026-08-22T10:57Z, the engine reports the
+terminal regime, and it is not reversible: the single registered extension is spent. The point of
+registering it a month in advance was that the answer could not be renegotiated after being seen.
+It is not being renegotiated here.
+
+**How this surfaced.** `main` went red on 2026-08-22. Six tests had hard-coded the pre-terminal
+verdict string without pinning the clock, so they passed for the whole extension window and failed
+together the moment the deadline arrived. The engine did exactly what it was registered to do; the
+tests were reading the calendar. Fixed in PR #452, which also added the coverage whose absence let
+this land silently — nothing in the suite had ever run the engine under the real clock, so nothing
+stated which regime the system was in.
+
+### What the NO is a verdict on
+
+`no_for_tested_edge_classes` — the tested classes, each with the measurement that closed it:
+
+| hypothesis | state | the measurement |
+|---|---|---|
+| **H1** sharp-anchor maker carry | dead | gross **$3.02/day** across the entire eligible universe against a $3.33/day target; adverse selection **$63.62/day**, 21x the gross. Net **-$60.60/day**. |
+| **H2** dutch-book consistency | dead | **0** flagged in 300 events; maximum executable basket **$0.00**. |
+| **H3** smart-flow CLV | **unmeasured** | the wallet axis is the instrument and it is still in PR #451. |
+| directional model | refuted | claimed **+0.08337/share**; realised 95% upper bound **+0.01435** across 109 positions. |
+| **H4** crypto up/down | dead twice | admission gate NOT ADMISSIBLE; capacity **$4-10 at touch** against 3,127 instances/day. |
+
+Market calibration is also unmeasured.
+
+**PROVENANCE, stated rather than implied**: these figures were read from VPS telemetry during the
+2026-08 review. None of the Polymarket output artifacts are committed to this repository
+(`git ls-files outputs` returns nothing under any Polymarket path), so **no reader can re-derive
+them from the repo alone** — they are a record of a reading, not a reproducible computation. The
+registered protocol, its dates and the terminal regime ARE verifiable here, in `profit_verdict.py`
+and its tests. The live gate states are VPS-resident: **the terminal read should be confirmed on the
+VPS before the record is treated as final.** Every measurement available at the time of writing had
+the gates not all passing, which is why the expected outcome is NO; that is an expectation from the
+evidence, not a printed live verdict.
+
+**H4 deserves its own line, because it was an agent's own claim.** An earlier version of the
+research plan asserted crypto up/down cleared the 4c/share bar on n=9 with a line-movement lower
+bound of +7.6c. A falsifier was registered against it and the gate executed it: a silently dropped
+-$10 loss; `line_movement` PINS TO SETTLEMENT on up/down markets, making the "skill" component an
+accounting artifact; the wrong variance and the wrong decision rate in the power calculation; and no
+estimator named in advance. The cohort had also been described to the gate as best-of-22 when it was
+best-of-39. Capacity then killed what was left. The falsifier working is the one thing on this board
+that went right.
+
+### Why the whole board reads this way — one defect, five times
+
+**Every component was scoped to a different population, and none intersected the one being traded:**
+
+- resolved corpus vs traded markets — **0 / 1000** overlap
+- decision layer — **88** rewarded markets
+- markout prices — a **110**-token list against **475** traded
+- "smart" wallets — the **100** on a public PnL leaderboard
+- calibration join — **0 / 16,910**
+
+Five instruments, five universes, no shared sample. That is why every lane read either "no edge" or
+"insufficient evidence": mostly the thing being measured was not the thing being traded. **Any future
+hypothesis must fix this before anything is measured again**; re-running the same instruments on the
+same mismatched populations will reproduce the same answer more slowly.
+
+### What continuing would cost
+
+From measured variance (sd 0.226) and the measured decision rate (2.4-5.0/day):
+
+| edge to detect | decisions needed | calendar time |
+|---|---|---|
+| 4c/share | 250 | 50-103 days |
+| 2c/share | 1,001 | 7-14 months |
+| 1c/share | 4,005 | **2.2-4.5 years** |
+
+Nothing measured clears 4c, so continuing means committing to the 2c or 1c row — months to years —
+on a system whose own pre-registered deadline has already returned NO.
+
+### What this section does and does not decide
+
+**Decided, and not by any agent:** the registered verdict for the tested edge classes is terminal.
+The evidence question was asked properly, with pre-committed gates and a pre-committed deadline, and
+it was answered. No agent may extend the window: the single registered extension is spent, and that
+was the point of registering it.
+
+**NOT decided here — these are the repo owner's calls alone, and no agent-authored text may stand in
+for them:**
+
+1. **STOP** — freeze the research surface, keep the paper system running as a telemetry archive, and
+   stop spending on the edge question; or
+2. **A DATED ALTERNATIVE** — a *new* registered hypothesis with a *new* pre-committed deadline, with
+   the population-scope defect fixed first.
+
+**Close-out state at the time of writing:** PR #452 landed (the suite no longer misreports the
+regime). PR #451 — the H3 instrument, the only tested class with no measurement at all — remains
+open with two review threads deliberately unresolved for the owner: that its registration followed
+rather than preceded its build, and that its ranking sample erodes under the rolling 200,000-row
+ledger. Reading the wallet axis once would complete the board and make the NO unanimous rather than
+4-of-5; whether to merge it is the owner's decision, as is every merge.
+
+**Unchanged throughout:** paper/dry-run only, no live order path, no gate, threshold or eligibility
+loosened, VPS-only runtime, and every owner-routed merge and deploy left to the owner.
 
 ## What "full quant mode" means here
 
@@ -843,3 +956,9 @@ without a human digging through code:
 
 Only then does the human-gated promotion path to larger paper stakes (and, far later, any live
 discussion) begin. Until then the correct state is exactly what the audit says: explainable refusal.
+
+**Read this against the terminal verdict at the top of this charter (2026-08-22).** No tested edge
+class ever reached the four conditions above, and the registered evidence clock for those classes has
+expired. This definition still stands as the standard any FUTURE registered hypothesis must meet —
+it is not a live checklist for the classes already answered, and nothing below it authorises
+re-opening one.

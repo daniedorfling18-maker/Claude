@@ -819,8 +819,11 @@ def test_same_stamp_features_break_ties_by_observation_not_price(tmp_path):
     build_flow_toxicity(cfg)
     rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
 
-    # Collected at 320 (earlier) wins, so markout is 0.70 - 0.50 = 0.20.
-    # A midpoint tiebreak would have selected 0.60 and given 0.10.
+    # Both rows represent the venue at 310, so the tie breaks on which was
+    # AVAILABLE first: collected 320 beats collected 400. Markout is
+    # 0.70 - 0.50 = 0.20. A midpoint tiebreak would have picked 0.60 (+0.10),
+    # and preferring the later correction would also give +0.10 -- so this
+    # assertion distinguishes all three orderings.
     assert float(rows["w1"]["markout_mean_total"]) == 0.2
 
 
@@ -942,8 +945,13 @@ def test_a_delayed_feature_does_not_hide_the_usable_one(tmp_path):
     build_flow_toxicity(cfg)
     rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
 
-    # The usable 0.70 row at effective 320 is selected: 0.70 - 0.50 = 0.20.
-    assert float(rows["w1"]["markout_mean_total"]) == 0.2
+    # Under the corrected model the 310-sourced row IS the right market state
+    # for a target of 300, and late COLLECTION does not make it stale -- being
+    # collected at 1000 only bars it from ranking, which this fixture does not
+    # test. So it is used: 0.90 - 0.50 = 0.40, and nothing is stale-excluded.
+    # The earlier expectation of 0.20 encoded the collapsed model, in which
+    # staleness was measured on availability; that was the defect, not this.
+    assert float(rows["w1"]["markout_mean_total"]) == 0.4
     assert int(rows["w1"]["fills_stale_price_excluded"]) == 0
 
 
@@ -1092,6 +1100,92 @@ def test_unavailable_leaderboard_is_not_reported_as_confirmed_absence(tmp_path):
     # Still measured -- markouts do not depend on the leaderboard.
     assert float(rows["w1"]["markout_mean_total"]) == 0.2
     assert summary["missing_wallet_data"] is True
+
+
+def test_finite_but_out_of_domain_trade_values_are_rejected(tmp_path):
+    """price=1.5 is not a print and size<=0 is not a fill (Codex P2 wave-15).
+
+    Both are finite, so the wave-5 non-finite guard let them through: an
+    out-of-range binary-market price produces a meaningless markout, and a
+    nonpositive size increments the wallet's fill counters while contributing
+    no VPIN volume -- a successful markout published for something that never
+    traded.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [
+            {"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0},
+            {"market": "0xa", "asset_id": "tok-a", "wallet": "wbad", "side": "BUY", "price": 1.5, "size": 100, "timestamp": 1},
+            {"market": "0xa", "asset_id": "tok-a", "wallet": "wzero", "side": "BUY", "price": 0.5, "size": 0, "timestamp": 2},
+            {"market": "0xa", "asset_id": "tok-a", "wallet": "wneg", "side": "BUY", "price": -0.2, "size": 5, "timestamp": 3},
+        ],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert set(rows) == {"w1"}
+    assert summary["malformed_trade_rows_excluded"] == 3
+    market = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+    assert int(market["0xa"]["trades_seen"]) == 1
+
+
+def test_an_unusable_leaderboard_snapshot_is_unavailable_not_empty(tmp_path):
+    """A nonempty file with blank wallet cells is not "nobody is ranked"."""
+    cfg = _config(tmp_path)
+    write_csv(
+        cfg.output_root / "wallet_intelligence" / "leaderboard_history.csv",
+        [{"snapshot_date": "2026-07-10", "wallet": "", "rank": "1"}],
+        fieldnames=["snapshot_date", "wallet", "rank"],
+    )
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert summary["missing_wallet_data"] is True
+    assert rows["w1"]["on_current_leaderboard"] == "unknown"
+    assert rows["w1"]["artifact_status"] == "leaderboard_unavailable"
+
+
+def test_a_changed_horizon_invalidates_the_frozen_split(tmp_path):
+    """The embargo is horizon-relative, so a cutoff frozen under another one
+    is not reusable -- shortening the horizon could move a previously
+    embargoed pre-split market into ranking after its markout was published.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+    assert build_flow_toxicity(cfg)["status"] == "ok"
+    state = read_json(cfg.output_root / "maker_carry" / "flow_toxicity_wallet_split.json")
+    assert state["horizon_seconds"] == 300.0
+
+    raw = yaml.safe_load(Path(cfg.path).read_text(encoding="utf-8"))
+    raw["flow_toxicity"]["markout_horizon_minutes"] = 2
+    Path(cfg.path).write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="refusing to manufacture"):
+        build_flow_toxicity(load_config(Path(cfg.path)))
+
+    wallet_rows = read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")
+    assert wallet_rows[0]["artifact_status"] == "invalid_frozen_split_state"
 
 
 def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):

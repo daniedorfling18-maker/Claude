@@ -151,7 +151,17 @@ def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], bool]:
     latest = max(str(row.get("snapshot_date") or row.get("snapshot_at_utc") or "") for row in rows)
     latest_rows = [row for row in rows if str(row.get("snapshot_date") or row.get("snapshot_at_utc") or "") == latest]
     latest_rows.sort(key=lambda row: safe_float(row.get("rank")) if safe_float(row.get("rank")) is not None else 1e9)
-    return {str(row.get("wallet") or "").lower() for row in latest_rows[:limit] if row.get("wallet")}, False
+    wallets = {
+        str(row.get("wallet") or "").strip().lower()
+        for row in latest_rows[:limit]
+        if str(row.get("wallet") or "").strip()
+    }
+    # A nonempty file whose selected snapshot has no usable wallet cells is
+    # UNAVAILABLE, not "nobody is on the leaderboard" (Codex P2 wave-15).
+    # Returning an empty set with missing_wallet_data False published every
+    # measured wallet as definitively off-leaderboard when membership could not
+    # be established at all -- the same conflation the absent-file case fixed.
+    return wallets, not wallets
 
 
 def _feature_paths(cfg: EngineConfig) -> Iterator[Path]:
@@ -205,13 +215,14 @@ def _build_price_index(
             asset_id TEXT NOT NULL,
             stamp REAL NOT NULL,
             midpoint REAL NOT NULL,
+            available_stamp REAL NOT NULL,
             availability_known INTEGER NOT NULL,
             source_order INTEGER NOT NULL
         );
         """
     )
-    batch: list[tuple[str, float, float, int, int]] = []
-    tail_candidates: dict[str, tuple[float, int, float, int]] = {}
+    batch: list[tuple[str, float, float, float, int, int]] = []
+    tail_candidates: dict[str, tuple[float, float, int, float, int]] = {}
     scanned_rows = 0
     indexed_rows = 0
 
@@ -220,8 +231,9 @@ def _build_price_index(
         if not batch:
             return
         connection.executemany(
-            "INSERT INTO feature_prices(asset_id, stamp, midpoint, availability_known, source_order)"
-            " VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO feature_prices"
+            "(asset_id, stamp, midpoint, available_stamp, availability_known, source_order)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
             batch,
         )
         indexed_rows += len(batch)
@@ -263,12 +275,29 @@ def _build_price_index(
             # available before the split and enter the ranking mean. Absent is
             # different from invalid - an absent field means the corpus predates
             # the column, and the venue stamp is the only evidence there is.
+            # TWO stamps, because they answer two different questions -- and
+            # collapsing them into one (wave-12) was WRONG (Codex P1 wave-15):
+            #
+            #   stamp      = the VENUE time. Which market state this price
+            #                represents. Gates target eligibility and the
+            #                staleness ceiling -- both "is this the market at
+            #                the requested horizon".
+            #   available  = the later of venue and collection. When we could
+            #                first have SEEN it. Gates ranking eligibility only
+            #                -- purely a look-ahead question.
+            #
+            # Under the collapse, a fill targeting 300 would score a quote
+            # sourced at 299 and collected at 301: max() made it "reach" the
+            # target while its midpoint represents the market BEFORE the
+            # horizon, corrupting both axes. Carrying two values is not the
+            # defect; conflating what they mean was.
             raw_collected = row.get("collected_at_utc")
             if str(raw_collected or "").strip():
                 collected = _stamp(raw_collected)
                 if collected is None or not math.isfinite(collected):
                     continue
-                stamp = max(source_stamp, collected)
+                stamp = source_stamp
+                available = max(source_stamp, collected)
                 availability_known = 1
             else:
                 # ABSENT collection time: the corpus predates the column, or the
@@ -282,6 +311,7 @@ def _build_price_index(
                 # is one boolean feeding exactly one decision, not a second
                 # clock -- the wave-12 collapse stands.
                 stamp = source_stamp
+                available = source_stamp
                 availability_known = 0
             if stamp < bounds[0]:
                 continue
@@ -295,7 +325,7 @@ def _build_price_index(
                 continue
             source_order = scanned_rows
             if stamp <= bounds[1]:
-                batch.append((token, stamp, midpoint, availability_known, source_order))
+                batch.append((token, stamp, midpoint, available, availability_known, source_order))
                 if len(batch) >= 10_000:
                     flush()
                 continue
@@ -306,18 +336,22 @@ def _build_price_index(
             # target bound it is THIS comparison that picks the single retained
             # row, and with midpoint second it picked whichever price was
             # numerically smaller (Codex P1 wave-9).
-            candidate = (stamp, source_order, midpoint, availability_known)
+            # Same key order as the SQL ORDER BY: venue stamp, then AVAILABLE
+            # stamp, then arrival order. This is the second tie-break site and
+            # it must agree with the first, or which row is retained depends on
+            # which code path saw it (the wave-9 defect, in its third form).
+            candidate = (stamp, available, source_order, midpoint, availability_known)
             current = tail_candidates.get(token)
             if current is None or candidate < current:
                 tail_candidates[token] = candidate
 
-    for token, (stamp, source_order, midpoint, availability_known) in tail_candidates.items():
-        batch.append((token, stamp, midpoint, availability_known, source_order))
+    for token, (stamp, available, source_order, midpoint, availability_known) in tail_candidates.items():
+        batch.append((token, stamp, midpoint, available, availability_known, source_order))
     flush()
     connection.commit()
     connection.execute(
         "CREATE INDEX feature_prices_token_stamp_idx "
-        "ON feature_prices(asset_id, stamp, source_order, midpoint, availability_known)"
+        "ON feature_prices(asset_id, stamp, source_order, midpoint, available_stamp, availability_known)"
     )
     connection.commit()
     return scanned_rows, indexed_rows
@@ -648,8 +682,14 @@ def _markout_stats(
                 # midpoint (Codex P1 wave-9 on #451): ordering by price made
                 # both which row is selected and whether it is embargoed depend
                 # on which number happened to be smaller.
-                "SELECT stamp, midpoint, availability_known FROM feature_prices "
-                "WHERE asset_id = ? ORDER BY stamp, source_order",
+                # Ties on the VENUE stamp break by AVAILABLE stamp, never by
+                # midpoint (Codex P1 wave-9): among quotes representing the same
+                # venue instant, the one we could see EARLIEST is the one a
+                # trader could have acted on; preferring a later correction is
+                # hindsight, and ordering by price makes the choice depend on
+                # which number happens to be smaller.
+                "SELECT stamp, midpoint, available_stamp, availability_known FROM feature_prices "
+                "WHERE asset_id = ? ORDER BY stamp, available_stamp, source_order",
                 (token,),
             )
         )
@@ -726,8 +766,10 @@ def _markout_stats(
                 # evaluation, so ranking on it is still look-ahead. Take the
                 # later of the two - a venue stamp after the split embargoes on
                 # its own, and so does a late collection of an early quote.
+                # Ranking eligibility is the LOOK-AHEAD question, so it uses
+                # the AVAILABLE stamp, not the venue stamp.
                 if window == "ranking" and (
-                    float(current_feature[0]) >= split_stamp or not int(current_feature[2])
+                    float(current_feature[2]) >= split_stamp or not int(current_feature[3])
                 ):
                     window = "label_embargoed"
                 if window in {"spanning", "label_embargoed"}:
@@ -794,6 +836,15 @@ def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int]:
         if not market or not token or price is None or size is None or stamp is None or side not in {"BUY", "SELL"}:
             continue
         if not math.isfinite(price) or not math.isfinite(size) or not math.isfinite(stamp):
+            malformed_rows += 1
+            continue
+        # Finite is not enough (Codex P2 wave-15). A binary-market share price
+        # is a probability in [0, 1] by construction, so price=1.5 is not a
+        # print; and size <= 0 is not a fill -- it would increment the wallet's
+        # counters while contributing no VPIN volume, publishing a successful
+        # markout for something that never traded. Same domain reasoning as the
+        # edge-attribution price rule.
+        if not (0.0 <= price <= 1.0) or size <= 0:
             malformed_rows += 1
             continue
         parsed.append(

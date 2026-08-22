@@ -2058,10 +2058,14 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    observation up to one further horizon late, so a market ending at 600 with a 300s horizon and a
    split at 1000 passes (a) while its price may be read at 1100 — inside the evaluation period.
    Both stages report as `fills_label_embargoed`, kept distinct from `fills_split_spanning`.
-4. STALENESS CEILING: a price is accepted only inside `[target, target + horizon]`, measured on the
-   LATER of its venue stamp and its collection stamp [Codex P1 wave-11 — measuring only the venue
-   stamp accepted a feature sourced at the target but collected hours later, so an evaluation markout
-   could silently measure a horizon of hours instead of the configured one]; later
+4. STALENESS CEILING: a price is accepted only inside `[target, target + horizon]`, measured on its
+   VENUE stamp. The venue stamp is the right clock for this rule because the question it answers is
+   "does this price represent the market at the requested horizon" — which is about the market state,
+   not about when we saw it. Wave-11 moved this onto the collection stamp and wave-12 collapsed the
+   two; both were WRONG and are reverted [Codex P1 wave-15]. The collapse let a fill targeting 300
+   score a quote sourced at 299 and collected at 301: `max()` made it "reach" the target while its
+   midpoint represented the market BEFORE the horizon. Late COLLECTION does not make a price stale —
+   it makes it unusable for RANKING, which is rule 3's job, and the two must not be conflated; later
    observations count as `fills_stale_price_excluded`. A 5-minute markout read from a price hours
    late measures a different horizon. The market-axis columns keep their long-standing WO-49 lookup
    unchanged — tightening a registered artifact is its own change, not a rider on this one.
@@ -2075,7 +2079,16 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    and counted as `malformed_trade_rows_excluded` in the summary. This is the one place that covers
    BOTH axes; see the parent's 2026-08-22 scope reconciliation above.
 7. THE SPLIT IS FROZEN AT FIRST COMPUTATION, persisted to
-   `outputs/maker_carry/flow_toxicity_wallet_split.json` and never recomputed. Recomputing the median
+   `outputs/maker_carry/flow_toxicity_wallet_split.json` and never recomputed. The persisted payload
+   carries `split_stamp`, `horizon_seconds`, `frozen_at_utc`, `corpus_rows_at_freeze` and both
+   invocation flags. `horizon_seconds` is BINDING [Codex P1 wave-15 — implemented but never
+   registered, so a builder following this text could have omitted it and recreated the leak]: the
+   embargo in rule 3 is defined relative to the horizon, so a cutoff frozen under a different one is
+   not reusable. Shortening the horizon narrows the embargo interval and can move a
+   previously-embargoed pre-split market into RANKING after its markout was already published. A
+   mismatch — or a payload with no recorded horizon, which is how a state written before this field
+   existed reads — makes the state INVALID and takes the rule-10 invalid-state path; it is never
+   silently reused. Recomputing the median
    from the CURRENT corpus each daily rebuild moved the split forward as fills arrived, so a market
    that was EVALUATION yesterday — whose markout was already published and inspected — could become
    RANKING today, recycling observed evaluation evidence into the ranking sample. That is the same
@@ -2126,8 +2139,13 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    did — left a market that had since turned toxic still reading clean on every harvest until an
    operator repaired an unrelated wallet file. Fail-closed on the wallet axis must not mean
    fail-stale on the veto.
-9. NO PATH EMITS A BARE HEADER. Exactly two states emit the single sentinel row: DISABLED, and an
-   enabled run that scores ZERO wallets. A header-only file names the columns while asserting
+9. NO PATH EMITS A BARE HEADER. FOUR states emit the single sentinel row [Codex P1 wave-15 — the
+   text said two while the implementation also emits one for the two invalid-state paths before
+   raising, leaving a builder unable to tell whether those were required or accidental]: DISABLED;
+   an enabled run that scores ZERO wallets; `invalid_frozen_split_state`; and
+   `invalid_markout_horizon`. The last two are emitted BEFORE the run raises, precisely so the
+   previous run's rows cannot be read as current while the harvest records the failure and
+   continues. A header-only file names the columns while asserting
    nothing, so it cannot establish the artifact's evidence class; a sentinel is never counted in
    `wallets_scored`. A not-ok UPSTREAM is NOT a sentinel state — it is handled by rule 8, which
    retains every scored row and stamps each one. [Codex P1 wave-6 on #451: this clause previously
@@ -2157,11 +2175,14 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
 ## ENUMERATED OFFLINE TESTS (S8/A10) [Codex P1 wave-8 on #451]
 
 Required and previously absent. Keyed to FUNCTION NAME rather than to a hand-kept number [Codex P1
-wave-14]: the numbered form drifted three times (24, 26, 31, 32 — each wave added tests and I updated
+wave-14]: the numbered form drifted four times (24, 26, 31, 32 — each wave added tests and I updated
 the matrix without the total), and even when the count was right the MAPPING was wrong — one tested
 behaviour was missing from the list while another entry claimed a standalone test that did not exist.
-A name-keyed list is checkable with `grep -c '^def test_'` and by diffing the names, which is how this
-one is verified. All 33 live in tests/polymarket_predictive_engine/test_flow_toxicity.py.
+
+This list is GENERATED from the test file and verified by diffing the names in both directions, so it
+cannot omit a real test or invent one that does not exist. Anyone changing it should regenerate
+rather than hand-edit. All 36 live in
+tests/polymarket_predictive_engine/test_flow_toxicity.py.
 
  1. `test_planted_toxic_flow_scores_above_balanced_flow`
     Parent WO-49 null test: planted toxic flow scores 1.0, balanced 0.0, and toxic VPIN > balanced.
@@ -2221,13 +2242,19 @@ one is verified. All 33 live in tests/polymarket_predictive_engine/test_flow_tox
     A feature with no collected_at_utc is barred from RANKING but stays measured: ranking 0, embargoed 1, fills_total 3, evaluation 2.
 29. `test_unavailable_leaderboard_is_not_reported_as_confirmed_absence`
     With the leaderboard absent, on_current_leaderboard is 'unknown' and rows are stamped leaderboard_unavailable, not reported as confirmed False.
-30. `test_wallet_without_any_forward_price_is_still_emitted`
+30. `test_finite_but_out_of_domain_trade_values_are_rejected`
+    price=1.5, size=0 and price=-0.2 are rejected at ingestion: only w1 is emitted, malformed_trade_rows_excluded == 3, market trades_seen == 1.
+31. `test_an_unusable_leaderboard_snapshot_is_unavailable_not_empty`
+    A nonempty leaderboard whose wallet cells are blank reads as UNAVAILABLE: missing_wallet_data True, on_current_leaderboard 'unknown', rows stamped leaderboard_unavailable.
+32. `test_a_changed_horizon_invalidates_the_frozen_split`
+    The split records horizon_seconds == 300.0; changing markout_horizon_minutes to 2 makes the state invalid and the run raises with the wallet artifact invalidated.
+33. `test_wallet_without_any_forward_price_is_still_emitted`
     A wallet whose every fill lacks a forward price is still emitted, fills_missing_price set, markets_touched credited.
-31. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
+34. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
     Disabled replaces the artifact with one sentinel carrying artifact_status=disabled and both flags false.
-32. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
+35. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
     A price outside [target, target+horizon] counts as stale-excluded, and the market-axis columns keep the parent lookup.
-33. `test_wallet_artifact_states_its_own_invocation_flags`
+36. `test_wallet_artifact_states_its_own_invocation_flags`
     The wallet CSV states both invocation flags itself.
 
 ## SECOND KNOWN LIMITATION: producer summaries are not bound to a harvest cycle

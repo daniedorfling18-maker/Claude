@@ -262,30 +262,48 @@ def test_wallet_markouts_are_published_for_wallets_off_the_leaderboard(tmp_path)
     assert summary["paper_trading_invoked"] is False
 
 
-def test_wallet_markout_windows_split_by_whole_market(tmp_path):
-    """The split is chronological AND out-of-sample BY MARKET (AGENTS.md).
+def test_wallet_markout_windows_split_by_whole_market_with_label_embargo(tmp_path):
+    """The split is chronological, out-of-sample BY MARKET, and EMBARGOED.
 
-    Assigning fills to windows by timestamp alone lets a market traded on both
-    sides of the median leak ranking-window effects into evaluation (Codex P1
-    on #451). A market belongs wholly to one window; one spanning the split
-    belongs to NEITHER — excluded fail-closed and disclosed, never scored.
+    Two leaks, both real, both pinned here:
+
+    1. Assigning fills to windows by timestamp alone lets a market traded on
+       both sides of the median leak ranking-window effects into evaluation
+       (Codex P1 on #451). A market belongs wholly to one window; one spanning
+       the split belongs to NEITHER.
+    2. A fill's markout LABEL is a price read one horizon LATER, so a market
+       whose last fill lands just before the split has its label observed after
+       evaluation fills have begun (Codex P2 on #451). The earlier version of
+       this very test demonstrated the leak: its "ranking" fills at t=0/1 were
+       labelled at t=310, while evaluation fills started at t=100. A market
+       ranks only when its label window also closes before the split.
+
+    Both exclusions are disclosed per wallet, under SEPARATE counters, never
+    silently scored. Horizon is 300s (5 min) throughout.
     """
     cfg = _config(tmp_path)
     _leaderboard(cfg)
-    # every forward point inside [target, target+horizon] for its fills
-    _features(cfg, "tok-a", [(310, 0.70)])   # targets 300, 301
-    _features(cfg, "tok-b", [(410, 0.70)])   # targets 400, 401
-    _features(cfg, "tok-c", [(305, 0.70), (405, 0.70)])  # targets 302, 402
+    # Every forward point sits inside [target, target + 300] for its fills.
+    _features(cfg, "tok-a", [(310, 0.70)])    # targets 300, 301
+    _features(cfg, "tok-d", [(1210, 0.70)])   # target 1200
+    _features(cfg, "tok-b", [(1310, 0.70)])   # targets 1300, 1301, 1305
+    _features(cfg, "tok-c", [(310, 0.70), (1310, 0.70)])  # targets 302, 1302
     trades = [
-        # market A: both fills before the median -> ranking
+        # market A: fills at 0/1, labels at 300/301 -> both close before the
+        # split at 1000, so this is a genuine ranking market.
         {"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0},
         {"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1},
-        # market B: both fills at/after the median -> evaluation
-        {"market": "0xb", "asset_id": "tok-b", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 100},
-        {"market": "0xb", "asset_id": "tok-b", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 101},
-        # market C: fills straddle the median -> spanning, in NEITHER window
+        # market D: fill at 900 is before the split, but its label is read at
+        # 1200 -- AFTER evaluation begins. Ranking-eligible by fill time,
+        # embargoed by label time.
+        {"market": "0xd", "asset_id": "tok-d", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 900},
+        # market B: every fill at/after the split -> evaluation.
+        {"market": "0xb", "asset_id": "tok-b", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1000},
+        {"market": "0xb", "asset_id": "tok-b", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1001},
+        {"market": "0xb", "asset_id": "tok-b", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1005},
+        # market C: fills straddle the split -> spanning, in NEITHER window.
         {"market": "0xc", "asset_id": "tok-c", "wallet": "w2", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 2},
-        {"market": "0xc", "asset_id": "tok-c", "wallet": "w2", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 102},
+        {"market": "0xc", "asset_id": "tok-c", "wallet": "w2", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1002},
     ]
     write_csv(
         cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
@@ -296,17 +314,97 @@ def test_wallet_markout_windows_split_by_whole_market(tmp_path):
     summary = build_flow_toxicity(cfg)
     rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
 
-    # median of [0,1,2,100,101,102] is 100: A wholly before, B wholly at/after.
-    assert int(rows["w1"]["fills_ranking_window"]) == 2
-    assert int(rows["w1"]["fills_evaluation_window"]) == 2
+    # stamps sorted: [0, 1, 2, 900, 1000, 1001, 1002, 1005]; n=8, n//2=4 -> split 1000.
+    assert summary["wallet_ranking_embargo_seconds"] == 300.0
+    assert int(rows["w1"]["fills_total"]) == 6
+    assert int(rows["w1"]["fills_ranking_window"]) == 2      # market A only
+    assert int(rows["w1"]["fills_evaluation_window"]) == 3   # market B
+    assert int(rows["w1"]["fills_label_embargoed"]) == 1     # market D
     assert int(rows["w1"]["fills_split_spanning"]) == 0
-    # w2 traded only the spanning market: counted, disclosed, never windowed.
+    # The embargoed fill is counted in the total and disclosed, but scored in
+    # neither window -- the two window counts must not sum to the total.
+    assert int(rows["w1"]["fills_ranking_window"]) + int(rows["w1"]["fills_evaluation_window"]) < int(
+        rows["w1"]["fills_total"]
+    )
+    # w2 traded only the spanning market: counted, disclosed, never windowed,
+    # and NOT confused with the embargo.
     assert int(rows["w2"]["fills_total"]) == 2
     assert int(rows["w2"]["fills_ranking_window"]) == 0
     assert int(rows["w2"]["fills_evaluation_window"]) == 0
     assert int(rows["w2"]["fills_split_spanning"]) == 2
+    assert int(rows["w2"]["fills_label_embargoed"]) == 0
     assert summary["wallets_in_both_windows"] == 1
     assert summary["wallets_scored"] == 2
+
+
+def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):
+    """A wallet with no measurable fill must appear, disclosed, not vanish.
+
+    Opening the wallet's accounting only after the forward-price lookup meant a
+    wallet whose every fill lacked a forward price was absent from the artifact
+    entirely -- indistinguishable from a wallet that never traded (Codex P2 on
+    #451). "Was not measurable" and "did not trade" are different facts.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _features(cfg, "tok-ok", [(310, 0.70)])
+    # tok-none has NO feature rows at all: every fill on it is unmeasurable.
+    trades = [
+        {"market": "0xok", "asset_id": "tok-ok", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0},
+        {"market": "0xnone", "asset_id": "tok-none", "wallet": "w2", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1},
+        {"market": "0xnone", "asset_id": "tok-none", "wallet": "w2", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 2},
+    ]
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        trades,
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert "w2" in rows, "a wallet whose fills were all unmeasurable must still be emitted"
+    assert int(rows["w2"]["fills_missing_price"]) == 2
+    assert int(rows["w2"]["fills_total"]) == 0
+    assert rows["w2"]["markout_mean_total"] == ""
+    # The market it traded is still credited as touched: it did trade there.
+    assert int(rows["w2"]["markets_touched"]) == 1
+    assert int(rows["w1"]["fills_missing_price"]) == 0
+    assert int(rows["w1"]["fills_total"]) == 1
+    assert summary["wallets_scored"] == 2
+
+
+def test_disabled_flow_toxicity_clears_the_wallet_artifact(tmp_path):
+    """Disabled must not leave last run's rankings on disk looking current.
+
+    The disabled early return precedes every artifact write, so a stale
+    flow_toxicity_wallets.csv survived with its own generated_at_utc and read
+    as current (Codex P2 on #451). The wallet artifact is new in this change,
+    so its disabled-path behaviour is ours to define: header-only.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+    wallet_path = cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv"
+
+    assert build_flow_toxicity(cfg)["status"] == "ok"
+    assert len(read_csv_rows(wallet_path)) == 1
+
+    raw = yaml.safe_load(Path(cfg.path).read_text(encoding="utf-8"))
+    raw["flow_toxicity"]["enabled"] = False
+    Path(cfg.path).write_text(yaml.safe_dump(raw), encoding="utf-8")
+    disabled_cfg = load_config(Path(cfg.path))
+
+    assert build_flow_toxicity(disabled_cfg)["status"] == "disabled"
+    assert wallet_path.exists(), "the artifact stays, cleared -- absence is not a disclosure"
+    assert read_csv_rows(wallet_path) == []
+    header = wallet_path.read_text(encoding="utf-8").splitlines()[0]
+    assert "fills_label_embargoed" in header and "fills_missing_price" in header
 
 
 def test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged(tmp_path):

@@ -70,7 +70,9 @@ WALLET_MARKOUT_FIELDS = [
     "fills_evaluation_window",
     "markout_mean_evaluation_window",
     "fills_split_spanning",
+    "fills_label_embargoed",
     "fills_stale_price_excluded",
+    "fills_missing_price",
     "markets_touched",
     # AGENTS.md artifact-level provenance invariant: every NEW artifact states
     # both flags itself; the summary's copy does not satisfy it.
@@ -270,12 +272,24 @@ def _markout_stats(
         stamp = float(trade["stamp"])
         low, high = market_bounds.get(market_key, (stamp, stamp))
         market_bounds[market_key] = (min(low, stamp), max(high, stamp))
+    # EMBARGO (Codex P2 on #451). A fill's markout LABEL is a price read one
+    # horizon after the fill, so a market whose last fill lands just before the
+    # split has its label observed AFTER evaluation fills have already begun.
+    # Ranking would then be scored partly on the evaluation period - the leak
+    # the chronological split exists to prevent. A market qualifies as
+    # "ranking" only when its label window also closes before the split
+    # (high + horizon < split); one that would otherwise rank but whose label
+    # crosses the split is EXCLUDED fail-closed and disclosed per wallet as
+    # fills_label_embargoed, kept separate from fills_split_spanning so the two
+    # exclusion reasons stay distinguishable.
     market_window: dict[str, str] = {}
     for market_key, (low, high) in market_bounds.items():
-        if high < split_stamp:
+        if high + horizon_seconds < split_stamp:
             market_window[market_key] = "ranking"
         elif low >= split_stamp:
             market_window[market_key] = "evaluation"
+        elif high < split_stamp:
+            market_window[market_key] = "label_embargoed"
         else:
             market_window[market_key] = "spanning"
     # A markout meant to measure the configured horizon, read from a price more
@@ -310,17 +324,14 @@ def _markout_stats(
                     "missing_prices": 0,
                 },
             )
-            if current_feature is None:
-                market_stats["missing_prices"] += 1
-                continue
-            later = float(current_feature[1])
-            markout = later - float(trade["price"])
-            if trade["side"] == "SELL":
-                markout = -markout
-            tier = "smart" if trade["wallet"] and trade["wallet"] in top_wallets else "crowd"
-            market_stats[f"{tier}_count"] += 1
-            market_stats[f"{tier}_sum"] += markout
+            # Wallet accounting is opened BEFORE the forward-price lookup can
+            # `continue` (Codex P2 on #451). Creating it after the
+            # missing-price branch meant a wallet whose every fill lacked a
+            # forward price vanished from the artifact entirely - read as "did
+            # not trade" when the truth is "was not measurable", the failure
+            # mode the coverage columns exist to make visible.
             wallet = str(trade["wallet"] or "").strip().lower()
+            entry: dict[str, Any] | None = None
             if wallet:
                 entry = wallet_stats.setdefault(
                     wallet,
@@ -332,19 +343,34 @@ def _markout_stats(
                         "fills_evaluation": 0,
                         "markout_evaluation": 0.0,
                         "fills_split_spanning": 0,
+                        "fills_label_embargoed": 0,
                         "fills_stale_price_excluded": 0,
+                        "fills_missing_price": 0,
                         "markets": set(),
                     },
                 )
                 entry["markets"].add(market)
+            if current_feature is None:
+                market_stats["missing_prices"] += 1
+                if entry is not None:
+                    entry["fills_missing_price"] += 1
+                continue
+            later = float(current_feature[1])
+            markout = later - float(trade["price"])
+            if trade["side"] == "SELL":
+                markout = -markout
+            tier = "smart" if trade["wallet"] and trade["wallet"] in top_wallets else "crowd"
+            market_stats[f"{tier}_count"] += 1
+            market_stats[f"{tier}_sum"] += markout
+            if entry is not None:
                 if float(current_feature[0]) - target > staleness_tolerance:
                     entry["fills_stale_price_excluded"] += 1
                     continue
                 entry["fills_total"] += 1
                 entry["markout_total"] += markout
                 window = market_window.get(market, "spanning")
-                if window == "spanning":
-                    entry["fills_split_spanning"] += 1
+                if window in {"spanning", "label_embargoed"}:
+                    entry["fills_split_spanning" if window == "spanning" else "fills_label_embargoed"] += 1
                 else:
                     entry[f"fills_{window}"] += 1
                     entry[f"markout_{window}"] += markout
@@ -426,6 +452,14 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
     }
     if str(settings.get("enabled", True)).strip().lower() in {"0", "false", "no"}:
         write_json(summary_path, summary)
+        # This early return precedes every artifact write, so the previous
+        # enabled run's wallet rows would survive on disk with their own
+        # generated_at_utc and be read as current rankings (Codex P2 on #451).
+        # The wallet artifact is NEW here, so its disabled-path behaviour is
+        # ours to define: clear it to a header-only file. flow_toxicity.csv's
+        # long-standing stale-on-disabled behaviour is deliberately NOT touched
+        # - changing a registered artifact is its own change, not a rider.
+        write_csv(out_root / "flow_toxicity_wallets.csv", [], fieldnames=WALLET_MARKOUT_FIELDS)
         return summary
     trades = _trade_rows(cfg)
     top_wallets, missing_wallet_data = _top_wallets(cfg)
@@ -516,7 +550,9 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
             "fills_evaluation_window": entry["fills_evaluation"],
             "markout_mean_evaluation_window": _mean(entry["markout_evaluation"], entry["fills_evaluation"]),
             "fills_split_spanning": entry["fills_split_spanning"],
+            "fills_label_embargoed": entry["fills_label_embargoed"],
             "fills_stale_price_excluded": entry["fills_stale_price_excluded"],
+            "fills_missing_price": entry["fills_missing_price"],
             "markets_touched": len(entry["markets"]),
             "paper_trading_invoked": False,
             "live_trading_invoked": False,
@@ -537,6 +573,10 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
                 1 for row in wallet_rows if row["fills_ranking_window"] and row["fills_evaluation_window"]
             ),
             "wallet_output_path": str(wallet_path),
+            # States the embargo so a reader of the summary alone cannot assume
+            # the chronological split is a bare median: a ranking market's label
+            # window must also close before the split.
+            "wallet_ranking_embargo_seconds": horizon,
             "trades_seen": len(trades),
             "missing_wallet_data": missing_wallet_data,
             "price_index_strategy": "disk_backed_streaming_sqlite",

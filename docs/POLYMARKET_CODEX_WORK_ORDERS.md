@@ -16992,9 +16992,17 @@ the charter WP status with a dated "Landed:" note at land time, and WP8 is the e
                                                  attributing against it scores a line that never
                                                  closed — today it IS attributed [Codex P1-d])
         4 "unattributable_unparseable_line"    — CLV row present; line_price missing/""/unparseable
-        5 "unattributable_no_entry_mid"        — line parses finite; entry mid missing OR present-
-                                                 but-unparseable — the ONLY cause that judges the mid
-                                                 [Codex P1-b]
+        5 "unattributable_no_entry_mid"        — line parses finite; entry mid missing, OR present-
+                                                 but-unparseable, OR parseable and finite but OUTSIDE
+                                                 the open interval (0, 1) — the ONLY cause that judges
+                                                 the mid [Codex P1-b]. The domain clause is registered
+                                                 because _entry_mid (edge_attribution.py:91-101)
+                                                 requires 0 < value < 1: market_midpoint="0" and "1"
+                                                 PARSE via safe_float and are FINITE, so they clear
+                                                 causes 1 and 2, yet _entry_mid returns None and :129
+                                                 returns None. Without this clause they match no
+                                                 registered cause and the enum in 1a is not closed
+                                                 [Codex wave-3]. A mid of exactly 0 or 1 is not a mid.
         6 "attributed"                         — everything above passed
       (Order note: 3-5 are reachable only when 1-2 pass on position-side fields; line-side nonfinite
       is caught at 2 only when the row exists and parses — a "nan" string PARSES, so it lands in 2;
@@ -17056,7 +17064,9 @@ threshold, policy or sizing surface.
 
 ## Fail-safe (unchanged from v2; C1-verified)
 Diagnostic only; field-projection identity for attributed rows (existing fields value-identical on
-identical inputs; the one new column is additive). New accounting raises loudly; blast radius stated:
+identical inputs; the TWO new columns enumerated in 1e — attribution_status and realised_pnl_usdc —
+are additive, and no existing column is renamed, reordered or removed [Codex wave-3: this sentence
+previously said "one new column", contradicting 1e]). New accounting raises loudly; blast radius stated:
 progress.run re-raises (refresh_governance.py:138), aborting the downstream governance stages of that
 cycle (17 in the scheduler invoker at run_vps_ops_scheduler.sh:443; 16 in
 run_polymarket_local_live_loop.py:1010, which skips dashboard). Correct direction: the model-critical
@@ -17081,6 +17091,10 @@ fresh-but-wrong. This paragraph must survive as a code comment.
    to "attributed"]; verbatim strings carried, nothing coerced.
 6. Valid finite line, missing entry mid -> cause 5; AND present-but-unparseable mid
    (market_midpoint="junk", no valid fallback) -> cause 5, never cause 1 [Codex P1-b];
+   AND parseable-and-finite but out-of-domain mid (market_midpoint="0", separately "1",
+   separately "-0.2", separately "1.4", no valid fallback) -> cause 5, never cause 2 and never
+   "attributed" [Codex wave-3: these clear the finite guard and are rejected only by _entry_mid's
+   0 < value < 1 domain check at edge_attribution.py:91-101];
    AND missing entry mid with line_price="nan" ->
    cause 2 (the nonfinite line is judged before the missing mid; the mid-missing x nan-line cell is
    pinned so no literal reading of cause 2's antecedent can exclude it [R4-a]).
@@ -17107,6 +17121,15 @@ fresh-but-wrong. This paragraph must survive as a code comment.
     COHORT unattributable_realised_pnl_usdc is also finite [Codex P1-f].
 13. Emitted CSV header contains attribution_status AND realised_pnl_usdc [G2 — pins the
     extrasaction="ignore" silent-drop mode shut].
+14. Overflow regression for 1c's loud-raise rule [Codex wave-3 — 1c mandates it and no test
+    enumerated it, so the rule could ship unimplemented and pass]: two unattributable rows whose
+    realised_pnl_usdc values are each INDIVIDUALLY finite but whose sum overflows IEEE754 double
+    ("1.7e308" and "1.7e308", each finite, sum == inf). Assert the run RAISES rather than emitting
+    a non-finite unattributable_realised_pnl_usdc; assert no edge_attribution.json is left carrying
+    Infinity; assert unattributable_pnl_unparseable_count does NOT absorb them (both values are
+    parseable and finite — the counter in 1c counts unparseable/non-finite INPUTS, not an overflowing
+    OUTPUT). Same assertion for a cohort-level sum that overflows [1d applies the same rule one level
+    down].
 
 ## Day-after check [N7 cured]
 Read edge_attribution.json AND governance_refresh_status.json on the first post-deploy cycle:
@@ -17118,7 +17141,14 @@ either way outside the bounds the check FAILS and the cause is named before the 
 [Codex P1-g]; unattributable_realised_pnl_usdc
 PRESENT and FINITE and unattributable_pnl_unparseable_count PRESENT — with skipped > 0 a null/absent
 dropped-mass sum means the core accounting this WO exists for did not ship, and the check FAILS
-[Codex P2]; governance cycle completion stamp
-fresh in governance_refresh_status.json (proves the accounting did not raise). Vacuous state: zero
+[Codex P2]; governance cycle completion stamp fresh in
+governance_refresh_status.json — the field is literally `completed_at_utc`, written by
+refresh_governance.py:146 as self._write("ok", completed_at_utc=now_utc()), and "fresh" means
+status == "ok" AND now_utc() - completed_at_utc <= 12 hours, the literal bound [Codex wave-3: an
+unbounded "fresh" passes against a stamp of any age, so a raise that aborts every post-deploy cycle
+would be read as a pass. Basis: GOVERNANCE_INTERVAL defaults to 21600s = 6h
+(run_vps_ops_scheduler.sh:23, matching the "every 6h" cadence in its header at :8); 12h is 2x that,
+one missed cycle of tolerance]. An absent or stale stamp FAILS the check (it proves the accounting DID raise,
+which is the mode 1c's loud-raise rule creates). Vacuous state: zero
 closed positions -> "not performed". Falsifier: any consumer rendering skipped as 0 while the summary
 shows >0; counts that do not sum; a missing histogram key.

@@ -998,12 +998,26 @@ def test_a_malformed_markout_horizon_fails_closed(tmp_path):
     raw["flow_toxicity"]["markout_horizon_minutes"] = "not-a-number"
     Path(cfg.path).write_text(yaml.safe_dump(raw), encoding="utf-8")
 
+    market_path = cfg.output_root / "maker_carry" / "flow_toxicity.csv"
+    market_path.unlink()
+
     with pytest.raises(ValueError, match="finite positive number"):
         build_flow_toxicity(load_config(Path(cfg.path)))
 
     rows = read_csv_rows(wallet_path)
     assert len(rows) == 1
     assert rows[0]["artifact_status"] == "invalid_markout_horizon"
+    # The toxicity VETO must stay current: its fields come from trade volume
+    # buckets and do not depend on the horizon (Codex P1 wave-14). Leaving the
+    # previous table meant a market that had turned toxic kept reading clean;
+    # DELETING it would be worse still, since requote_alerts treats an absent
+    # record as no block at all.
+    assert market_path.exists()
+    market_rows = read_csv_rows(market_path)
+    assert len(market_rows) == 1 and market_rows[0]["market"] == "0xa"
+    assert market_rows[0]["vpin_raw"] != ""
+    # Markout columns are empty, because every markout is horizon-relative.
+    assert market_rows[0]["smart_fill_markout"] == ""
 
 
 def test_unproven_availability_cannot_enter_the_ranking_window(tmp_path):
@@ -1049,6 +1063,35 @@ def test_unproven_availability_cannot_enter_the_ranking_window(tmp_path):
     # unaffected.
     assert int(rows["w1"]["fills_total"]) == 3
     assert int(rows["w1"]["fills_evaluation_window"]) == 2
+
+
+def test_unavailable_leaderboard_is_not_reported_as_confirmed_absence(tmp_path):
+    """Unknown membership must not render as a definite False.
+
+    With leaderboard_history.csv absent, _top_wallets returns an empty set and
+    every wallet was emitted with on_current_leaderboard=False and
+    artifact_status="ok" -- so "confirmed absent from the current leaderboard"
+    and "membership could not be determined" were indistinguishable, and a
+    potentially ranked wallet read as definitively unranked (Codex P2 wave-14).
+    """
+    cfg = _config(tmp_path)
+    # No _leaderboard(cfg): the dependency is missing.
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert rows["w1"]["on_current_leaderboard"] == "unknown"
+    assert rows["w1"]["artifact_status"] == "leaderboard_unavailable"
+    # Still measured -- markouts do not depend on the leaderboard.
+    assert float(rows["w1"]["markout_mean_total"]) == 0.2
+    assert summary["missing_wallet_data"] is True
 
 
 def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):

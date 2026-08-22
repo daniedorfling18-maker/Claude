@@ -323,6 +323,24 @@ def _build_price_index(
     return scanned_rows, indexed_rows
 
 
+def _finite_number(value: Any) -> float | None:
+    """A finite float, or None if the value is not one.
+
+    Booleans are rejected BEFORE conversion: safe_float(True) is 1.0 and
+    safe_float(False) is 0.0, so a JSON/YAML boolean sails through any plain
+    finite check. That has now been a separate finding three waves running --
+    split_stamp (wave-10), markout_horizon_minutes (wave-13), markets_polled
+    (wave-14) -- so the guard lives in one place rather than being rediscovered
+    per field.
+    """
+    if isinstance(value, bool):
+        return None
+    number = safe_float(value)
+    if number is None or not math.isfinite(number):
+        return None
+    return number
+
+
 def _split_stamp_value(persisted: Any) -> float | None:
     """The frozen split_stamp, or None if the state is not usable.
 
@@ -336,11 +354,8 @@ def _split_stamp_value(persisted: Any) -> float | None:
     """
     if not isinstance(persisted, dict):
         return None
-    raw = persisted.get("split_stamp")
-    if isinstance(raw, bool):
-        return None
-    value = safe_float(raw)
-    if value is None or not math.isfinite(value) or value < 0:
+    value = _finite_number(persisted.get("split_stamp"))
+    if value is None or value < 0:
         return None
     return value
 
@@ -360,11 +375,8 @@ def _frozen_horizon_mismatch(persisted: Any, horizon_seconds: float) -> bool:
     """
     if not isinstance(persisted, dict):
         return True
-    recorded = persisted.get("horizon_seconds")
-    if isinstance(recorded, bool):
-        return True
-    value = safe_float(recorded)
-    if value is None or not math.isfinite(value):
+    value = _finite_number(persisted.get("horizon_seconds"))
+    if value is None:
         return True
     return abs(value - horizon_seconds) > 1e-9
 
@@ -522,14 +534,14 @@ def _trade_corpus_status(cfg: EngineConfig) -> str:
         # markets_polled at all, so treating a missing field as "did not poll"
         # would disqualify a producer that legitimately refreshed the ledger.
         # (I wrote that broader version first; the registered tests rejected it.)
-        polled = safe_float(payload.get("markets_polled"))
+        polled = _finite_number(payload.get("markets_polled"))
         source_state = str(payload.get("market_source_status") or "").strip().lower()
         # A count must be finite and positive: safe_float returns None for
         # garbage and NaN makes `polled <= 0` false, so both would otherwise
         # sail through as valid poll evidence (Codex P1 wave-12). For the two
         # producers that always publish the field, ABSENT is also disqualifying
         # (Codex P1 wave-13).
-        bad_count = polled is None or not math.isfinite(polled) or polled <= 0
+        bad_count = polled is None or polled <= 0
         if polled_required:
             no_poll = source_state == "empty" or bad_count
         else:
@@ -572,6 +584,14 @@ def _markout_stats(
 
     stats: dict[str, dict[str, float | int]] = {}
     wallet_stats: dict[str, dict[str, Any]] = {}
+    # S1 CONTRACT: the ranking and evaluation windows here are DATA-RELATIVE --
+    # derived from the corpus median fill time and from observed fill/feature
+    # timestamps, never from the run clock. Engineering Standards S1 permits
+    # that only for replaying RECORDED HISTORY, which is exactly what this is:
+    # a backward-looking markout replay over an immutable trade ledger. It is
+    # NOT a freshness window and must never be read as one -- nothing here says
+    # anything about whether the corpus is current. Corpus currency is a
+    # separate question, answered by the producer-status rule.
     # Median fill time splits the sample chronologically, and the split is by
     # WHOLE MARKET, not by fill: a wallet trading one market on both sides of
     # the median would let market-specific effects observed during ranking
@@ -842,21 +862,26 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
     # silently score both axes at a ONE-MINUTE horizon and permanently freeze
     # that unintended horizon while publishing healthy-looking artifacts (Codex
     # P2 wave-13). Rejected before conversion, as the split-state validators do.
-    horizon_raw = None if isinstance(horizon_setting, bool) else safe_float(horizon_setting)
-    if horizon_raw is None or not math.isfinite(horizon_raw) or horizon_raw <= 0:
-        summary["status"] = "invalid_markout_horizon"
-        write_json(summary_path, summary)
+    horizon_raw = _finite_number(horizon_setting)
+    invalid_horizon = horizon_raw is None or horizon_raw <= 0
+    if invalid_horizon:
+        # DETECTED here, RAISED after the market axis is rebuilt (Codex P1
+        # wave-14). Raising here left the previous flow_toxicity.csv intact,
+        # so requote_alerts.py and stage_ticket_eligibility.py kept reading a
+        # formerly-clean toxicity row after the flow turned toxic -- the same
+        # defect wave-11 fixed on the split path, which I then recreated on this
+        # one. Invalidating the market artifact instead would be WORSE: absent
+        # rows make requote_alerts' `tox_record` None and the veto fails OPEN
+        # for every market, where a stale row at least still blocks the markets
+        # it already flagged. So the veto fields, which are computed from trade
+        # volume buckets and do NOT depend on the horizon, are rebuilt; only the
+        # markout columns are left empty.
         write_csv(
             out_root / "flow_toxicity_wallets.csv",
             [_wallet_sentinel_row(generated_at, "invalid_markout_horizon")],
             fieldnames=WALLET_MARKOUT_FIELDS,
         )
-        raise ValueError(
-            "flow_toxicity.markout_horizon_minutes must be a finite positive number; got "
-            f"{settings.get('markout_horizon_minutes')!r}. The wallet artifact has been "
-            "invalidated so no stale ranking is readable."
-        )
-    horizon = horizon_raw * 60.0
+    horizon = (horizon_raw or 5.0) * 60.0
 
     # DETECT here, but do NOT raise here (Codex P1 wave-11 on #451). Raising
     # before the market-axis rebuild was a safety regression I introduced in
@@ -899,7 +924,10 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
     feature_rows_scanned = 0
     feature_rows_indexed = 0
     price_index_disk_bytes = 0
-    if trades:
+    # Skipped entirely on an invalid horizon: every markout is defined relative
+    # to it, so none can be computed. The veto fields below come from trade
+    # volume buckets and are horizon-independent, so they still rebuild.
+    if trades and not invalid_horizon:
         with TemporaryDirectory(prefix="polymarket-flow-toxicity-") as temp_dir:
             database_path = Path(temp_dir) / "price_index.sqlite3"
             connection = sqlite3.connect(database_path)
@@ -970,6 +998,16 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
             }
         )
     write_csv(path, rows_out, fieldnames=TOXICITY_FIELDS)
+    if invalid_horizon:
+        summary["status"] = "invalid_markout_horizon"
+        summary["markets_scored"] = len(rows_out)
+        write_json(summary_path, summary)
+        raise ValueError(
+            "flow_toxicity.markout_horizon_minutes must be a finite positive number; got "
+            f"{settings.get('markout_horizon_minutes')!r}. The wallet artifact has been "
+            "invalidated so no stale ranking is readable; the market-axis veto fields WERE "
+            "rebuilt, with the markout columns left empty, so the toxicity veto stays current."
+        )
     if invalid_split_state:
         # The market axis is now current on disk, so the toxicity veto is not
         # frozen by a wallet-side fault. Only now does the run fail loudly.
@@ -992,7 +1030,13 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
             "generated_at_utc": generated_at,
             "artifact_status": "ok",
             "wallet": wallet,
-            "on_current_leaderboard": wallet in top_wallets,
+            # "unknown" when the leaderboard itself was unavailable (Codex
+            # P2 wave-14). Rendering it as False made "confirmed absent from the
+            # current leaderboard" indistinguishable from "membership could not
+            # be determined", so a potentially ranked wallet was reported as
+            # definitively unranked. The summary's missing_wallet_data flag does
+            # not reach a reader of this CSV.
+            "on_current_leaderboard": "unknown" if missing_wallet_data else (wallet in top_wallets),
             "fills_total": entry["fills_total"],
             "markout_mean_total": _mean(entry["markout_total"], entry["fills_total"]),
             "fills_ranking_window": entry["fills_ranking"],
@@ -1013,6 +1057,12 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
     # Summary aggregates are computed over the SCORED rows only; a sentinel
     # carries no window counters and must never be counted as a scored wallet.
     scored_wallet_rows = wallet_rows
+    if missing_wallet_data and wallet_rows:
+        # The rows are still measured -- markouts do not depend on the
+        # leaderboard -- but the artifact must say its membership column is
+        # unresolved rather than presenting it as an ordinary result.
+        for row in wallet_rows:
+            row["artifact_status"] = "leaderboard_unavailable"
     if trade_corpus_status != "ok":
         # The dependency is stale, partial, or unreported. Every row is STAMPED
         # with the upstream state rather than the artifact being blanked (Codex

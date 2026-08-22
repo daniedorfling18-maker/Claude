@@ -2156,117 +2156,79 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
 
 ## ENUMERATED OFFLINE TESTS (S8/A10) [Codex P1 wave-8 on #451]
 
-Required and previously absent: this amendment named the test file but enumerated no wallet-axis
-tests, and the parent's generic sentence covers only the market axis — it cannot specify the frozen
-split, embargo, staleness, sentinel or upstream-failure paths. WO-151 was found undispatchable for
-exactly this omission (see §151.1), so the same standard applies here. All THIRTY-TWO live in
-tests/polymarket_predictive_engine/test_flow_toxicity.py.
-Counted as thirty-two: items 1-24, the lettered cases 16a and 19a, and the six later additions
-enumerated as 25-30 below. All are separate test functions [S8/A7 requires a registered count to be
-true; this count has now been corrected three times — 24, then 26, then 31 — because each review wave
-added tests and I updated the matrix without updating the total. It is verified against
-`grep -c "^def test_"` rather than counted by hand].
+Required and previously absent. Keyed to FUNCTION NAME rather than to a hand-kept number [Codex P1
+wave-14]: the numbered form drifted three times (24, 26, 31, 32 — each wave added tests and I updated
+the matrix without the total), and even when the count was right the MAPPING was wrong — one tested
+behaviour was missing from the list while another entry claimed a standalone test that did not exist.
+A name-keyed list is checkable with `grep -c '^def test_'` and by diffing the names, which is how this
+one is verified. All 33 live in tests/polymarket_predictive_engine/test_flow_toxicity.py.
 
-25. A wallet-side fault does NOT freeze the toxicity veto. FIXTURE: a healthy run over 20 fills on
-    one market; then corrupt flow_toxicity_wallet_split.json to `{"split_stamp": true}` and delete
-    flow_toxicity.csv. EXPECT: the run RAISES, AND flow_toxicity.csv exists again with its one market
-    row, AND the wallet CSV holds exactly one sentinel with artifact_status
-    "invalid_frozen_split_state".
-26. An "ok" status without poll evidence is not a refresh. FIXTURE: primary "disabled", replay
-    {status ok, markets_polled 0, market_source_status "empty"}, backfill "no_candidate_markets".
-    EXPECT trade_corpus_status == "no_producer_refreshed" and NO split file. Then set replay to
-    {ok, markets_polled 3, market_source_status "websocket"}: EXPECT "ok".
-27. A delayed feature does not hide the usable one. FIXTURE: fill at t=0 (target 300); features
-    (source 310, collected 1000, 0.90) and (source 320, collected 320, 0.70). EXPECT the 0.70 row is
-    selected — markout_mean_total == +0.20 — and fills_stale_price_excluded == 0.
-28. Features with a PRESENT but invalid collection time are rejected, not defaulted. FIXTURE:
-    (source 310, collected "junk", 0.90) and (source 330, collected 330, 0.70). EXPECT
-    markout_mean_total == +0.20 (the junk row dropped). An ABSENT column is different and still
-    falls back to the venue stamp.
-29. A malformed markout_horizon_minutes fails closed. FIXTURE: a healthy run, then set the setting
-    to "not-a-number". EXPECT the run RAISES and the wallet CSV holds one sentinel with
-    artifact_status "invalid_markout_horizon" — configuration corruption must not leave the previous
-    artifact_status="ok" rows readable. YAML `true` is rejected the same way, since safe_float(True)
-    is 1.0 and would otherwise silently score both axes at a ONE-MINUTE horizon and freeze that
-    unintended horizon while publishing healthy-looking artifacts [Codex P2 wave-13].
-30. A label with unproven availability cannot rank. FIXTURE: tok-a feature (source 310,
-    collected_at_utc BLANK, 0.70) with a fill at t=0; tok-e features (1310, 1315) with fills at 1000
-    and 1010. SPLIT == 1000, so 0xa would rank on fill time (0 + 300 < 1000). EXPECT
-    fills_ranking_window == 0, fills_label_embargoed == 1, fills_total == 3,
-    fills_evaluation_window == 2 — barred from ranking, still measured.
-
- 1. Planted toxic flow scores above balanced flow (parent WO-49 null test, unchanged).
- 2. Wallet-tier markout split arithmetic (parent, unchanged).
- 3. Missing WO-37 wallet intelligence is tolerated (parent, unchanged).
- 4. Feature archives and trade prints are STREAMED, not bulk-loaded (parent, 2 GiB constraint).
- 5. The absolute raw-imbalance floor blocks a one-sided market the percentile would de-veto (parent).
- 6. A wallet OFF the leaderboard is still measured, and marks out identically to one on it.
-    FIXTURE: leaderboard holds only "smart1"; both smart1 and unranked9 BUY tok at 0.50, feature
-    0.70 inside the window. EXPECT: both rows present, on_current_leaderboard True/False
-    respectively, markout_mean_total == 0.70 - 0.50 == +0.20 for BOTH and exactly equal,
-    wallets_scored == 2.
- 7. Whole-market window split WITH the label embargo. FIXTURE, horizon 300: A = fills at t=0,1
-    (labels 300/301, feature 310); D = fill at t=900 (label 1200, feature 1210); B = fills at
-    t=1000,1001,1005 (feature 1310); C = fills at t=2 and 1002 (features 310, 1310). Sorted stamps
-    [0,1,2,900,1000,1001,1002,1005], n=8, n//2=4 -> SPLIT == 1000.
-    EXPECT w1: fills_total 6; ranking 2 (A: 1+300 < 1000); evaluation 3 (B: low >= 1000);
-    label_embargoed 1 (D: 900 < 1000 <= 900+300); split_spanning 0. EXPECT w2 (C only):
-    fills_total 2, spanning 2, ranking 0, evaluation 0, embargoed 0. wallets_in_both_windows == 1.
-    The four window counters sum to 6; ranking + evaluation == 5 != 6.
- 8. A nominally-ranking fill whose SELECTED feature timestamp is >= split is embargoed.
-    FIXTURE, horizon 300: tok-r fill at t=600 (target 900), its ONLY feature at t=1100 (200s late,
-    inside the 300s staleness ceiling); tok-e fills at t=1000,1010, features at 1310/1315/1320.
-    Stamps [600,1000,1010], n=3, n//2=1 -> SPLIT == 1000. Market 0xr passes the NOMINAL test
-    (600+300 == 900 < 1000). EXPECT: ranking 0, label_embargoed 1, evaluation 2, fills_total 3,
-    markout_mean_ranking_window == "" (the +0.40 move never reaches the ranking mean).
- 9. A ranking label whose VENUE stamp precedes the split but whose COLLECTION stamp follows it is
-    embargoed. FIXTURE: tok-r feature source_timestamp 900, collected_at_utc 1100; fill at t=600
-    (target 900); tok-e fills at 1000,1010 with features at 1310/1315. SPLIT == 1000.
-    EXPECT: ranking 0, label_embargoed 1, markout_mean_ranking_window == "".
-10. A wallet whose every fill lacks a forward price is still emitted, with fills_missing_price set
-    and markets_touched credited.
-11. Stale prices rejected: a price outside [target, target + horizon] counts as
-    fills_stale_price_excluded, and the market-axis columns keep the parent lookup.
-12. The wallet artifact states its own paper/live invocation flags.
-13. Disabled clears the artifact to a single sentinel row carrying artifact_status="disabled" and
-    both flags false; the previous run's rankings are gone.
-14. An enabled run scoring zero wallets emits the "no_wallets_scored" sentinel, and the sentinel is
-    NOT counted in wallets_scored.
-15. A not-ok upstream STAMPS every row upstream_<status> and keeps it measured (rule 8).
-    FIXTURE: trade_prints_summary "ok", maker_portfolio "ok", backfill "partial"; one fill, one
-    feature. EXPECT: artifact_status == "upstream_partial", fills_total == 1 (still measured, not
-    blanked), summary trade_corpus_status == "partial". One bad writer of the shared ledger is
-    enough.
-16. NO PRODUCER REFRESHED is not a current corpus. FIXTURE: all three summaries "disabled".
-    EXPECT: trade_corpus_status == "no_producer_refreshed", rows stamped
-    "upstream_no_producer_refreshed", and flow_toxicity_wallet_split.json does NOT exist.
-16a. RESTING no-ops do NOT veto [wave-9]. FIXTURE: trade_prints_summary "ok", maker_portfolio
-    "disabled", backfill "skipped_all_completed". EXPECT: trade_corpus_status == "ok",
-    artifact_status == "ok", split file EXISTS. Repeat with backfill "no_candidate_markets":
-    identical result. Both are set in an elif chain AFTER the error check
-    (trade_print_collector.py:666-673) and mean the producer ran with nothing to do.
-17. Non-finite TRADE prices/sizes rejected at ingestion; malformed_trade_rows_excluded counts them;
-    the market axis sees the same rejection (trades_seen excludes them).
-18. Non-finite FEATURE midpoints rejected before indexing: the build completes and scores from the
-    finite point rather than aborting on the NOT NULL insert.
-19. The split is frozen across runs. FIXTURE: run 1 has fills at t=0 (tok-a) and t=300 (tok-b),
-    features 310/610; run 2 adds fills at t=900 and t=1200. EXPECT run 1:
-    wallet_split_was_frozen False, split file written, split_stamp recorded. EXPECT run 2:
-    wallet_split_was_frozen True and split_stamp BYTE-EQUAL to run 1's, even though the new
-    corpus median is later.
-19a. Same-stamp feature ties break on OBSERVATION time, not price [wave-9]. FIXTURE: one fill at
-    t=0 (target 300); two features both source_timestamp 310, one collected_at_utc 320 with
-    midpoint 0.70 and one collected_at_utc 400 with midpoint 0.60. EXPECT: the 320-collected row
-    wins, so markout_mean_total == 0.70 - 0.50 == +0.20. A midpoint tiebreak would select 0.60 and
-    give +0.10, so the assertion distinguishes the two orderings. Note this must hold at BOTH
-    tie-break sites: the SQL ORDER BY, and the tail_candidates tuple comparison that picks the
-    single retained row when candidates fall past the target bound.
-20. A stale corpus persists NO split state at all.
-21. A corrupt split state raises AND invalidates the wallet artifact first, so no stale "ok" row
-    survives the failure.
-22. The split artifact states its own invocation flags and publishes corpus_rows_at_freeze.
-23. CLI registration for `flow-toxicity`.
-24. The market-axis table is unchanged in schema and method across all of the above.
+ 1. `test_planted_toxic_flow_scores_above_balanced_flow`
+    Parent WO-49 null test: planted toxic flow scores 1.0, balanced 0.0, and toxic VPIN > balanced.
+ 2. `test_wallet_tier_markout_split_arithmetic`
+    Parent: smart/crowd markout split arithmetic.
+ 3. `test_missing_wallet_intelligence_is_tolerated`
+    Parent: absent WO-37 leaderboard data does not abort the run.
+ 4. `test_feature_archives_and_trade_prints_are_streamed_not_bulk_loaded`
+    Parent: corpora are streamed, not bulk-loaded (the 2 GiB scheduler constraint).
+ 5. `test_quote_sheet_surfaces_toxicity_column_and_rule`
+    Parent: the quote sheet carries the toxicity column and standing rule 8.
+ 6. `test_cli_exposes_flow_toxicity`
+    Parent: the `flow-toxicity` CLI command is registered.
+ 7. `test_absolute_floor_blocks_one_sided_market_the_percentile_would_de_veto`
+    WO-102: the absolute raw-imbalance floor blocks a one-sided market the percentile would de-veto.
+ 8. `test_wallet_markouts_are_published_for_wallets_off_the_leaderboard`
+    A wallet OFF the leaderboard is measured, and marks out identically to one on it: both BUY at 0.50 against a 0.70 feature, markout_mean_total == +0.20 for both, wallets_scored == 2.
+ 9. `test_wallet_markout_windows_split_by_whole_market_with_label_embargo`
+    Whole-market split WITH embargo, horizon 300. Stamps [0,1,2,900,1000,1001,1002,1005] -> SPLIT 1000. w1: fills_total 6, ranking 2, evaluation 3, embargoed 1, spanning 0. w2: fills_total 2, spanning 2. wallets_in_both_windows == 1.
+10. `test_ranking_fill_priced_after_the_split_is_embargoed`
+    Nominal embargo is insufficient: fill at 600 (target 900) priced at 1100, split 1000 -> ranking 0, embargoed 1, evaluation 2, markout_mean_ranking_window empty.
+11. `test_enabled_run_with_no_wallets_still_states_its_evidence_class`
+    An enabled run scoring zero wallets emits the no_wallets_scored sentinel; it is not counted in wallets_scored.
+12. `test_stale_trade_corpus_is_stamped_on_every_wallet_row`
+    A not-ok upstream stamps every row upstream_<status> and keeps it measured, proven with only the BACKFILL producer partial.
+13. `test_non_finite_trade_prices_are_rejected_at_ingestion`
+    Non-finite trade price/size rejected at the boundary; malformed_trade_rows_excluded == 2; the market axis sees the same rejection (trades_seen == 1).
+14. `test_the_ranking_split_is_frozen_across_runs`
+    Run 1 computes and persists the split; run 2 reuses it byte-equal despite a later corpus median.
+15. `test_a_stale_corpus_never_freezes_the_split`
+    A partial corpus persists NO split state, so contamination cannot outlive the run.
+16. `test_a_corrupt_frozen_split_fails_closed`
+    A corrupt split state raises AND invalidates the wallet artifact, so no stale 'ok' row survives.
+17. `test_split_artifact_states_its_own_invocation_flags`
+    The split artifact carries both invocation flags and publishes corpus_rows_at_freeze.
+18. `test_non_finite_feature_midpoints_are_rejected_before_indexing`
+    An inf/nan feature midpoint is rejected before indexing; the build completes and scores from the finite point.
+19. `test_all_producers_disabled_is_not_a_current_corpus`
+    All producers resting -> no_producer_refreshed, rows stamped, no split seeded.
+20. `test_ranking_label_embargoed_by_collection_time_not_venue_stamp`
+    A label sourced 900 but collected 1100 with split 1000 is embargoed, not ranked.
+21. `test_backfill_no_op_statuses_do_not_veto_a_healthy_harvest`
+    skipped_all_completed and no_candidate_markets are resting states; a healthy harvest stays ok and persists the split. A primary summary carrying only status=ok is NOT evidence.
+22. `test_same_stamp_features_break_ties_by_observation_not_price`
+    Same-stamp ties break on availability, not midpoint: the 320-collected 0.70 row wins, markout +0.20 (a midpoint tiebreak would give +0.10).
+23. `test_an_ok_status_without_a_poll_is_not_a_refresh`
+    status=ok with markets_polled 0 / market_source_status empty is not a refresh; markets_polled 3 flips it back.
+24. `test_invalid_split_state_does_not_freeze_the_toxicity_veto`
+    A wallet-side fault raises but the market-axis veto table IS rebuilt first; the wallet artifact is invalidated.
+25. `test_a_delayed_feature_does_not_hide_the_usable_one`
+    A delayed row (source 310, collected 1000) no longer masks a timely one (320): markout +0.20, stale-excluded 0.
+26. `test_features_with_invalid_collection_times_are_rejected`
+    A PRESENT but unparseable collected_at_utc is dropped, not defaulted to the venue stamp.
+27. `test_a_malformed_markout_horizon_fails_closed`
+    A malformed horizon (including YAML true) raises, invalidates the wallet artifact, AND still rebuilds the horizon-independent veto fields with markout columns empty.
+28. `test_unproven_availability_cannot_enter_the_ranking_window`
+    A feature with no collected_at_utc is barred from RANKING but stays measured: ranking 0, embargoed 1, fills_total 3, evaluation 2.
+29. `test_unavailable_leaderboard_is_not_reported_as_confirmed_absence`
+    With the leaderboard absent, on_current_leaderboard is 'unknown' and rows are stamped leaderboard_unavailable, not reported as confirmed False.
+30. `test_wallet_without_any_forward_price_is_still_emitted`
+    A wallet whose every fill lacks a forward price is still emitted, fills_missing_price set, markets_touched credited.
+31. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
+    Disabled replaces the artifact with one sentinel carrying artifact_status=disabled and both flags false.
+32. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
+    A price outside [target, target+horizon] counts as stale-excluded, and the market-axis columns keep the parent lookup.
+33. `test_wallet_artifact_states_its_own_invocation_flags`
+    The wallet CSV states both invocation flags itself.
 
 ## SECOND KNOWN LIMITATION: producer summaries are not bound to a harvest cycle
 

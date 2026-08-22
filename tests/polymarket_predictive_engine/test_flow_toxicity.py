@@ -80,11 +80,21 @@ def _trade_summary(cfg, status: str = "ok", *, only: str | None = None) -> None:
         write_json(root / name, payload)
 
 
-def _leaderboard(cfg) -> None:
+def _leaderboard(cfg, producer_status: str = "ok") -> None:
+    """Leaderboard rows AND the producer summary that vouches for them.
+
+    wallet_intelligence_collector keeps the retained history when a refresh
+    fails, so the rows alone do not establish that membership is current -- the
+    producer's own status does.
+    """
     write_csv(
         cfg.output_root / "wallet_intelligence" / "leaderboard_history.csv",
         [{"snapshot_date": "2026-07-10", "wallet": "smart1", "rank": "1"}],
         fieldnames=["snapshot_date", "wallet", "rank"],
+    )
+    write_json(
+        cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json",
+        {"status": producer_status, "generated_at_utc": "2026-08-22T00:00:00Z"},
     )
 
 
@@ -1149,6 +1159,10 @@ def test_an_unusable_leaderboard_snapshot_is_unavailable_not_empty(tmp_path):
         [{"snapshot_date": "2026-07-10", "wallet": "", "rank": "1"}],
         fieldnames=["snapshot_date", "wallet", "rank"],
     )
+    write_json(
+        cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json",
+        {"status": "ok", "generated_at_utc": "2026-08-22T00:00:00Z"},
+    )
     _trade_summary(cfg)
     _features(cfg, "tok-a", [(310, 0.70)])
     write_csv(
@@ -1192,6 +1206,87 @@ def test_a_changed_horizon_invalidates_the_frozen_split(tmp_path):
 
     wallet_rows = read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")
     assert wallet_rows[0]["artifact_status"] == "invalid_frozen_split_state"
+
+
+def test_a_fill_without_a_venue_timestamp_is_rejected(tmp_path):
+    """Collection time must never stand in for fill time (Codex P1 wave-17).
+
+    trade_print_collector persists a BLANK timestamp when /trades omits both
+    `timestamp` and `matchTime`, beside a collected_at_utc of now(). Falling
+    back made a delayed or backfilled historical fill look as though it occurred
+    when it was FETCHED, moving both its markout target and its window
+    classification by hours or days. This is the same venue-vs-collection
+    conflation fixed on the FEATURE side; it sat on the trade side in the
+    identical `or` idiom.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [
+            {"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5,
+             "size": 100, "timestamp": 0, "collected_at_utc": 0},
+            {"market": "0xa", "asset_id": "tok-a", "wallet": "wnostamp", "side": "BUY", "price": 0.5,
+             "size": 100, "timestamp": "", "collected_at_utc": 99999},
+        ],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp", "collected_at_utc"],
+    )
+
+    build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert set(rows) == {"w1"}, "the fill with no venue timestamp must not be scored at 99999"
+
+
+def test_a_failed_leaderboard_refresh_renders_membership_unknown(tmp_path):
+    """Retained rows survive a failed refresh, so they are not authoritative."""
+    cfg = _config(tmp_path)
+    _leaderboard(cfg, producer_status="failed")
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    # smart1 IS in the retained file, but the refresh failed, so membership is
+    # unknown rather than a definitive True.
+    assert summary["missing_wallet_data"] is True
+    assert rows["smart1"]["on_current_leaderboard"] == "unknown"
+    assert rows["smart1"]["artifact_status"] == "leaderboard_unavailable"
+
+
+def test_a_contended_run_writes_nothing(tmp_path):
+    """The check/create/build sequence around the split is serialised."""
+    from polymarket_predictive_engine.runtime_lock import acquire_runtime_lock, release_runtime_lock
+
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    held = acquire_runtime_lock(cfg, "flow_toxicity")
+    try:
+        summary = build_flow_toxicity(cfg)
+    finally:
+        release_runtime_lock(held)
+
+    assert summary["status"] == "skipped_locked"
+    assert summary["paper_trading_invoked"] is False
+    # Nothing was written: no split state can have been created by the loser.
+    assert not (cfg.output_root / "maker_carry" / "flow_toxicity_wallet_split.json").exists()
+    assert not (cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv").exists()
 
 
 def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):

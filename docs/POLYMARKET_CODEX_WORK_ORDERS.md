@@ -2044,6 +2044,13 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
 2. The split is BY WHOLE MARKET, not by fill (AGENTS.md requires validation chronological and
    out-of-sample by market). A market whose fills straddle the split belongs to NEITHER window and is
    counted as `fills_split_spanning`.
+1a. A FILL WITHOUT A VENUE TIMESTAMP IS REJECTED [Codex P1 wave-17]. `_trade_rows` must read
+   `timestamp` ONLY and never fall back to `collected_at_utc`. trade_print_collector.py:161 persists
+   a BLANK timestamp when /trades omits both `timestamp` and `matchTime`, beside a collected_at_utc
+   of now(), so the fallback made a delayed or backfilled historical fill look as though it occurred
+   when it was FETCHED — moving both its markout target and its ranking/evaluation window by hours or
+   days. This is the same venue-vs-collection conflation rules 2a/4 fix on the FEATURE side; it sat
+   on the trade side in the identical `or` idiom for the whole review.
 2a. A LABEL WITH UNPROVEN AVAILABILITY CANNOT RANK [Codex P1 wave-13]. A feature row with no
    `collected_at_utc` — a legacy corpus predating the column, or a replayed row — has an unknown
    actual availability time that may fall after the split, so ranking on it is look-ahead. Such rows
@@ -2139,6 +2146,12 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    did — left a market that had since turned toxic still reading clean on every harvest until an
    operator repaired an unrelated wallet file. Fail-closed on the wallet axis must not mean
    fail-stale on the veto.
+8b. THE LEADERBOARD DEPENDENCY IS GATED ON ITS PRODUCER TOO [Codex P2 wave-17].
+   wallet_intelligence_collector.py:366-372 KEEPS the retained history when a refresh fails, so a
+   nonempty leaderboard_history.csv is not evidence that membership is current. `_top_wallets` reads
+   `wallet_intelligence_summary.json` and treats any status other than "ok"/"disabled" — including
+   absent — as unavailable, which renders `on_current_leaderboard` "unknown" and stamps rows
+   `leaderboard_unavailable`. Markouts are unaffected: they do not depend on the leaderboard.
 9. NO PATH EMITS A BARE HEADER. FOUR states emit the single sentinel row [Codex P1 wave-15 — the
    text said two while the implementation also emits one for the two invalid-state paths before
    raising, leaving a builder unable to tell whether those were required or accidental]: DISABLED;
@@ -2178,10 +2191,9 @@ Required and previously absent. Keyed to FUNCTION NAME rather than to a hand-kep
 wave-14]: the numbered form drifted four times (24, 26, 31, 32 — each wave added tests and I updated
 the matrix without the total), and even when the count was right the MAPPING was wrong — one tested
 behaviour was missing from the list while another entry claimed a standalone test that did not exist.
-
 This list is GENERATED from the test file and verified by diffing the names in both directions, so it
 cannot omit a real test or invent one that does not exist. Anyone changing it should regenerate
-rather than hand-edit. All 36 live in
+rather than hand-edit. All 39 live in
 tests/polymarket_predictive_engine/test_flow_toxicity.py.
 
  1. `test_planted_toxic_flow_scores_above_balanced_flow`
@@ -2248,14 +2260,31 @@ tests/polymarket_predictive_engine/test_flow_toxicity.py.
     A nonempty leaderboard whose wallet cells are blank reads as UNAVAILABLE: missing_wallet_data True, on_current_leaderboard 'unknown', rows stamped leaderboard_unavailable.
 32. `test_a_changed_horizon_invalidates_the_frozen_split`
     The split records horizon_seconds == 300.0; changing markout_horizon_minutes to 2 makes the state invalid and the run raises with the wallet artifact invalidated.
-33. `test_wallet_without_any_forward_price_is_still_emitted`
+33. `test_a_fill_without_a_venue_timestamp_is_rejected`
+    A fill with a blank venue timestamp is rejected, not dated by its collection time: only w1 is scored, the 99999-collected row is not.
+34. `test_a_failed_leaderboard_refresh_renders_membership_unknown`
+    With the leaderboard producer status 'failed', smart1 IS in the retained file but reads on_current_leaderboard 'unknown' and artifact_status leaderboard_unavailable.
+35. `test_a_contended_run_writes_nothing`
+    With the flow_toxicity runtime lock already held, the run returns skipped_locked and writes NO split state and NO wallet CSV.
+36. `test_wallet_without_any_forward_price_is_still_emitted`
     A wallet whose every fill lacks a forward price is still emitted, fills_missing_price set, markets_touched credited.
-34. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
+37. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
     Disabled replaces the artifact with one sentinel carrying artifact_status=disabled and both flags false.
-35. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
+38. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
     A price outside [target, target+horizon] counts as stale-excluded, and the market-axis columns keep the parent lookup.
-36. `test_wallet_artifact_states_its_own_invocation_flags`
+39. `test_wallet_artifact_states_its_own_invocation_flags`
     The wallet CSV states both invocation flags itself.
+
+## CONCURRENCY
+
+The whole build is serialised under the `flow_toxicity` runtime lock [Codex P2 wave-17]. The
+check/create/build sequence around the frozen split is not a transaction: a manual `flow-toxicity`
+invocation overlapping the harvest could have both processes observe the split file as absent,
+compute DIFFERENT medians from different atomic revisions of `trade_prints.csv`, and interleave their
+artifact replacements — leaving one process's wallet rows paired with the other's persisted cutoff,
+so the published windows could not be reproduced from the state on disk. A contended run writes
+NOTHING and returns `status="skipped_locked"` with the lock payload, matching the registered idiom in
+cost_ledger.py:310.
 
 ## SECOND KNOWN LIMITATION: producer summaries are not bound to a harvest cycle
 

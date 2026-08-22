@@ -21,6 +21,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from .config import EngineConfig, load_config
+from .runtime_lock import runtime_lock
 from .utils import (
     normalize_external_timestamp,
     now_utc,
@@ -144,9 +145,22 @@ def _iter_csv_any(path: Path) -> Iterator[dict[str, str]]:
 
 
 def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], bool]:
+    # The leaderboard has a producer too, and its retained rows survive a failed
+    # refresh (wallet_intelligence_collector.py:366-372 keeps the old history
+    # and records the error in its summary). Treating any nonempty file as
+    # authoritative published definitive on_current_leaderboard values after a
+    # failed refresh, when membership may have moved (Codex P2 wave-17). Same
+    # producer-status rule already applied to the trade ledger, now applied to
+    # this dependency.
+    producer = read_json(cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json")
+    producer_status = (
+        str(producer.get("status") or "missing").strip().lower()
+        if isinstance(producer, dict)
+        else "missing"
+    )
     path = cfg.output_root / "wallet_intelligence" / "leaderboard_history.csv"
     rows = read_csv_rows(path)
-    if not rows:
+    if not rows or producer_status not in {"ok", "disabled"}:
         return set(), True
     latest = max(str(row.get("snapshot_date") or row.get("snapshot_at_utc") or "") for row in rows)
     latest_rows = [row for row in rows if str(row.get("snapshot_date") or row.get("snapshot_at_utc") or "") == latest]
@@ -840,7 +854,16 @@ def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int]:
         token = str(row.get("asset_id") or row.get("token_id") or "").strip()
         price = safe_float(row.get("price"))
         size = safe_float(row.get("size"))
-        stamp = _stamp(row.get("timestamp") or row.get("collected_at_utc"))
+        # The VENUE timestamp only -- never a fallback to collection time
+        # (Codex P1 wave-17). trade_print_collector.py:161 persists a BLANK
+        # timestamp when /trades omits both `timestamp` and `matchTime`, beside
+        # a collected_at_utc of now(). Falling back made a delayed or backfilled
+        # historical fill look as though it occurred when it was FETCHED, moving
+        # both its markout target and its ranking/evaluation window by hours or
+        # days. This is the same venue-vs-collection conflation fixed across
+        # three waves on the FEATURE side; it was sitting on the trade side the
+        # whole time, in the identical `or` idiom.
+        stamp = _stamp(row.get("timestamp"))
         side = str(row.get("side") or "").upper()
         # safe_float PARSES "nan" and "inf" (Codex P1 wave-5 on #451): a nan
         # price yields a nan markout that increments fills_total and poisons
@@ -881,6 +904,32 @@ def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int]:
 
 
 def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
+    """Score the market and wallet toxicity axes.
+
+    Serialised under the `flow_toxicity` runtime lock (Codex P2 wave-17). The
+    check/create/build sequence around the frozen split is NOT a transaction: a
+    manual CLI invocation overlapping the harvest could have both processes see
+    the split file absent, compute DIFFERENT medians from different atomic
+    ledger revisions, and interleave their writes -- leaving one process's
+    wallet rows paired with the other's persisted cutoff, so the published
+    windows could not be reproduced from the state on disk. A contended run
+    writes nothing and returns skipped_locked, matching the idiom in
+    cost_ledger.py:310.
+    """
+    with runtime_lock(cfg, "flow_toxicity") as lock:
+        if not lock.acquired:
+            return {
+                "status": "skipped_locked",
+                "generated_at_utc": now_utc(),
+                "work_order": "WO-49",
+                "runtime_lock": lock.as_dict(),
+                "paper_trading_invoked": False,
+                "live_trading_invoked": False,
+            }
+        return _build_flow_toxicity_locked(cfg)
+
+
+def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
     settings = _settings(cfg)
     out_root = cfg.output_root / "maker_carry"
     path = out_root / "flow_toxicity.csv"

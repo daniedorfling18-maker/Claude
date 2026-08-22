@@ -337,6 +337,54 @@ def test_wallet_markout_windows_split_by_whole_market_with_label_embargo(tmp_pat
     assert summary["wallets_scored"] == 2
 
 
+def test_ranking_fill_priced_after_the_split_is_embargoed(tmp_path):
+    """The nominal label time is not enough; the ACTUAL observation decides.
+
+    The market-level embargo tests `high + horizon < split`. That is necessary
+    but not sufficient, because the staleness rule accepts an observation up to
+    one further horizon late (Codex P1 wave-4 on #451). Codex's worked example,
+    reproduced exactly: horizon 300, split 1000, a market whose last fill is at
+    600 passes the nominal test (900 < 1000) and is classed "ranking" -- but its
+    price is actually first observed at 1100, only 200s late so the staleness
+    rule accepts it, and 1100 is inside the evaluation period. Scoring it would
+    rank the wallet on an evaluation-period observation.
+
+    The per-fill check catches exactly this and nothing else: the fill is
+    counted and disclosed as embargoed, never scored into the ranking mean.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    # tok-r: fill at 600, target 900, first observation at 1100 -> 200s late
+    # (inside the 300s tolerance) but PAST the split at 1000.
+    _features(cfg, "tok-r", [(1100, 0.90)])
+    # tok-e: the evaluation market that puts the split at 1000.
+    _features(cfg, "tok-e", [(1310, 0.70), (1315, 0.70), (1320, 0.70)])
+    trades = [
+        {"market": "0xr", "asset_id": "tok-r", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 600},
+        {"market": "0xe", "asset_id": "tok-e", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1000},
+        {"market": "0xe", "asset_id": "tok-e", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1010},
+    ]
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        trades,
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    # stamps [600, 1000, 1010]; n=3, n//2=1 -> split 1000. Market 0xr:
+    # high=600, 600+300=900 < 1000, so the NOMINAL test ranks it.
+    assert int(rows["w1"]["fills_ranking_window"]) == 0, (
+        "the fill is nominally ranking but its price was observed at 1100, past the split"
+    )
+    assert int(rows["w1"]["fills_label_embargoed"]) == 1
+    assert int(rows["w1"]["fills_evaluation_window"]) == 2
+    assert int(rows["w1"]["fills_total"]) == 3
+    # The +0.40 move on tok-r must not reach the ranking mean at all.
+    assert rows["w1"]["markout_mean_ranking_window"] == ""
+
+
 def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):
     """A wallet with no measurable fill must appear, disclosed, not vanish.
 
@@ -371,6 +419,7 @@ def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):
     assert int(rows["w2"]["markets_touched"]) == 1
     assert int(rows["w1"]["fills_missing_price"]) == 0
     assert int(rows["w1"]["fills_total"]) == 1
+    assert rows["w1"]["artifact_status"] == "ok"
     assert summary["wallets_scored"] == 2
 
 
@@ -402,7 +451,15 @@ def test_disabled_flow_toxicity_clears_the_wallet_artifact(tmp_path):
 
     assert build_flow_toxicity(disabled_cfg)["status"] == "disabled"
     assert wallet_path.exists(), "the artifact stays, cleared -- absence is not a disclosure"
-    assert read_csv_rows(wallet_path) == []
+    rows = read_csv_rows(wallet_path)
+    # A header-only file names the columns but ASSERTS nothing, so the disabled
+    # artifact carries one sentinel row stating its own evidence class.
+    assert len(rows) == 1
+    assert rows[0]["artifact_status"] == "disabled"
+    assert rows[0]["wallet"] == ""
+    assert rows[0]["paper_trading_invoked"] == "False"
+    assert rows[0]["live_trading_invoked"] == "False"
+    assert "w1" not in {row["wallet"] for row in rows}, "the previous run's rankings are gone"
     header = wallet_path.read_text(encoding="utf-8").splitlines()[0]
     assert "fills_label_embargoed" in header and "fills_missing_price" in header
 

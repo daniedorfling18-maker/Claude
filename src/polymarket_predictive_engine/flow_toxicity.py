@@ -61,6 +61,11 @@ TOXICITY_FIELDS = [
 # sizing or order surface reads it.
 WALLET_MARKOUT_FIELDS = [
     "generated_at_utc",
+    # AGENTS.md artifact-level provenance: a header-only file names the columns
+    # but asserts nothing, so a disabled run must still emit ONE row that states
+    # its own evidence class (Codex P1 wave-4 on #451). artifact_status is "ok"
+    # on a scored row and "disabled" on that sentinel.
+    "artifact_status",
     "wallet",
     "on_current_leaderboard",
     "fills_total",
@@ -282,6 +287,14 @@ def _markout_stats(
     # crosses the split is EXCLUDED fail-closed and disclosed per wallet as
     # fills_label_embargoed, kept separate from fills_split_spanning so the two
     # exclusion reasons stay distinguishable.
+    # The market-level test below uses the NOMINAL label time (high + horizon).
+    # That is necessary but NOT sufficient: the staleness rule accepts an actual
+    # observation up to one further horizon late, so a market ending at 600 with
+    # a 300s horizon and a split at 1000 ranks on the nominal test (900 < 1000)
+    # while its price could actually be read at 1100 - inside the evaluation
+    # period (Codex P1 wave-4 on #451). The exact check is per fill, on the
+    # timestamp actually selected, and is applied at accumulation below; this
+    # market-level pass still excludes the bulk cheaply.
     market_window: dict[str, str] = {}
     for market_key, (low, high) in market_bounds.items():
         if high + horizon_seconds < split_stamp:
@@ -369,6 +382,11 @@ def _markout_stats(
                 entry["fills_total"] += 1
                 entry["markout_total"] += markout
                 window = market_window.get(market, "spanning")
+                if window == "ranking" and float(current_feature[0]) >= split_stamp:
+                    # Nominally ranking, but the price actually used was observed
+                    # at or after the split. Scoring it would rank this wallet on
+                    # an evaluation-period observation.
+                    window = "label_embargoed"
                 if window in {"spanning", "label_embargoed"}:
                     entry["fills_split_spanning" if window == "spanning" else "fills_label_embargoed"] += 1
                 else:
@@ -456,10 +474,25 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
         # enabled run's wallet rows would survive on disk with their own
         # generated_at_utc and be read as current rankings (Codex P2 on #451).
         # The wallet artifact is NEW here, so its disabled-path behaviour is
-        # ours to define: clear it to a header-only file. flow_toxicity.csv's
-        # long-standing stale-on-disabled behaviour is deliberately NOT touched
-        # - changing a registered artifact is its own change, not a rider.
-        write_csv(out_root / "flow_toxicity_wallets.csv", [], fieldnames=WALLET_MARKOUT_FIELDS)
+        # ours to define: replace it with a single sentinel row that states the
+        # artifact is disabled AND carries both invocation flags, since a
+        # header-only file names the columns but asserts nothing (Codex P1
+        # wave-4). flow_toxicity.csv's long-standing stale-on-disabled
+        # behaviour is deliberately NOT touched - changing a registered
+        # artifact is its own change, not a rider.
+        write_csv(
+            out_root / "flow_toxicity_wallets.csv",
+            [
+                {
+                    "generated_at_utc": generated_at,
+                    "artifact_status": "disabled",
+                    "wallet": "",
+                    "paper_trading_invoked": False,
+                    "live_trading_invoked": False,
+                }
+            ],
+            fieldnames=WALLET_MARKOUT_FIELDS,
+        )
         return summary
     trades = _trade_rows(cfg)
     top_wallets, missing_wallet_data = _top_wallets(cfg)
@@ -541,6 +574,7 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
     wallet_rows = [
         {
             "generated_at_utc": generated_at,
+            "artifact_status": "ok",
             "wallet": wallet,
             "on_current_leaderboard": wallet in top_wallets,
             "fills_total": entry["fills_total"],

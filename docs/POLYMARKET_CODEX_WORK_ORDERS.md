@@ -1978,6 +1978,79 @@ Spec:
    score, balanced flow does not (constraint 6 null test), wallet-tier
    split arithmetic, missing-WO-37-data tolerance.
 
+### §49.1 — Wallet-axis forward markout (`flow_toxicity_wallets.csv`) — registered 2026-08-22
+
+Scoped amendment to WO-49, registered because the parent entry above covers ONLY the per-market
+`flow_toxicity.csv` and its summary. The wallet axis is a DISTINCT artifact with its own population,
+its own exclusions and its own failure modes, so shipping it under WO-49's existing contract would
+leave its input-coverage rule, fail-safe and day-after check unregistered and therefore unreviewable
+[Codex P1 wave-4 on #451 — a correct call against my own practice: I built this as a code PR without
+amending the register, which is exactly the lifecycle step I have been enforcing elsewhere]. Class M
+(mechanical, non-frozen: diagnostic telemetry). Register and build land together in #451 rather than
+in separate PRs; stated plainly rather than presented as the ordinary two-step.
+
+WHY: `_top_wallets` (flow_toxicity.py:94) caps "smart" at the latest leaderboard snapshot's 100
+wallets, so across ~200,000 attributed fills a trade can only be scored smart if its wallet sits on a
+public PnL board. A PnL/volume ranking is not a measure of prediction. The wallet axis measures
+forward markout per wallet directly, so a predictive wallet OFF the list is visible.
+
+WRITES: `src/polymarket_predictive_engine/flow_toxicity.py`, its test file, this registry entry.
+
+ARTIFACT: `outputs/maker_carry/flow_toxicity_wallets.csv`, columns fixed by WALLET_MARKOUT_FIELDS:
+generated_at_utc, artifact_status, wallet, on_current_leaderboard, fills_total, markout_mean_total,
+fills_ranking_window, markout_mean_ranking_window, fills_evaluation_window,
+markout_mean_evaluation_window, fills_split_spanning, fills_label_embargoed,
+fills_stale_price_excluded, fills_missing_price, markets_touched, paper_trading_invoked,
+live_trading_invoked.
+
+REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather than silently applied:
+1. Chronological split at the MEDIAN fill time. A wallet ranked on the fills used to judge it is
+   circular by construction.
+2. The split is BY WHOLE MARKET, not by fill (AGENTS.md requires validation chronological and
+   out-of-sample by market). A market whose fills straddle the split belongs to NEITHER window and is
+   counted as `fills_split_spanning`.
+3. LABEL EMBARGO, two-stage, because a markout label is a price read one horizon AFTER the fill:
+   (a) market level, nominal — a market ranks only when `high + horizon < split`;
+   (b) fill level, EXACT — a nominally-ranking fill whose ACTUALLY SELECTED feature timestamp is
+   `>= split` is excluded. (b) is required because (a) alone is insufficient: rule 4 accepts an
+   observation up to one further horizon late, so a market ending at 600 with a 300s horizon and a
+   split at 1000 passes (a) while its price may be read at 1100 — inside the evaluation period.
+   Both stages report as `fills_label_embargoed`, kept distinct from `fills_split_spanning`.
+4. STALENESS CEILING: a price is accepted only inside `[target, target + horizon]`; later
+   observations count as `fills_stale_price_excluded`. A 5-minute markout read from a price hours
+   late measures a different horizon. The market-axis columns keep their long-standing WO-49 lookup
+   unchanged — tightening a registered artifact is its own change, not a rider on this one.
+5. INPUT COVERAGE: wallet accounting opens BEFORE the forward-price lookup, so a wallet whose every
+   fill lacks a forward price still appears, with `fills_missing_price` set. "Was not measurable" and
+   "did not trade" are different facts and must not render identically.
+
+FAIL-SAFE: diagnostic only. No gate, threshold, sizing, promotion, eligibility or order surface reads
+this artifact; `grep -rn` finds no in-repo consumer outside flow_toxicity.py. The market-axis table is
+byte-identical. On the disabled path the artifact is REPLACED by a single sentinel row carrying
+`artifact_status="disabled"` and both invocation flags false — a stale ranking left on disk would read
+as current, and a header-only file names the columns while asserting nothing.
+
+DAY-AFTER CHECK (first post-deploy cycle): `flow_toxicity_wallets.csv` present with all seventeen
+columns; every row `artifact_status="ok"` and both invocation flags false; `wallets_scored` in the
+summary equals the row count; and for EVERY row the two registered identities hold —
+  (i) `fills_ranking_window + fills_evaluation_window + fills_split_spanning +
+      fills_label_embargoed == fills_total`
+      (a scored fill lands in exactly one of the four window buckets), and
+  (ii) `fills_total + fills_stale_price_excluded + fills_missing_price` == the wallet's fill count in
+      the INPUT corpus, `outputs/polymarket_trade_prints/trade_prints.csv` grouped by the same
+      lower-cased wallet key, counting only rows that survive `_trade_rows` parsing. The two
+      pre-scoring exclusions sit OUTSIDE fills_total because both `continue` before it is incremented
+      (flow_toxicity.py, the missing-price and staleness branches). The input file is named because
+      the wallet's total observed fill count is NOT emitted as a column — an identity stated only
+      over the artifact's own columns would not be evaluable, and an unevaluable day-after check is
+      not a check;
+`wallet_ranking_embargo_seconds` present and equal to `markout_horizon_minutes * 60`. FALSIFIER: any
+wallet whose window counters do not reconcile, or a run where `fills_label_embargoed` is 0 across the
+entire artifact while markets exist on both sides of the split — that would mean an embargo that
+never binds, which is the defect this rule exists to close, not a clean bill of health.
+
+VACUOUS STATE: zero trade prints -> "not performed".
+
 # Codex batch 3 — filed 2026-07-10 (decision discipline + carry optimization)
 
 Constraints 1-8 bind. One WO per PR.

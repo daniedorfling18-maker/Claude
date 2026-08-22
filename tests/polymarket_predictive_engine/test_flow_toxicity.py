@@ -1957,6 +1957,78 @@ def test_a_producer_just_inside_its_registered_ceiling_still_settles_membership(
     assert rows["smart1"]["on_current_leaderboard"] == "True"
 
 
+def test_the_same_leaderboard_ages_out_as_the_run_clock_advances(tmp_path, monkeypatch):
+    """S1 clock-advance: the SAME evidence must expire as time passes.
+
+    The two boundary tests above manufacture one already-stale stamp and one
+    already-fresh stamp, which cannot distinguish a real freshness rule from an
+    implementation that caches its first verdict or otherwise fails to age the
+    same producer evidence across runs (Codex P1 wave-30). This holds the
+    leaderboard event fixed and moves only the clock.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    def _at(offset_seconds: float) -> str:
+        return (
+            datetime.now(timezone.utc) + timedelta(seconds=offset_seconds)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    ceiling = flow_toxicity.REGISTERED_HARVEST_FRESHNESS_MAX_SECONDS
+
+    # t0: the producer just ran. Membership is settled.
+    monkeypatch.setattr("polymarket_predictive_engine.flow_toxicity.now_utc", lambda: _at(0))
+    assert build_flow_toxicity(cfg)["missing_wallet_data"] is False
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+    assert rows["smart1"]["on_current_leaderboard"] == "True"
+
+    # t0 + one hour short of the ceiling: still inside it, still settled.
+    monkeypatch.setattr("polymarket_predictive_engine.flow_toxicity.now_utc", lambda: _at(ceiling - 3600))
+    assert build_flow_toxicity(cfg)["missing_wallet_data"] is False
+
+    # t0 + past the ceiling: the SAME leaderboard, now aged out.
+    monkeypatch.setattr("polymarket_predictive_engine.flow_toxicity.now_utc", lambda: _at(ceiling + 60))
+    assert build_flow_toxicity(cfg)["missing_wallet_data"] is True
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+    assert rows["smart1"]["on_current_leaderboard"] == "unknown"
+
+
+def test_a_future_dated_producer_summary_fails_closed(tmp_path, monkeypatch):
+    """A negative age is malformed evidence, not fresh evidence (wave-30).
+
+    The one-sided check read a future-dated summary as freshly written, and
+    `revision_torn` does not catch it because the rows moved with it.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+    # The run clock is BEHIND the producer's stamp: rows and summary agree with
+    # each other, so only the sign of the age reveals the fault.
+    monkeypatch.setattr(
+        "polymarket_predictive_engine.flow_toxicity.now_utc",
+        lambda: (datetime.now(timezone.utc) - timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert summary["missing_wallet_data"] is True
+    assert rows["smart1"]["on_current_leaderboard"] == "unknown"
+
+
 def test_an_unmeasured_wallet_row_does_not_claim_healthy_evidence(tmp_path):
     """A coverage row must say it is unmeasured, even in a healthy corpus.
 

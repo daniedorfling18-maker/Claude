@@ -2307,6 +2307,22 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    `snapshot_at_utc`, since `_instant_key` falls back to `snapshot_date` and a bare date can outsort a
    full timestamp. Both are unbindable, so ANY row lacking a parseable `snapshot_at_utc` makes
    membership unknown.
+8g. THE FRESHNESS WINDOW IS CLOSED AT BOTH ENDS [Codex P2 wave-30]. Rule 8d's first implementation
+   tested only `age > ceiling`, so a FUTURE-dated summary produced a negative age and read as freshly
+   written — a collector on a skewed clock, or a retained pair corrupted to the same future stamp,
+   published definitive membership from evidence that stays stale until wall time catches up. Rule
+   8c does not catch it, because rows and summary moved together. ZERO skew is permitted, and that is
+   a literal with a basis rather than an invented tolerance: `collect_wallet_intel` and
+   `flow_toxicity` are both steps of the SAME harvest on the SAME host (training_harvest.py:88), so
+   there is no cross-host clock to reconcile and a future-stamped summary is malformed, not early.
+17. THE FRESHNESS RULE IS TESTED BY ADVANCING THE CLOCK, not only by manufacturing stamps [Codex P1
+   wave-30]. Rule 8d's boundary tests build one already-stale and one already-fresh stamp against the
+   real clock, which cannot distinguish a real freshness rule from an implementation that caches its
+   first verdict or otherwise fails to age the SAME producer evidence across runs — the S1
+   clock-advance behaviour. The registered test holds one leaderboard event fixed and moves only
+   `flow_toxicity.now_utc`, asserting settled membership at t0, still settled one hour inside the
+   ceiling, and `unknown` past it.
+
 16. A FINITE HORIZON IN MINUTES CAN BE AN INFINITE ONE IN SECONDS [Codex P2 wave-29].
    `markout_horizon_minutes = 1e308` passes the finiteness guard and overflows to `inf` when
    multiplied by 60, and the run then persisted `horizon_seconds: Infinity` into the split state —
@@ -2413,9 +2429,9 @@ the matrix without the total), and even when the count was right the MAPPING was
 behaviour was missing from the list while another entry claimed a standalone test that did not exist.
 This list is GENERATED from the test file and verified by diffing the names in both directions, so it
 cannot omit a real test or invent one that does not exist. Anyone changing it should regenerate
-rather than hand-edit. All 68 live in
-tests/polymarket_predictive_engine/test_flow_toxicity.py. That is 68 test FUNCTIONS; pytest collects
-78 cases, because the two S4 sweeps in rule 15 are parametrised (7 offsets and 5 clock shifts). An
+rather than hand-edit. All 70 live in
+tests/polymarket_predictive_engine/test_flow_toxicity.py. That is 70 test FUNCTIONS; pytest collects
+80 cases, because the two S4 sweeps in rule 15 are parametrised (7 offsets and 5 clock shifts). An
 auditor comparing this count to pytest output should expect the difference [noted at wave-26 so the
 mismatch is not later read as the drift this generated list exists to prevent].
 
@@ -2517,43 +2533,47 @@ mismatch is not later read as the drift this generated list exists to prevent].
     A summary 60s past training_harvest's registered 25-hour ceiling: membership unknown, while the market axis keeps smart_fill_count 1.
 49. `test_a_producer_just_inside_its_registered_ceiling_still_settles_membership`
     A summary one hour inside the same ceiling: missing_wallet_data False and membership True -- the bound is a ceiling, not a hair trigger.
-50. `test_an_unmeasured_wallet_row_does_not_claim_healthy_evidence`
+50. `test_the_same_leaderboard_ages_out_as_the_run_clock_advances`
+    S1 clock-advance on ONE fixed leaderboard event: settled at t0, still settled one hour inside the 25-hour ceiling, unknown 60s past it -- the only test here that would catch a cached verdict.
+51. `test_a_future_dated_producer_summary_fails_closed`
+    The run clock three hours BEHIND the producer stamp: a negative age is malformed evidence, not fresh evidence, so membership reads unknown.
+52. `test_an_unmeasured_wallet_row_does_not_claim_healthy_evidence`
     A mixed corpus where only tok-a has a forward price: smart1 reads ok with fills_total 1, while w2 reads no_usable_labels with fills_total 0 and fills_missing_price 1.
-51. `test_a_stronger_status_outranks_the_per_row_unmeasured_one`
+53. `test_a_stronger_status_outranks_the_per_row_unmeasured_one`
     The same corpus under a stale producer: both the scored and the coverage row read upstream_stale -- the ladder is unchanged by making no_usable_labels per-row.
-52. `test_feature_rejections_are_counted_separately_from_trade_rejections`
+54. `test_feature_rejections_are_counted_separately_from_trade_rejections`
     One out-of-domain midpoint and one blank venue stamp beside a good feature: malformed_feature_rows_excluded 2, malformed_trade_rows_excluded 0, row status ok and summary status ok -- a feature loss is not a partial TRADE corpus.
-53. `test_a_departed_market_is_not_pinned_by_an_unrelated_rejection`
+55. `test_a_departed_market_is_not_pinned_by_an_unrelated_rejection`
     0xc departs cleanly while 0xa loses one row: market_rows_carried_forward absent and 0xc gone -- an attributable rejection names only its own market's lost coverage.
-54. `test_an_unattributable_rejection_pins_every_departed_market`
+56. `test_an_unattributable_rejection_pins_every_departed_market`
     A rejection with a BLANK market field while 0xc departs: market_rows_carried_forward 1 and 0xc held -- naming no market makes every absence unverifiable.
-55. `test_a_freshly_toxic_market_still_wins_over_a_prior_clean_row`
+57. `test_a_freshly_toxic_market_still_wins_over_a_prior_clean_row`
     0xb turns one-sided AND loses a row: 0xb's FRESH blocking row wins, while 0xa -- which lost nothing but held a percentile-ONLY block and fell from 1.0 to 0.5 -- is retained. Pins rule 13c's deliberate over-breadth.
-56. `test_a_partly_rejected_ledger_does_not_freeze_the_split`
+58. `test_a_partly_rejected_ledger_does_not_freeze_the_split`
     One valid fill and one out-of-domain fill under an ok producer: wallet_split_was_frozen False and no split-state file on disk -- a contaminated cutoff must not outlive the rejected run.
-57. `test_a_clean_run_does_not_carry_a_departed_market_forward`
+59. `test_a_clean_run_does_not_carry_a_departed_market_forward`
     A market with no fills in the new ledger and NO exclusions this run: it leaves the table, market_rows_carried_forward absent -- absence with nothing rejected is meaningful.
-58. `test_a_partly_rejected_sample_is_not_a_healthy_wallet_artifact`
+60. `test_a_partly_rejected_sample_is_not_a_healthy_wallet_artifact`
     One valid fill and one out-of-domain fill under an ok producer: the surviving row reads partial_malformed_trade_corpus, wallets_scored 1, and the rejected wallet is absent entirely.
-59. `test_a_leaderboard_newer_than_its_summary_cannot_settle_membership`
+61. `test_a_leaderboard_newer_than_its_summary_cannot_settle_membership`
     Rows stamped 2026-08-23 beside a summary generated 2026-08-22: missing_wallet_data True and membership 'unknown', while the market axis keeps smart_fill_count 1.
-60. `test_an_incomplete_leaderboard_is_not_authoritative`
+62. `test_an_incomplete_leaderboard_is_not_authoritative`
     leaderboard_probe_params.complete=false with 12 rows added renders membership 'unknown'; complete=true with 100 rows added under the same 'partial' status is authoritative.
-61. `test_a_malformed_corpus_does_not_clear_the_market_veto`
+63. `test_a_malformed_corpus_does_not_clear_the_market_veto`
     A healthy run scores one market; the next refresh is entirely corrupt. EXPECT status malformed_trade_corpus, market_axis_preserved True, and flow_toxicity.csv byte-equal to before -- the active veto survives.
-62. `test_a_disabled_leaderboard_producer_yields_unknown_membership`
+64. `test_a_disabled_leaderboard_producer_yields_unknown_membership`
     Producer status 'disabled': membership reads 'unknown', while the market-axis tier split still uses the retained top-100 (smart_fill_count 1).
-63. `test_the_latest_intraday_snapshot_wins`
+65. `test_the_latest_intraday_snapshot_wins`
     Two same-date snapshots at 06:00 and 18:00: fresh1 (18:00) reads True, stale1 (06:00, dropped from the newer top-100) reads False.
-64. `test_a_feature_without_a_venue_timestamp_is_rejected`
+66. `test_a_feature_without_a_venue_timestamp_is_rejected`
     A feature with a BLANK source_timestamp collected at 301 must not become a t=301 price for a fill targeting 300: the known-venue 0.70 row at 330 is used instead, markout +0.20.
-65. `test_wallet_without_any_forward_price_is_still_emitted`
+67. `test_wallet_without_any_forward_price_is_still_emitted`
     A wallet whose every fill lacks a forward price is still emitted, fills_missing_price set, markets_touched credited.
-66. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
+68. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
     Disabled replaces the artifact with one sentinel carrying artifact_status=disabled and both flags false.
-67. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
+69. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
     A price outside [target, target+horizon] counts as stale-excluded, and the market-axis columns keep the parent lookup.
-68. `test_wallet_artifact_states_its_own_invocation_flags`
+70. `test_wallet_artifact_states_its_own_invocation_flags`
     The wallet CSV states both invocation flags itself.
 
 ## FAILURE PATH
@@ -2675,11 +2695,16 @@ withdrawn [Codex P1 wave-7: it directly contradicted this same amendment's paren
 reconciliation, which registers rule 6's non-finite rejection as a deliberate behaviour change to the
 market axis. Two incompatible statements in the binding spec left a builder or auditor unable to tell
 whether preserving previous bytes or excluding malformed rows was authoritative — EXCLUDING THEM IS
-AUTHORITATIVE]. SIX differences, all registered above and none hidden [count corrected at wave-20, which found it
+AUTHORITATIVE]. SEVEN differences, all registered above and none hidden [count corrected at wave-20, which found it
 still reading THREE while enumerating (i) through (v) — implying two delivered behaviours sat outside
 the authoritative set; corrected again at wave-25, which found rule 1b's feature-side rejection
 delivered and registered as a rule but ABSENT from this list, so a corpus satisfying all five listed
-exclusions could still change market markouts; Codex P1 wave-12 and wave-16 — this
+exclusions could still change market markouts; and AGAIN at wave-27/29's negative-timestamp guard,
+found at wave-30 — the FOURTH time this list has claimed to be exhaustive while a delivered behaviour
+sat outside it (wave-18 for (iii), wave-19 for (iv), wave-25 for (vi), wave-30 for (vii)). The
+pattern is now explicit: EVERY new input rejection is a parent-artifact difference by default,
+because the parent had no such rejection, and the burden is to show otherwise rather than to
+remember to add it; Codex P1 wave-12 and wave-16 — this
 sentence first claimed "every ordering is untouched" while the parent scope registered an ordering
 change, and then still described the COLLAPSED single-clock model after the code had reverted to two
 clocks; a builder following the stale text could have reinstated the very behaviour that corrupts
@@ -2713,9 +2738,16 @@ markouts]:
       the same omission wave-18 found for (iii) and wave-19 for (iv). The feature and trade sides
       are one rule applied at two boundaries and must be registered together, or fixing one keeps
       re-opening this hole in the other].
+  (vii) fills with a finite NEGATIVE venue timestamp are absent. The parent accepted them; rule 0b
+      rejects the row at ingestion, so a corpus containing one changes `trades_seen`, VPIN and the
+      tier markouts even with no non-finite, out-of-domain, blank-stamp, malformed-collection-time or
+      duplicate rows [Codex P1 wave-30]. The guard exists because a negative median would write a
+      negative `split_stamp` this module's OWN reader then rejects on every later run, but its
+      market-axis effect is a separate consequence and belongs here.
 Every column NAME and every FORMULA is untouched, and on a corpus with no non-finite rows, no
-out-of-domain rows, no blank venue timestamps on EITHER the trade or the feature side, no malformed
-collection timestamps and no same-venue-stamp duplicates the output IS byte-identical.
+out-of-domain rows, no blank venue timestamps on EITHER the trade or the feature side, no NEGATIVE
+venue timestamps, no malformed collection timestamps and no same-venue-stamp duplicates the output IS
+byte-identical.
 
 The leaderboard-producer rule (8b) deliberately does NOT change the market axis: `_top_wallets` still
 returns the RETAINED top-100 when a refresh fails, so the legacy smart/crowd tier split is unaffected.

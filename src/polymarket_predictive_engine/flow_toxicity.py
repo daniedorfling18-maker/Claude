@@ -291,11 +291,24 @@ def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], set[str
     # This is an ABSOLUTE freshness read against a registered SLO, not a
     # data-relative window -- rule 12's S1 contract governs `_markout_stats` and
     # is untouched by it.
+    #
+    # BOTH ENDS of the window are closed (Codex P2 wave-30). A future-dated
+    # summary produces a NEGATIVE age, which the one-sided check read as
+    # freshly written -- so a collector running on a skewed clock, or a
+    # retained pair corrupted to the same future stamp, published definitive
+    # membership from evidence that stays stale until wall time catches up.
+    # `revision_torn` does not catch it either, since rows and summary moved
+    # together. Zero skew is allowed, and that is a literal with a basis rather
+    # than an invented tolerance: collect_wallet_intel and flow_toxicity are
+    # both steps of the SAME harvest process on the SAME host
+    # (training_harvest.py:88), so there is no cross-host clock to reconcile and
+    # a summary stamped in the future is malformed, not merely early.
     now = parse_timestamp(now_utc())
+    age_seconds = (now - summary_stamp).total_seconds() if (now and summary_stamp) else None
     producer_stale = (
-        summary_stamp is None
-        or now is None
-        or (now - summary_stamp).total_seconds() > REGISTERED_HARVEST_FRESHNESS_MAX_SECONDS
+        age_seconds is None
+        or age_seconds < 0
+        or age_seconds > REGISTERED_HARVEST_FRESHNESS_MAX_SECONDS
     )
     membership_unknown = (
         (producer_status != "ok" and not refreshed)

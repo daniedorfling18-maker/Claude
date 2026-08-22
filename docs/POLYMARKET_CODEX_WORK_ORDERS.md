@@ -16943,3 +16943,535 @@ changing what the day-after operator should actually go check:
    evidence of a problem with THIS WO's alarm — check reading (b), the
    watchdog's own `observed_disk_used_percent`, independently; it does not
    depend on `corpus_retention` at all (subject to qualification 1, above).
+
+## WO-163 (DRAFT — NOT REGISTERED) — Edge attribution fails closed on unattributable positions
+
+STATUS: `draft`. This WO is NOT registered and MUST NOT be dispatched [Codex P1 wave-8, accepted in
+full]. S8 says a draft becomes registerable only when EVERY admission rule passes, and A1 (literal
+thresholds) does not pass: BLOCKER-1 below has no literal skipped-fraction bound. Calling that a
+"blocker" on an otherwise-registered WO was a half-measure — it labelled the omission instead of
+curing it, and it contradicted this WO's own claim that four admission rounds ended at zero blockers.
+Both cannot be true. The honest state is DRAFT, and it stays draft until the VPS measurement in
+BLOCKER-1 is taken and written in as a literal; registration is a separate, later step.
+
+Everything below is the draft text, retained because the admission history and the defect evidence
+are worth preserving. The four gate rounds and eight review waves DID happen and DID close 43
+findings; what they could not do is supply a number that only live telemetry holds.
+
+Draft history (2026-08-15 from gate-executed evidence; four-round S8 admission, blockers 4→3→2→0; adds no gate, moves no ceiling, changes no policy or sizing surface → OWNER MERGE after line-audit)
+
+
+Class M (mechanical, non-frozen: telemetry honesty). Admission: FOUR independent S8 gate rounds
+(blockers 4 -> 3 -> 2 -> 0; final verdict ADMISSIBLE WITH CORRECTIONS R4-a/b/c, all applied in this
+text). Every executed figure below was reproduced by the gate against the code and telemetry, not
+carried from the drafter. Routing: OWNER MERGE after line-audit. Build is a separate, later lifecycle
+step, dispatched only after owner merge.
+
+## Provenance (unchanged from v2 except as corrected)
+attribute_position (edge_attribution.py:115-129) silently drops unattributable closed positions:
+216 closed / 109 attributed / 107 skipped (49.54%) at snapshot 279619c9; 226/109/117 (51.77%) at
+b0dff795. Gate re-execution: 102/102 surviving skips = no CLV row. The dropped-loss exemplar:
+entry_fill 0.505094, entry_mid 0.495, exit 0.0, quantity 19.798295, realised_pnl_usdc -10.0, no CLV
+row. Bias flows via edge_attribution.json's cohort objects. [N1 cured] edge_attribution_cohorts.csv is
+an ORPHAN artifact (zero in-repo references, divergent schema); it is out of scope and no consistency
+claim is made about it. Live defects this WO closes, both gate-executed: (a) CLV line_price="nan"
+attributes garbage; (b) POSITION-side entry_price/exit_price/quantity = "nan"/"inf" pass :122 and
+attribute garbage, which CAN classify (verified conditional on cohort P&L sign) into classes feeding
+research_focus.py:1053-1061 priority_delta +12.0. [N6 cured: "can", not "currently does"]
+
+## Writes (exactly four files — the registry pre-flight item 7 requires flipping this WO's status AND
+the charter WP status with a dated "Landed:" note at land time, and WP8 is the edge-attribution entry
+[Codex P1-e])
+1. src/polymarket_predictive_engine/edge_attribution.py
+   a. [R1/R2 cured] `attribution_status`: CLOSED SEVEN-value enum — SIX unattributable failure
+      reasons (1-6) PLUS the one success status "attributed" (7); all seven are legal values of the
+      field and a build that omits any of them has not implemented this enum [Codex wave-5: the
+      wave-4 amendment inserted cause 3 and renumbered 1-7 but left this descriptor reading "six",
+      so the stated count contradicted the list immediately below it and a literal builder could
+      have dropped either "attributed" or one failure reason to honour the count]. Evaluated in THIS
+      registered precedence, first match wins:
+        1 "unattributable_malformed_position"  — any required position INPUT field missing/
+                                                 unparseable (input keys: shadow_position_id,
+                                                 entry_price, exit_price, quantity —
+                                                 entry_fill_price is the EMITTED name for
+                                                 entry_price, edge_attribution.py:119/:143; the entry
+                                                 mid is NOT judged here [Codex P1-b]), OR quantity
+                                                 parses but is <= 0 — the :122 return-None path the
+                                                 code enforces today; a nonpositive-quantity position
+                                                 is not a position [G1]. shadow_position_id is a
+                                                 REQUIRED input and a missing/blank one is cause 1
+                                                 [Codex wave-4]: the CLV side is indexed as
+                                                 {str(row.get("shadow_position_id") or ""): row}
+                                                 (edge_attribution.py:189) and looked up the same way
+                                                 (:197), so EVERY blank-id position collides on the ""
+                                                 key and they all attribute against whichever blank-id
+                                                 CLV row happened to be written last. A position with
+                                                 no join identity has not been joined to anything; it
+                                                 is not attributable, and a silent last-wins collision
+                                                 is the opposite of failing closed.
+        2 "unattributable_nonfinite_inputs"    — every required input EXCEPT entry_mid parses (entry
+                                                 mid is judged only at cause 6 [R4-a]) but ANY is non-finite
+                                                 (nan/inf, position side OR line side). Covers the
+                                                 gate-executed cases entry="nan", exit="nan",
+                                                 quantity="inf", line_price="nan".
+                                                 [Codex wave-7: the earlier "OR any derived
+                                                 intermediate is non-finite" clause is DELETED, not
+                                                 reworded. It was unreachable by construction: once
+                                                 cause 3 bounds every price to [0,1], the largest
+                                                 |price difference| is 1, so every *_usdc product is
+                                                 bounded by the quantity and a finite quantity can
+                                                 never produce a non-finite product. Registered test
+                                                 19 was written for that branch and its fixture
+                                                 (0.5, 1.0, quantity 1e308 -> 5e307) could not
+                                                 overflow, so a CORRECT build would have failed a
+                                                 mandated test. An unreachable rule is removed rather
+                                                 than given a fixture that lies about reaching it.]
+        3 "unattributable_out_of_domain_price" — every required input EXCEPT entry_mid parses and is
+                                                 finite (the entry mid is judged ONLY at cause 6, the
+                                                 same carve-out cause 2 carries — [Codex wave-5]:
+                                                 without it, a row with no usable entry mid AND
+                                                 line_price="2.0" made cause 3's antecedent false via
+                                                 the mid and cause 6's false via the out-of-domain
+                                                 line, so the "closed" precedence assigned it NO
+                                                 status at all; tests 6 and 15 each exercised their
+                                                 defect with the other input valid, so neither caught
+                                                 the cross-case), but
+                                                 entry_price, exit_price or line_price falls OUTSIDE
+                                                 its registered domain [Codex wave-4]. REGISTERED
+                                                 DOMAINS, with basis: a Polymarket share pays exactly
+                                                 $1 or $0 at settlement, so a share price is a
+                                                 probability in [0, 1] BY CONSTRUCTION — no venue
+                                                 quote or fill can sit outside it.
+                                                   entry_price  — OPEN (0, 1). A fill at exactly 0 is
+                                                     free shares and at exactly 1 is paying certainty;
+                                                     neither is a fill. Matches the open interval the
+                                                     code already enforces on the entry MID
+                                                     (_entry_mid, edge_attribution.py:94).
+                                                   exit_price   — CLOSED [0, 1]. A settled position
+                                                     exits at exactly 0.0 or 1.0; that is the ORDINARY
+                                                     case, not a defect (the registered test-7 fixture
+                                                     carries exits of 1.0 and the dropped-loss exemplar
+                                                     exits at 0.0), so the endpoints must stay legal.
+                                                   line_price   — CLOSED [0, 1]. A closing line on a
+                                                     market that resolved before close legitimately
+                                                     sits at an endpoint.
+                                                 Reachable today: _load_final_history
+                                                 (closing_line.py:279-281) accepts ANY parseable
+                                                 persisted line_price, testing only `is None` and never
+                                                 the domain, so line_price=2.0 clears causes 1 and 2
+                                                 and is ATTRIBUTED, emitting finite-but-impossible
+                                                 metrics that can classify a cohort and move
+                                                 research_focus priority by +12.0. Registering this is
+                                                 also an internal-consistency repair: the wave-3
+                                                 amendment registered a domain rule for the entry MID
+                                                 while leaving the entry, exit and line PRICES
+                                                 unbounded — the spec said "a mid of exactly 0 or 1 is
+                                                 not a mid" while permitting a line of 2.0.
+                                                 (Side note, mirroring cause 2: the position side is
+                                                 judged as soon as it parses; the line side is judged
+                                                 only once the CLV row exists and its line_price
+                                                 parses, so a missing row still lands in 4 and an
+                                                 unparseable line still lands in 5.)
+        4 "unattributable_no_closing_line"     — no CLV row for the position, OR a row whose
+                                                 line_kind != "closing" (closing_line.py:359-362 emits
+                                                 "latest_provisional" when no closing quote exists;
+                                                 attributing against it scores a line that never
+                                                 closed — today it IS attributed [Codex P1-d])
+        5 "unattributable_unparseable_line"    — CLV row present; line_price missing/""/unparseable
+        6 "unattributable_no_entry_mid"        — line parses finite and IN DOMAIN; entry mid missing, OR present-
+                                                 but-unparseable, OR parseable and finite but OUTSIDE
+                                                 the open interval (0, 1), OR parseable and NON-FINITE
+                                                 ("nan"/"inf") [Codex wave-8: cause 2 explicitly
+                                                 excludes the entry mid and cause 6 covered only
+                                                 missing / unparseable / finite-out-of-domain, so a
+                                                 mid of "nan" with no valid fallback matched NO
+                                                 registered cause — the third time this enum was
+                                                 declared closed while a reachable mid state fell
+                                                 outside it. _entry_mid rejects nan/inf because
+                                                 `0 < value < 1` is False for both] — the ONLY cause that judges
+                                                 the MID [Codex P1-b] (the PRICES are judged at cause
+                                                 3). The domain clause is registered
+                                                 because _entry_mid (edge_attribution.py:91-101)
+                                                 requires 0 < value < 1: market_midpoint="0" and "1"
+                                                 PARSE via safe_float and are FINITE, so they clear
+                                                 causes 1 and 2, yet _entry_mid returns None and :129
+                                                 returns None. Without this clause they match no
+                                                 registered cause and the enum in 1a is not closed
+                                                 [Codex wave-3]. A mid of exactly 0 or 1 is not a mid.
+        7 "attributed"                         — everything above passed
+      (Order note: 4-6 are reachable only when 1-3 pass on position-side fields; line-side nonfinite
+      is caught at 2, and line-side out-of-domain at 3, only when the row exists and parses — a "nan"
+      string PARSES, so it lands in 2; "" / "junk" do not parse and land in 5; "2.0" parses finite and
+      lands in 3. KIND IS VALIDATED BEFORE ANY LINE PRICE IS READ [Codex wave-5, widened at wave-7]: if a
+      CLV row is absent, or present with line_kind != "closing", the position is cause 4 and its
+      line_price is NEVER examined — so line_kind="" with line_price "junk", "nan" or "2.0" is cause
+      4, not 5, not 2, not 3. The LINE-side arms of causes 2 and 3 therefore apply only to a row that
+      IS a closing row; the POSITION-side arms of 2 and 3 are unaffected and still precede 4. A line
+      that never closed is not scored no matter how its price parses, and reading a price off it to
+      choose a label would be scoring it. Stated so no two labels can be true at once.)
+   b. [R1 cured] Per-cause field-population table, registered:
+        ALWAYS populated (all seven): shadow_position_id, signal_cohort, category, market_slug,
+          close_reason, quantity*, entry_fill_price*, exit_price*, realised_pnl_usdc*, attribution_status
+          (*verbatim strings from the position row when unparseable — never coerced)
+        Populated from cause 4 onward: entry_mid_price (if parseable)
+        Populated from cause 6 onward: line_price, line_kind
+        Populated AT cause 3, additionally and by exception: whichever of entry_mid_price, line_price
+          and line_kind is available, verbatim [Codex wave-4]. Cause 3 fires BECAUSE a specific value
+          violated its registered domain, so an artifact that withheld that value would name the fault
+          without naming the offender — the opposite of the diagnostic this WO exists to build. This
+          is the one place the "onward" ordering is deliberately broken, stated here so it reads as a
+          registered exception and not as a contradiction of the two lines above.
+        Populated ONLY for "attributed": model_probability, model_claimed_edge_per_share,
+          execution_cost_per_share/_usdc, line_movement_per_share/_usdc,
+          settlement_surprise_per_share/_usdc, total_pnl_per_share/_usdc
+        Everything not populated is "" in the CSV. THIS TABLE IS CSV-ONLY [Codex wave-5]: the
+        registered writes put position rows in edge_attribution_positions.csv and nothing else, while
+        edge_attribution.json carries the summary and the cohort objects and NO per-position array.
+        The earlier "and null in JSON" wording had no target — a literal builder would have to either
+        ignore half the requirement or invent an unregistered positions payload and schema, so it is
+        removed rather than left ambiguous. The null-in-JSON convention still governs the COHORT
+        objects, where 1d registers nullable metric, class and action fields. A literal build never
+        computes with an unavailable input — no `entry_fill - None`, no invented 0.0.
+   c. Summary JSON [unchanged, verified cured]: closed_positions_seen, attributed_positions,
+      skipped_unattributable_closed preserved byte-for-name; skipped == sum of causes 1-6. NEW:
+      `unattributable_by_reason` ALWAYS carries ALL SIX unattributable keys, zero-filled [N3 cured; six
+      since the wave-4 out-of-domain cause];
+      `unattributable_realised_pnl_usdc` (sum over causes 1-6 of realised_pnl_usdc values that are
+      parseable AND finite [G4: "nan" PARSES — an unguarded parse rule poisons the sum to NaN and
+      json emits invalid output, gate-executed]) and `unattributable_pnl_unparseable_count` (rows
+      whose realised_pnl_usdc is missing, unparseable, or non-finite contribute 0 to the sum and
+      increment this counter); and `registered_baseline_skipped_fraction` — the ONE number the
+      day-after check's bound is derived from, computed once by applying the registered seven-cause
+      precedence to the registration-time snapshot and written to the artifact so the bound is
+      evaluable from the artifact alone (see the day-after check; enumerated here so it is a
+      registered summary key and not an unregistered field a build could omit). The EMITTED sum itself must be finite: if summation of individually
+      finite values overflows to +/-inf, the run raises loudly rather than emitting non-finite JSON
+      [R4-b]. THE RULE IS UNIVERSAL OVER COMPUTED VALUES [Codex wave-4, NARROWED at wave-5]: every
+      DERIVED numeric value this module computes and emits to JSON or CSV — the unattributable sums here, the per-cohort sums in 1d, AND
+      the existing ATTRIBUTED cohort aggregates (total_pnl_usdc, execution_cost_usdc,
+      line_movement_usdc, settlement_surprise_usdc, computed in _classify and rounded at
+      edge_attribution.py:213-217) — must be finite at the point of emission or the run raises. As
+      registered before this correction the rule covered only the new unattributable sums, so two
+      attributed rows with individually finite total_pnl_usdc summing past the float range would clear
+      cause 2 individually and emit Infinity through write_json, producing non-standard JSON that no
+      consumer can parse. round(inf, 6) is inf; rounding is not a guard.
+      EXPLICIT CARVE-OUT, required to remove a self-contradiction the wave-4 wording created [Codex
+      wave-5]: this rule does NOT govern the RAW SOURCE fields 1b requires to be carried VERBATIM on
+      an unattributable row (quantity, entry_fill_price, exit_price, realised_pnl_usdc — the
+      starred entries). Those are the position row's own bytes, reproduced so a reader can see what
+      was rejected; realised_pnl_usdc="nan" MUST still appear there, the run MUST still complete, and
+      the value is excluded from every aggregate by the parse-and-finite rule instead (test 12
+      requires exactly that completion, so the unnarrowed rule would have forced a literal build to
+      either emit a non-finite computed aggregate, blank a field the table requires populated, or
+      fail test 12 — three ways to be wrong and none to be right). Emitting a raw source byte is not
+      computing with it.
+   d. Unattributable rows with an empty signal_cohort take the existing ""->"unknown" cohort-key
+      idiom, so no dropped mass can hide under a keyless cohort [R4-c]. THAT ALONE DOES NOT FAIL
+      CLOSED, and the gap is registered shut here [Codex P1 wave-8]: routing keyless rows to
+      "unknown" leaves every NAMED cohort with unattributable_positions == 0, free to emit
+      positive_edge_confirmed and earn the research_focus +12.0 — while the dropped loss, having no
+      trustworthy cohort identity, may belong to any of them. The suppression rule in 1d is therefore
+      GLOBAL for this case: if ANY unattributable row lacks a trustworthy signal_cohort, NO cohort
+      emits a class or action for that run, and every cohort carries
+      class_suppressed_reason "unassignable_dropped_mass_present". A loss that could belong to any
+      cohort must not be allowed to clear all of them. This is deliberately the strictest arm of the
+      rule, and it is reachable in production — this very clause exists because keyless rows occur. Every per-cohort
+      unattributable_realised_pnl_usdc uses the SAME parseable-AND-finite rule as the top-level sum
+      in 1c — a "nan" P&L excluded from the summary but aggregated raw into its cohort would emit
+      non-standard JSON one level down [Codex P1-f].
+      CLASS SUPPRESSION, registered [Codex wave-4 P1 — this is the selection bias the WO exists to
+      close, and v4 left the main case open]: a cohort emits a non-null attribution_class and
+      recommended_action ONLY when unattributable_positions == 0. As registered before this
+      correction only an ENTIRELY unattributable cohort lost its class, so a MIXED cohort whose
+      attributed subset shows positive P&L while its dropped rows carry larger realised losses still
+      emitted "positive_edge_confirmed", and research_focus.py:1053-1061 applied the same +12.0
+      priority delta with no reference to unattributable_positions or the dropped P&L — priority
+      raised BY the act of dropping the losses. At the registration-time refs that is not a corner
+      case: 49.54% and 51.77% of closed positions drop, across seven cohorts. Any cohort with
+      unattributable_positions > 0 therefore emits attribution_class JSON null, recommended_action
+      JSON null, and a new field class_suppressed_reason "unattributable_positions_present" (JSON null
+      when nothing is suppressed) so the null is explained rather than mysterious. No coverage
+      THRESHOLD is registered: a fraction would be an invented number, and this WO exists because
+      dropped mass can reverse a sign — one dropped position is enough to do it. Strictly
+      tighten-only; it can only withhold a class, never grant one. Attributed METRICS are still
+      emitted for mixed cohorts (they are honestly labelled metric_population:"attributed_only"); it
+      is the JUDGMENT that is withheld.
+      Cohort objects [unchanged from v2, C5-verified shape]: unattributable_positions,
+      unattributable_realised_pnl_usdc, metric_population:"attributed_only"; all-unattributable cohorts
+      emit rows with attributed_positions 0, metric fields JSON null, AND recommended_action JSON null
+      [Codex P1-c: the builder resolves actions via RECOMMENDED_ACTIONS[classification]
+      (edge_attribution.py:220), a bracket lookup that raises KeyError on a null classification and
+      aborts the governance refresh; the build must bypass that lookup for this state, and an ad hoc
+      action string is forbidden — a class is a judgment and an empty sample supports none; same for
+      G6's null metrics].
+   e. New positions-CSV columns, enumerated [N5/G2]: EXACTLY TWO — attribution_status and
+      realised_pnl_usdc. class_suppressed_reason (1d) is a COHORT field and lives only in
+      edge_attribution.json; it is NOT a positions-CSV column and does not change this count
+      [Codex wave-4 — stated so the two enumerations cannot be read as contradicting each other].
+      The two columns are (ROW_FIELDS at edge_attribution.py:37-59 is extended with both; all existing
+      columns keep names and order). Stated because write_csv uses extrasaction="ignore"
+      (utils.py:137): a field promised by the table but absent from ROW_FIELDS would be dropped
+      SILENTLY — so test 13 asserts the emitted header contains both new columns, making the
+      silent-breach mode impossible.
+2. tests/polymarket_predictive_engine/test_edge_attribution.py
+3. docs/POLYMARKET_CODEX_WORK_ORDERS.md
+4. docs/POLYMARKET_QUANT_MODE_CHARTER.md — WP8 only, and by APPENDING, not flipping [Codex wave-5].
+   WP8 is ALREADY `done` (2026-07-02, orchestrator) and already carries a Landed block naming
+   edge_attribution.py and both artifacts (charter:155-167), so there is no status to flip and a
+   literal builder could satisfy the pre-flight only by inventing a status or rewriting historical
+   completion metadata. The registered edit is therefore exactly this: leave the `done` status and
+   the existing Landed block BYTE-IDENTICAL, and append one dated line immediately below the block,
+   of the form, using the literal `Landed:` token the pre-flight requires [Codex wave-7 — the
+   earlier wording prescribed an `Amended` line and then declared it equivalent, which does not
+   satisfy a literal check for `Landed:`; a builder would have had to violate either this
+   instruction or pre-flight item 7]:
+     `Landed: <YYYY-MM-DD> (WO-163) — attribution now fails closed: attribution_status enum,
+      dropped-mass accounting, cohort class suppression while coverage is incomplete.`
+   Two `Landed:` lines under one WP is the intended result: the 2026-07-02 line records the original
+   delivery and stays untouched, the new one records this amendment. Nothing is renamed, reordered
+   or removed, and pre-flight item 7 is satisfied on its own literal terms rather than by an
+   equivalence argument.
+
+## Consumers (grep -rn "edge_attribution" src/ scripts/ tests/, plus round-2 additions [N2 cured])
+refresh_governance.py:281-287; dashboard.py:1083-1090, :2912, :2953-2954 (funnel), :292 (render);
+evidence_history.py:73-93; research_focus.py cohort readers; cli.py:702;
+scripts/audit_polymarket_local_history.py:245-253. All read only preserved key names; new keys additive.
+No in-repo reader of edge_attribution_positions.csv exists; row-count is not branched on anywhere.
+
+## Do NOT touch
+closing_line.py; shadow position producers; safe_float itself (the finite guard is LOCAL to this
+module's parsing helper); edge_attribution_cohorts.csv (orphan; separate cleanup WO if ever); any gate,
+threshold, policy or sizing surface.
+
+## Fail-safe (unchanged from v2; C1-verified)
+Diagnostic only; field-projection identity for attributed rows (existing fields value-identical on
+identical inputs; the TWO new columns enumerated in 1e — attribution_status and realised_pnl_usdc —
+are additive, and no existing column is renamed, reordered or removed [Codex wave-3: this sentence
+previously said "one new column", contradicting 1e]). New accounting raises loudly; blast radius stated:
+progress.run re-raises (refresh_governance.py:138), aborting the downstream governance stages of that
+cycle (17 in the scheduler invoker at run_vps_ops_scheduler.sh:443; 16 in
+run_polymarket_local_live_loop.py:1010, which skips dashboard). Correct direction: the model-critical
+path publishes first (:178-184); failure is stamped; downstream goes stale-with-a-stamp, never
+fresh-but-wrong. This paragraph must survive as a code comment.
+
+## Tests (enumerated; figures literal)
+1. No CLV row -> cause 4; AND a CLV row with line_kind="latest_provisional" -> cause 4, never
+   attributed [Codex P1-d]; realised P&L populated; entry_mid populated when parseable; line and
+   attributed-only fields empty.
+2. CLV row with line_price "" and "junk" -> cause 5 (the round-2 R1 case).
+3. line_price="nan" -> cause 2 (parses, non-finite) — regression for gate-executed live defect (a).
+4. entry_price="nan"; separately exit_price="nan"; separately quantity="inf" -> cause 2 — regression
+   for live defect (b); assert NOT attributed, NOT classified, and NO class upsert occurs at
+   research_focus.py:1053-1070 for the affected cohort [G5: worded as no-class-upsert, because 1d
+   correctly EMITS a cohort row for it — presence of the row is required, presence of a class is the
+   defect].
+5. Malformed position (entry_price="" — the INPUT key attribute_position reads at :119;
+   entry_fill_price would be an inert extra dict field and the branch would never fire
+   [Codex P1-a]) -> cause 1; AND quantity="0", separately "-5" -> cause 1
+   [G1 regression: both parse finite and are return-None'd by :122 today; under v3 they fell through
+   to "attributed"]; verbatim strings carried, nothing coerced.
+6. Valid finite line, missing entry mid -> cause 6; AND present-but-unparseable mid
+   (market_midpoint="junk", no valid fallback) -> cause 6, never cause 1 [Codex P1-b];
+   AND parseable-and-finite but out-of-domain mid (market_midpoint="0", separately "1",
+   separately "-0.2", separately "1.4", no valid fallback) -> cause 6; AND parseable-but-NON-FINITE
+   mid (market_midpoint="nan", separately "inf", no valid fallback) -> cause 6, never cause 2
+   (cause 2 excludes the mid by construction) [Codex wave-8], never cause 2, never cause 3
+   (cause 3 judges the PRICES, cause 6 the MID) and never
+   "attributed" [Codex wave-3: these clear the finite guard and are rejected only by _entry_mid's
+   0 < value < 1 domain check at edge_attribution.py:91-101];
+   AND missing entry mid with line_price="nan" ->
+   cause 2 (the nonfinite line is judged before the missing mid; the mid-missing x nan-line cell is
+   pinned so no literal reading of cause 2's antecedent can exclude it [R4-a]).
+7. [R3 cured] Dropped-mass fixture, SYNTHETIC single cohort, literals stated as VALUES drawn from real
+   artifact rows and NOT as a reproduction of artifact grouping (the real nine span seven cohorts —
+   the fixture normalizes signal_cohort to "fixture_cohort" for all ten rows): nine attributed tuples
+   (entry_fill, exit, total_pnl_per_share): (0.59,0.75,+0.16) (0.42,0.53,+0.11) (0.18,1.0,+0.82)
+   (0.24,0.31,+0.07) (0.91,1.0,+0.09) (0.88,1.0,+0.12) (0.49,0.31,-0.18) (0.508157,1.0,+0.491843)
+   (0.78,0.99,+0.21) plus the dropped loss (0.505094, 0.0, no CLV row, realised -10.0). Asserts, all
+   hand-computed: attributed_positions == 9; unattributable_positions == 1;
+   unattributable_realised_pnl_usdc == -10.0; the cohort's attribution_class is JSON null with
+   class_suppressed_reason "unattributable_positions_present" [Codex wave-4: v4's test 7 asserted the
+   counts but never the CLASS, so the selection bias it demonstrates stayed permitted by every
+   registered test]; attributed-only sum(total_pnl_per_share) rounded to
+   6dp == 1.891843 [G3: the raw IEEE754 sum is 1.8918430000000002 — literal equality without rounding
+   fails, gate-executed]; mean rounded to 6dp == 0.210205.
+8. Field-projection identity on attributed rows.
+9. CSV round-trip: empty fields -> safe_float None, never 0.0.
+10. Producer emission: three preserved counters present; attributed + skipped == seen; zero-filled
+    SIX-key histogram sums to skipped (on a fixture where all skips are ONE cause, the other five
+    keys are present and 0 — the round-2 N3 case).
+11. All-unattributable cohort emits a row (attributed_positions 0, metrics null,
+    recommended_action null) AND the governance refresh cycle completes — the KeyError abort mode is
+    pinned shut [Codex P1-c].
+12. realised_pnl_usdc="garbage" AND separately "nan" on unattributable rows -> sum unchanged and
+    FINITE, unattributable_pnl_unparseable_count increments for each [G4]; AND the affected row's
+    COHORT unattributable_realised_pnl_usdc is also finite [Codex P1-f].
+13. Emitted CSV header contains attribution_status AND realised_pnl_usdc [G2 — pins the
+    extrasaction="ignore" silent-drop mode shut].
+14. Overflow regression for 1c's UNIVERSAL loud-raise rule [Codex wave-3 — 1c mandates it and no test
+    enumerated it, so the rule could ship unimplemented and pass]: two unattributable rows whose
+    realised_pnl_usdc values are each INDIVIDUALLY finite but whose sum overflows IEEE754 double
+    ("1.7e308" and "1.7e308", each finite, sum == inf). Assert the run RAISES rather than emitting
+    a non-finite unattributable_realised_pnl_usdc; assert no edge_attribution.json is left carrying
+    Infinity; assert unattributable_pnl_unparseable_count does NOT absorb them (both values are
+    parseable and finite — the counter in 1c counts unparseable/non-finite INPUTS, not an overflowing
+    OUTPUT). Same assertion for a cohort-level sum that overflows, ISOLATED so it cannot be satisfied by
+    the global guard [Codex wave-7: two positive 1.7e308 values overflow the TOP-LEVEL sum too and
+    raise before cohort emission is ever reached, so an implementation guarding only the global
+    aggregate would pass. The fixture must keep the global sum FINITE while one cohort overflows:
+    cohort A carries +1.7e308 twice (its own sum overflows) and cohort B carries -1.7e308 twice,
+    so the global TOTAL is 0.0. The SOURCE ROW ORDER is part of the fixture and is registered as
+    A+, B-, A+, B- [Codex P2 wave-8: the module sums in row order, so the grouping A+, A+, B-, B-
+    overflows the global running sum on the SECOND A value before either negative is visited — the
+    test would then raise in the global guard and again fail to prove the cohort guard exists.
+    "The global sum is 0.0" is only true of the total, not of every prefix, and a running sum has
+    prefixes]. Interleaved, every global prefix stays finite while each cohort still overflows.
+    Assert the run raises, and that it raises on the COHORT path]; AND the same assertion for an ATTRIBUTED cohort aggregate — two individually valid,
+    individually finite attributed rows in ONE cohort whose total_pnl_usdc values sum past the float
+    range must raise, not emit Infinity for the cohort's total_pnl_usdc [Codex wave-4: the rule as
+    registered in v4 covered only the unattributable sums, so this path was permitted].
+15. Out-of-domain price regressions [Codex wave-4 P1, cause 3]: line_price="2.0", separately "-0.5"
+    -> cause 3, NOT attributed; entry_price="1.5", separately "-0.1", separately "0", separately "1"
+    -> cause 3 (entry is the OPEN interval); exit_price="1.7", separately "-0.2" -> cause 3; AND the
+    endpoints that must stay LEGAL: exit_price="0.0" and separately "1.0" with an in-domain entry and
+    line -> "attributed", never cause 3 (a settled position exits at an endpoint; registering a
+    closed interval for exit and then rejecting it would break the registered test-7 fixture and drop
+    every settled position).
+16. Blank join identity [Codex wave-4 P2, cause 1]: a closed position with shadow_position_id "" and
+    otherwise valid fields -> cause 1, NOT attributed; AND with TWO blank-id positions and one
+    blank-id CLV row present, assert NEITHER attributes and the row is consumed by neither — the
+    last-wins "" collision at edge_attribution.py:189/:197 is pinned shut.
+17. Mixed-cohort class suppression [Codex wave-4 P1, the 1d rule]. LITERAL QUANTITIES ARE REQUIRED
+    [Codex wave-7]: `_classify` decides positive_edge_confirmed from the QUANTITY-WEIGHTED
+    total_pnl_usdc, and the test-7 fixture specifies only entry, exit and per-share P&L. A builder
+    who gave the one negative row a large enough quantity would make the attributed subset negative
+    on its own, so the "NOT positive_edge_confirmed" assertion would pass even with the
+    selection-bias path left wide open — a vacuous test. Every attributed row in this fixture
+    therefore carries quantity EXACTLY 1.0, making the attributed subset's total_pnl_usdc
+    +1.891843 — unambiguously positive — so suppression is the ONLY thing that can remove the class.
+    Assert both directions: with the dropped row present the class is null; with the same nine rows
+    and NO dropped row the class IS positive_edge_confirmed. Reuse the test-7 rows (nine attributed
+    summing to +1.891843/share plus one dropped -10.0 realised) and assert the cohort
+    emits attribution_class JSON null, recommended_action JSON null, and class_suppressed_reason
+    "unattributable_positions_present" — NOT "positive_edge_confirmed"; assert no class upsert
+    reaches research_focus.py:1053-1070 for it, so the +12.0 delta cannot be earned by dropping the
+    losses; AND a fully-attributed cohort (unattributable_positions == 0) still emits its class,
+    its action, and class_suppressed_reason null, so the rule withholds without disabling.
+
+18. Cross-case totality [Codex wave-5 — the defect class, not just the instance]. Every registered
+    test before this one exercises ONE defect with every other input valid, which is exactly why the
+    entry-mid x out-of-domain-line cell went unassigned through four gate rounds and one review wave.
+    Two parts:
+    (a) The named cell, pinned literally: no usable entry mid (market_midpoint="junk", no valid
+        fallback) AND line_price="2.0" -> cause 3, never cause 6, never unassigned.
+    (b) TOTALITY, asserted structurally rather than case by case. The position dimension must cross
+        EVERY registered position-side cause, not just entry_price [Codex wave-5 — the first version
+        of this test varied only entry_price and so was not total either, which is the same defect it
+        was written to catch. The concrete miss: an implementation that checks for a missing CLV row
+        BEFORE checking a blank identity passes test 16 (whose fixture supplies a line) and passes a
+        matrix in which every id is valid, yet assigns cause 4 instead of cause 1 to a
+        blank-id/no-line production row].
+        POSITION dimension (8): all-valid; shadow_position_id ""; entry_price ""; entry_price "nan";
+          exit_price "nan"; quantity "0"; quantity "inf"; entry_price "1.5" (the domain arm).
+        LINE dimension (7): no row; line_kind "latest_provisional"; line_kind "" with line_price
+          "junk"; line_price ""; line_price "nan"; line_price "2.0"; a valid closing line.
+        MID dimension (6): valid; missing; "junk"; "0"; "nan"; "inf".
+        [Codex wave-7: the counts previously read 7 and 6 while the lists held 8 and 7, so a literal
+        builder could have dropped an arm to honour the number. Counts and lists now agree; if they
+        ever disagree again the LIST is authoritative, since it is the thing that gets built.]
+        Assert for EVERY closed position in the cross-product that attribution_status is present, is
+        one of the seven registered values, and equals the FIRST cause its inputs match under the
+        registered precedence — not merely some legal value, since "any of seven" would pass an
+        implementation that evaluates them in the wrong order. Also assert attributed + skipped ==
+        seen with the six-key histogram summing to skipped. No cell unassigned, no cell outside the
+        enum, no cell out of precedence. This is what makes "CLOSED enum" something a build can fail
+        rather than a claim in prose.
+
+19. Global suppression on keyless dropped mass [Codex P1 wave-9 — 1d's strictest arm was registered
+    in wave 8 with NO test, so it was a rule a build could ignore while passing everything]. Fixture:
+    cohort "alpha" with THREE attributed rows, all positive, quantity 1.0 each, entry 0.40 exit 0.55
+    (+0.15/share, cohort total +0.45) — on its own an unambiguous positive_edge_confirmed; PLUS one
+    unattributable row with signal_cohort "" (keyless) and realised_pnl_usdc -20.0, no CLV row.
+    Assert: "alpha" has unattributable_positions == 0 and WOULD classify, yet emits attribution_class
+    JSON null, recommended_action JSON null, and class_suppressed_reason
+    "unassignable_dropped_mass_present"; the "unknown" cohort row is ALSO emitted and also carries no
+    class; and NO class upsert reaches research_focus.py:1053-1070 for either, so the +12.0 cannot be
+    earned. Then the control arm: the identical fixture with the dropped row given signal_cohort
+    "alpha" instead of "" — now "alpha" has unattributable_positions == 1 and is suppressed under the
+    ORDINARY 1d rule with class_suppressed_reason "unattributable_positions_present", proving the two
+    suppression reasons are distinguishable and neither is dead code. Without this test an
+    implementation that merely routes the keyless row to "unknown" and suppresses only THAT cohort
+    passes every other enumerated test while the named cohort still classifies around the loss.
+20. The day-after bound is reconstructible from the artifact alone [Codex P1 wave-9]:
+    `registered_baseline_skipped_fraction` is PRESENT in edge_attribution.json, is a FINITE float in
+    [0.0, 1.0], and EQUALS the literal that replaces BLOCKER-1 — asserted against that literal, not
+    against a recomputation, so a build cannot emit a self-consistent but different baseline. Missing,
+    malformed, non-finite, out-of-range, or mismatched all FAIL. Registered now and NOT satisfiable
+    until BLOCKER-1 is resolved, which is the point: the key exists so the operator can reconstruct
+    the advertised bound from the artifact, and an unasserted key is one a build can omit while
+    leaving the checker to evaluate a threshold that was never published.
+
+## Day-after check [N7 cured]
+Read edge_attribution.json AND governance_refresh_status.json on the first post-deploy cycle:
+histogram present with ALL SIX keys; attributed + skipped == seen; skipped fraction within the bound registered at
+BLOCKER-1 below [Codex wave-7]. The previously registered [0.30, 0.70] is DELETED, and so is the
+wave-5 attempt to have the BUILD compute the bound at run time — both were wrong, in opposite
+directions. The literal bounds were wrong because their basis (the measured 0.4954 and 0.5177)
+predates cause 4, which deliberately reclassifies every `latest_provisional` row from attributed to
+skipped; those rows are in neither historical numerator, so a faithful implementation could exceed
+0.70 and fail its own day-after check purely by implementing the registered change. Deferring the
+number to the builder was wrong because a threshold the builder chooses is not a registered
+threshold — that is precisely what S8/A1 forbids, and I substituted a method for a number to avoid
+admitting I could not measure one.
+
+**BLOCKER-1 — this WO is NOT DISPATCHABLE until one number is measured and written here.** Required
+measurement, on the VPS, against the registration-time snapshot: apply the registered seven-cause
+precedence to `shadow_positions.csv` + `closing_line_value_positions.csv` and record the resulting
+skipped fraction. That single number, written into this text as a literal, sets the day-after bound
+as [value - 0.20, value + 0.20], the +/-0.20 being one cycle of drift on the same basis the original
++/-0.20 used. I cannot take this measurement: it needs live VPS telemetry, and the operating rule is
+that engines and data stay on the VPS. Recording it as a blocker rather than guessing is the honest
+form — the count of `latest_provisional` rows among currently-attributed positions is unknown to me,
+and it is exactly the quantity that moves the bound. The 0.4954/0.5177 figures remain on record as
+the PRE-cause-4 measurement and are NOT the bound. Outside the registered bound the check FAILS and
+the cause is named before the WO closes [Codex P1-g]; unattributable_realised_pnl_usdc
+PRESENT and FINITE; and unattributable_pnl_unparseable_count PRESENT, a FINITE NONNEGATIVE INTEGER,
+and <= skipped_unattributable_closed — presence alone is not a check [Codex wave-5: a build that
+hard-codes it to 0, emits null, or simply never increments it passes a presence test while concealing
+exactly the accounting defect the counter exists to expose]. It is additionally RECONCILED against the
+source: its value must equal the number of rows in edge_attribution_positions.csv whose
+attribution_status is one of the six unattributable values AND whose realised_pnl_usdc is missing,
+unparseable, or non-finite. With skipped > 0 a null/absent dropped-mass sum means the core accounting
+this WO exists for did not ship, and the check FAILS [Codex P2]; governance cycle completion stamp fresh in
+governance_refresh_status.json — the field is literally `completed_at_utc`, written by
+refresh_governance.py:146 as self._write("ok", completed_at_utc=now_utc()), and "fresh" means
+status == "ok" AND completed_at_utc >= THE DEPLOYMENT TIMESTAMP AND completed_at_utc <= now_utc()
+AND now_utc() - completed_at_utc <= 12 hours, all three bounds literal.
+THE DEPLOYMENT TIMESTAMP is named, not left to the operator [Codex P1 wave-8 — the procedure says to
+read only edge_attribution.json and governance_refresh_status.json, neither of which carries it, so
+the check was not deterministically executable]: it is `generated_at_utc` in
+`outputs/ops_scheduler/deploy_acceptance.json` (deploy_acceptance.py:621, OUTPUT_FILE at :41), which
+both permitted deploy paths write — the scheduler-driven acceptance run and
+`scripts/deploy_vps_paper_manual.sh`. That artifact is therefore a THIRD required read for this
+check. If it is absent, unparseable, or its `generated_at_utc` is missing or malformed, the check
+FAILS; it is never skipped and never defaulted to a permissive value.
+THE UPPER BOUND `completed_at_utc <= now_utc()` is required because without it a corrupt FUTURE stamp
+passes both other predicates — it is trivially after the deploy, and `now_utc() - completed_at_utc`
+is NEGATIVE and so satisfies `<= 12 hours` [Codex P1 wave-8]. A future stamp would report a healthy
+post-deploy cycle that never ran, and stay "fresh" until that time arrived. A future
+`completed_at_utc` is a FAIL [Codex wave-5 added the first: an age
+bound alone accepts a cycle that completed shortly BEFORE the deploy — status "ok", age under 12h,
+and no line of the new code ever executed. The check exists to prove the POST-deploy accounting did
+not raise, so it must bind to the deployed revision and not merely to the clock] [Codex wave-3: an
+unbounded "fresh" passes against a stamp of any age, so a raise that aborts every post-deploy cycle
+would be read as a pass. Basis: GOVERNANCE_INTERVAL defaults to 21600s = 6h
+(run_vps_ops_scheduler.sh:23, matching the "every 6h" cadence in its header at :8); 12h is 2x that,
+one missed cycle of tolerance]. An absent or stale stamp FAILS the check (it proves the accounting DID raise,
+which is the mode 1c's loud-raise rule creates). EVERY malformed form FAILS TOO, enumerated so the
+checker cannot choose [Codex wave-7]: `completed_at_utc` missing, "", non-string, unparseable
+("junk"), or parseable but not a real instant — each is a FAIL, never a skip and never a crash. A
+retained artifact carrying status "ok" with completed_at_utc "junk" is exactly the shape a stale
+status file takes, so treating it as anything other than a failure would pass the check on the
+evidence that should fail it. Vacuous state: zero
+closed positions -> "not performed". Falsifier: any consumer rendering skipped as 0 while the summary
+shows >0; counts that do not sum; a missing histogram key.

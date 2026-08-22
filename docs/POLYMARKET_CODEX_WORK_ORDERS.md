@@ -16944,7 +16944,9 @@ changing what the day-after operator should actually go check:
    watchdog's own `observed_disk_used_percent`, independently; it does not
    depend on `corpus_retention` at all (subject to qualification 1, above).
 
-## WO-163 — Edge attribution fails closed on unattributable positions — `queued` (registered 2026-08-15 from gate-executed evidence; four-round S8 admission, blockers 4→3→2→0; adds no gate, moves no ceiling, changes no policy or sizing surface → OWNER MERGE after line-audit)
+## WO-163 — Edge attribution fails closed on unattributable positions — `blocked_on_measurement`
+(NOT DISPATCHABLE: BLOCKER-1 in the day-after check requires one VPS measurement written into this
+text before any build is dispatched) (registered 2026-08-15 from gate-executed evidence; four-round S8 admission, blockers 4→3→2→0; adds no gate, moves no ceiling, changes no policy or sizing surface → OWNER MERGE after line-audit)
 
 
 Class M (mechanical, non-frozen: telemetry honesty). Admission: FOUR independent S8 gate rounds
@@ -16997,11 +16999,21 @@ the charter WP status with a dated "Landed:" note at land time, and WP8 is the e
                                                  is the opposite of failing closed.
         2 "unattributable_nonfinite_inputs"    — every required input EXCEPT entry_mid parses (entry
                                                  mid is judged only at cause 6 [R4-a]) but ANY is non-finite
-                                                 (nan/inf, position side OR line side), OR any derived
-                                                 intermediate (execution_cost, line_movement,
-                                                 settlement_surprise, total_pnl, any *_usdc) is
-                                                 non-finite. Covers gate-executed cases entry="nan",
-                                                 exit="nan", quantity="inf", line_price="nan".
+                                                 (nan/inf, position side OR line side). Covers the
+                                                 gate-executed cases entry="nan", exit="nan",
+                                                 quantity="inf", line_price="nan".
+                                                 [Codex wave-7: the earlier "OR any derived
+                                                 intermediate is non-finite" clause is DELETED, not
+                                                 reworded. It was unreachable by construction: once
+                                                 cause 3 bounds every price to [0,1], the largest
+                                                 |price difference| is 1, so every *_usdc product is
+                                                 bounded by the quantity and a finite quantity can
+                                                 never produce a non-finite product. Registered test
+                                                 19 was written for that branch and its fixture
+                                                 (0.5, 1.0, quantity 1e308 -> 5e307) could not
+                                                 overflow, so a CORRECT build would have failed a
+                                                 mandated test. An unreachable rule is removed rather
+                                                 than given a fixture that lies about reaching it.]
         3 "unattributable_out_of_domain_price" — every required input EXCEPT entry_mid parses and is
                                                  finite (the entry mid is judged ONLY at cause 6, the
                                                  same carve-out cause 2 carries — [Codex wave-5]:
@@ -17070,12 +17082,13 @@ the charter WP status with a dated "Landed:" note at land time, and WP8 is the e
       (Order note: 4-6 are reachable only when 1-3 pass on position-side fields; line-side nonfinite
       is caught at 2, and line-side out-of-domain at 3, only when the row exists and parses — a "nan"
       string PARSES, so it lands in 2; "" / "junk" do not parse and land in 5; "2.0" parses finite and
-      lands in 3. KIND IS VALIDATED BEFORE PRICE [Codex wave-5]: a row whose line_kind is anything
-      other than "closing" lands in 4 REGARDLESS of its line_price, so line_kind="" with
-      line_price="junk" is cause 4, not cause 5. Cause 5 is reachable only on a row that IS a closing
-      row. The earlier order note said ""/"junk" land in 5 unconditionally, which contradicted the
-      first-match precedence for exactly this cell; a line that never closed is not scored no matter
-      how its price parses. Stated so no two labels can be true at once.)
+      lands in 3. KIND IS VALIDATED BEFORE ANY LINE PRICE IS READ [Codex wave-5, widened at wave-7]: if a
+      CLV row is absent, or present with line_kind != "closing", the position is cause 4 and its
+      line_price is NEVER examined — so line_kind="" with line_price "junk", "nan" or "2.0" is cause
+      4, not 5, not 2, not 3. The LINE-side arms of causes 2 and 3 therefore apply only to a row that
+      IS a closing row; the POSITION-side arms of 2 and 3 are unaffected and still precede 4. A line
+      that never closed is not scored no matter how its price parses, and reading a price off it to
+      choose a label would be scoring it. Stated so no two labels can be true at once.)
    b. [R1 cured] Per-cause field-population table, registered:
         ALWAYS populated (all seven): shadow_position_id, signal_cohort, category, market_slug,
           close_reason, quantity*, entry_fill_price*, exit_price*, realised_pnl_usdc*, attribution_status
@@ -17179,12 +17192,16 @@ the charter WP status with a dated "Landed:" note at land time, and WP8 is the e
    literal builder could satisfy the pre-flight only by inventing a status or rewriting historical
    completion metadata. The registered edit is therefore exactly this: leave the `done` status and
    the existing Landed block BYTE-IDENTICAL, and append one dated line immediately below the block,
-   of the form
-     `Amended <YYYY-MM-DD> (WO-163): attribution now fails closed — attribution_status enum,
+   of the form, using the literal `Landed:` token the pre-flight requires [Codex wave-7 — the
+   earlier wording prescribed an `Amended` line and then declared it equivalent, which does not
+   satisfy a literal check for `Landed:`; a builder would have had to violate either this
+   instruction or pre-flight item 7]:
+     `Landed: <YYYY-MM-DD> (WO-163) — attribution now fails closed: attribution_status enum,
       dropped-mass accounting, cohort class suppression while coverage is incomplete.`
-   The registry pre-flight's "flip the charter WP status" step is satisfied for an already-done WP by
-   this dated amendment note; that is stated here so the pre-flight and this WO cannot be read as
-   demanding contradictory edits.
+   Two `Landed:` lines under one WP is the intended result: the 2026-07-02 line records the original
+   delivery and stays untouched, the new one records this amendment. Nothing is renamed, reordered
+   or removed, and pre-flight item 7 is satisfied on its own literal terms rather than by an
+   equivalence argument.
 
 ## Consumers (grep -rn "edge_attribution" src/ scripts/ tests/, plus round-2 additions [N2 cured])
 refresh_governance.py:281-287; dashboard.py:1083-1090, :2912, :2953-2954 (funnel), :292 (render);
@@ -17267,8 +17284,13 @@ fresh-but-wrong. This paragraph must survive as a code comment.
     a non-finite unattributable_realised_pnl_usdc; assert no edge_attribution.json is left carrying
     Infinity; assert unattributable_pnl_unparseable_count does NOT absorb them (both values are
     parseable and finite — the counter in 1c counts unparseable/non-finite INPUTS, not an overflowing
-    OUTPUT). Same assertion for a cohort-level sum that overflows [1d applies the same rule one level
-    down]; AND the same assertion for an ATTRIBUTED cohort aggregate — two individually valid,
+    OUTPUT). Same assertion for a cohort-level sum that overflows, ISOLATED so it cannot be satisfied by
+    the global guard [Codex wave-7: two positive 1.7e308 values overflow the TOP-LEVEL sum too and
+    raise before cohort emission is ever reached, so an implementation guarding only the global
+    aggregate would pass. The fixture must keep the global sum FINITE while one cohort overflows:
+    cohort A carries +1.7e308 and +1.7e308 (its own sum overflows), cohort B carries -1.7e308 and
+    -1.7e308, so the global sum is 0.0 and finite. Assert the run raises, and that it raises on the
+    COHORT path]; AND the same assertion for an ATTRIBUTED cohort aggregate — two individually valid,
     individually finite attributed rows in ONE cohort whose total_pnl_usdc values sum past the float
     range must raise, not emit Infinity for the cohort's total_pnl_usdc [Codex wave-4: the rule as
     registered in v4 covered only the unattributable sums, so this path was permitted].
@@ -17283,8 +17305,17 @@ fresh-but-wrong. This paragraph must survive as a code comment.
     otherwise valid fields -> cause 1, NOT attributed; AND with TWO blank-id positions and one
     blank-id CLV row present, assert NEITHER attributes and the row is consumed by neither — the
     last-wins "" collision at edge_attribution.py:189/:197 is pinned shut.
-17. Mixed-cohort class suppression [Codex wave-4 P1, the 1d rule]: reuse the test-7 fixture (nine
-    attributed summing to +1.891843/share plus one dropped -10.0 realised) and assert the cohort
+17. Mixed-cohort class suppression [Codex wave-4 P1, the 1d rule]. LITERAL QUANTITIES ARE REQUIRED
+    [Codex wave-7]: `_classify` decides positive_edge_confirmed from the QUANTITY-WEIGHTED
+    total_pnl_usdc, and the test-7 fixture specifies only entry, exit and per-share P&L. A builder
+    who gave the one negative row a large enough quantity would make the attributed subset negative
+    on its own, so the "NOT positive_edge_confirmed" assertion would pass even with the
+    selection-bias path left wide open — a vacuous test. Every attributed row in this fixture
+    therefore carries quantity EXACTLY 1.0, making the attributed subset's total_pnl_usdc
+    +1.891843 — unambiguously positive — so suppression is the ONLY thing that can remove the class.
+    Assert both directions: with the dropped row present the class is null; with the same nine rows
+    and NO dropped row the class IS positive_edge_confirmed. Reuse the test-7 rows (nine attributed
+    summing to +1.891843/share plus one dropped -10.0 realised) and assert the cohort
     emits attribution_class JSON null, recommended_action JSON null, and class_suppressed_reason
     "unattributable_positions_present" — NOT "positive_edge_confirmed"; assert no class upsert
     reaches research_focus.py:1053-1070 for it, so the +12.0 delta cannot be earned by dropping the
@@ -17304,11 +17335,14 @@ fresh-but-wrong. This paragraph must survive as a code comment.
         BEFORE checking a blank identity passes test 16 (whose fixture supplies a line) and passes a
         matrix in which every id is valid, yet assigns cause 4 instead of cause 1 to a
         blank-id/no-line production row].
-        POSITION dimension (7): all-valid; shadow_position_id ""; entry_price ""; entry_price "nan";
-          exit_price "nan"; quantity "0"; quantity "inf". Plus entry_price "1.5" for the domain arm.
-        LINE dimension (6): no row; line_kind "latest_provisional"; line_kind "" with line_price
-          "junk"; line_price ""; line_price "nan"; line_price "2.0"; and a valid closing line.
+        POSITION dimension (8): all-valid; shadow_position_id ""; entry_price ""; entry_price "nan";
+          exit_price "nan"; quantity "0"; quantity "inf"; entry_price "1.5" (the domain arm).
+        LINE dimension (7): no row; line_kind "latest_provisional"; line_kind "" with line_price
+          "junk"; line_price ""; line_price "nan"; line_price "2.0"; a valid closing line.
         MID dimension (4): valid; missing; "junk"; "0".
+        [Codex wave-7: the counts previously read 7 and 6 while the lists held 8 and 7, so a literal
+        builder could have dropped an arm to honour the number. Counts and lists now agree; if they
+        ever disagree again the LIST is authoritative, since it is the thing that gets built.]
         Assert for EVERY closed position in the cross-product that attribution_status is present, is
         one of the seven registered values, and equals the FIRST cause its inputs match under the
         registered precedence — not merely some legal value, since "any of seven" would pass an
@@ -17317,36 +17351,30 @@ fresh-but-wrong. This paragraph must survive as a code comment.
         enum, no cell out of precedence. This is what makes "CLOSED enum" something a build can fail
         rather than a claim in prose.
 
-19. Per-position derived overflow [Codex wave-5, cause 2's second clause]: cause 2 assigns
-    `unattributable_nonfinite_inputs` when every INPUT is finite but a DERIVED intermediate is not,
-    and no enumerated test reached that branch — tests 3-4 feed non-finite inputs, and test 14
-    overflows a sum ACROSS rows. Within ONE position, a valid finite price times a sufficiently large
-    finite quantity overflows: entry_fill 0.5, exit 1.0, quantity "1e308" (parses, finite, positive,
-    so it clears cause 1) makes the *_usdc products non-finite. Assert the row is assigned cause 2
-    exactly, is NOT attributed, that the run COMPLETES rather than raising (a per-position defect is
-    a classification, not an accounting failure — the loud raise in 1c governs EMITTED AGGREGATES,
-    and this row contributes to none), and that no non-finite value reaches the positions CSV or the
-    JSON. Without this an implementation that validates only inputs and aggregate sums passes every
-    other test while either raising at emission or writing an invalid position row.
-
 ## Day-after check [N7 cured]
 Read edge_attribution.json AND governance_refresh_status.json on the first post-deploy cycle:
-histogram present with ALL SIX keys; attributed + skipped == seen; skipped fraction within the literal
-bounds derived as follows [Codex wave-5 — the previously registered [0.30, 0.70] was WRONG, and
-wrong in the direction that fails a CORRECT build: its basis, the measured 0.4954 and 0.5177, was
-taken BEFORE cause 4 exists, and cause 4 deliberately reclassifies every `latest_provisional` row
-from attributed to skipped. Those rows are in neither historical numerator and this WO has no count
-for them, so a faithful implementation could exceed 0.70 and fail its own day-after check purely by
-implementing the registered change]. The build therefore RECOMPUTES the baseline as its first
-day-after step: apply the registered seven-cause precedence to the registration-time snapshot,
-record the resulting skipped fraction in edge_attribution.json as
-`registered_baseline_skipped_fraction` (literal, one number, written once), and the day-after bound
-is that recorded baseline +/- 0.20. The method is literal now and the number becomes literal at
-build time; a bound invented today from pre-change data is not a threshold, it is a guess. The
-0.4954/0.5177 figures remain on record as the PRE-cause-4 measurement and are no longer the bound; BELOW 0.30 is investigated as too-good-to-be-true
-(the drain lowering it gradually is expected, a jump is not), ABOVE 0.70 as a coverage regression;
-either way outside the bounds the check FAILS and the cause is named before the WO closes
-[Codex P1-g]; unattributable_realised_pnl_usdc
+histogram present with ALL SIX keys; attributed + skipped == seen; skipped fraction within the bound registered at
+BLOCKER-1 below [Codex wave-7]. The previously registered [0.30, 0.70] is DELETED, and so is the
+wave-5 attempt to have the BUILD compute the bound at run time — both were wrong, in opposite
+directions. The literal bounds were wrong because their basis (the measured 0.4954 and 0.5177)
+predates cause 4, which deliberately reclassifies every `latest_provisional` row from attributed to
+skipped; those rows are in neither historical numerator, so a faithful implementation could exceed
+0.70 and fail its own day-after check purely by implementing the registered change. Deferring the
+number to the builder was wrong because a threshold the builder chooses is not a registered
+threshold — that is precisely what S8/A1 forbids, and I substituted a method for a number to avoid
+admitting I could not measure one.
+
+**BLOCKER-1 — this WO is NOT DISPATCHABLE until one number is measured and written here.** Required
+measurement, on the VPS, against the registration-time snapshot: apply the registered seven-cause
+precedence to `shadow_positions.csv` + `closing_line_value_positions.csv` and record the resulting
+skipped fraction. That single number, written into this text as a literal, sets the day-after bound
+as [value - 0.20, value + 0.20], the +/-0.20 being one cycle of drift on the same basis the original
++/-0.20 used. I cannot take this measurement: it needs live VPS telemetry, and the operating rule is
+that engines and data stay on the VPS. Recording it as a blocker rather than guessing is the honest
+form — the count of `latest_provisional` rows among currently-attributed positions is unknown to me,
+and it is exactly the quantity that moves the bound. The 0.4954/0.5177 figures remain on record as
+the PRE-cause-4 measurement and are NOT the bound. Outside the registered bound the check FAILS and
+the cause is named before the WO closes [Codex P1-g]; unattributable_realised_pnl_usdc
 PRESENT and FINITE; and unattributable_pnl_unparseable_count PRESENT, a FINITE NONNEGATIVE INTEGER,
 and <= skipped_unattributable_closed — presence alone is not a check [Codex wave-5: a build that
 hard-codes it to 0, emits null, or simply never increments it passes a presence test while concealing
@@ -17366,6 +17394,11 @@ unbounded "fresh" passes against a stamp of any age, so a raise that aborts ever
 would be read as a pass. Basis: GOVERNANCE_INTERVAL defaults to 21600s = 6h
 (run_vps_ops_scheduler.sh:23, matching the "every 6h" cadence in its header at :8); 12h is 2x that,
 one missed cycle of tolerance]. An absent or stale stamp FAILS the check (it proves the accounting DID raise,
-which is the mode 1c's loud-raise rule creates). Vacuous state: zero
+which is the mode 1c's loud-raise rule creates). EVERY malformed form FAILS TOO, enumerated so the
+checker cannot choose [Codex wave-7]: `completed_at_utc` missing, "", non-string, unparseable
+("junk"), or parseable but not a real instant — each is a FAIL, never a skip and never a crash. A
+retained artifact carrying status "ok" with completed_at_utc "junk" is exactly the shape a stale
+status file takes, so treating it as anything other than a failure would pass the check on the
+evidence that should fail it. Vacuous state: zero
 closed positions -> "not performed". Falsifier: any consumer rendering skipped as 0 while the summary
 shows >0; counts that do not sum; a missing histogram key.

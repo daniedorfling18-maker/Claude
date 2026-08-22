@@ -887,6 +887,100 @@ def test_invalid_split_state_does_not_freeze_the_toxicity_veto(tmp_path):
     assert wallet_rows[0]["artifact_status"] == "invalid_frozen_split_state"
 
 
+def test_a_delayed_feature_does_not_hide_the_usable_one(tmp_path):
+    """The cursor must not stop on a delayed row and skip a valid later one.
+
+    With venue and collection times carried separately, a source-time cursor
+    could select a feature sourced at 310 but collected at 1000, stale-exclude
+    it, and never consider a feature sourced AND collected at 320 -- the first
+    usable observation inside the window (Codex P2 wave-12). Ordering on the
+    single effective stamp fixes it by construction: the delayed row's effective
+    time is 1000, so it sorts after the timely one.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            {"source_timestamp": 310, "collected_at_utc": 1000, "asset_id": "tok-a", "midpoint": 0.90},
+            {"source_timestamp": 320, "collected_at_utc": 320, "asset_id": "tok-a", "midpoint": 0.70},
+        ],
+        fieldnames=["source_timestamp", "collected_at_utc", "asset_id", "midpoint"],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    # The usable 0.70 row at effective 320 is selected: 0.70 - 0.50 = 0.20.
+    assert float(rows["w1"]["markout_mean_total"]) == 0.2
+    assert int(rows["w1"]["fills_stale_price_excluded"]) == 0
+
+
+def test_features_with_invalid_collection_times_are_rejected(tmp_path):
+    """A present-but-unparseable collection time must not default to the venue.
+
+    Defaulting manufactured an availability time we do not know, so an
+    unverifiable label could appear available before the split and enter the
+    ranking mean (Codex P1 wave-12). Absent is different from invalid: an absent
+    column means the corpus predates it, and the venue stamp is the only
+    evidence available.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            {"source_timestamp": 310, "collected_at_utc": "junk", "asset_id": "tok-a", "midpoint": 0.90},
+            {"source_timestamp": 330, "collected_at_utc": 330, "asset_id": "tok-a", "midpoint": 0.70},
+        ],
+        fieldnames=["source_timestamp", "collected_at_utc", "asset_id", "midpoint"],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    # The junk-collection row is dropped; the valid 0.70 row scores.
+    assert float(rows["w1"]["markout_mean_total"]) == 0.2
+
+
+def test_a_malformed_markout_horizon_fails_closed(tmp_path):
+    """Config corruption must not preserve or manufacture healthy evidence."""
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+    wallet_path = cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv"
+    assert build_flow_toxicity(cfg)["status"] == "ok"
+
+    raw = yaml.safe_load(Path(cfg.path).read_text(encoding="utf-8"))
+    raw["flow_toxicity"]["markout_horizon_minutes"] = "not-a-number"
+    Path(cfg.path).write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="finite positive number"):
+        build_flow_toxicity(load_config(Path(cfg.path)))
+
+    rows = read_csv_rows(wallet_path)
+    assert len(rows) == 1
+    assert rows[0]["artifact_status"] == "invalid_markout_horizon"
+
+
 def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):
     """A wallet with no measurable fill must appear, disclosed, not vanish.
 

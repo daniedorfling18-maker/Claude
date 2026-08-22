@@ -2148,11 +2148,34 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
 Required and previously absent: this amendment named the test file but enumerated no wallet-axis
 tests, and the parent's generic sentence covers only the market axis — it cannot specify the frozen
 split, embargo, staleness, sentinel or upstream-failure paths. WO-151 was found undispatchable for
-exactly this omission (see §151.1), so the same standard applies here. All TWENTY-SIX live in
+exactly this omission (see §151.1), so the same standard applies here. All THIRTY-ONE live in
 tests/polymarket_predictive_engine/test_flow_toxicity.py.
-Counted as twenty-six because items 16a and 19a are separate test functions, not sub-cases [Codex
-P1 wave-10: the preamble said twenty-four while the matrix listed twenty-six, and S8/A7 requires a
-registered count to be true].
+Counted as thirty-one: items 1-24, the lettered cases 16a and 19a, and the five later additions
+enumerated as 25-29 below. All are separate test functions [S8/A7 requires a registered count to be
+true; this count has now been corrected three times — 24, then 26, then 31 — because each review wave
+added tests and I updated the matrix without updating the total. It is verified against
+`grep -c "^def test_"` rather than counted by hand].
+
+25. A wallet-side fault does NOT freeze the toxicity veto. FIXTURE: a healthy run over 20 fills on
+    one market; then corrupt flow_toxicity_wallet_split.json to `{"split_stamp": true}` and delete
+    flow_toxicity.csv. EXPECT: the run RAISES, AND flow_toxicity.csv exists again with its one market
+    row, AND the wallet CSV holds exactly one sentinel with artifact_status
+    "invalid_frozen_split_state".
+26. An "ok" status without poll evidence is not a refresh. FIXTURE: primary "disabled", replay
+    {status ok, markets_polled 0, market_source_status "empty"}, backfill "no_candidate_markets".
+    EXPECT trade_corpus_status == "no_producer_refreshed" and NO split file. Then set replay to
+    {ok, markets_polled 3, market_source_status "websocket"}: EXPECT "ok".
+27. A delayed feature does not hide the usable one. FIXTURE: fill at t=0 (target 300); features
+    (source 310, collected 1000, 0.90) and (source 320, collected 320, 0.70). EXPECT the 0.70 row is
+    selected — markout_mean_total == +0.20 — and fills_stale_price_excluded == 0.
+28. Features with a PRESENT but invalid collection time are rejected, not defaulted. FIXTURE:
+    (source 310, collected "junk", 0.90) and (source 330, collected 330, 0.70). EXPECT
+    markout_mean_total == +0.20 (the junk row dropped). An ABSENT column is different and still
+    falls back to the venue stamp.
+29. A malformed markout_horizon_minutes fails closed. FIXTURE: a healthy run, then set the setting to
+    "not-a-number". EXPECT the run RAISES and the wallet CSV holds one sentinel with
+    artifact_status "invalid_markout_horizon" — configuration corruption must not leave the previous
+    artifact_status="ok" rows readable.
 
  1. Planted toxic flow scores above balanced flow (parent WO-49 null test, unchanged).
  2. Wallet-tier markout split arithmetic (parent, unchanged).
@@ -2274,9 +2297,14 @@ withdrawn [Codex P1 wave-7: it directly contradicted this same amendment's paren
 reconciliation, which registers rule 6's non-finite rejection as a deliberate behaviour change to the
 market axis. Two incompatible statements in the binding spec left a builder or auditor unable to tell
 whether preserving previous bytes or excluding malformed rows was authoritative — EXCLUDING THEM IS
-AUTHORITATIVE]. The only difference is the absence of rows whose price, size or timestamp parsed but
-was non-finite; every column name, ordering and formula is untouched, and on a corpus containing no
-such rows the output IS byte-identical. On the disabled path the artifact is REPLACED by a single sentinel row carrying
+AUTHORITATIVE]. Two differences, both registered above and neither hidden [Codex P1 wave-12 — this sentence still
+claimed "every ordering is untouched" while the parent scope registers the ordering change, and the
+two cannot both be true]: (i) rows whose price, size or timestamp parsed but was non-finite are
+absent; (ii) a feature's effective timestamp is now the LATER of its venue stamp and its collection
+stamp, and same-stamp ties break on arrival order rather than on midpoint, so on a corpus containing
+delayed or duplicate features a different quote may be selected. Every column NAME and every FORMULA
+is untouched, and on a corpus with no non-finite rows, no delayed collections and no same-stamp
+duplicates the output IS byte-identical. On the disabled path the artifact is REPLACED by a single sentinel row carrying
 `artifact_status="disabled"` and both invocation flags false — a stale ranking left on disk would read
 as current, and a header-only file names the columns while asserting nothing.
 

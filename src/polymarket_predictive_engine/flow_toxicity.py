@@ -205,13 +205,12 @@ def _build_price_index(
             asset_id TEXT NOT NULL,
             stamp REAL NOT NULL,
             midpoint REAL NOT NULL,
-            observed_stamp REAL NOT NULL,
             source_order INTEGER NOT NULL
         );
         """
     )
-    batch: list[tuple[str, float, float, float, int]] = []
-    tail_candidates: dict[str, tuple[float, float, int, float]] = {}
+    batch: list[tuple[str, float, float, int]] = []
+    tail_candidates: dict[str, tuple[float, int, float]] = {}
     scanned_rows = 0
     indexed_rows = 0
 
@@ -220,8 +219,7 @@ def _build_price_index(
         if not batch:
             return
         connection.executemany(
-            "INSERT INTO feature_prices(asset_id, stamp, midpoint, observed_stamp, source_order)"
-            " VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO feature_prices(asset_id, stamp, midpoint, source_order) VALUES (?, ?, ?, ?)",
             batch,
         )
         indexed_rows += len(batch)
@@ -234,17 +232,44 @@ def _build_price_index(
             bounds = target_bounds.get(token)
             if bounds is None:
                 continue
-            stamp = _stamp(row.get("source_timestamp") or row.get("collected_at_utc"))
-            # The VENUE stamp orders the series; the COLLECTION stamp says when
-            # the price actually became observable to us (Codex P1 wave-8 on
-            # #451). Keeping only the venue stamp let a delayed or replayed
-            # feature sourced at 900 but collected at 1100 count as available at
-            # 900 - so it would pass a split at 1000 and enter the RANKING mean
-            # despite only existing during evaluation. Both are retained and the
-            # ranking embargo tests the later of the two.
-            observed = _stamp(row.get("collected_at_utc")) or stamp
+            source_stamp = _stamp(row.get("source_timestamp") or row.get("collected_at_utc"))
             midpoint = safe_float(row.get("midpoint"))
-            if stamp is None or midpoint is None or stamp < bounds[0]:
+            if source_stamp is None or midpoint is None:
+                continue
+            # ONE effective stamp, not two interacting ones.
+            #
+            # A price is usable no earlier than BOTH the venue stamping it and
+            # us observing it, so the effective time is the later of the two.
+            # Carrying venue and collection times separately meant four
+            # independent decisions - cursor advance, ranking embargo, staleness
+            # ceiling, tie-break - each of which had to remember which clock it
+            # cared about, and waves 8 through 12 produced a defect in one of
+            # them per round. Collapsing to a single value makes those four
+            # decisions consistent by construction.
+            #
+            # It also fixes the cursor defect directly (Codex P2 wave-12): the
+            # cursor advances in effective-stamp order, so a delayed row
+            # (sourced 310, collected 1000 -> effective 1000) now sorts AFTER a
+            # timely one (sourced and collected 320 -> effective 320) and can no
+            # longer be selected and stale-excluded while the usable row is
+            # skipped.
+            #
+            # A collection field that is PRESENT but unparseable or non-finite
+            # is rejected outright rather than defaulted to the venue stamp
+            # (Codex P1 wave-12): defaulting manufactured an availability time
+            # we do not know, and an unverifiable label could then appear
+            # available before the split and enter the ranking mean. Absent is
+            # different from invalid - an absent field means the corpus predates
+            # the column, and the venue stamp is the only evidence there is.
+            raw_collected = row.get("collected_at_utc")
+            if str(raw_collected or "").strip():
+                collected = _stamp(raw_collected)
+                if collected is None or not math.isfinite(collected):
+                    continue
+                stamp = max(source_stamp, collected)
+            else:
+                stamp = source_stamp
+            if stamp < bounds[0]:
                 continue
             # safe_float parses "inf"/"nan" here too (Codex P1 wave-6 on #451:
             # the wave-5 fix validated only TRADE fields). An inf midpoint
@@ -254,33 +279,31 @@ def _build_price_index(
             # and the constraint aborts the whole build. Rejected before either.
             if not math.isfinite(stamp) or not math.isfinite(midpoint):
                 continue
-            if observed is None or not math.isfinite(observed):
-                observed = stamp
             source_order = scanned_rows
             if stamp <= bounds[1]:
-                batch.append((token, stamp, midpoint, observed, source_order))
+                batch.append((token, stamp, midpoint, source_order))
                 if len(batch) >= 10_000:
                     flush()
                 continue
-            # Ordered (stamp, observed, source_order, midpoint) so the tuple
-            # comparison below breaks same-stamp ties on OBSERVATION time, never
-            # on price. This is the second place that ordering mattered: the
-            # SQL ORDER BY decides among indexed rows, but for a token whose
-            # only candidates fall past the target bound it is THIS comparison
-            # that picks the single retained row, and with midpoint second it
-            # picked whichever price was numerically smaller (Codex P1 wave-9).
-            candidate = (stamp, observed, source_order, midpoint)
+            # Ordered (stamp, source_order, midpoint) so the tuple comparison
+            # below breaks ties on ARRIVAL ORDER, never on price. This is the
+            # second place ordering mattered: the SQL ORDER BY decides among
+            # indexed rows, but for a token whose only candidates fall past the
+            # target bound it is THIS comparison that picks the single retained
+            # row, and with midpoint second it picked whichever price was
+            # numerically smaller (Codex P1 wave-9).
+            candidate = (stamp, source_order, midpoint)
             current = tail_candidates.get(token)
             if current is None or candidate < current:
                 tail_candidates[token] = candidate
 
-    for token, (stamp, observed, source_order, midpoint) in tail_candidates.items():
-        batch.append((token, stamp, midpoint, observed, source_order))
+    for token, (stamp, source_order, midpoint) in tail_candidates.items():
+        batch.append((token, stamp, midpoint, source_order))
     flush()
     connection.commit()
     connection.execute(
         "CREATE INDEX feature_prices_token_stamp_idx "
-        "ON feature_prices(asset_id, stamp, observed_stamp, source_order, midpoint)"
+        "ON feature_prices(asset_id, stamp, source_order, midpoint)"
     )
     connection.commit()
     return scanned_rows, indexed_rows
@@ -478,8 +501,12 @@ def _trade_corpus_status(cfg: EngineConfig) -> str:
         # (I wrote that broader version first; the registered tests rejected it.)
         polled = safe_float(payload.get("markets_polled"))
         source_state = str(payload.get("market_source_status") or "").strip().lower()
+        # A PRESENT count must be finite and positive. safe_float returns None
+        # for garbage and NaN makes `polled <= 0` false, so both would otherwise
+        # sail through as valid poll evidence (Codex P1 wave-12).
         no_poll = source_state == "empty" or (
-            "markets_polled" in payload and polled is not None and polled <= 0
+            "markets_polled" in payload
+            and (polled is None or not math.isfinite(polled) or polled <= 0)
         )
         if status == "ok" and not no_poll:
             refreshing.append(status)
@@ -571,18 +598,12 @@ def _markout_stats(
     for token, token_trades in trades_by_token.items():
         feature_rows = iter(
             connection.execute(
-                # Ties on the venue stamp break by OBSERVATION time, never by
-                # midpoint (Codex P1 wave-9 on #451). websocket_normaliser.py
-                # includes collection time in its dedup key, so two rows can
-                # share a source_timestamp - e.g. a 0.70 quote collected before
-                # the split and a corrected 0.60 quote collected after it.
-                # Ordering by midpoint made BOTH which row is selected and
-                # whether it is embargoed depend on the numerical price
-                # ordering: swap the two prices and a different row wins. Which
-                # observation was available first is the only defensible
-                # tiebreak.
-                "SELECT stamp, midpoint, observed_stamp FROM feature_prices "
-                "WHERE asset_id = ? ORDER BY stamp, observed_stamp, source_order",
+                # Ties on the effective stamp break by ARRIVAL ORDER, never by
+                # midpoint (Codex P1 wave-9 on #451): ordering by price made
+                # both which row is selected and whether it is embargoed depend
+                # on which number happened to be smaller.
+                "SELECT stamp, midpoint FROM feature_prices "
+                "WHERE asset_id = ? ORDER BY stamp, source_order",
                 (token,),
             )
         )
@@ -647,8 +668,7 @@ def _markout_stats(
                 # accepted as fresh, so an evaluation markout could silently
                 # measure a horizon of hours instead of the configured one. Take
                 # the later of the two, which is conservative in both cases.
-                observed_age = max(float(current_feature[0]), float(current_feature[2])) - target
-                if observed_age > staleness_tolerance:
+                if float(current_feature[0]) - target > staleness_tolerance:
                     entry["fills_stale_price_excluded"] += 1
                     continue
                 entry["fills_total"] += 1
@@ -660,8 +680,7 @@ def _markout_stats(
                 # evaluation, so ranking on it is still look-ahead. Take the
                 # later of the two - a venue stamp after the split embargoes on
                 # its own, and so does a late collection of an early quote.
-                label_time = max(float(current_feature[0]), float(current_feature[2]))
-                if window == "ranking" and label_time >= split_stamp:
+                if window == "ranking" and float(current_feature[0]) >= split_stamp:
                     window = "label_embargoed"
                 if window in {"spanning", "label_embargoed"}:
                     entry["fills_split_spanning" if window == "spanning" else "fills_label_embargoed"] += 1
@@ -746,9 +765,6 @@ def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int]:
 
 def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
     settings = _settings(cfg)
-    # Hoisted above the frozen-split gate below, which validates the persisted
-    # state against the horizon it was frozen under.
-    horizon = float(settings["markout_horizon_minutes"]) * 60.0
     out_root = cfg.output_root / "maker_carry"
     path = out_root / "flow_toxicity.csv"
     summary_path = out_root / "flow_toxicity_summary.json"
@@ -785,6 +801,30 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
     # PREVIOUS run's rows on disk still saying artifact_status="ok". A
     # fail-closed guard that leaves stale evidence readable fails OPEN at the
     # artifact level. Invalidate first, then raise.
+    # Hoisted above the frozen-split gate below, which validates the persisted
+    # state against the horizon it was frozen under -- and validated here,
+    # before any artifact is read or written (Codex P1 wave-12). A nonnumeric
+    # value raised from float() while the previous artifact_status="ok" rows sat
+    # readable on disk; NaN or a negative value made every target and staleness
+    # comparison fail OPEN, publishing meaningless markouts and an unusable
+    # frozen split. Configuration corruption must not be able to preserve or
+    # manufacture apparently healthy evidence.
+    horizon_raw = safe_float(settings.get("markout_horizon_minutes"))
+    if horizon_raw is None or not math.isfinite(horizon_raw) or horizon_raw <= 0:
+        summary["status"] = "invalid_markout_horizon"
+        write_json(summary_path, summary)
+        write_csv(
+            out_root / "flow_toxicity_wallets.csv",
+            [_wallet_sentinel_row(generated_at, "invalid_markout_horizon")],
+            fieldnames=WALLET_MARKOUT_FIELDS,
+        )
+        raise ValueError(
+            "flow_toxicity.markout_horizon_minutes must be a finite positive number; got "
+            f"{settings.get('markout_horizon_minutes')!r}. The wallet artifact has been "
+            "invalidated so no stale ranking is readable."
+        )
+    horizon = horizon_raw * 60.0
+
     # DETECT here, but do NOT raise here (Codex P1 wave-11 on #451). Raising
     # before the market-axis rebuild was a safety regression I introduced in
     # wave 8: flow_toxicity.csv feeds the toxicity VETO that requote_alerts.py

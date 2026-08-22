@@ -1553,6 +1553,326 @@ def test_a_partly_rejected_refresh_keeps_the_veto_for_the_market_it_dropped(tmp_
     assert after["0xa"]["generated_at_utc"] == "2026-08-23T00:00:00Z"
 
 
+def _flow(market, token, wallet, *, buys, sells, start=0):
+    """`buys` BUY prints then `sells` SELL prints for one market.
+
+    Order-flow imbalance is what the toxicity veto measures, so these fixtures
+    set it explicitly: the tests below depend on the RELATIVE ranking of three
+    markets, and the percentile block always fires on whichever is most
+    imbalanced.
+
+    Sides are INTERLEAVED, not concatenated. VPIN is bucketed by USD volume --
+    100 per bucket in this config, so two 50-dollar prints -- and a run of BUYs
+    followed by a run of SELLs is locally one-sided in every bucket, scoring 1.0
+    even when the market is balanced overall. Alternating while both sides
+    remain, then emitting the excess, makes the score track the imbalance the
+    fixture is trying to express.
+    """
+    sides: list[str] = []
+    remaining_buys, remaining_sells = buys, sells
+    while remaining_buys and remaining_sells:
+        sides.extend(("BUY", "SELL"))
+        remaining_buys -= 1
+        remaining_sells -= 1
+    sides.extend(["BUY"] * remaining_buys)
+    sides.extend(["SELL"] * remaining_sells)
+    return [
+        {
+            "market": market,
+            "asset_id": token,
+            "wallet": wallet,
+            "side": side,
+            "price": 0.5,
+            "size": 100,
+            "timestamp": start + i,
+        }
+        for i, side in enumerate(sides)
+    ]
+
+
+_FLOW_FIELDS = ["market", "asset_id", "wallet", "side", "price", "size", "timestamp"]
+
+
+# ---------------------------------------------------------------------------
+# S4 PROPERTY SWEEP over the wallet time windows.
+#
+# docs/ENGINEERING_STANDARDS.md:48-50 requires property tests for time windows
+# (S1), and every other test in this file is a hand-picked example (Codex P1
+# wave-26). Examples cannot cover the interacting strict boundaries here --
+# `high + horizon < split` for the embargo, `low >= split` for evaluation, and
+# per-fill label availability on top of a per-market classification -- because
+# the interesting behaviour is exactly AT equality, where an example either
+# tests one side or the other.
+#
+# The repository has no `hypothesis` dependency and no property-test
+# infrastructure; the house idiom for this is an exhaustive parametrised sweep
+# (test_degraded_state_watchdog.py:1432, test_disaster_recovery.py:1205). This
+# follows it: the sweep walks each market's fills across the split boundary in
+# single-second steps, and asserts INVARIANTS rather than hand-computed
+# expectations, so it cannot drift into restating the implementation.
+# ---------------------------------------------------------------------------
+
+_HORIZON_SECONDS = 5 * 60  # markout_horizon_minutes: 5 in _config
+
+# Market B's first fill, in seconds. With four fills each at 0..3 and
+# offset..offset+3, the corpus median IS `offset`, so the split moves with B and
+# walking B forward walks A's label window across the embargo boundary.
+#
+# A's last fill is at t=3, so A's label closes at 3 + horizon = 303. The embargo
+# rule is STRICT -- `high + horizon < split` -- so A ranks only from offset 304.
+# The sweep is centred on that transition rather than on the horizon itself: the
+# first version of this sweep stepped +/-2 around 300 and never crossed the
+# boundary at all, passing vacuously on seven embargoed cases.
+_A_LABEL_CLOSES = 3 + _HORIZON_SECONDS  # 303
+_SPLIT_SWEEP_OFFSETS = [
+    _A_LABEL_CLOSES - 2,
+    _A_LABEL_CLOSES - 1,
+    _A_LABEL_CLOSES,      # label closes exactly AT the split: must NOT rank
+    _A_LABEL_CLOSES + 1,  # first offset at which ranking is permitted
+    _A_LABEL_CLOSES + 2,
+    _HORIZON_SECONDS * 4,
+    _HORIZON_SECONDS * 16,
+]
+
+
+def _window_sweep_corpus(cfg, offset: int) -> None:
+    """Two markets, four fills each, B starting `offset` seconds after A."""
+    fills = []
+    for i in range(4):
+        fills.append({"market": "0xa", "asset_id": "tok-a", "wallet": "wa",
+                      "side": "BUY", "price": 0.5, "size": 100, "timestamp": i})
+        fills.append({"market": "0xb", "asset_id": "tok-b", "wallet": "wb",
+                      "side": "BUY", "price": 0.5, "size": 100, "timestamp": offset + i})
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        fills,
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+    # A forward price for every fill, at exactly its markout target, so no fill
+    # is excluded as stale or missing and the partition below is over the whole
+    # corpus rather than a survivor subset.
+    for token, base in (("tok-a", 0), ("tok-b", offset)):
+        _features(cfg, token, [(base + i + _HORIZON_SECONDS, 0.70) for i in range(4)])
+
+
+@pytest.mark.parametrize("offset", _SPLIT_SWEEP_OFFSETS)
+def test_window_partition_invariants_hold_across_the_split_boundary(tmp_path, offset):
+    """Every fill lands in exactly one window, and no market spans two.
+
+    INVARIANTS, not expectations:
+      1. fills_total == ranking + evaluation + spanning + label_embargoed
+      2. every fill is accounted: total + stale + missing == fills written
+      3. no wallet has fills in BOTH the ranking and evaluation windows -- each
+         wallet here trades exactly one market, so that is the whole-market
+         leakage rule the chronological split exists to enforce
+      4. a wallet credited to ranking has its market's LAST fill label closing
+         strictly before the split
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _window_sweep_corpus(cfg, offset)
+
+    build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+    split = read_json(cfg.output_root / "maker_carry" / "flow_toxicity_wallet_split.json")["split_stamp"]
+
+    assert set(rows) == {"wa", "wb"}
+    for wallet, last_fill in (("wa", 3), ("wb", offset + 3)):
+        row = rows[wallet]
+        total = int(row["fills_total"])
+        ranking = int(row["fills_ranking_window"])
+        evaluation = int(row["fills_evaluation_window"])
+        spanning = int(row["fills_split_spanning"])
+        embargoed = int(row["fills_label_embargoed"])
+        stale = int(row["fills_stale_price_excluded"])
+        missing = int(row["fills_missing_price"])
+
+        assert total == ranking + evaluation + spanning + embargoed, (
+            f"{wallet}: window counters must partition fills_total"
+        )
+        assert total + stale + missing == 4, f"{wallet}: every written fill must be accounted"
+        assert not (ranking and evaluation), (
+            f"{wallet}: one market's fills must not straddle ranking and evaluation"
+        )
+        if ranking:
+            assert last_fill + _HORIZON_SECONDS < split, (
+                f"{wallet}: a ranking market's label window must close STRICTLY before the split"
+            )
+
+
+@pytest.mark.parametrize("shift", [0, 1, 3600, 86_400, 10 * 86_400])
+def test_the_windows_are_invariant_under_a_clock_shift(tmp_path, shift):
+    """Advancing every venue clock by a constant changes nothing.
+
+    The windows are data-relative by registered contract (rule 12), so a corpus
+    translated in time must produce identical counters. A dependence on
+    absolute time -- a run-clock read leaking into the split, the embargo or the
+    staleness ceiling -- shows up here and nowhere else in this file.
+    """
+    (tmp_path / "baseline").mkdir()
+    baseline_cfg = _config(tmp_path / "baseline")
+    _leaderboard(baseline_cfg)
+    _trade_summary(baseline_cfg)
+    _window_sweep_corpus(baseline_cfg, _HORIZON_SECONDS * 4)
+    build_flow_toxicity(baseline_cfg)
+    baseline = {
+        row["wallet"]: {k: v for k, v in row.items() if k.startswith("fills_")}
+        for row in read_csv_rows(baseline_cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")
+    }
+
+    (tmp_path / "shifted").mkdir()
+    shifted_cfg = _config(tmp_path / "shifted")
+    _leaderboard(shifted_cfg)
+    _trade_summary(shifted_cfg)
+    _window_sweep_corpus(shifted_cfg, _HORIZON_SECONDS * 4)
+    # Re-stamp both producers by the shift, venue side only.
+    prints_path = shifted_cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    fills = [
+        {**row, "timestamp": int(row["timestamp"]) + shift}
+        for row in read_csv_rows(prints_path)
+    ]
+    write_csv(prints_path, fills, fieldnames=list(fills[0]))
+    features_path = shifted_cfg.output_root / "polymarket_training" / "websocket_market_features.csv"
+    features = [
+        {**row, "source_timestamp": int(row["source_timestamp"]) + shift,
+         "collected_at_utc": int(row["collected_at_utc"]) + shift}
+        for row in read_csv_rows(features_path)
+    ]
+    write_csv(features_path, features, fieldnames=list(features[0]))
+
+    build_flow_toxicity(shifted_cfg)
+    shifted = {
+        row["wallet"]: {k: v for k, v in row.items() if k.startswith("fills_")}
+        for row in read_csv_rows(shifted_cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")
+    }
+
+    assert shifted == baseline
+
+
+def test_a_partly_parsed_market_keeps_its_prior_block(tmp_path, monkeypatch):
+    """A surviving subset must not unblock a market (Codex P1 wave-26).
+
+    Wave-25 closed only the case where a market loses EVERY row. A market that
+    loses SOME rows still produces a fresh row -- from an INCOMPLETE sample --
+    and that row can read clean and overwrite a prior blocking one. The
+    artifact then looks healthy: fresh timestamp, fresh row, quietly missing
+    the prints that made the market toxic.
+
+    0xa stays one-sided throughout purely as the percentile anchor, so that
+    0xb's post-corruption row is judged on its own (low) imbalance rather than
+    being the highest of a two-market field.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    for token in ("tok-a", "tok-b", "tok-c"):
+        _features(cfg, token, [(310, 0.70)])
+    prints_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    # The anchor sits BETWEEN the two states of 0xb: more imbalanced than 0xb's
+    # calm tail, less than 0xb with its burst. That is what makes 0xb the most
+    # imbalanced market before the corruption and not after it.
+    anchor = _flow("0xa", "tok-a", "w1", buys=6, sells=2)
+    calm = _flow("0xc", "tok-c", "w3", buys=4, sells=4)
+    # 0xb is a one-sided BURST followed by calm two-way flow. The burst is what
+    # makes it toxic; the calm tail is what survives the corruption below.
+    burst = _flow("0xb", "tok-b", "w2", buys=12, sells=0)
+    tail = _flow("0xb", "tok-b", "w2", buys=4, sells=4, start=12)
+
+    monkeypatch.setattr("polymarket_predictive_engine.flow_toxicity.now_utc", lambda: "2026-08-22T00:00:00Z")
+    write_csv(prints_path, [*anchor, *calm, *burst, *tail], fieldnames=_FLOW_FIELDS)
+    build_flow_toxicity(cfg)
+    before = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+    assert before["0xb"]["toxic_blocked"] == "True", "0xb must be blocking before the corruption"
+
+    # The refresh corrupts exactly the burst. What SURVIVES is the calm tail --
+    # a clean-looking sample of a market that is actually toxic.
+    partly_corrupt = [{**row, "price": 1.5} for row in burst]
+    write_csv(prints_path, [*anchor, *calm, *partly_corrupt, *tail], fieldnames=_FLOW_FIELDS)
+    monkeypatch.setattr("polymarket_predictive_engine.flow_toxicity.now_utc", lambda: "2026-08-23T00:00:00Z")
+    summary = build_flow_toxicity(cfg)
+    after = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+
+    assert summary["malformed_trade_rows_excluded"] == 12
+    assert summary["market_blocks_retained_on_partial_sample"] == 1
+    # 0xb keeps its prior BLOCKING row verbatim, original stamp included, so the
+    # retained veto is visibly stale rather than passing as a fresh measurement.
+    assert after["0xb"] == before["0xb"]
+    assert after["0xb"]["generated_at_utc"] == "2026-08-22T00:00:00Z"
+    # 0xc lost nothing, so it is re-measured fresh.
+    assert after["0xc"]["generated_at_utc"] == "2026-08-23T00:00:00Z"
+
+
+def test_a_freshly_toxic_market_still_wins_over_a_prior_clean_row(tmp_path):
+    """The retain rule is one-directional and can never hide toxicity.
+
+    Deferring to the prior row unconditionally would let a market that JUST
+    turned toxic keep an old clean record -- failing open in the other
+    direction. Only a NON-blocking fresh row defers; a blocking one always wins.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    for token in ("tok-a", "tok-b", "tok-c"):
+        _features(cfg, token, [(310, 0.70)])
+    prints_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    anchor = _flow("0xa", "tok-a", "w1", buys=6, sells=2)
+    calm = _flow("0xc", "tok-c", "w3", buys=4, sells=4)
+
+    write_csv(
+        prints_path,
+        [*anchor, *calm, *_flow("0xb", "tok-b", "w2", buys=4, sells=4)],
+        fieldnames=_FLOW_FIELDS,
+    )
+    build_flow_toxicity(cfg)
+    before = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+    assert before["0xb"]["toxic_blocked"] == "False"
+
+    # 0xb turns one-sided AND loses a row to rejection in the same refresh.
+    now_toxic = _flow("0xb", "tok-b", "w2", buys=12, sells=0)
+    now_toxic.append(
+        {"market": "0xb", "asset_id": "tok-b", "wallet": "w2",
+         "side": "BUY", "price": 1.5, "size": 100, "timestamp": 9}
+    )
+    write_csv(prints_path, [*anchor, *calm, *now_toxic], fieldnames=_FLOW_FIELDS)
+    summary = build_flow_toxicity(cfg)
+    after = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+
+    assert summary["malformed_trade_rows_excluded"] == 1
+    assert "market_blocks_retained_on_partial_sample" not in summary
+    assert after["0xb"]["toxic_blocked"] == "True", "new toxicity must not be suppressed by a prior clean row"
+
+
+def test_a_partly_rejected_ledger_does_not_freeze_the_split(tmp_path):
+    """A contaminated cutoff would outlive the corruption (Codex P1 wave-26).
+
+    The freeze guard checked only the producer status, so a ledger with locally
+    rejected rows still persisted a median computed from the surviving subset.
+    Once the malformed rows were corrected, every later run reused that
+    contaminated cutoff permanently.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [
+            {"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0},
+            {"market": "0xa", "asset_id": "tok-a", "wallet": "w2", "side": "BUY", "price": 1.5, "size": 100, "timestamp": 500},
+        ],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+
+    assert summary["malformed_trade_rows_excluded"] == 1
+    assert summary["wallet_split_was_frozen"] is False
+    assert not (cfg.output_root / "maker_carry" / "flow_toxicity_wallet_split.json").exists(), (
+        "no split state may be persisted from a partially rejected ledger"
+    )
+
+
 def test_a_clean_run_does_not_carry_a_departed_market_forward(tmp_path):
     """Absence with no exclusions is meaningful and must clear (wave-25).
 

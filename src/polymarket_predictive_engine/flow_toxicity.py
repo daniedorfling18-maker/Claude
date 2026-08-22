@@ -986,10 +986,23 @@ def _percentiles(raw_by_market: dict[str, float]) -> dict[str, float]:
     return {market: round(index / (len(ordered) - 1), 6) for index, (market, _) in enumerate(ordered)}
 
 
-def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int, int]:
+def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int, int, set[str], int]:
+    """Parsed fills, plus WHICH markets lost rows to rejection.
+
+    The counts alone were not enough (Codex P1 wave-26). A market with both
+    valid and rejected rows still produces a fresh toxicity row, computed from
+    an incomplete sample, and that row can read CLEAN and replace a prior
+    blocking one -- so knowing only that "some rows were rejected somewhere"
+    cannot protect the market that actually lost coverage. The two extra
+    returns name the affected markets and count the rejections whose `market`
+    field was itself unreadable, which cannot be attributed to any market and
+    therefore taint the whole table.
+    """
     parsed: list[dict[str, Any]] = []
     malformed_rows = 0
     source_rows = 0
+    rejected_markets: set[str] = set()
+    unattributable_rejections = 0
     path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
     for row in _iter_csv_any(path):
         source_rows += 1
@@ -1021,9 +1034,17 @@ def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int, int]:
             # Counted too (Codex P2 wave-20): these basic-shape rejections were
             # silent, so a wholly malformed ledger looked like an empty one.
             malformed_rows += 1
+            if market:
+                rejected_markets.add(market)
+            else:
+                # No readable market means the loss cannot be attributed, so no
+                # single market's veto can be protected by it -- the whole table
+                # is unverifiable instead.
+                unattributable_rejections += 1
             continue
         if not math.isfinite(price) or not math.isfinite(size) or not math.isfinite(stamp):
             malformed_rows += 1
+            rejected_markets.add(market)
             continue
         # Finite is not enough (Codex P2 wave-15). A binary-market share price
         # is a probability in [0, 1] by construction, so price=1.5 is not a
@@ -1033,6 +1054,7 @@ def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int, int]:
         # edge-attribution price rule.
         if not (0.0 <= price <= 1.0) or size <= 0:
             malformed_rows += 1
+            rejected_markets.add(market)
             continue
         # A negative venue timestamp is not a time (Codex P2 wave-21). Left
         # through, a first-run corpus with a negative median would write a
@@ -1041,6 +1063,7 @@ def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int, int]:
         # refuses. The two validators must agree.
         if stamp < 0:
             malformed_rows += 1
+            rejected_markets.add(market)
             continue
         parsed.append(
             {
@@ -1054,7 +1077,7 @@ def _trade_rows(cfg: EngineConfig) -> tuple[list[dict[str, Any]], int, int]:
                 "wallet": _wallet(row),
             }
         )
-    return parsed, malformed_rows, source_rows
+    return parsed, malformed_rows, source_rows, rejected_markets, unattributable_rejections
 
 
 def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
@@ -1231,7 +1254,13 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
                 [_wallet_sentinel_row(generated_at, "invalid_frozen_split_state")],
                 fieldnames=WALLET_MARKOUT_FIELDS,
             )
-    trades, malformed_trade_rows, trade_source_rows = _trade_rows(cfg)
+    (
+        trades,
+        malformed_trade_rows,
+        trade_source_rows,
+        rejected_markets,
+        unattributable_rejections,
+    ) = _trade_rows(cfg)
     trade_corpus_status = _trade_corpus_status(cfg)
     tier_wallets, current_wallets, missing_wallet_data = _top_wallets(cfg)
     by_market: dict[str, list[dict[str, Any]]] = {}
@@ -1273,7 +1302,18 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
                     split_was_frozen = False
                 else:
                     split_stamp, split_was_frozen = _frozen_split_stamp(
-                        cfg, trades, stamps_ok=trade_corpus_status == "ok", horizon_seconds=horizon
+                        cfg,
+                        trades,
+                        # A LOCALLY rejected row makes the ledger partial in
+                        # exactly the sense rule 10 forbids freezing against
+                        # (Codex P1 wave-26). Checking only the producer status
+                        # let a run persist a median computed from the surviving
+                        # subset; once the malformed rows were corrected, every
+                        # later run reused that contaminated cutoff FOREVER,
+                        # permanently changing which markets rank and which are
+                        # evaluated. The rejected run must not outlive itself.
+                        stamps_ok=trade_corpus_status == "ok" and not malformed_trade_rows,
+                        horizon_seconds=horizon,
                     )
                 markout_by_market, markout_by_wallet = _markout_stats(
                     connection, trades, tier_wallets, horizon, split_stamp
@@ -1357,12 +1397,53 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
         # visible in the artifact itself -- it is a stale veto, disclosed as
         # stale, not a fresh measurement.
         if malformed_trade_rows:
-            fresh_markets = {str(row["market"]) for row in rows_out}
-            carried = [
-                row
-                for row in read_csv_rows(path)
-                if str(row.get("market") or "") and str(row.get("market")) not in fresh_markets
-            ]
+            fresh_by_market = {str(row["market"]): row for row in rows_out}
+            # A market can lose its veto TWO ways, and wave-25 closed only one.
+            #
+            #   (a) every row rejected -> the market vanishes from rows_out, and
+            #       an absent tox_record is NO BLOCK at requote_alerts.py:502-535.
+            #   (b) SOME rows rejected -> a fresh row is still produced, but from
+            #       an INCOMPLETE sample, and that row can read clean and
+            #       overwrite a prior blocking one (Codex P1 wave-26).
+            #
+            # (b) is the more dangerous of the two, because the artifact looks
+            # healthy: a fresh row with a fresh timestamp, computed off a sample
+            # that is quietly missing the very prints that made the market toxic.
+            #
+            # The rule for (b) is one-directional, so it can never HIDE toxicity:
+            # a fresh row that BLOCKS always wins, because newly-measured
+            # toxicity is real information. Only a fresh row that does NOT block,
+            # for a market that lost rows this run, defers to a prior blocking
+            # row. Unblocking requires a complete sample; blocking does not.
+            #
+            # Rejections whose `market` field was itself unreadable cannot be
+            # attributed, so they taint EVERY market: with those present, any
+            # market could be the one that lost coverage.
+            tainted_markets = (
+                set(fresh_by_market) if unattributable_rejections else rejected_markets
+            )
+            carried: list[dict[str, Any]] = []
+            retained_blocks = 0
+            for prior in read_csv_rows(path):
+                market = str(prior.get("market") or "")
+                if not market:
+                    continue
+                fresh = fresh_by_market.get(market)
+                if fresh is None:
+                    carried.append(prior)  # case (a)
+                    continue
+                if market not in tainted_markets:
+                    continue
+                prior_blocked = str(prior.get("toxic_blocked") or "").strip().lower() == "true"
+                if prior_blocked and not fresh["toxic_blocked"]:
+                    # Case (b): keep the prior BLOCKING row verbatim, original
+                    # generated_at_utc included, so the retained veto is visibly
+                    # stale rather than passing as a fresh clean measurement.
+                    fresh_by_market[market] = prior
+                    retained_blocks += 1
+            if retained_blocks:
+                rows_out = [fresh_by_market[str(row["market"])] for row in rows_out]
+                summary["market_blocks_retained_on_partial_sample"] = retained_blocks
             if carried:
                 rows_out = [*rows_out, *carried]
                 summary["market_rows_carried_forward"] = len(carried)

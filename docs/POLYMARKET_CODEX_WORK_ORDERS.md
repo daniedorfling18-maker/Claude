@@ -2108,6 +2108,52 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    and the constraint aborts the entire build. Both are rejected in `_build_price_index` before the
    row is indexed.
 
+## ENUMERATED OFFLINE TESTS (S8/A10) [Codex P1 wave-8 on #451]
+
+Required and previously absent: this amendment named the test file but enumerated no wallet-axis
+tests, and the parent's generic sentence covers only the market axis — it cannot specify the frozen
+split, embargo, staleness, sentinel or upstream-failure paths. WO-151 was found undispatchable for
+exactly this omission (see §151.1), so the same standard applies here. All twenty-four live in
+tests/polymarket_predictive_engine/test_flow_toxicity.py.
+
+ 1. Planted toxic flow scores above balanced flow (parent WO-49 null test, unchanged).
+ 2. Wallet-tier markout split arithmetic (parent, unchanged).
+ 3. Missing WO-37 wallet intelligence is tolerated (parent, unchanged).
+ 4. Feature archives and trade prints are STREAMED, not bulk-loaded (parent, 2 GiB constraint).
+ 5. The absolute raw-imbalance floor blocks a one-sided market the percentile would de-veto (parent).
+ 6. A wallet OFF the leaderboard is still measured, and marks out identically to one on it.
+ 7. Whole-market window split WITH the label embargo: market A ranks, D is embargoed, B evaluates,
+    C spans; the four window counters sum to fills_total and the two window counts do NOT.
+ 8. A nominally-ranking fill whose SELECTED feature timestamp is >= split is embargoed
+    (horizon 300, split 1000, market ending 600, price read at 1100).
+ 9. A ranking label whose VENUE stamp precedes the split but whose COLLECTION stamp follows it is
+    embargoed (sourced 900, collected 1100, split 1000).
+10. A wallet whose every fill lacks a forward price is still emitted, with fills_missing_price set
+    and markets_touched credited.
+11. Stale prices rejected: a price outside [target, target + horizon] counts as
+    fills_stale_price_excluded, and the market-axis columns keep the parent lookup.
+12. The wallet artifact states its own paper/live invocation flags.
+13. Disabled clears the artifact to a single sentinel row carrying artifact_status="disabled" and
+    both flags false; the previous run's rankings are gone.
+14. An enabled run scoring zero wallets emits the "no_wallets_scored" sentinel, and the sentinel is
+    NOT counted in wallets_scored.
+15. A not-ok upstream STAMPS every row upstream_<status> and keeps it measured (rule 8), proven with
+    only the BACKFILL producer partial — one bad writer of the shared ledger is enough.
+16. An all-disabled producer set is NOT a current corpus: status all_producers_disabled, rows
+    stamped, and no split state seeded.
+17. Non-finite TRADE prices/sizes rejected at ingestion; malformed_trade_rows_excluded counts them;
+    the market axis sees the same rejection (trades_seen excludes them).
+18. Non-finite FEATURE midpoints rejected before indexing: the build completes and scores from the
+    finite point rather than aborting on the NOT NULL insert.
+19. The split is frozen across runs: first run computes and persists, second run reuses,
+    split_stamp unchanged after a later corpus arrives.
+20. A stale corpus persists NO split state at all.
+21. A corrupt split state raises AND invalidates the wallet artifact first, so no stale "ok" row
+    survives the failure.
+22. The split artifact states its own invocation flags and publishes corpus_rows_at_freeze.
+23. CLI registration for `flow-toxicity`.
+24. The market-axis table is unchanged in schema and method across all of the above.
+
 ## KNOWN LIMITATION, REGISTERED RATHER THAN ENGINEERED AWAY [Codex P1 wave-6 on #451]
 
 Rule 7 freezes the split CUTOFF but not the ranking SAMPLE, and the sample is not stable. The trade

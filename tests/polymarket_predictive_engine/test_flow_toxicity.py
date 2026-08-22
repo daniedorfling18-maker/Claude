@@ -11,7 +11,7 @@ from polymarket_predictive_engine import flow_toxicity
 from polymarket_predictive_engine import maker_carry_study
 from polymarket_predictive_engine.cli import COMMANDS
 from polymarket_predictive_engine.config import load_config
-from polymarket_predictive_engine.flow_toxicity import build_flow_toxicity
+from polymarket_predictive_engine.flow_toxicity import WALLET_MARKOUT_FIELDS, build_flow_toxicity
 from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_csv, write_json
 
 
@@ -590,8 +590,28 @@ def test_a_corrupt_frozen_split_fails_closed(tmp_path):
     split_path.parent.mkdir(parents=True, exist_ok=True)
     split_path.write_text('{"split_stamp": "not-a-number"}', encoding="utf-8")
 
+    # A previous successful run left rows on disk.
+    _features(cfg, "tok-a", [(310, 0.70)])
+    wallet_path = cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv"
+    write_csv(
+        wallet_path,
+        [{"generated_at_utc": "old", "artifact_status": "ok", "wallet": "w1", "fills_total": 3}],
+        fieldnames=WALLET_MARKOUT_FIELDS,
+    )
+
     with pytest.raises(ValueError, match="refusing to manufacture"):
         build_flow_toxicity(cfg)
+
+    # The raise must not leave the previous ranking readable: the harvest
+    # records the failure and continues, so a stale "ok" row would be read as
+    # current evidence (Codex P2 wave-8 on #451).
+    rows = read_csv_rows(wallet_path)
+    assert len(rows) == 1
+    assert rows[0]["artifact_status"] == "invalid_frozen_split_state"
+    assert rows[0]["wallet"] == ""
+    assert read_json(cfg.output_root / "maker_carry" / "flow_toxicity_summary.json")["status"] == (
+        "invalid_frozen_split_state"
+    )
 
 
 def test_split_artifact_states_its_own_invocation_flags(tmp_path):
@@ -639,6 +659,77 @@ def test_non_finite_feature_midpoints_are_rejected_before_indexing(tmp_path):
 
     assert summary["status"] == "ok", "a nan/inf feature must not abort the build"
     assert float(rows["w1"]["markout_mean_total"]) == 0.2, "scored from the finite 0.70 point"
+
+
+def test_all_producers_disabled_is_not_a_current_corpus(tmp_path):
+    """Nothing refreshed the ledger, so retained rows are not current.
+
+    With trade_prints disabled, all three producers write status="disabled"
+    without touching the retained ledger. Accepting that as "ok" stamped stale
+    rows as current AND let them permanently seed the frozen split (Codex P1
+    wave-8 on #451). At least one producer must have actually succeeded.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg, status="disabled")
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert summary["trade_corpus_status"] == "all_producers_disabled"
+    assert rows["w1"]["artifact_status"] == "upstream_all_producers_disabled"
+    assert not (cfg.output_root / "maker_carry" / "flow_toxicity_wallet_split.json").exists(), (
+        "an all-disabled corpus must not seed the frozen split"
+    )
+
+
+def test_ranking_label_embargoed_by_collection_time_not_venue_stamp(tmp_path):
+    """A price sourced before the split but COLLECTED after it is look-ahead.
+
+    _build_price_index kept only source_timestamp, so a delayed or replayed
+    feature sourced at 900 and collected at 1100 counted as available at 900 --
+    passing a split at 1000 and entering the ranking mean despite only existing
+    during evaluation (Codex P1 wave-8 on #451). The embargo now takes the later
+    of the two timestamps.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    # tok-r: fill at 600 -> target 900. The feature's VENUE stamp is 900 (before
+    # the split at 1000) but it was COLLECTED at 1100 (after it).
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [
+            {"source_timestamp": 900, "collected_at_utc": 1100, "asset_id": "tok-r", "midpoint": 0.90},
+            {"source_timestamp": 1310, "collected_at_utc": 1310, "asset_id": "tok-e", "midpoint": 0.70},
+            {"source_timestamp": 1315, "collected_at_utc": 1315, "asset_id": "tok-e", "midpoint": 0.70},
+        ],
+        fieldnames=["source_timestamp", "collected_at_utc", "asset_id", "midpoint"],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [
+            {"market": "0xr", "asset_id": "tok-r", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 600},
+            {"market": "0xe", "asset_id": "tok-e", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1000},
+            {"market": "0xe", "asset_id": "tok-e", "wallet": "w1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1010},
+        ],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert int(rows["w1"]["fills_ranking_window"]) == 0, (
+        "the venue stamp precedes the split but the price was not observable until after it"
+    )
+    assert int(rows["w1"]["fills_label_embargoed"]) == 1
+    assert rows["w1"]["markout_mean_ranking_window"] == ""
 
 
 def test_wallet_without_any_forward_price_is_still_emitted(tmp_path):

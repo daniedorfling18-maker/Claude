@@ -205,12 +205,13 @@ def _build_price_index(
             asset_id TEXT NOT NULL,
             stamp REAL NOT NULL,
             midpoint REAL NOT NULL,
+            observed_stamp REAL NOT NULL,
             source_order INTEGER NOT NULL
         );
         """
     )
-    batch: list[tuple[str, float, float, int]] = []
-    tail_candidates: dict[str, tuple[float, float, int]] = {}
+    batch: list[tuple[str, float, float, float, int]] = []
+    tail_candidates: dict[str, tuple[float, float, float, int]] = {}
     scanned_rows = 0
     indexed_rows = 0
 
@@ -219,7 +220,8 @@ def _build_price_index(
         if not batch:
             return
         connection.executemany(
-            "INSERT INTO feature_prices(asset_id, stamp, midpoint, source_order) VALUES (?, ?, ?, ?)",
+            "INSERT INTO feature_prices(asset_id, stamp, midpoint, observed_stamp, source_order)"
+            " VALUES (?, ?, ?, ?, ?)",
             batch,
         )
         indexed_rows += len(batch)
@@ -233,6 +235,14 @@ def _build_price_index(
             if bounds is None:
                 continue
             stamp = _stamp(row.get("source_timestamp") or row.get("collected_at_utc"))
+            # The VENUE stamp orders the series; the COLLECTION stamp says when
+            # the price actually became observable to us (Codex P1 wave-8 on
+            # #451). Keeping only the venue stamp let a delayed or replayed
+            # feature sourced at 900 but collected at 1100 count as available at
+            # 900 - so it would pass a split at 1000 and enter the RANKING mean
+            # despite only existing during evaluation. Both are retained and the
+            # ranking embargo tests the later of the two.
+            observed = _stamp(row.get("collected_at_utc")) or stamp
             midpoint = safe_float(row.get("midpoint"))
             if stamp is None or midpoint is None or stamp < bounds[0]:
                 continue
@@ -244,24 +254,26 @@ def _build_price_index(
             # and the constraint aborts the whole build. Rejected before either.
             if not math.isfinite(stamp) or not math.isfinite(midpoint):
                 continue
+            if observed is None or not math.isfinite(observed):
+                observed = stamp
             source_order = scanned_rows
             if stamp <= bounds[1]:
-                batch.append((token, stamp, midpoint, source_order))
+                batch.append((token, stamp, midpoint, observed, source_order))
                 if len(batch) >= 10_000:
                     flush()
                 continue
-            candidate = (stamp, midpoint, source_order)
+            candidate = (stamp, midpoint, observed, source_order)
             current = tail_candidates.get(token)
             if current is None or candidate < current:
                 tail_candidates[token] = candidate
 
-    for token, (stamp, midpoint, source_order) in tail_candidates.items():
-        batch.append((token, stamp, midpoint, source_order))
+    for token, (stamp, midpoint, observed, source_order) in tail_candidates.items():
+        batch.append((token, stamp, midpoint, observed, source_order))
     flush()
     connection.commit()
     connection.execute(
         "CREATE INDEX feature_prices_token_stamp_idx "
-        "ON feature_prices(asset_id, stamp, midpoint, source_order)"
+        "ON feature_prices(asset_id, stamp, midpoint, observed_stamp, source_order)"
     )
     connection.commit()
     return scanned_rows, indexed_rows
@@ -289,16 +301,13 @@ def _frozen_split_stamp(
         stored = safe_float(persisted.get("split_stamp")) if isinstance(persisted, dict) else None
         if stored is not None and math.isfinite(stored):
             return stored, True
-        # The file exists but is unparseable, not a dict, or carries a
-        # missing/non-finite split_stamp. Silently overwriting it would
-        # manufacture a fresh cutoff from data that has ALREADY been observed as
-        # evaluation - recreating exactly the moving-split leakage this file
-        # exists to prevent, after any corruption or partial restore (Codex P1
-        # wave-6 on #451). An invalid frozen state fails closed and loudly.
+        # Unreachable in build_flow_toxicity: the early gate there validates
+        # this file, invalidates the wallet artifact and raises before any of
+        # this runs. Kept as a defensive guard for any other caller, so an
+        # invalid frozen state can never silently become a fresh cutoff.
         raise ValueError(
             f"frozen wallet split state at {path} is present but invalid; refusing to "
-            "manufacture a replacement cutoff from already-observed evaluation data. "
-            "Restore the file from backup, or delete it deliberately to re-freeze."
+            "manufacture a replacement cutoff from already-observed evaluation data."
         )
     if not stamps_ok:
         # Never freeze against a stale or partial ledger (Codex P1 wave-6 on
@@ -390,6 +399,13 @@ def _trade_corpus_status(cfg: EngineConfig) -> str:
     for status in statuses:
         if status not in {"ok", "disabled"}:
             return status
+    if not any(status == "ok" for status in statuses):
+        # Every producer is disabled, so NOTHING refreshed the ledger this run
+        # while flow-toxicity itself stayed enabled (Codex P1 wave-8 on #451).
+        # Returning "ok" here would stamp retained rows as current and let them
+        # permanently seed the frozen split. At least one producer must have
+        # actually succeeded for the corpus to count as current.
+        return "all_producers_disabled"
     return "ok"
 
 
@@ -458,7 +474,7 @@ def _markout_stats(
     for token, token_trades in trades_by_token.items():
         feature_rows = iter(
             connection.execute(
-                "SELECT stamp, midpoint FROM feature_prices "
+                "SELECT stamp, midpoint, observed_stamp FROM feature_prices "
                 "WHERE asset_id = ? ORDER BY stamp, midpoint, source_order",
                 (token,),
             )
@@ -524,10 +540,14 @@ def _markout_stats(
                 entry["fills_total"] += 1
                 entry["markout_total"] += markout
                 window = market_window.get(market, "spanning")
-                if window == "ranking" and float(current_feature[0]) >= split_stamp:
-                    # Nominally ranking, but the price actually used was observed
-                    # at or after the split. Scoring it would rank this wallet on
-                    # an evaluation-period observation.
+                # The label's OBSERVATION time decides, not the venue stamp
+                # (Codex P1 wave-8 on #451): a feature sourced before the split
+                # but collected after it only became available during
+                # evaluation, so ranking on it is still look-ahead. Take the
+                # later of the two - a venue stamp after the split embargoes on
+                # its own, and so does a late collection of an early quote.
+                label_time = max(float(current_feature[0]), float(current_feature[2]))
+                if window == "ranking" and label_time >= split_stamp:
                     window = "label_embargoed"
                 if window in {"spanning", "label_embargoed"}:
                     entry["fills_split_spanning" if window == "spanning" else "fills_label_embargoed"] += 1
@@ -641,6 +661,31 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
             fieldnames=WALLET_MARKOUT_FIELDS,
         )
         return summary
+    # Validate the frozen split state BEFORE any heavy work and, critically,
+    # before raising (Codex P2 wave-8 on #451). The raise is meant to fail
+    # closed, but it happened before the wallet CSV or summary were rewritten,
+    # so the harvest recorded the command failure, continued, and left the
+    # PREVIOUS run's rows on disk still saying artifact_status="ok". A
+    # fail-closed guard that leaves stale evidence readable fails OPEN at the
+    # artifact level. Invalidate first, then raise.
+    split_path = out_root / "flow_toxicity_wallet_split.json"
+    if split_path.exists():
+        persisted = read_json(split_path)
+        stored = safe_float(persisted.get("split_stamp")) if isinstance(persisted, dict) else None
+        if stored is None or not math.isfinite(stored):
+            summary["status"] = "invalid_frozen_split_state"
+            write_json(summary_path, summary)
+            write_csv(
+                out_root / "flow_toxicity_wallets.csv",
+                [_wallet_sentinel_row(generated_at, "invalid_frozen_split_state")],
+                fieldnames=WALLET_MARKOUT_FIELDS,
+            )
+            raise ValueError(
+                f"frozen wallet split state at {split_path} is present but invalid; refusing to "
+                "manufacture a replacement cutoff from already-observed evaluation data. "
+                "Restore the file from backup, or delete it deliberately to re-freeze. "
+                "The wallet artifact has been invalidated so no stale ranking is readable."
+            )
     trades, malformed_trade_rows = _trade_rows(cfg)
     trade_corpus_status = _trade_corpus_status(cfg)
     top_wallets, missing_wallet_data = _top_wallets(cfg)

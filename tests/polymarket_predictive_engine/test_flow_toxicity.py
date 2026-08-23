@@ -2424,6 +2424,122 @@ def test_markets_scored_excludes_carried_and_synthetic_rows(tmp_path):
     assert summary["markets_scored"] == 1, "but only 0xa was measured from this corpus"
 
 
+def test_a_lock_acquisition_failure_invalidates_stale_wallet_evidence(tmp_path, monkeypatch):
+    """The abort handler must cover the `with` itself (Codex P2 wave-39).
+
+    Entering runtime_lock can raise on its own -- a permissions or filesystem
+    error on outputs/polymarket_runtime alone is enough -- and that happens
+    BEFORE the inner try is active. Neither the build_failed summary nor its
+    wallet sentinel was written, so yesterday's rows stayed readable as
+    artifact_status="ok" while the harvest recorded a failed step.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+    # A healthy run first, so there IS stale evidence to invalidate.
+    assert build_flow_toxicity(cfg)["status"] == "ok"
+    before = read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")
+    assert before[0]["artifact_status"] == "ok"
+
+    def _cannot_lock(*args, **kwargs):
+        raise PermissionError("outputs/polymarket_runtime is not writable")
+
+    monkeypatch.setattr("polymarket_predictive_engine.flow_toxicity.runtime_lock", _cannot_lock)
+
+    with pytest.raises(PermissionError):
+        build_flow_toxicity(cfg)
+
+    rows = read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")
+    assert len(rows) == 1
+    assert rows[0]["artifact_status"] == "build_failed", (
+        "a lock the run could not even acquire must not leave yesterday's "
+        "rankings readable as healthy"
+    )
+    assert read_json(cfg.output_root / "maker_carry" / "flow_toxicity_summary.json")["status"] == "build_failed"
+
+
+def test_a_missing_trade_ledger_is_not_a_quiet_day(tmp_path):
+    """Deletion must not read as the supported header-only corpus (wave-39).
+
+    `_iter_csv_any` yields nothing for an ABSENT file exactly as it does for an
+    empty one, so with retained producer summaries still healthy the run emitted
+    the benign no_wallets_scored sentinel and reported status "ok" -- presenting
+    missing input as healthy evidence.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    # trade_prints.csv is never written.
+    assert not (cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv").exists()
+
+    summary = build_flow_toxicity(cfg)
+    rows = read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")
+
+    assert summary["status"] == "missing_trade_ledger"
+    assert len(rows) == 1
+    assert rows[0]["artifact_status"] == "missing_trade_ledger"
+
+
+def test_an_empty_trade_ledger_is_still_a_quiet_day(tmp_path):
+    """The other side: a header-only corpus is deliberately supported."""
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")
+
+    assert summary["status"] == "ok"
+    assert rows[0]["artifact_status"] == "no_wallets_scored"
+
+
+def test_a_present_but_unreadable_requested_limit_is_not_a_legacy_summary(tmp_path):
+    """Absent vs present-but-invalid, the same split rule 8e draws (wave-39)."""
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    stamp = now_utc()
+    write_csv(
+        cfg.output_root / "wallet_intelligence" / "leaderboard_history.csv",
+        [
+            {"snapshot_date": stamp[:10], "snapshot_at_utc": stamp,
+             "wallet": "smart1" if index == 0 else f"w{index}", "rank": str(index + 1)}
+            for index in range(50)
+        ],
+        fieldnames=["snapshot_date", "snapshot_at_utc", "wallet", "rank"],
+    )
+    write_json(
+        cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json",
+        {"status": "ok", "generated_at_utc": stamp, "leaderboard_rows_added": 50,
+         "leaderboard_probe_params": {"complete": True, "requested_limit": None}},
+    )
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert summary["missing_wallet_data"] is True
+    assert rows["smart1"]["on_current_leaderboard"] == "unknown"
+
+
 def test_a_token_only_veto_survives_a_later_partial_corpus(tmp_path):
     """The preservation machinery must not delete its own synthetic veto.
 

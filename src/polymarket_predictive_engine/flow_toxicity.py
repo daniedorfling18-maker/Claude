@@ -230,8 +230,25 @@ def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], set[str
     # collector summaries do not publish requested_limit, and treating that as
     # disqualifying would render membership permanently unknown on every
     # pre-existing summary. Present-but-too-small is the fault this catches.
-    requested_limit = _finite_number(probe.get("requested_limit") if isinstance(probe, dict) else None)
-    limit_covers_consumer = requested_limit is None or requested_limit >= limit
+    # KEY PRESENCE, not value-is-not-None: JSON `null` deserialises to Python
+    # None, so `probe.get(...) is not None` cannot tell an absent legacy key
+    # from a key that is present and explicitly null -- and the latter is
+    # exactly the malformed case this distinguishes.
+    requested_limit_present = isinstance(probe, dict) and "requested_limit" in probe
+    raw_requested_limit = probe.get("requested_limit") if isinstance(probe, dict) else None
+    requested_limit = _finite_number(raw_requested_limit)
+    # ABSENT vs PRESENT-BUT-INVALID, the same distinction rule 8e already draws
+    # for `complete` (Codex P2 wave-39). Collapsing them let a summary carrying
+    # `requested_limit: null` be read as a legacy summary: BOTH gates were then
+    # skipped -- the coverage check because it defaults to permissive, and the
+    # short-snapshot check because it needs a number -- so a 50-row snapshot
+    # could still publish wallets ranked 51-100 as definitively absent. Absent
+    # stays the legacy path; present-but-unreadable fails closed.
+    requested_limit_invalid = requested_limit_present and requested_limit is None
+    limit_covers_consumer = (
+        not requested_limit_invalid
+        and (requested_limit is None or requested_limit >= limit)
+    )
     refreshed = (
         leaderboard_rows_added is not None
         and leaderboard_rows_added > 0
@@ -1114,7 +1131,7 @@ def _percentiles(raw_by_market: dict[str, float]) -> dict[str, float]:
 
 def _trade_rows(
     cfg: EngineConfig,
-) -> tuple[list[dict[str, Any]], int, int, set[str], set[str], int]:
+) -> tuple[list[dict[str, Any]], int, int, set[str], set[str], int, bool]:
     """Parsed fills, plus WHICH markets and tokens lost rows to rejection.
 
     The counts alone were not enough (Codex P1 wave-26). A market with both
@@ -1143,6 +1160,14 @@ def _trade_rows(
     rejected_tokens: set[str] = set()
     unattributable_rejections = 0
     path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    # PRESENCE is tracked separately from emptiness (Codex P2 wave-39).
+    # `_iter_csv_any` yields nothing for an ABSENT file exactly as it does for a
+    # header-only one, so a deleted or never-published ledger was
+    # indistinguishable from the deliberately supported quiet-day corpus: with
+    # retained producer summaries still healthy the run emitted the benign
+    # `no_wallets_scored` sentinel and reported status "ok", presenting MISSING
+    # INPUT as healthy evidence.
+    ledger_present = path.exists()
     for row in _iter_csv_any(path):
         source_rows += 1
         market = str(row.get("market") or "").strip()
@@ -1229,7 +1254,15 @@ def _trade_rows(
                 "wallet": _wallet(row),
             }
         )
-    return parsed, malformed_rows, source_rows, rejected_markets, rejected_tokens, unattributable_rejections
+    return (
+        parsed,
+        malformed_rows,
+        source_rows,
+        rejected_markets,
+        rejected_tokens,
+        unattributable_rejections,
+        ledger_present,
+    )
 
 
 def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
@@ -1262,6 +1295,45 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
     # unreproducible and silent. PREREQUISITE, registered: promoting the wallet
     # axis to a standing input wants a liveness-checking lease in runtime_lock
     # itself, which is a shared module with many callers and its own work order.
+    # The handler wraps the `with` ITSELF, not just its body (Codex P2 wave-39).
+    # Entering runtime_lock can raise on its own -- a permissions or filesystem
+    # error on outputs/polymarket_runtime alone is enough -- and that happens
+    # BEFORE the inner try is active. The advertised generic failure path then
+    # wrote neither the build_failed summary nor its wallet sentinel, so
+    # yesterday's rows stayed readable as artifact_status="ok" while the harvest
+    # recorded a failed step: the exact fail-open rule 9's build_failed sentinel
+    # exists to close, reached through the one statement outside its reach.
+    try:
+        return _build_flow_toxicity_under_lock(cfg)
+    except Exception as exc:
+        if not getattr(exc, "_flow_toxicity_handled", False):
+            _invalidate_wallet_evidence_on_abort(cfg, exc)
+        raise
+
+
+def _invalidate_wallet_evidence_on_abort(cfg: EngineConfig, exc: BaseException) -> None:
+    """Replace the wallet artifact and summary with build_failed sentinels."""
+    out_root = cfg.output_root / "maker_carry"
+    generated_at = now_utc()
+    write_json(
+        out_root / "flow_toxicity_summary.json",
+        {
+            "status": "build_failed",
+            "generated_at_utc": generated_at,
+            "work_order": "WO-49",
+            "error": f"{type(exc).__name__}: {exc}",
+            "paper_trading_invoked": False,
+            "live_trading_invoked": False,
+        },
+    )
+    write_csv(
+        out_root / "flow_toxicity_wallets.csv",
+        [_wallet_sentinel_row(generated_at, "build_failed")],
+        fieldnames=WALLET_MARKOUT_FIELDS,
+    )
+
+
+def _build_flow_toxicity_under_lock(cfg: EngineConfig) -> dict[str, Any]:
     with runtime_lock(cfg, "flow_toxicity", stale_after_seconds=0.0) as lock:
         if not lock.acquired:
             return {
@@ -1283,24 +1355,7 @@ def build_flow_toxicity(cfg: EngineConfig) -> dict[str, Any]:
             # their own, more specific sentinels and set _HANDLED_FAILURE, so
             # this does not overwrite them.
             if not getattr(exc, "_flow_toxicity_handled", False):
-                out_root = cfg.output_root / "maker_carry"
-                generated_at = now_utc()
-                write_json(
-                    out_root / "flow_toxicity_summary.json",
-                    {
-                        "status": "build_failed",
-                        "generated_at_utc": generated_at,
-                        "work_order": "WO-49",
-                        "error": f"{type(exc).__name__}: {exc}",
-                        "paper_trading_invoked": False,
-                        "live_trading_invoked": False,
-                    },
-                )
-                write_csv(
-                    out_root / "flow_toxicity_wallets.csv",
-                    [_wallet_sentinel_row(generated_at, "build_failed")],
-                    fieldnames=WALLET_MARKOUT_FIELDS,
-                )
+                _invalidate_wallet_evidence_on_abort(cfg, exc)
             raise
 
 
@@ -1427,6 +1482,7 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
         rejected_markets,
         rejected_tokens,
         unattributable_rejections,
+        trade_ledger_present,
     ) = _trade_rows(cfg)
     trade_corpus_status = _trade_corpus_status(cfg)
     tier_wallets, current_wallets, missing_wallet_data = _top_wallets(cfg)
@@ -2025,7 +2081,12 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
         # An enabled run with no trades, or with trades carrying no wallet
         # attribution, must still state its evidence class rather than emit a
         # bare header (Codex P1 wave-5 on #451).
-        if trade_source_rows and not trades:
+        if not trade_ledger_present:
+            # A ledger that does not EXIST is not a quiet day (Codex P2
+            # wave-39). Reported distinctly so deletion or a failure to publish
+            # cannot read as the supported header-only corpus.
+            sentinel_status = "missing_trade_ledger"
+        elif trade_source_rows and not trades:
             sentinel_status = "malformed_trade_corpus"
         elif trade_corpus_status == "ok":
             sentinel_status = "no_wallets_scored"
@@ -2040,7 +2101,9 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
             # a malformed producer output, not a quiet day. Reported distinctly
             # so a reader cannot mistake one for the other.
             "status": (
-                "malformed_trade_corpus"
+                "missing_trade_ledger"
+                if not trade_ledger_present
+                else "malformed_trade_corpus"
                 if trade_source_rows and not trades
                 else "ok"
                 if rows_out or not trades

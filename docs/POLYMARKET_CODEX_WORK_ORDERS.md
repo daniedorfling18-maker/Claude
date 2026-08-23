@@ -2002,7 +2002,7 @@ ordering same-stamp quotes by PRICE is indefensible on either axis — it makes 
 used depend on which number happens to be smaller — while ordering by when a quote became available
 is correct for both. On a corpus with no same-stamp duplicates the market output is unchanged.
 
-### §49.1 — Wallet-axis forward markout (`flow_toxicity_wallets.csv`) — registered 2026-08-22
+### §49.1 — Wallet-axis forward markout (`flow_toxicity_wallets.csv`) — DRAFT, NOT REGISTERED (status reverted 2026-08-23; see the lifecycle note below)
 
 Scoped amendment to WO-49, registered because the parent entry above covers ONLY the per-market
 `flow_toxicity.csv` and its summary. The wallet axis is a DISTINCT artifact with its own population,
@@ -2012,17 +2012,35 @@ leave its input-coverage rule, fail-safe and day-after check unregistered and th
 amending the register, which is exactly the lifecycle step I have been enforcing elsewhere]. Class M
 (mechanical, non-frozen: diagnostic telemetry).
 
-LIFECYCLE DEVIATION, RECORDED AND UNRESOLVED [Codex P1 wave-5 on #451]. The binding order is
-register -> independent review -> dispatch -> build. Here the BUILD came first and this registration
-was written afterwards, so the implementation was not made from an independently-admitted design. The
-review asks that the registration land first and the implementation then be dispatched from a branch
-containing that registered `main` tip. That is the rule-faithful remedy and it is NOT applied here,
-for a stated reason: the ordering already happened, and re-arranging the two PRs now would produce
-the APPEARANCE of compliance without the property the rule protects - a design reviewed before code
-was written to it. Splitting cannot retroactively create that. What the owner has instead is an
-accurate record and a cheap choice: merge this registration and accept the existing build, or merge
-it and have the implementation rebuilt from the registered text. The review thread is deliberately
-left OPEN rather than resolved, because this is the owner's call and not mine to close.
+STATUS: `draft`. THIS SECTION IS NOT REGISTERED AND MUST NOT BE TREATED AS REGISTERED SPECIFICATION
+[Codex P1 wave-39 on #451, and correct].
+
+The binding order is register -> independent review -> dispatch -> build. Here the BUILD came first
+and this text was written afterwards, so the implementation was not made from an independently
+admitted design. Waves 5 through 38 recorded that deviation inside the section while continuing to
+present the section as registered. That form is specifically prohibited:
+`docs/ENGINEERING_STANDARDS.md:161-162` reads "A draft that fails any rule returns to its drafter.
+Registering it with the failure noted is the outcome this section exists to prevent." Noting the
+failure is the anti-pattern, not the cure -- and I had already applied the correct disposition to
+WO-163 earlier the same day, reverting it to draft rather than registering it with a blocker. This
+section gets the same treatment for consistency with that precedent and with S8.
+
+What does NOT change: the engineering. Every rule below was written against a real defect, each has
+an enumerated test, and the market-axis veto fixes in rules 13-13l close genuine fail-opens on a live
+quoting surface. Reverting the status does not withdraw any of that; it labels what the text IS.
+
+What CANNOT be cured by an agent: A1-ordering cannot pass retroactively, because the build already
+exists. Re-arranging the two PRs now would manufacture the APPEARANCE of compliance without the
+property the rule protects -- a design reviewed before code was written to it. So this is not a
+blocker I can clear by more work, and more review waves will not change it.
+
+THE OWNER'S CHOICE, and only the owner's:
+  (a) waive the ordering for this instance, in an owner-authored note, and register the text as it
+      stands; or
+  (b) treat the build as unregistered work: discard it, register the design first, and rebuild from
+      a branch containing that registered `main` tip.
+The review thread stays OPEN. OWNER AUTHORIZATION IS NEVER AGENT-WRITABLE, so nothing here should be
+read as (a) having happened.
 
 WHY: `_top_wallets` (flow_toxicity.py:94) caps "smart" at the latest leaderboard snapshot's 100
 wallets, so across ~200,000 attributed fills a trade can only be scored smart if its wallet sits on a
@@ -2368,6 +2386,11 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    catch it either, because it compares against the producer's own request. This is reachable by
    supported CONFIGURATION — `leaderboard_limit` is a config key — not only by corruption, which is
    why it is fixed rather than deferred with the other membership hardening.
+   ABSENT vs PRESENT-BUT-INVALID is drawn on KEY PRESENCE [Codex P2 wave-39]: JSON `null`
+   deserialises to Python `None`, so `probe.get(...) is not None` cannot tell an absent legacy key
+   from one explicitly set to null, and collapsing them skipped BOTH gates — the coverage check
+   because it defaults permissive, the short-snapshot check because it needs a number. Absent stays
+   the legacy path; present-but-unreadable fails closed, matching rule 8e's treatment of `complete`.
    SEPARATELY, a complete REQUEST can still leave a short SNAPSHOT: `_dedupe_latest` keys on
    (snapshot_date, wallet), so a response repeating a wallet collapses to fewer unique rows than were
    fetched while the summary, describing the fetch, still reads complete. The selected instant must
@@ -2455,6 +2478,22 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    the shape to watch for whenever a rule keys on one identifier while its consumers accept two. A
    token-only prior row is carried whenever the taint is global or its own token was rejected again,
    and skipped when this run already recreated it.
+
+18. A MISSING LEDGER IS NOT A QUIET DAY [Codex P2 wave-39]. `_iter_csv_any` yields nothing for an
+   ABSENT `trade_prints.csv` exactly as it does for a header-only one, so with retained producer
+   summaries still healthy the run emitted the benign `no_wallets_scored` sentinel and reported
+   `status="ok"` — presenting MISSING INPUT as healthy evidence, and making deletion or a failure to
+   publish indistinguishable from the deliberately supported quiet-day corpus. `_trade_rows` now
+   returns file PRESENCE separately from row count, and an absent ledger reports
+   `missing_trade_ledger` in both the summary and the sentinel. The empty-but-present case is
+   unchanged and has its own regression test, since that one IS a supported state.
+19. THE ABORT HANDLER COVERS THE LOCK ACQUISITION ITSELF [Codex P2 wave-39]. Rule 9's `build_failed`
+   sentinel was written inside the `with runtime_lock(...)` body, but entering that context manager
+   can raise on its own — a permissions or filesystem error on `outputs/polymarket_runtime` alone is
+   enough — and that happens BEFORE the inner `try` is active. Neither the summary nor the wallet
+   sentinel was written, so the previous run's rows stayed readable as `artifact_status="ok"` while
+   the harvest recorded a failed step: the exact fail-open rule 9 exists to close, reached through
+   the one statement outside its reach. The handler now wraps the `with` itself.
 
 13c. THE TWO BLOCK KINDS HAVE DIFFERENT BLAST RADII [Codex P1 wave-27]. Wave-26 protected only
    markets that lost rows, which is right for `raw_imbalance_block` and WRONG for
@@ -2552,9 +2591,9 @@ the matrix without the total), and even when the count was right the MAPPING was
 behaviour was missing from the list while another entry claimed a standalone test that did not exist.
 This list is GENERATED from the test file and verified by diffing the names in both directions, so it
 cannot omit a real test or invent one that does not exist. Anyone changing it should regenerate
-rather than hand-edit. All 82 live in
-tests/polymarket_predictive_engine/test_flow_toxicity.py. That is 82 test FUNCTIONS; pytest collects
-97 cases, because THREE tests are parametrised: rule 15's two S4 sweeps (7 offsets and 5 clock
+rather than hand-edit. All 86 live in
+tests/polymarket_predictive_engine/test_flow_toxicity.py. That is 86 test FUNCTIONS; pytest collects
+101 cases, because THREE tests are parametrised: rule 15's two S4 sweeps (7 offsets and 5 clock
 shifts) and rule 0b's negative-epoch contract (6 forms), for 15 extra cases. An
 auditor comparing this count to pytest output should expect the difference [noted at wave-26 so the
 mismatch is not later read as the drift this generated list exists to prevent].
@@ -2683,45 +2722,53 @@ mismatch is not later read as the drift this generated list exists to prevent].
     0xb appears for the first time with every row rejected: market_blocks_on_unmeasurable_sample 1, a synthetic row with trades_seen 0, toxic_blocked True and reason wholly_rejected_sample, and markets_scored still 1.
 62. `test_markets_scored_excludes_carried_and_synthetic_rows`
     0xb loses every row while 0xa is measured: the carried row reaches the artifact, market_rows_carried_forward 1, but markets_scored is 1 -- only 0xa came from this corpus.
-63. `test_a_token_only_veto_survives_a_later_partial_corpus`
+63. `test_a_lock_acquisition_failure_invalidates_stale_wallet_evidence`
+    runtime_lock raises on entry after a healthy run: the wallet artifact is replaced by a build_failed sentinel and the summary reads build_failed, rather than leaving the prior run's rows readable as ok.
+64. `test_a_missing_trade_ledger_is_not_a_quiet_day`
+    trade_prints.csv never written: status and sentinel both missing_trade_ledger, not the benign no_wallets_scored.
+65. `test_an_empty_trade_ledger_is_still_a_quiet_day`
+    A header-only ledger: status ok and no_wallets_scored -- the supported quiet day, pinned so the missing-file rule cannot swallow it. Passes with and without the fix by design; it is a regression guard, not a falsifiable claim.
+66. `test_a_present_but_unreadable_requested_limit_is_not_a_legacy_summary`
+    requested_limit present and explicitly null with 50 seeded wallets: membership unknown -- key presence, not value-is-not-None, separates an absent legacy key from a malformed one.
+67. `test_a_token_only_veto_survives_a_later_partial_corpus`
     An orphan-token veto created in run 1 survives a run-2 corpus whose rejection names neither identifier -- the preservation rewrite must not delete a token-addressable row it created itself.
-64. `test_a_truncated_limit_is_unknown_even_when_the_producer_reports_ok`
+68. `test_a_truncated_limit_is_unknown_even_when_the_producer_reports_ok`
     50 distinct wallets at the selected instant with requested_limit 50 and status ok: membership still unknown, because the producer never fetched ranks 51-100. Seeded to a full 50 so the short-snapshot check cannot mask the gate under test.
-65. `test_a_departed_market_is_not_pinned_by_an_unrelated_rejection`
+69. `test_a_departed_market_is_not_pinned_by_an_unrelated_rejection`
     0xc departs cleanly while 0xa loses one row: market_rows_carried_forward absent and 0xc gone -- an attributable rejection names only its own market's lost coverage.
-66. `test_a_token_only_rejection_is_resolved_to_its_market`
+70. `test_a_token_only_rejection_is_resolved_to_its_market`
     A rejection with a blank market but token tok-c: attributed to 0xc via the table's own pairing, carried forward, AND blocked with reason unmeasurable_sample -- its prior clean verdict must not survive as clearance. (Renamed at wave-33; it no longer exercised the unattributable case.)
-67. `test_a_rejection_naming_nothing_pins_every_departed_market`
+71. `test_a_rejection_naming_nothing_pins_every_departed_market`
     A rejection with BOTH market and asset_id blank: nothing can be pinned to it, so every departed market is held -- market_rows_carried_forward 1 and 0xc retained.
-68. `test_an_orphan_token_rejection_gets_a_token_addressable_veto`
+72. `test_an_orphan_token_rejection_gets_a_token_addressable_veto`
     A first-seen token with no market pairing anywhere: a synthetic row carrying asset_id and a blank market, toxic_blocked True, reason wholly_rejected_sample -- requote_alerts looks up by token id, so the blank market still blocks.
-69. `test_a_freshly_toxic_market_still_wins_over_a_prior_clean_row`
+73. `test_a_freshly_toxic_market_still_wins_over_a_prior_clean_row`
     0xb turns one-sided AND loses a row: 0xb's FRESH blocking row wins, while 0xa -- which lost nothing but held a percentile-ONLY block and fell from 1.0 to 0.5 -- is retained. Pins rule 13c's deliberate over-breadth.
-70. `test_a_partly_rejected_ledger_does_not_freeze_the_split`
+74. `test_a_partly_rejected_ledger_does_not_freeze_the_split`
     One valid fill and one out-of-domain fill under an ok producer: wallet_split_was_frozen False and no split-state file on disk -- a contaminated cutoff must not outlive the rejected run.
-71. `test_a_clean_run_does_not_carry_a_departed_market_forward`
+75. `test_a_clean_run_does_not_carry_a_departed_market_forward`
     A market with no fills in the new ledger and NO exclusions this run: it leaves the table, market_rows_carried_forward absent -- absence with nothing rejected is meaningful.
-72. `test_a_partly_rejected_sample_is_not_a_healthy_wallet_artifact`
+76. `test_a_partly_rejected_sample_is_not_a_healthy_wallet_artifact`
     One valid fill and one out-of-domain fill under an ok producer: the surviving row reads partial_malformed_trade_corpus, wallets_scored 1, and the rejected wallet is absent entirely.
-73. `test_a_leaderboard_newer_than_its_summary_cannot_settle_membership`
+77. `test_a_leaderboard_newer_than_its_summary_cannot_settle_membership`
     Rows stamped 2026-08-23 beside a summary generated 2026-08-22: missing_wallet_data True and membership 'unknown', while the market axis keeps smart_fill_count 1.
-74. `test_an_incomplete_leaderboard_is_not_authoritative`
+78. `test_an_incomplete_leaderboard_is_not_authoritative`
     leaderboard_probe_params.complete=false with 12 rows added renders membership 'unknown'; complete=true with 100 rows added under the same 'partial' status is authoritative.
-75. `test_a_malformed_corpus_does_not_clear_the_market_veto`
+79. `test_a_malformed_corpus_does_not_clear_the_market_veto`
     A healthy run scores one market; the next refresh is entirely corrupt. EXPECT status malformed_trade_corpus, market_axis_preserved True, and flow_toxicity.csv byte-equal to before -- the active veto survives.
-76. `test_a_disabled_leaderboard_producer_yields_unknown_membership`
+80. `test_a_disabled_leaderboard_producer_yields_unknown_membership`
     Producer status 'disabled': membership reads 'unknown', while the market-axis tier split still uses the retained top-100 (smart_fill_count 1).
-77. `test_the_latest_intraday_snapshot_wins`
+81. `test_the_latest_intraday_snapshot_wins`
     Two same-date snapshots at 06:00 and 18:00: fresh1 (18:00) reads True, stale1 (06:00, dropped from the newer top-100) reads False.
-78. `test_a_feature_without_a_venue_timestamp_is_rejected`
+82. `test_a_feature_without_a_venue_timestamp_is_rejected`
     A feature with a BLANK source_timestamp collected at 301 must not become a t=301 price for a fill targeting 300: the known-venue 0.70 row at 330 is used instead, markout +0.20.
-79. `test_wallet_without_any_forward_price_is_still_emitted`
+83. `test_wallet_without_any_forward_price_is_still_emitted`
     A wallet whose every fill lacks a forward price is still emitted, fills_missing_price set, markets_touched credited.
-80. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
+84. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
     Disabled replaces the artifact with one sentinel carrying artifact_status=disabled and both flags false.
-81. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
+85. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
     A price outside [target, target+horizon] counts as stale-excluded, and the market-axis columns keep the parent lookup.
-82. `test_wallet_artifact_states_its_own_invocation_flags`
+86. `test_wallet_artifact_states_its_own_invocation_flags`
     The wallet CSV states both invocation flags itself.
 
 ## FAILURE PATH

@@ -8107,11 +8107,27 @@ instance, so the contract is registered once, here, for all callers.
 
 **The caller-honesty contract.** A caller that reports how many candidates
 reached the shadow updater MUST derive that number from the update's outcome,
-not from the size of what it passed in. Concretely: **when the update is
-skipped — whether because the callee returned a `skipped_*` status OR because
-the caller elected not to call it at all** — the reported forwarded count is
-`0`, and the caller's artifact additionally carries the skip status verbatim so
-the skip is visible rather than inferred from a zero.
+not from the size of what it passed in. Concretely: **when the update did not
+WRITE — for any reason — the reported forwarded count is `0`**, and the
+caller's artifact additionally carries the status verbatim so the reason is
+visible rather than inferred from a zero.
+
+**AMENDED 2026-08-23 (Codex P2 wave-42): stated as an ALLOW-LIST on the
+writing side, not a deny-list on the non-writing one.** The original wording
+enumerated the non-writing cases — a `skipped_*` status, or the caller electing
+not to call at all — and every implementation of it wrote
+`startswith("skipped_")`. That does not match `disabled`, which is what
+`update_shadow_cohort_evidence` returns when `shadow_cohort_validation.enabled`
+is false and under which it writes neither ledger: a disabled deployment
+produced receipts claiming delivery of evidence that was never recorded. The
+enumeration is the wrong shape here — a status added later defaults to "claim
+delivery" and the failure is silent, which is how this one survived four call
+sites. `computed` is the only status under which either shadow ledger is
+written, so it is the only status under which a caller may claim a forward.
+Every call site that reports a count now tests `status != "computed"`, which
+also subsumes the locally synthesised statuses (`skipped_scoring_only`,
+`skipped_prediction_cycle_lock_held`, `not_run`) the original wording had to
+name one by one.
 
 **Wording corrected 2026-08-01 after review.** The original said only "when the
 returned status is any `skipped_*` value". That antecedent is never satisfied on
@@ -8153,8 +8169,18 @@ the internal `shadow_cohort` lock; (6) the byte-identity regression runs from
 a committed fixture and does not skip when git history is unavailable —
 assert explicitly that it did not skip.
 
-**Touch ONLY these files** (`git diff --stat` must show exactly these fourteen —
-thirteen if the runtime-lock tests fold into `test_shadow_cohort.py`).
+**Touch ONLY these files** (`git diff --stat` must show exactly these SIXTEEN).
+
+**Count corrected 2026-08-23 (Codex P1 wave-42).** The list said "fourteen —
+thirteen if the runtime-lock tests fold into `test_shadow_cohort.py`", and then
+"fifteen" when `config.py` was added. Both were wrong for the same reason: the
+inventory never counted `tests/.../test_runtime_lock.py`, which the build does
+touch and which the fold-in clause presupposed would not exist, nor THIS
+DOCUMENT, which every registration amendment changes by construction. An audit
+rule whose own count does not match the diff cannot be executed, which is the
+whole purpose of putting one here. The sixteen are enumerated below and were
+verified against `git diff --stat origin/main...HEAD` at the time of writing;
+anyone changing the build must recount rather than assume.
 This list is authoritative for a line audit and SUPERSEDES the single-file
 Scope paragraph in the parent WO:
 
@@ -8184,7 +8210,33 @@ Scope paragraph in the parent WO:
 - NEW `tests/polymarket_predictive_engine/fixtures/` byte-identity fixture (F3)
 - `tests/polymarket_predictive_engine/test_paper_broker_foundation.py` (F4)
 - `tests/polymarket_predictive_engine/test_longshot_bias.py` (F4)
-- NEW test file(s) covering the two `scripts/` call sites that have none
+- `tests/polymarket_predictive_engine/test_runtime_lock.py` — the heartbeat,
+  owner-identity, fencing-token and ownership-loss tests. Listed explicitly
+  from 2026-08-23: the earlier "thirteen if the runtime-lock tests fold into
+  `test_shadow_cohort.py`" clause treated this file as conditional, and it is
+  not — the build touches it.
+- `tests/polymarket_predictive_engine/test_scripts_shadow_caller_honesty.py` —
+  the NEW file covering the `scripts/` call sites that had none, plus the
+  `config-check` / `load_config` timing-validation tests.
+- `docs/POLYMARKET_CODEX_WORK_ORDERS.md` — this document. Listed explicitly
+  from 2026-08-23, because every registration amendment in this section changes
+  it and an inventory that omits itself can never match the diff.
+- `src/polymarket_predictive_engine/config.py` — **ADDED 2026-08-23 (Codex P2
+  wave-42), a deliberate extension of this list rather than an unnoticed
+  overrun.** `shadow_cohort_timings` documents itself as validating F1's
+  registered ordering AT LOAD TIME, and its only call site was inside
+  `update_shadow_cohort_evidence`. A config violating the ordering therefore
+  passed `config-check`, started normally, and failed on the first live-loop
+  shadow-maintenance tick — with the operator's last signal saying the
+  configuration was fine. Fixing that necessarily touches the file that owns
+  `config-check`; leaving the validator uncalled would mean registering a
+  load-time check that does not run at load time. *Fail-safe for this file:
+  `config_check` REPORTS the violation (`status: "invalid"`, plus a
+  `shadow_cohort_timings` field) rather than raising, so it still enumerates
+  every other problem with a configuration; the runtime raise in
+  `update_shadow_cohort_evidence` is unchanged and remains what actually stops
+  a bad configuration from being used. The import is function-local because
+  `shadow_cohort` imports `EngineConfig` from `config`.*
 
 **Day-after check:** after deploy, any `skipped_shadow_lock_held` in the
 cycle artifacts is accompanied by `shadow_candidates_forwarded: 0` in the

@@ -513,6 +513,121 @@ def test_training_harvest_completion_older_than_25_hours_is_incident(
     assert result["status"] == "incident"
 
 
+# --- WO-143.5: watchdog coverage for the scheduled scoring-only paper cycle -
+
+
+def test_paper_cycle_freshness_registration_is_5_hours() -> None:
+    assert REGISTERED_JOB_FRESHNESS_MAX_SECONDS["paper_cycle"] == 18000
+
+
+def test_paper_cycle_stale_at_18001_seconds_opens_incident(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "ops_scheduler" / "status.json",
+        {
+            "generated_at_utc": "2026-07-15T05:00:01Z",
+            "jobs": {
+                "paper_cycle": {
+                    "last_exit_code": 0,
+                    "last_run_utc": "2026-07-15T04:30:00Z",
+                    "last_success_utc": "2026-07-15T00:00:00Z",
+                }
+            },
+        },
+    )
+
+    result = build_degraded_state_watchdog(cfg, as_of="2026-07-15T05:00:01Z")
+
+    freshness = next(row for row in result["evaluations"] if row["registration_id"] == "scheduler_completion_freshness")
+    paper_cycle_row = next(row for row in freshness["jobs"] if row["job"] == "paper_cycle")
+    assert paper_cycle_row["age_seconds"] == 18001.0
+    assert paper_cycle_row["maximum_age_seconds"] == 18000
+    assert paper_cycle_row["state"] == "stale"
+    incident = next(
+        row
+        for row in result["active_incidents"]
+        if row["registration_id"] == "scheduler_completion_freshness" and row["entity"] == "paper_cycle"
+    )
+    assert incident["owner_notification_eligible"] is True
+    assert result["status"] == "incident"
+
+
+def test_paper_cycle_fresh_at_17999_seconds_is_not_incident(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "ops_scheduler" / "status.json",
+        {
+            "generated_at_utc": "2026-07-15T04:59:59Z",
+            "jobs": {
+                "paper_cycle": {
+                    "last_exit_code": 0,
+                    "last_run_utc": "2026-07-15T04:30:00Z",
+                    "last_success_utc": "2026-07-15T00:00:00Z",
+                }
+            },
+        },
+    )
+
+    result = build_degraded_state_watchdog(cfg, as_of="2026-07-15T04:59:59Z")
+
+    freshness = next(row for row in result["evaluations"] if row["registration_id"] == "scheduler_completion_freshness")
+    paper_cycle_row = next(row for row in freshness["jobs"] if row["job"] == "paper_cycle")
+    assert paper_cycle_row["age_seconds"] == 17999.0
+    assert paper_cycle_row["state"] == "fresh"
+    assert not any(
+        row["registration_id"] == "scheduler_completion_freshness" and row["entity"] == "paper_cycle"
+        for row in result["active_incidents"]
+    )
+    assert result["status"] != "incident" or all(
+        row["entity"] != "paper_cycle" for row in result["active_incidents"] if row["registration_id"] == "scheduler_completion_freshness"
+    )
+
+
+def test_paper_cycle_never_observed_becomes_stale_unobserved_on_second_evaluation(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "ops_scheduler" / "status.json",
+        {
+            "generated_at_utc": "2026-07-15T00:00:00Z",
+            "jobs": {"trade_prints": {"last_exit_code": 0, "last_success_utc": "2026-07-15T00:00:00Z"}},
+        },
+    )
+
+    first = build_degraded_state_watchdog(cfg, as_of="2026-07-15T00:00:00Z")
+    freshness_first = next(row for row in first["evaluations"] if row["registration_id"] == "scheduler_completion_freshness")
+    paper_cycle_first = next(row for row in freshness_first["jobs"] if row["job"] == "paper_cycle")
+    assert paper_cycle_first["state"] == "unobserved"
+
+    second = build_degraded_state_watchdog(cfg, as_of="2026-07-15T05:00:01Z")
+    freshness_second = next(row for row in second["evaluations"] if row["registration_id"] == "scheduler_completion_freshness")
+    paper_cycle_second = next(row for row in freshness_second["jobs"] if row["job"] == "paper_cycle")
+    assert paper_cycle_second["state"] == "stale_unobserved"
+    incident = next(
+        row
+        for row in second["active_incidents"]
+        if row["registration_id"] == "scheduler_completion_freshness" and row["entity"] == "paper_cycle"
+    )
+    assert incident is not None
+    assert second["status"] == "incident"
+
+
+def test_paper_cycle_malformed_job_record_fails_closed_without_raising(tmp_path: Path) -> None:
+    cfg = _cfg(tmp_path)
+    write_json(
+        cfg.output_root / "ops_scheduler" / "status.json",
+        {
+            "generated_at_utc": "2026-07-15T00:00:00Z",
+            "jobs": {"paper_cycle": "not-a-dict", "trade_prints": {"last_exit_code": 0}},
+        },
+    )
+
+    result = build_degraded_state_watchdog(cfg, as_of="2026-07-15T00:00:00Z")
+
+    freshness = next(row for row in result["evaluations"] if row["registration_id"] == "scheduler_completion_freshness")
+    paper_cycle_row = next(row for row in freshness["jobs"] if row["job"] == "paper_cycle")
+    assert paper_cycle_row["state"] in {"unobserved", "stale_unobserved"}
+
+
 def test_cli_scheduler_dashboard_and_operating_state_are_wired() -> None:
     scheduler = Path("scripts/run_vps_ops_scheduler.sh").read_text(encoding="utf-8")
     dashboard = Path("src/polymarket_predictive_engine/dashboard.py").read_text(encoding="utf-8")

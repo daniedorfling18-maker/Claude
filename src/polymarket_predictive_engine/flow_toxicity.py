@@ -333,6 +333,15 @@ def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], set[str
         or leaderboard_complete is False
         or revision_torn
         or producer_stale
+        # DIRECTLY, not only through `refreshed` (Codex P2 wave-37). The first
+        # clause ignores `refreshed` entirely when the producer reports "ok", so
+        # with leaderboard_limit=50 the producer could truthfully report ok,
+        # complete and 50 rows, and membership stayed KNOWN -- publishing every
+        # wallet ranked 51-100 as definitively absent from a top-100 the
+        # producer never fetched. The short-snapshot check below did not catch
+        # it either, because it compares against the producer's own request.
+        # This is reachable by supported CONFIGURATION, not just corruption.
+        or not limit_covers_consumer
     )
     # TWO sets, because this function has TWO consumers with DIFFERENT
     # contracts, and returning one made every change to it silently rewrite the
@@ -1712,6 +1721,20 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
                 for row in prior_rows
                 if str(row.get("market") or "")
             }
+            # TOKEN-ONLY rows are addressable too, and indexing solely by market
+            # dropped them (Codex P1 wave-37). Rule 13j's orphan-token synthetic
+            # rows carry a BLANK market and only an asset_id, so the
+            # market-keyed map above excludes them entirely: under a global
+            # taint they were neither carried nor recreated, and the rewrite
+            # below then DELETED a veto this module had itself created --
+            # leaving requote_alerts.py:503, which looks up by token id, with no
+            # record for that token at all. A fail-open produced by the
+            # preservation machinery rather than despite it.
+            prior_by_token = {
+                str(row.get("asset_id") or ""): row
+                for row in prior_rows
+                if str(row.get("asset_id") or "") and not str(row.get("market") or "")
+            }
             # A token-only rejection is resolved to its market where the table
             # already knows the pairing (Codex P2 wave-33), so the ordinary
             # market rules apply to it. Only a token with NO coverage anywhere
@@ -1729,6 +1752,14 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
                     rejected_markets.add(resolved)
                 else:
                     orphan_tokens.add(token)
+            # Token-only prior rows first: they have no market to match against
+            # the fresh table, so the only questions are whether this run
+            # re-created them and whether their absence is verifiable.
+            for token, prior in prior_by_token.items():
+                if token in orphan_tokens:
+                    continue  # recreated below as a fresh synthetic row
+                if taint_all or token in rejected_tokens:
+                    carried.append(prior)
             for prior in prior_by_market.values():
                 market = str(prior.get("market") or "")
                 if not market:

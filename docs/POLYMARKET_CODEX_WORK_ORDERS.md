@@ -2361,6 +2361,13 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    `requested_limit >= limit`, read from the same probe params so no new field is required. ABSENT is
    the legacy path exactly as for `complete`, since older summaries do not publish it and treating
    that as disqualifying would render every pre-existing summary permanently unknown.
+   FED DIRECTLY INTO `membership_unknown`, not only into `refreshed` [Codex P2 wave-37]: the first
+   clause of `membership_unknown` ignores `refreshed` whenever the producer reports `ok`, so a
+   truthful `ok` + `complete` + 50-row summary still published every wallet ranked 51-100 as
+   DEFINITIVELY ABSENT from a top-100 the producer never fetched. The short-snapshot check does not
+   catch it either, because it compares against the producer's own request. This is reachable by
+   supported CONFIGURATION — `leaderboard_limit` is a config key — not only by corruption, which is
+   why it is fixed rather than deferred with the other membership hardening.
    SEPARATELY, a complete REQUEST can still leave a short SNAPSHOT: `_dedupe_latest` keys on
    (snapshot_date, wallet), so a response repeating a wallet collapses to fewer unique rows than were
    fetched while the summary, describing the fetch, still reads complete. The selected instant must
@@ -2438,6 +2445,16 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    row. Every attributable market or orphan token absent from the preserved table still gets a rule
    13g synthetic row. `market_axis_preserved` reports true — the prior rows ARE the basis —
    alongside the two conversion counters.
+
+13l. PRIOR ROWS ARE INDEXED BY TOKEN AS WELL AS MARKET [Codex P1 wave-37]. Rule 13j's orphan-token
+   synthetic rows carry a BLANK `market` and only an `asset_id`, and the prior-row index was keyed on
+   market alone — so those rows were excluded from it entirely. Under a global taint they were
+   neither carried forward nor recreated, and the rewrite then DELETED a veto this module had itself
+   created, leaving requote_alerts.py:503 — which looks up by token id — with no record for that
+   token at all. A fail-open produced BY the preservation machinery rather than despite it, which is
+   the shape to watch for whenever a rule keys on one identifier while its consumers accept two. A
+   token-only prior row is carried whenever the taint is global or its own token was rejected again,
+   and skipped when this run already recreated it.
 
 13c. THE TWO BLOCK KINDS HAVE DIFFERENT BLAST RADII [Codex P1 wave-27]. Wave-26 protected only
    markets that lost rows, which is right for `raw_imbalance_block` and WRONG for
@@ -2535,9 +2552,9 @@ the matrix without the total), and even when the count was right the MAPPING was
 behaviour was missing from the list while another entry claimed a standalone test that did not exist.
 This list is GENERATED from the test file and verified by diffing the names in both directions, so it
 cannot omit a real test or invent one that does not exist. Anyone changing it should regenerate
-rather than hand-edit. All 80 live in
-tests/polymarket_predictive_engine/test_flow_toxicity.py. That is 80 test FUNCTIONS; pytest collects
-95 cases, because THREE tests are parametrised: rule 15's two S4 sweeps (7 offsets and 5 clock
+rather than hand-edit. All 82 live in
+tests/polymarket_predictive_engine/test_flow_toxicity.py. That is 82 test FUNCTIONS; pytest collects
+97 cases, because THREE tests are parametrised: rule 15's two S4 sweeps (7 offsets and 5 clock
 shifts) and rule 0b's negative-epoch contract (6 forms), for 15 extra cases. An
 auditor comparing this count to pytest output should expect the difference [noted at wave-26 so the
 mismatch is not later read as the drift this generated list exists to prevent].
@@ -2666,41 +2683,45 @@ mismatch is not later read as the drift this generated list exists to prevent].
     0xb appears for the first time with every row rejected: market_blocks_on_unmeasurable_sample 1, a synthetic row with trades_seen 0, toxic_blocked True and reason wholly_rejected_sample, and markets_scored still 1.
 62. `test_markets_scored_excludes_carried_and_synthetic_rows`
     0xb loses every row while 0xa is measured: the carried row reaches the artifact, market_rows_carried_forward 1, but markets_scored is 1 -- only 0xa came from this corpus.
-63. `test_a_departed_market_is_not_pinned_by_an_unrelated_rejection`
+63. `test_a_token_only_veto_survives_a_later_partial_corpus`
+    An orphan-token veto created in run 1 survives a run-2 corpus whose rejection names neither identifier -- the preservation rewrite must not delete a token-addressable row it created itself.
+64. `test_a_truncated_limit_is_unknown_even_when_the_producer_reports_ok`
+    50 distinct wallets at the selected instant with requested_limit 50 and status ok: membership still unknown, because the producer never fetched ranks 51-100. Seeded to a full 50 so the short-snapshot check cannot mask the gate under test.
+65. `test_a_departed_market_is_not_pinned_by_an_unrelated_rejection`
     0xc departs cleanly while 0xa loses one row: market_rows_carried_forward absent and 0xc gone -- an attributable rejection names only its own market's lost coverage.
-64. `test_a_token_only_rejection_is_resolved_to_its_market`
+66. `test_a_token_only_rejection_is_resolved_to_its_market`
     A rejection with a blank market but token tok-c: attributed to 0xc via the table's own pairing, carried forward, AND blocked with reason unmeasurable_sample -- its prior clean verdict must not survive as clearance. (Renamed at wave-33; it no longer exercised the unattributable case.)
-65. `test_a_rejection_naming_nothing_pins_every_departed_market`
+67. `test_a_rejection_naming_nothing_pins_every_departed_market`
     A rejection with BOTH market and asset_id blank: nothing can be pinned to it, so every departed market is held -- market_rows_carried_forward 1 and 0xc retained.
-66. `test_an_orphan_token_rejection_gets_a_token_addressable_veto`
+68. `test_an_orphan_token_rejection_gets_a_token_addressable_veto`
     A first-seen token with no market pairing anywhere: a synthetic row carrying asset_id and a blank market, toxic_blocked True, reason wholly_rejected_sample -- requote_alerts looks up by token id, so the blank market still blocks.
-67. `test_a_freshly_toxic_market_still_wins_over_a_prior_clean_row`
+69. `test_a_freshly_toxic_market_still_wins_over_a_prior_clean_row`
     0xb turns one-sided AND loses a row: 0xb's FRESH blocking row wins, while 0xa -- which lost nothing but held a percentile-ONLY block and fell from 1.0 to 0.5 -- is retained. Pins rule 13c's deliberate over-breadth.
-68. `test_a_partly_rejected_ledger_does_not_freeze_the_split`
+70. `test_a_partly_rejected_ledger_does_not_freeze_the_split`
     One valid fill and one out-of-domain fill under an ok producer: wallet_split_was_frozen False and no split-state file on disk -- a contaminated cutoff must not outlive the rejected run.
-69. `test_a_clean_run_does_not_carry_a_departed_market_forward`
+71. `test_a_clean_run_does_not_carry_a_departed_market_forward`
     A market with no fills in the new ledger and NO exclusions this run: it leaves the table, market_rows_carried_forward absent -- absence with nothing rejected is meaningful.
-70. `test_a_partly_rejected_sample_is_not_a_healthy_wallet_artifact`
+72. `test_a_partly_rejected_sample_is_not_a_healthy_wallet_artifact`
     One valid fill and one out-of-domain fill under an ok producer: the surviving row reads partial_malformed_trade_corpus, wallets_scored 1, and the rejected wallet is absent entirely.
-71. `test_a_leaderboard_newer_than_its_summary_cannot_settle_membership`
+73. `test_a_leaderboard_newer_than_its_summary_cannot_settle_membership`
     Rows stamped 2026-08-23 beside a summary generated 2026-08-22: missing_wallet_data True and membership 'unknown', while the market axis keeps smart_fill_count 1.
-72. `test_an_incomplete_leaderboard_is_not_authoritative`
+74. `test_an_incomplete_leaderboard_is_not_authoritative`
     leaderboard_probe_params.complete=false with 12 rows added renders membership 'unknown'; complete=true with 100 rows added under the same 'partial' status is authoritative.
-73. `test_a_malformed_corpus_does_not_clear_the_market_veto`
+75. `test_a_malformed_corpus_does_not_clear_the_market_veto`
     A healthy run scores one market; the next refresh is entirely corrupt. EXPECT status malformed_trade_corpus, market_axis_preserved True, and flow_toxicity.csv byte-equal to before -- the active veto survives.
-74. `test_a_disabled_leaderboard_producer_yields_unknown_membership`
+76. `test_a_disabled_leaderboard_producer_yields_unknown_membership`
     Producer status 'disabled': membership reads 'unknown', while the market-axis tier split still uses the retained top-100 (smart_fill_count 1).
-75. `test_the_latest_intraday_snapshot_wins`
+77. `test_the_latest_intraday_snapshot_wins`
     Two same-date snapshots at 06:00 and 18:00: fresh1 (18:00) reads True, stale1 (06:00, dropped from the newer top-100) reads False.
-76. `test_a_feature_without_a_venue_timestamp_is_rejected`
+78. `test_a_feature_without_a_venue_timestamp_is_rejected`
     A feature with a BLANK source_timestamp collected at 301 must not become a t=301 price for a fill targeting 300: the known-venue 0.70 row at 330 is used instead, markout +0.20.
-77. `test_wallet_without_any_forward_price_is_still_emitted`
+79. `test_wallet_without_any_forward_price_is_still_emitted`
     A wallet whose every fill lacks a forward price is still emitted, fills_missing_price set, markets_touched credited.
-78. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
+80. `test_disabled_flow_toxicity_clears_the_wallet_artifact`
     Disabled replaces the artifact with one sentinel carrying artifact_status=disabled and both flags false.
-79. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
+81. `test_wallet_markout_rejects_stale_prices_and_market_axis_is_unchanged`
     A price outside [target, target+horizon] counts as stale-excluded, and the market-axis columns keep the parent lookup.
-80. `test_wallet_artifact_states_its_own_invocation_flags`
+82. `test_wallet_artifact_states_its_own_invocation_flags`
     The wallet CSV states both invocation flags itself.
 
 ## FAILURE PATH

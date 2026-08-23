@@ -2424,6 +2424,102 @@ def test_markets_scored_excludes_carried_and_synthetic_rows(tmp_path):
     assert summary["markets_scored"] == 1, "but only 0xa was measured from this corpus"
 
 
+def test_a_token_only_veto_survives_a_later_partial_corpus(tmp_path):
+    """The preservation machinery must not delete its own synthetic veto.
+
+    Rule 13j's orphan-token rows carry a BLANK market and only an asset_id, and
+    the prior-row index was keyed on market alone -- so under a global taint
+    such a row was neither carried nor recreated, and the rewrite DELETED a
+    veto this module had itself created. requote_alerts.py:503 looks up by
+    token id, so nothing then pulls that token's quotes (Codex P1 wave-37).
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    prints_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+
+    # Run 1 creates the orphan-token veto.
+    write_csv(
+        prints_path,
+        [
+            *_flow("0xa", "tok-a", "w1", buys=6, sells=2),
+            {"market": "", "asset_id": "tok-orphan", "wallet": "w9",
+             "side": "BUY", "price": 0.5, "size": 100, "timestamp": 99},
+        ],
+        fieldnames=_FLOW_FIELDS,
+    )
+    first = build_flow_toxicity(cfg)
+    assert first["market_blocks_on_unmeasurable_sample"] == 1
+    by_token = {row["asset_id"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+    assert by_token["tok-orphan"]["toxic_blocked"] == "True"
+
+    # Run 2: trades survive, and one rejected row names NEITHER identifier, so
+    # every absence is unverifiable. The orphan veto must survive with them.
+    write_csv(
+        prints_path,
+        [
+            *_flow("0xa", "tok-a", "w1", buys=6, sells=2),
+            {"market": "", "asset_id": "", "wallet": "w9",
+             "side": "BUY", "price": 0.5, "size": 100, "timestamp": 99},
+        ],
+        fieldnames=_FLOW_FIELDS,
+    )
+    build_flow_toxicity(cfg)
+    after = {row["asset_id"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+
+    assert "tok-orphan" in after, (
+        "a token-addressable veto must not be deleted by the rewrite that "
+        "exists to preserve vetoes"
+    )
+    assert after["tok-orphan"]["toxic_blocked"] == "True"
+
+
+def test_a_truncated_limit_is_unknown_even_when_the_producer_reports_ok(tmp_path):
+    """Insufficient consumer coverage is unknown regardless of status (wave-37).
+
+    `limit_covers_consumer` fed only `refreshed`, and the first clause of
+    membership_unknown ignores `refreshed` when the producer reports ok -- so a
+    truthful ok/complete/50-row summary still published wallets ranked 51-100
+    as definitively absent from a top-100 the producer never fetched. Reachable
+    by supported configuration, not only by corruption.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    stamp = now_utc()
+    # A FULL 50 distinct wallets at the selected instant, so the short-snapshot
+    # check (len < min(requested_limit, limit)) is satisfied and cannot mask the
+    # gate under test. With the one-wallet default fixture this test passed
+    # without the fix, on that other check entirely.
+    write_csv(
+        cfg.output_root / "wallet_intelligence" / "leaderboard_history.csv",
+        [
+            {"snapshot_date": stamp[:10], "snapshot_at_utc": stamp,
+             "wallet": "smart1" if index == 0 else f"w{index}", "rank": str(index + 1)}
+            for index in range(50)
+        ],
+        fieldnames=["snapshot_date", "snapshot_at_utc", "wallet", "rank"],
+    )
+    write_json(
+        cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json",
+        {"status": "ok", "generated_at_utc": stamp, "leaderboard_rows_added": 50,
+         "leaderboard_probe_params": {"complete": True, "requested_limit": 50}},
+    )
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert summary["missing_wallet_data"] is True
+    assert rows["smart1"]["on_current_leaderboard"] == "unknown"
+
+
 def test_a_departed_market_is_not_pinned_by_an_unrelated_rejection(tmp_path):
     """Carry-forward is restricted to markets that actually lost rows.
 

@@ -20,7 +20,7 @@ import yaml
 
 from polymarket_predictive_engine.config import EngineConfig, load_config
 from polymarket_predictive_engine.runtime_lock import acquire_runtime_lock, release_runtime_lock
-from polymarket_predictive_engine.utils import read_csv_rows, write_csv
+from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_csv
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -324,3 +324,43 @@ def test_live_loop_shadow_maintenance_reports_zero_rows_when_shadow_is_disabled(
     assert result["prediction_rows"] == 0, (
         "a disabled updater wrote nothing, so no row was forwarded this tick"
     )
+
+
+def test_config_check_reports_an_invalid_shadow_timing_ordering(tmp_path):
+    """The load-time validator must run at LOAD time (Codex P2 wave-42).
+
+    `shadow_cohort_timings` documents itself as validating the registered F1
+    ordering at load time, and its only call site was inside
+    `update_shadow_cohort_evidence`. A config violating the ordering therefore
+    passed `config-check`, started normally, and failed on the first live-loop
+    shadow-maintenance tick -- with the operator's last signal saying the
+    configuration was fine.
+    """
+    from polymarket_predictive_engine.config import config_check
+
+    config_path = _write_config(tmp_path)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    settings = raw.setdefault("shadow_cohort_validation", {})
+    # heartbeat_cap must be < stale_after; invert it.
+    settings["heartbeat_cap_seconds"] = 9000
+    settings["shadow_cohort_stale_after_seconds"] = 2400
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+    status = config_check(str(config_path))
+
+    assert status["status"] == "invalid"
+    assert "invalid" in status["shadow_cohort_timings"]
+    # And it is written to the artifact an operator actually reads.
+    cfg = load_config(config_path)
+    published = read_json(cfg.governance_root / "config_check.json")
+    assert published["status"] == "invalid"
+
+
+def test_config_check_still_passes_a_valid_shadow_timing_ordering(tmp_path):
+    """The over-correction guard: a stock config is still `ok`."""
+    from polymarket_predictive_engine.config import config_check
+
+    status = config_check(str(_write_config(tmp_path)))
+
+    assert status["status"] == "ok"
+    assert status["shadow_cohort_timings"] == "ok"

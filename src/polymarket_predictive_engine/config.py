@@ -118,6 +118,28 @@ def config_check(path: str | Path) -> dict[str, Any]:
         "live_env_opt_in": os.getenv("POLYMARKET_LIVE_TRADING") == "1",
         "kill_switch_active": kill_switch_active(),
     }
+    # WO-143b.1 F1's registered timing ordering is validated HERE, not only on
+    # the first shadow update (Codex P2 wave-42). `shadow_cohort_timings` calls
+    # itself a load-time validator, but nothing called it at load time: the only
+    # call site is inside `update_shadow_cohort_evidence`, so a config that
+    # violates the ordering passed `config-check`, started normally, and failed
+    # on the first live-loop shadow-maintenance tick -- with the operator's
+    # last signal saying the configuration was fine.
+    #
+    # Imported inside the function because `shadow_cohort` imports `EngineConfig`
+    # from this module; a top-level import would be circular. A violation is
+    # REPORTED, not raised: `config-check` exists to enumerate what is wrong
+    # with a configuration, and aborting on the first problem would hide the
+    # rest. The runtime raise in `update_shadow_cohort_evidence` is unchanged
+    # and is still what stops a bad configuration from being used.
+    try:
+        from .shadow_cohort import ShadowCohortTimingConfigError, shadow_cohort_timings
+
+        shadow_cohort_timings(cfg)
+        status["shadow_cohort_timings"] = "ok"
+    except ShadowCohortTimingConfigError as exc:
+        status["status"] = "invalid"
+        status["shadow_cohort_timings"] = f"invalid: {exc}"
     write_json(cfg.governance_root / "config_check.json", status)
     return status
 

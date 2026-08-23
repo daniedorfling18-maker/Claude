@@ -8169,8 +8169,9 @@ the internal `shadow_cohort` lock; (6) the byte-identity regression runs from
 a committed fixture and does not skip when git history is unavailable —
 assert explicitly that it did not skip.
 
-**Touch ONLY these files** (`git diff --stat` must show exactly these fourteen —
-thirteen if the runtime-lock tests fold into `test_shadow_cohort.py`).
+**Touch ONLY these files** (`git diff --stat` must show exactly these fifteen —
+fourteen if the runtime-lock tests fold into `test_shadow_cohort.py`; the
+fifteenth, `config.py`, was added 2026-08-23 and is annotated as such below).
 This list is authoritative for a line audit and SUPERSEDES the single-file
 Scope paragraph in the parent WO:
 
@@ -8201,6 +8202,22 @@ Scope paragraph in the parent WO:
 - `tests/polymarket_predictive_engine/test_paper_broker_foundation.py` (F4)
 - `tests/polymarket_predictive_engine/test_longshot_bias.py` (F4)
 - NEW test file(s) covering the two `scripts/` call sites that have none
+- `src/polymarket_predictive_engine/config.py` — **ADDED 2026-08-23 (Codex P2
+  wave-42), a deliberate extension of this list rather than an unnoticed
+  overrun.** `shadow_cohort_timings` documents itself as validating F1's
+  registered ordering AT LOAD TIME, and its only call site was inside
+  `update_shadow_cohort_evidence`. A config violating the ordering therefore
+  passed `config-check`, started normally, and failed on the first live-loop
+  shadow-maintenance tick — with the operator's last signal saying the
+  configuration was fine. Fixing that necessarily touches the file that owns
+  `config-check`; leaving the validator uncalled would mean registering a
+  load-time check that does not run at load time. *Fail-safe for this file:
+  `config_check` REPORTS the violation (`status: "invalid"`, plus a
+  `shadow_cohort_timings` field) rather than raising, so it still enumerates
+  every other problem with a configuration; the runtime raise in
+  `update_shadow_cohort_evidence` is unchanged and remains what actually stops
+  a bad configuration from being used. The import is function-local because
+  `shadow_cohort` imports `EngineConfig` from `config`.*
 
 **Day-after check:** after deploy, any `skipped_shadow_lock_held` in the
 cycle artifacts is accompanied by `shadow_candidates_forwarded: 0` in the

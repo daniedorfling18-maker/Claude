@@ -16,7 +16,7 @@ from polymarket_predictive_engine import runtime_lock
 from polymarket_predictive_engine.config import EngineConfig
 from polymarket_predictive_engine.shadow_cohort import _write_shadow_pnl_history, update_shadow_cohort_evidence
 import polymarket_predictive_engine.shadow_cohort as shadow_cohort_module
-from polymarket_predictive_engine.utils import now_utc, read_json, write_csv
+from polymarket_predictive_engine.utils import now_utc, read_json, write_csv, write_json
 
 
 def _unlocked_shadow_update_calls(source: str) -> list[int]:
@@ -1742,3 +1742,65 @@ def test_wo143b1_lock_heartbeat_diagnostics_cover_the_trailing_writes(tmp_path, 
         "the durable diagnostic is the only record once the lock is deleted, and it "
         "reports the trailing-write failures as never having happened"
     )
+
+
+def test_wo143b1_a_malformed_settlement_checkpoint_is_treated_as_never_checked(tmp_path, monkeypatch):
+    """A nonempty non-timestamp is not a completed check (Codex P2 wave-42).
+
+    `_settlement_check_sort_key` orders by the raw STRING, so `"garbage"` sorts
+    after every ISO stamp beginning with a digit. With more due positions than
+    the per-cycle limit, the valid entries are rotated and re-stamped forever
+    while that position is never reached again -- the permanent starvation the
+    sidecar exists to prevent, manufactured by the sidecar itself.
+    """
+    cfg = _settling_cfg(tmp_path, settlement_max_positions_per_cycle=2)
+    _seed_due_positions(cfg, 3)
+    write_json(
+        cfg.governance_root / "shadow_settlement_checkpoints.json",
+        {
+            "generated_at_utc": "2026-08-01T00:00:00Z",
+            "last_settlement_check_utc": {
+                "pos-0": "2026-08-01T00:00:00Z",
+                "pos-1": "2026-08-01T00:00:01Z",
+                "pos-2": "garbage",
+            },
+        },
+    )
+
+    checked: list[str] = []
+
+    def _recording_provider(_cfg, position, *, timeout_seconds):
+        checked.append(str(position.get("shadow_position_id")))
+        return None, "unresolved_stub"
+
+    monkeypatch.setattr(shadow_cohort_module, "_settlement_price_for_position", _recording_provider)
+    update_shadow_cohort_evidence(cfg, [])
+
+    assert "pos-2" in checked, (
+        "the position with the unparseable checkpoint sorted last and was starved; an "
+        "unreadable checkpoint must fall back to NEVER CHECKED, which sorts first"
+    )
+    assert checked[0] == "pos-2"
+
+
+def test_wo143b1_the_settlement_checkpoint_artifact_states_its_invocation_flags(tmp_path, monkeypatch):
+    """AGENTS.md artifact-level provenance (Codex P1 wave-42).
+
+    The checkpoint sidecar is a persistent governance artifact of its own, so
+    an auditor must be able to establish from THE ARTIFACT that the path which
+    wrote it invoked no trading.
+    """
+    cfg = _settling_cfg(tmp_path)
+    _seed_due_positions(cfg, 1)
+    monkeypatch.setattr(
+        shadow_cohort_module,
+        "_settlement_price_for_position",
+        lambda _cfg, _position, *, timeout_seconds: (None, "unresolved_stub"),
+    )
+
+    update_shadow_cohort_evidence(cfg, [])
+    payload = read_json(cfg.governance_root / "shadow_settlement_checkpoints.json")
+
+    assert payload["paper_trading_invoked"] is False
+    assert payload["live_trading_invoked"] is False
+    assert payload["last_settlement_check_utc"], "the fixture must have written a checkpoint"

@@ -576,7 +576,26 @@ def _read_settlement_checkpoints(cfg: EngineConfig) -> dict[str, str]:
     checkpoints = payload.get("last_settlement_check_utc")
     if not isinstance(checkpoints, dict):
         return {}
-    return {str(key): str(value) for key, value in checkpoints.items() if value}
+    # EACH TIMESTAMP IS PARSED, AND AN UNPARSEABLE ONE IS DROPPED (Codex P2
+    # wave-42). `_settlement_check_sort_key` orders by the raw STRING, so a
+    # nonempty value that is not a timestamp -- `"garbage"` -- was accepted as a
+    # completed check and sorted after every ISO stamp beginning with a digit.
+    # With more due positions than the per-cycle limit, the valid entries were
+    # then rotated and re-stamped forever while that one position was never
+    # reached again: exactly the permanent starvation this sidecar exists to
+    # prevent, manufactured by the sidecar itself, and ending in the stale-mark
+    # time exit the rotation was added to avoid.
+    #
+    # Dropping is the fail-safe direction: an absent checkpoint means NEVER
+    # CHECKED, which sorts FIRST, so a corrupt entry costs one early re-check
+    # rather than indefinite starvation.
+    resolved: dict[str, str] = {}
+    for key, value in checkpoints.items():
+        text = str(value or "").strip()
+        if not text or parse_timestamp(text) is None:
+            continue
+        resolved[str(key)] = text
+    return resolved
 
 
 def _settlement_check_sort_key(position: dict[str, Any], checkpoints: dict[str, str]) -> tuple[int, str, str]:
@@ -807,7 +826,17 @@ def _settle_due_positions(
     if checks:
         write_json(
             _settlement_checkpoints_path(cfg),
-            {"generated_at_utc": timestamp, "last_settlement_check_utc": checkpoints},
+            {
+                "generated_at_utc": timestamp,
+                # AGENTS.md artifact-level provenance (Codex P1 wave-42): this
+                # is a persistent governance artifact of its own, so an auditor
+                # must be able to establish from THE ARTIFACT that the path
+                # which wrote it invoked no trading. It is pure scheduling
+                # bookkeeping and both flags are false by construction.
+                "paper_trading_invoked": False,
+                "live_trading_invoked": False,
+                "last_settlement_check_utc": checkpoints,
+            },
         )
     return {
         "settlement_enabled": True,

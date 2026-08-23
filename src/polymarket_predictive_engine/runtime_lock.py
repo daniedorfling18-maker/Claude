@@ -326,13 +326,13 @@ class RuntimeLockHeartbeat:
         if not isinstance(raw, dict):
             self._ownership_checks_failed += 1
             return None
-        token = str(raw.get("owner_token") or "")
+        token = str(raw.get("fencing_token") or "")
         if not token:
-            # A payload with no owner token predates this field or was written
+            # A payload with no fencing token predates this field or was written
             # by something else. Ambiguous, not proof.
             self._ownership_checks_failed += 1
             return None
-        if token != str(self._lock.payload.get("owner_token") or ""):
+        if token != str(self._lock.payload.get("fencing_token") or ""):
             self._ownership_lost = True
             return False
         return True
@@ -445,6 +445,21 @@ class RuntimeLockHeartbeat:
                 "process; refusing to publish the artifacts it serialises. A stale reclaim took the "
                 "lock while this holder was judged aged-out."
             )
+        # A CAP-EXEMPT BEAT ON THE WAY IN (Codex P1 wave-42). Past
+        # `cap_seconds` the beat immediately BEFORE this section is refused --
+        # `_beating_allowed` only makes its carve-out once the section is
+        # already open -- so the section could be entered with a heartbeat
+        # already close to the stale threshold, and a contender could reclaim
+        # while an `os.replace` was running. The exit-only overrun flag records
+        # that afterwards; it does not prevent it. Refreshing here is the same
+        # carve-out the cap already grants INSIDE the section, applied at the
+        # boundary so the whole bounded section starts from a fresh stamp.
+        #
+        # `_write_beat` directly, not `maybe_beat`: the progress gate would
+        # refuse this beat whenever the caller's last step advanced no counter,
+        # which is exactly the case here. It re-checks ownership itself, so a
+        # lost lock still cannot be stamped over.
+        self._write_beat()
         entered = time.monotonic()
         self._critical_section_entered_monotonic = entered
         try:
@@ -490,7 +505,17 @@ def acquire_runtime_lock(
         "name": name,
         "pid": os.getpid(),
         "process_started_at_utc": _PROCESS_STARTED_AT_UTC,
+        # PROCESS identity: shared by every acquisition this process makes, and
+        # used only by `_same_owner_lock_predates_current_process`, whose
+        # question is "did MY process write this before it started".
         "owner_token": _PROCESS_OWNER_TOKEN,
+        # ACQUISITION identity: unique to this one acquire (Codex P1 wave-42).
+        # The process token cannot distinguish a stalled holder from the thread
+        # in the SAME process that reclaimed the lock out from under it, so both
+        # passed the ownership check, both could publish, and the resumed holder
+        # could even unlink the replacement lock on its way out. Ownership
+        # validation and release both key on this instead.
+        "fencing_token": uuid.uuid4().hex,
         "acquired_at_utc": now_utc(),
     }
     try:
@@ -593,6 +618,13 @@ def release_runtime_lock(lock: RuntimeLockResult) -> None:
     # numbered process had since taken.
     current = read_json(lock.path, default={}) or {}
     if isinstance(current, dict):
+        # THE ACQUISITION token, not the process one (Codex P1 wave-42): two
+        # acquisitions in the same process share `owner_token`, so a stalled
+        # holder whose lock was reclaimed by a sibling thread would pass that
+        # check and delete the sibling's live lock.
+        current_fencing = current.get("fencing_token")
+        if current_fencing not in {None, lock.payload.get("fencing_token")}:
+            return
         current_token = current.get("owner_token")
         if current_token not in {None, lock.payload.get("owner_token")}:
             return

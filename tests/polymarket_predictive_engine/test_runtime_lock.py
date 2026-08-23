@@ -258,7 +258,7 @@ def test_a_holder_that_lost_the_lock_refuses_to_publish(tmp_path: Path) -> None:
 
     # Someone else reclaimed and now holds it.
     stolen = dict(lock.payload)
-    stolen["owner_token"] = "a-different-process-entirely"
+    stolen["fencing_token"] = "a-different-acquisition-entirely"
     runtime_lock._rewrite_lock_payload(lock.path, stolen)
 
     with pytest.raises(runtime_lock.RuntimeLockOwnershipLost):
@@ -280,7 +280,7 @@ def test_a_holder_that_lost_the_lock_does_not_stamp_over_the_new_owner(tmp_path:
     lock, heartbeat = _held_heartbeat(cfg)
 
     stolen = dict(lock.payload)
-    stolen["owner_token"] = "a-different-process-entirely"
+    stolen["fencing_token"] = "a-different-acquisition-entirely"
     runtime_lock._rewrite_lock_payload(lock.path, stolen)
     before = json.loads(lock.path.read_text(encoding="utf-8"))
 
@@ -288,7 +288,7 @@ def test_a_holder_that_lost_the_lock_does_not_stamp_over_the_new_owner(tmp_path:
 
     after = json.loads(lock.path.read_text(encoding="utf-8"))
     assert after == before, "the losing holder overwrote the new owner's payload"
-    assert after["owner_token"] == "a-different-process-entirely"
+    assert after["fencing_token"] == "a-different-acquisition-entirely"
     assert heartbeat.beats == 0
 
 
@@ -335,3 +335,36 @@ def test_the_ordinary_held_case_still_beats_and_publishes(tmp_path: Path) -> Non
     assert heartbeat.ownership_lost is False
     assert heartbeat.as_dict()["heartbeat_ownership_checks_inconclusive"] == 0
     runtime_lock.release_runtime_lock(lock)
+
+
+def test_two_acquisitions_in_one_process_have_distinct_fencing_tokens(tmp_path: Path) -> None:
+    """The process token cannot fence a sibling in the same process (Codex P1 wave-42).
+
+    `_PROCESS_OWNER_TOKEN` is module-global, so a stalled holder and the thread
+    that reclaimed the lock out from under it carried the SAME identity: both
+    passed the ownership check, both could publish, and the resumed holder
+    could unlink the replacement lock on its way out. Every acquisition now
+    carries its own token.
+    """
+    cfg = _cfg(tmp_path)
+    first = runtime_lock.acquire_runtime_lock(cfg, "shadow_cohort", stale_after_seconds=999999)
+    assert first.acquired is True
+    first_heartbeat = runtime_lock.RuntimeLockHeartbeat(
+        first, cap_seconds=999999.0, critical_section_max_seconds=999999.0
+    )
+    runtime_lock.release_runtime_lock(first)
+
+    second = runtime_lock.acquire_runtime_lock(cfg, "shadow_cohort", stale_after_seconds=999999)
+    assert second.acquired is True
+    assert second.payload["owner_token"] == first.payload["owner_token"], (
+        "the PROCESS identity is deliberately shared; it answers a different question"
+    )
+    assert second.payload["fencing_token"] != first.payload["fencing_token"]
+
+    # The first holder, resumed, must neither publish nor release the second's lock.
+    with pytest.raises(runtime_lock.RuntimeLockOwnershipLost):
+        with first_heartbeat.critical_section():
+            raise AssertionError("unreachable")
+    runtime_lock.release_runtime_lock(first)
+    assert second.path.exists(), "the stale holder deleted the live lock on its way out"
+    runtime_lock.release_runtime_lock(second)

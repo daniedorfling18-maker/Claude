@@ -16,6 +16,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
 import yaml
 
 from polymarket_predictive_engine.config import EngineConfig, load_config
@@ -326,18 +327,7 @@ def test_live_loop_shadow_maintenance_reports_zero_rows_when_shadow_is_disabled(
     )
 
 
-def test_config_check_reports_an_invalid_shadow_timing_ordering(tmp_path):
-    """The load-time validator must run at LOAD time (Codex P2 wave-42).
-
-    `shadow_cohort_timings` documents itself as validating the registered F1
-    ordering at load time, and its only call site was inside
-    `update_shadow_cohort_evidence`. A config violating the ordering therefore
-    passed `config-check`, started normally, and failed on the first live-loop
-    shadow-maintenance tick -- with the operator's last signal saying the
-    configuration was fine.
-    """
-    from polymarket_predictive_engine.config import config_check
-
+def _invalid_timing_config(tmp_path: Path) -> Path:
     config_path = _write_config(tmp_path)
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     settings = raw.setdefault("shadow_cohort_validation", {})
@@ -345,15 +335,54 @@ def test_config_check_reports_an_invalid_shadow_timing_ordering(tmp_path):
     settings["heartbeat_cap_seconds"] = 9000
     settings["shadow_cohort_stale_after_seconds"] = 2400
     config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    return config_path
 
-    status = config_check(str(config_path))
 
-    assert status["status"] == "invalid"
-    assert "invalid" in status["shadow_cohort_timings"]
-    # And it is written to the artifact an operator actually reads.
-    cfg = load_config(config_path)
-    published = read_json(cfg.governance_root / "config_check.json")
+def test_load_config_rejects_an_invalid_shadow_timing_ordering(tmp_path):
+    """The load-time validator must run at LOAD time (Codex P2 wave-42/wave-42b).
+
+    `shadow_cohort_timings` documents itself as validating the registered F1
+    ordering at load time, and its only call site was inside
+    `update_shadow_cohort_evidence`. A config violating the ordering therefore
+    started normally and raised on the first shadow-maintenance tick, where the
+    live loop's per-iteration handler keeps the broken service running.
+    `config-check` alone was not enough either: docker-compose starts the loop
+    through `load_config`, which never reaches it.
+    """
+    from polymarket_predictive_engine.shadow_cohort import ShadowCohortTimingConfigError
+
+    with pytest.raises(ShadowCohortTimingConfigError):
+        load_config(_invalid_timing_config(tmp_path))
+
+
+def test_config_check_fails_loudly_on_an_invalid_shadow_timing_ordering(tmp_path):
+    """Reporting without propagating is the shape of gate that does not gate.
+
+    `cli.py` returns 0 for a payload it printed, and the required PR gate
+    invokes `config-check`, so an earlier version that only set
+    `status: "invalid"` in the JSON left the gate GREEN for a configuration
+    guaranteed to fail its first shadow update (Codex P1 wave-42). The artifact
+    is still written, so the operator sees the named fault rather than only a
+    stderr line -- and the error propagates so the exit code is non-zero.
+    """
+    from polymarket_predictive_engine.config import config_check
+    from polymarket_predictive_engine.cli import main as cli_main
+    from polymarket_predictive_engine.shadow_cohort import ShadowCohortTimingConfigError
+
+    config_path = _invalid_timing_config(tmp_path)
+    with pytest.raises(ShadowCohortTimingConfigError):
+        config_check(str(config_path))
+
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    governance_root = Path(raw["paths"]["output_root"]) / "polymarket_model_governance"
+    published = read_json(governance_root / "config_check.json")
     assert published["status"] == "invalid"
+    assert "invalid" in published["shadow_cohort_timings"]
+
+    assert cli_main(["config-check", "--config", str(config_path)]) != 0, (
+        "the required PR gate reads this exit code; a printed 'invalid' it returns 0 for "
+        "is a gate that does not gate"
+    )
 
 
 def test_config_check_still_passes_a_valid_shadow_timing_ordering(tmp_path):

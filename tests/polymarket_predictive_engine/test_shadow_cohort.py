@@ -1462,7 +1462,12 @@ def test_wo143b1_f1_heartbeat_cap_is_conditional_on_the_critical_section(tmp_pat
 
         with beyond_cap.critical_section():
             beyond_cap.note_progress("inside")
-            assert beyond_cap.beats == 1, "the cap must NOT fire inside the critical section"
+            # TWO beats: the cap-exempt refresh on ENTRY (Codex P1 wave-42) and
+            # the one inside. Entry is beaten because past the cap the beat
+            # immediately BEFORE the section is refused, so without it the
+            # section could open on an almost-stale stamp and a contender could
+            # reclaim while an os.replace was running.
+            assert beyond_cap.beats == 2, "the cap must NOT fire inside the critical section"
         assert beyond_cap.critical_section_overran is False
 
         # A critical section that overruns its own bound stops beating, and
@@ -1473,7 +1478,13 @@ def test_wo143b1_f1_heartbeat_cap_is_conditional_on_the_critical_section(tmp_pat
         with overrunning.critical_section():
             time.sleep(0.01)
             overrunning.note_progress("inside_overrun")
-        assert overrunning.beats == 0
+        # EXACTLY ONE beat, taken at entry before any time had elapsed, and then
+        # nothing (Codex P1 wave-42). The registered property is that an
+        # overrunning section does not beat INDEFINITELY, and one beat at t=0 of
+        # the section is bounded by construction: the overrun had not happened
+        # yet when it was written. `== 0` was over-specific to the arrangement
+        # that had no entry beat at all.
+        assert overrunning.beats == 1
         assert overrunning.critical_section_overran is True
     finally:
         runtime_lock.release_runtime_lock(lock)
@@ -1804,3 +1815,50 @@ def test_wo143b1_the_settlement_checkpoint_artifact_states_its_invocation_flags(
     assert payload["paper_trading_invoked"] is False
     assert payload["live_trading_invoked"] is False
     assert payload["last_settlement_check_utc"], "the fixture must have written a checkpoint"
+
+
+def test_wo143b1_trailing_publication_stops_once_the_lock_is_lost(tmp_path, monkeypatch):
+    """Recording a fact and enforcing it are not the same thing (Codex P2 wave-42).
+
+    The trailing beats DETECT a foreign owner and latch
+    `heartbeat_ownership_lost`; nothing acted on it. A writer whose history
+    write stalled long enough to be reclaimed still overwrote the newer
+    holder's summary and update summary from its own older snapshot, leaving
+    the governance artifacts describing a different pass than the ledgers
+    beside them.
+    """
+    cfg = _settling_cfg(tmp_path)
+    _seed_due_positions(cfg, 1)
+    monkeypatch.setattr(
+        shadow_cohort_module,
+        "_settlement_price_for_position",
+        lambda _cfg, _position, *, timeout_seconds: (1.0, "clean_settlement"),
+    )
+
+    summary_path = cfg.governance_root / "shadow_signal_cohort_pnl.json"
+    update_path = cfg.governance_root / "shadow_cohort_update_summary.json"
+    lock_path = runtime_lock.runtime_lock_path(cfg, "shadow_cohort")
+    original_history = shadow_cohort_module._write_shadow_pnl_history
+
+    def _reclaimed_during_history(cfg_arg, summary_arg):
+        result = original_history(cfg_arg, summary_arg)
+        # A contender reclaimed the lock while this writer was in the history
+        # write, and published its own artifacts.
+        payload = json.loads(lock_path.read_text(encoding="utf-8"))
+        payload["fencing_token"] = "the-contender"
+        lock_path.write_text(json.dumps(payload), encoding="utf-8")
+        for path in (summary_path, update_path):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"written_by": "the-contender"}), encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(shadow_cohort_module, "_write_shadow_pnl_history", _reclaimed_during_history)
+
+    summary = update_shadow_cohort_evidence(cfg, [])
+
+    assert summary["shadow_lock_heartbeat"]["heartbeat_ownership_lost"] is True
+    assert summary["shadow_summary_publication_abandoned_on_lost_lock"] is True
+    for path in (summary_path, update_path):
+        assert read_json(path)["written_by"] == "the-contender", (
+            f"{path.name} was overwritten from the losing writer's older snapshot"
+        )

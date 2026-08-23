@@ -1646,6 +1646,24 @@ def _update_shadow_cohort_evidence_locked(
     # its older snapshot. That is two writers on the same artifacts, which is
     # the failure this lock exists to prevent, reached through the one phase the
     # whole-function heartbeat did not cover.
+    def _publication_still_permitted() -> bool:
+        """Stop publishing once the lock is provably gone (Codex P2 wave-42).
+
+        The trailing beats DETECT a foreign owner and latch
+        `heartbeat_ownership_lost`; nothing acted on it, so a writer whose
+        history write stalled long enough to be reclaimed still went on to
+        overwrite the newer holder's summary and update summary from its own
+        older snapshot -- leaving the governance artifacts describing a
+        different pass than the ledgers beside them. Recording a fact and
+        enforcing it are not the same thing.
+
+        Only the TRAILING writes are gated. The ledgers themselves are already
+        protected by `critical_section`, which refuses to open at all; here the
+        pass is over and the honest action is to leave the newer writer's
+        artifacts alone.
+        """
+        return heartbeat is None or not heartbeat.ownership_lost
+
     # The history is written FIRST so both published summaries can carry the
     # beats it produced; the ordering is otherwise immaterial, since `summary`
     # is unchanged by the history writer.
@@ -1653,9 +1671,13 @@ def _update_shadow_cohort_evidence_locked(
     _progress("pnl_history_published")
     _refresh_lock_diagnostics()
     summary_file = str(settings.get("summary_file", "shadow_signal_cohort_pnl.json"))
-    write_json(cfg.governance_root / summary_file, summary)
-    _progress("summary_published")
-    _refresh_lock_diagnostics()
-    write_json(cfg.governance_root / "shadow_cohort_update_summary.json", summary)
-    _progress("update_summary_published")
+    if _publication_still_permitted():
+        write_json(cfg.governance_root / summary_file, summary)
+        _progress("summary_published")
+        _refresh_lock_diagnostics()
+    if _publication_still_permitted():
+        write_json(cfg.governance_root / "shadow_cohort_update_summary.json", summary)
+        _progress("update_summary_published")
+    else:
+        summary["shadow_summary_publication_abandoned_on_lost_lock"] = True
     return summary

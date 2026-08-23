@@ -8169,9 +8169,18 @@ the internal `shadow_cohort` lock; (6) the byte-identity regression runs from
 a committed fixture and does not skip when git history is unavailable —
 assert explicitly that it did not skip.
 
-**Touch ONLY these files** (`git diff --stat` must show exactly these fifteen —
-fourteen if the runtime-lock tests fold into `test_shadow_cohort.py`; the
-fifteenth, `config.py`, was added 2026-08-23 and is annotated as such below).
+**Touch ONLY these files** (`git diff --stat` must show exactly these SIXTEEN).
+
+**Count corrected 2026-08-23 (Codex P1 wave-42).** The list said "fourteen —
+thirteen if the runtime-lock tests fold into `test_shadow_cohort.py`", and then
+"fifteen" when `config.py` was added. Both were wrong for the same reason: the
+inventory never counted `tests/.../test_runtime_lock.py`, which the build does
+touch and which the fold-in clause presupposed would not exist, nor THIS
+DOCUMENT, which every registration amendment changes by construction. An audit
+rule whose own count does not match the diff cannot be executed, which is the
+whole purpose of putting one here. The sixteen are enumerated below and were
+verified against `git diff --stat origin/main...HEAD` at the time of writing;
+anyone changing the build must recount rather than assume.
 This list is authoritative for a line audit and SUPERSEDES the single-file
 Scope paragraph in the parent WO:
 
@@ -8201,7 +8210,17 @@ Scope paragraph in the parent WO:
 - NEW `tests/polymarket_predictive_engine/fixtures/` byte-identity fixture (F3)
 - `tests/polymarket_predictive_engine/test_paper_broker_foundation.py` (F4)
 - `tests/polymarket_predictive_engine/test_longshot_bias.py` (F4)
-- NEW test file(s) covering the two `scripts/` call sites that have none
+- `tests/polymarket_predictive_engine/test_runtime_lock.py` — the heartbeat,
+  owner-identity, fencing-token and ownership-loss tests. Listed explicitly
+  from 2026-08-23: the earlier "thirteen if the runtime-lock tests fold into
+  `test_shadow_cohort.py`" clause treated this file as conditional, and it is
+  not — the build touches it.
+- `tests/polymarket_predictive_engine/test_scripts_shadow_caller_honesty.py` —
+  the NEW file covering the `scripts/` call sites that had none, plus the
+  `config-check` / `load_config` timing-validation tests.
+- `docs/POLYMARKET_CODEX_WORK_ORDERS.md` — this document. Listed explicitly
+  from 2026-08-23, because every registration amendment in this section changes
+  it and an inventory that omits itself can never match the diff.
 - `src/polymarket_predictive_engine/config.py` — **ADDED 2026-08-23 (Codex P2
   wave-42), a deliberate extension of this list rather than an unnoticed
   overrun.** `shadow_cohort_timings` documents itself as validating F1's

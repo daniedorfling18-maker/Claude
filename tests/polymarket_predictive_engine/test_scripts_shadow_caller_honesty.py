@@ -253,3 +253,74 @@ def test_live_loop_shadow_maintenance_reports_the_real_row_count_when_uncontende
 
     assert result["prediction_rows"] == 1
     assert not str(result["shadow"]["status"]).startswith("skipped_")
+
+
+def _disabled_config(tmp_path: Path) -> Path:
+    """The same config with `shadow_cohort_validation.enabled` turned off."""
+    config_path = _write_config(tmp_path)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    raw.setdefault("shadow_cohort_validation", {})["enabled"] = False
+    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    return config_path
+
+
+def test_alpha_candidate_shadow_evidence_reports_zero_forwarded_when_shadow_is_disabled(tmp_path):
+    """`disabled` writes nothing either (Codex P2 wave-42).
+
+    The honesty predicate was `startswith("skipped_")`, which does not match
+    the `disabled` status `update_shadow_cohort_evidence` returns when
+    `shadow_cohort_validation.enabled` is false -- so a disabled deployment
+    produced a receipt claiming delivery of evidence that was never recorded.
+    """
+    module = _load_script(ALPHA_SCRIPT, "wo143b1_alpha_shadow_evidence_disabled")
+    config_path = _disabled_config(tmp_path)
+    cfg = load_config(config_path)
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "mispricing_alpha_scores.csv",
+        [_alpha_candidate_row()],
+    )
+
+    payload = module.run(str(config_path))
+
+    assert payload["shadow_update_status"] == "disabled"
+    assert payload["prepared_rows_sent_to_shadow_ledger"] == 0
+    assert payload["existing_shadow_rows_forwarded"] == 0
+    assert payload["existing_near_miss_rows_forwarded"] == 0
+    # The script's own CSV output is written regardless, and still says so.
+    assert payload["alpha_shadow_input_rows"] == 1
+    positions = cfg.output_root / "polymarket_shadow" / "shadow_positions.csv"
+    assert not positions.exists() or read_csv_rows(positions) == []
+
+
+def test_live_loop_shadow_maintenance_reports_zero_rows_when_shadow_is_disabled(tmp_path):
+    """The live loop carries the same predicate and the same defect."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "wo143b1_live_loop_disabled", ROOT / "scripts" / "run_polymarket_local_live_loop.py"
+    )
+    assert spec and spec.loader
+    loop = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(loop)
+
+    config_path = _disabled_config(tmp_path)
+    cfg = load_config(config_path)
+    write_csv(
+        cfg.output_root / "polymarket_predictions" / "predictions.csv",
+        [
+            {
+                "market_id": "m-shadow-tick",
+                "token_id": "t-shadow-tick",
+                "shadow_trade_candidate": "True",
+                "shadow_source": "test_shadow",
+                "prediction_timestamp": "2026-06-27T04:00:00Z",
+            }
+        ],
+    )
+
+    result = loop._lightweight_shadow_maintenance(cfg, [])
+
+    assert str(result["shadow"]["status"]) == "disabled"
+    assert result["prediction_rows"] == 0, (
+        "a disabled updater wrote nothing, so no row was forwarded this tick"
+    )

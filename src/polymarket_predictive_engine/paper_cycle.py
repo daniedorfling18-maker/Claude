@@ -38,11 +38,20 @@ def _shadow_update_status(shadow_update: Any) -> str:
 def _is_skipped_shadow_update(shadow_update: Any) -> bool:
     """True when the shadow update did not write, so nothing was forwarded.
 
-    WO-143b.1 F4: covers both a `skipped_*` status returned by
-    ``update_shadow_cohort_evidence`` and a status synthesised locally by a
-    caller that elected not to call it at all.
+    WO-143b.1 F4: covers a `skipped_*` status returned by
+    ``update_shadow_cohort_evidence``, the `disabled` status it returns when
+    `shadow_cohort_validation.enabled` is false, and any status synthesised
+    locally by a caller that elected not to call it at all.
+
+    ALLOW-LISTED ON THE WRITING SIDE (Codex P2 wave-42). The predicate was
+    `startswith("skipped_")`, which does not match `disabled` -- so a disabled
+    deployment produced receipts claiming delivery of evidence that was never
+    recorded. Deny-listing the non-writing outcomes is the wrong shape: a
+    status added later defaults to "claim delivery" and the failure is silent.
+    `computed` is the only outcome that writes either ledger, so it is the only
+    one that may claim to have.
     """
-    return _shadow_update_status(shadow_update).startswith("skipped_")
+    return _shadow_update_status(shadow_update) != "computed"
 
 
 def _persist_predictions(cfg: EngineConfig, predictions: list[dict[str, Any]]) -> None:

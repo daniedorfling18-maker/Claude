@@ -29,6 +29,16 @@ _PROCESS_STARTED_AT_UTC = now_utc()
 _PROCESS_OWNER_TOKEN = uuid.uuid4().hex
 
 
+class RuntimeLockOwnershipLost(RuntimeError):
+    """Raised when a holder discovers the lock it is publishing under is not its own.
+
+    WO-143b.1 (Codex P1 wave-42). Age-based stale reclaim can steal a lock from
+    a holder that is in fact alive; no filesystem primitive prevents that, so
+    the holder detects it instead and stops before writing. Deliberately a
+    distinct type so callers can tell "I lost the lock" from an I/O failure.
+    """
+
+
 @dataclass(frozen=True)
 class RuntimeLockResult:
     name: str
@@ -233,6 +243,8 @@ class RuntimeLockHeartbeat:
         self._write_failures = 0
         self._cap_stopped = False
         self._critical_section_overran = False
+        self._ownership_lost = False
+        self._ownership_checks_failed = 0
         self._last_progress_label = ""
 
     # -- state ---------------------------------------------------------
@@ -247,6 +259,83 @@ class RuntimeLockHeartbeat:
     @property
     def critical_section_overran(self) -> bool:
         return self._critical_section_overran
+
+    @property
+    def ownership_lost(self) -> bool:
+        return self._ownership_lost
+
+    def _still_owns_lock(self) -> bool | None:
+        """Whether the lock file still names US. ``None`` when unreadable.
+
+        THE ACQUISITION WINDOW IN STALE RECLAIM CANNOT BE CLOSED FROM HERE, SO
+        THE CONSEQUENCE IS CLOSED INSTEAD (Codex P1 wave-42). Reclaim renames
+        the stale lock aside, verifies the captured payload, and restores it
+        when a live holder heartbeated in between -- but between the rename and
+        the restore the lock path does not exist, and a third caller can
+        acquire in that gap. The restore then loses, and the original holder,
+        whose heartbeat succeeded, still believes it holds the lock.
+
+        No filesystem CAS closes that gap: ``os.replace`` rebinds a name
+        atomically but unconditionally, so there is no "replace only if it still
+        names the payload I read". This is not specific to rename-to-claim --
+        ANY age-based steal from a holder that turns out to be alive admits two
+        writers, which is why ``stale_after_seconds=0.0`` is the registered
+        setting on the locks that cannot tolerate it at all.
+
+        What IS decidable is whether WE still hold the lock, at the moment it
+        matters: immediately before publishing. A holder that has lost the lock
+        must not write the ledgers and must not keep stamping heartbeats over
+        the new holder's payload -- the second of which is its own defect, since
+        it would overwrite the owner token the new holder's release validates
+        and strand the lock.
+
+        Fail-safe direction, deliberately split:
+          - ABSENT, or present with a DIFFERENT ``owner_token`` -> we do not
+            hold it. A foreign token is proof outright. Absence is not proof
+            that someone else took it, but it IS proof we do not hold it at
+            this instant, which is the question being asked; this process never
+            unlinks its own lock before release.
+          - unreadable or malformed -> ambiguous, and counted rather than
+            treated as loss, so a transient read error cannot abort a pass.
+
+        ``read_json`` returns its default for a MISSING file and for an
+        unreadable one alike, so the existence check is made separately -- the
+        two answers here are different and collapsing them would put the
+        ambiguous case on the fail-closed side.
+
+        REGISTERED FALSE POSITIVE, accepted deliberately: reclaim's
+        rename-to-claim removes the lock path for the length of its verify, so a
+        probe landing inside that window sees absence and latches loss even when
+        the payload is about to be restored. That costs an aborted pass, which
+        the next pass redoes; the alternative reading -- assume we still hold it
+        -- costs two concurrent ledger writers, which is the failure the lock
+        exists to prevent. The flag is latched rather than re-tested for the
+        same reason: during that window a third caller may have acquired, and
+        nothing observable afterwards distinguishes that from a clean restore.
+        """
+        path = self._lock.path
+        try:
+            present = path.exists()
+        except OSError:
+            self._ownership_checks_failed += 1
+            return None
+        if not present:
+            self._ownership_lost = True
+            return False
+        raw = read_json(path, default=None)
+        if not isinstance(raw, dict):
+            self._ownership_checks_failed += 1
+            return None
+        token = str(raw.get("owner_token") or "")
+        if not token:
+            # A payload with no owner token predates this field or was written
+            # by something else. Ambiguous, not proof.
+            self._ownership_checks_failed += 1
+            return None
+        if token != str(self._lock.payload.get("owner_token") or ""):
+            self._ownership_lost = True
+            return False
+        return True
 
     def _in_critical_section(self) -> bool:
         return self._critical_section_entered_monotonic is not None
@@ -320,6 +409,14 @@ class RuntimeLockHeartbeat:
         payload["progress_counter"] = self._progress
         if self._last_progress_label:
             payload["last_progress_step"] = self._last_progress_label
+        if self._still_owns_lock() is False:
+            # Republishing here would overwrite the NEW holder's payload with
+            # ours -- including its owner token, which its own
+            # ``release_runtime_lock`` validates before unlinking. It would then
+            # refuse to release and strand the lock until the stale window
+            # elapsed again. Losing the lock is bad; stranding the lane on the
+            # way out is worse.
+            return
         try:
             _rewrite_lock_payload(self._lock.path, payload)
         except (OSError, ValueError):
@@ -337,6 +434,17 @@ class RuntimeLockHeartbeat:
         content is built in temp files OUTSIDE it -- so it is
         near-instantaneous by construction.
         """
+        if self._still_owns_lock() is False:
+            # FAIL CLOSED AT THE ONE POINT WHERE IT MATTERS. The publishes
+            # inside this section are the writes the lock exists to serialise,
+            # so a holder that has provably lost the lock stops here rather
+            # than racing the new one. Ambiguity (an unreadable payload) does
+            # not stop the pass -- it is counted in the diagnostics instead.
+            raise RuntimeLockOwnershipLost(
+                f"runtime lock {self._lock.name!r} at {self._lock.path} is no longer held by this "
+                "process; refusing to publish the artifacts it serialises. A stale reclaim took the "
+                "lock while this holder was judged aged-out."
+            )
         entered = time.monotonic()
         self._critical_section_entered_monotonic = entered
         try:
@@ -365,6 +473,8 @@ class RuntimeLockHeartbeat:
             "heartbeat_write_failures": self._write_failures,
             "heartbeat_cap_stopped": self._cap_stopped,
             "heartbeat_critical_section_overran": self._critical_section_overran,
+            "heartbeat_ownership_lost": self._ownership_lost,
+            "heartbeat_ownership_checks_inconclusive": self._ownership_checks_failed,
         }
 
 

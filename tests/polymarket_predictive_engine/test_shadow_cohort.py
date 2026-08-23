@@ -1601,3 +1601,144 @@ def test_wo143b1_f1_settlement_pass_within_budget_is_byte_identical_to_the_pre_f
         new_bytes = (new_cfg.output_root / "polymarket_shadow" / ledger).read_bytes()
         assert new_bytes == old_bytes, f"{ledger} drifted from the pre-fix build"
         assert old_bytes, f"{ledger} was empty, so byte-identity proves nothing"
+
+
+def test_wo143b1_budget_overrun_on_the_last_lookup_still_discards_the_batch(tmp_path, monkeypatch):
+    """The loop can end without a next iteration to check (Codex P1 wave-42).
+
+    The budget test runs at the TOP of each pass through the loop, so an
+    overrun is noticed by the FOLLOWING iteration -- and the last or only due
+    position has no following one. A lookup that started inside the budget and
+    returned outside it left `budget_expired` false and the staged batch was
+    applied and published, against the registered no-partial-write contract.
+
+    ONE due position, so the very first lookup is also the last: the natural
+    exhaustion path with nothing else to mask it.
+    """
+    cfg = _settling_cfg(tmp_path, settlement_budget_seconds=0.25)
+    _seed_due_positions(cfg, 1)
+
+    def _slow_but_resolving_provider(_cfg, _position, *, timeout_seconds):
+        # Starts inside the budget, returns outside it -- and RESOLVES, so
+        # there is a staged settlement to be wrongly applied.
+        time.sleep(0.4)
+        return 1.0, "clean_settlement"
+
+    monkeypatch.setattr(
+        shadow_cohort_module, "_settlement_price_for_position", _slow_but_resolving_provider
+    )
+
+    summary = update_shadow_cohort_evidence(cfg, [])
+
+    assert summary["settlement_budget_expired"] is True, (
+        "a lookup that returned after the deadline expired the budget, whether or "
+        "not another iteration followed it"
+    )
+    assert summary["settlement_status"] == "partial_budget_expired"
+    assert summary["settled_positions"] == 0
+    assert summary["settlement_resolved_discarded_on_expiry"] == 1
+    # The discarded settlement is deferred to the next pass, by name and by count.
+    assert summary["settlement_abandoned_ids"] == ["pos-0"]
+    assert summary["settlement_positions_abandoned"] == 1
+    fills_path = cfg.output_root / "polymarket_shadow" / "shadow_fills.csv"
+    assert not fills_path.exists() or read_csv_rows(fills_path) == []
+    position = read_csv_rows(cfg.output_root / "polymarket_shadow" / "shadow_positions.csv")[0]
+    assert position["status"] == "open", "the discarded settlement must not close the position"
+
+
+def test_wo143b1_the_per_pass_deferral_marker_is_cleared_on_the_next_pass(tmp_path, monkeypatch):
+    """`deferred_to_next_settlement_pass` is per-pass; the column is persistent.
+
+    Codex P2 wave-42: nothing ever took the marker back off, so a position
+    abandoned once carried it for the rest of its life -- reading "still
+    waiting on settlement" through every later pass that checked it normally.
+    """
+    cfg = _settling_cfg(tmp_path, settlement_budget_seconds=0.25)
+    _seed_due_positions(cfg, 5)
+
+    def _slow_provider(_cfg, _position, *, timeout_seconds):
+        time.sleep(0.2)
+        return None, "unresolved_stub"
+
+    monkeypatch.setattr(shadow_cohort_module, "_settlement_price_for_position", _slow_provider)
+    first = update_shadow_cohort_evidence(cfg, [])
+    deferred = set(first["settlement_abandoned_ids"])
+    assert deferred, "the fixture must actually defer something"
+    marked = {
+        row["shadow_position_id"]: row
+        for row in read_csv_rows(cfg.output_root / "polymarket_shadow" / "shadow_positions.csv")
+    }
+    assert all(
+        marked[position_id]["settlement_policy"] == "deferred_to_next_settlement_pass"
+        for position_id in deferred
+    )
+
+    # A pass that settles nothing and defers nothing: every position is checked
+    # normally, so no marker should survive it.
+    def _fast_unresolved_provider(_cfg, _position, *, timeout_seconds):
+        return None, "unresolved_stub"
+
+    monkeypatch.setattr(
+        shadow_cohort_module, "_settlement_price_for_position", _fast_unresolved_provider
+    )
+    second = update_shadow_cohort_evidence(cfg, [])
+    assert second["settlement_budget_expired"] is False
+    assert second["settlement_abandoned_ids"] == []
+    after = {
+        row["shadow_position_id"]: row
+        for row in read_csv_rows(cfg.output_root / "polymarket_shadow" / "shadow_positions.csv")
+    }
+    assert all(
+        after[position_id]["settlement_policy"] == "mark_exit_allowed"
+        for position_id in deferred
+    ), "the deferral marker outlived the pass that deferred it"
+
+
+def test_wo143b1_lock_heartbeat_diagnostics_cover_the_trailing_writes(tmp_path, monkeypatch):
+    """The snapshot must be taken AFTER the trailing writes (Codex P2 wave-42).
+
+    The wave-36 fix continued the heartbeat through the three trailing writes;
+    the diagnostics were still captured once, before any of them. The lock is
+    deleted on return, so that snapshot is the ONLY durable record -- and a
+    heartbeat failure while publishing the summary or the history was therefore
+    reported as never having happened, by the very artifact added to report it.
+
+    The failure is INDUCED rather than counted around: beats are broken from
+    the moment the history write begins, so every diagnostic that claims zero
+    write failures afterwards is claiming something false.
+    """
+    cfg = _settling_cfg(tmp_path)
+    _seed_due_positions(cfg, 1)
+    monkeypatch.setattr(
+        shadow_cohort_module,
+        "_settlement_price_for_position",
+        lambda _cfg, _position, *, timeout_seconds: (1.0, "clean_settlement"),
+    )
+
+    state = {"break_beats": False}
+    original_rewrite = runtime_lock._rewrite_lock_payload
+    original_history = shadow_cohort_module._write_shadow_pnl_history
+
+    def _breaking_rewrite(path, payload):
+        if state["break_beats"]:
+            raise OSError("simulated heartbeat write failure during the trailing writes")
+        return original_rewrite(path, payload)
+
+    def _history(cfg_arg, summary_arg):
+        state["break_beats"] = True
+        return original_history(cfg_arg, summary_arg)
+
+    monkeypatch.setattr(runtime_lock, "_rewrite_lock_payload", _breaking_rewrite)
+    monkeypatch.setattr(shadow_cohort_module, "_write_shadow_pnl_history", _history)
+
+    summary = update_shadow_cohort_evidence(cfg, [])
+    published = read_json(cfg.governance_root / "shadow_cohort_update_summary.json")
+
+    assert summary["shadow_lock_heartbeat"]["heartbeat_write_failures"] >= 1, (
+        "the returned summary reports no heartbeat failure, but every beat after the "
+        "history write failed"
+    )
+    assert published["shadow_lock_heartbeat"]["heartbeat_write_failures"] >= 1, (
+        "the durable diagnostic is the only record once the lock is deleted, and it "
+        "reports the trailing-write failures as never having happened"
+    )

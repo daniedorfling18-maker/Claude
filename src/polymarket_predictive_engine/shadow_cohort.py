@@ -220,6 +220,30 @@ def _is_fast_crypto_updown_position(position: dict[str, Any]) -> bool:
     return bool(window and window[1] in {5, 15})
 
 
+_SETTLEMENT_DEFERRED_POLICY = "deferred_to_next_settlement_pass"
+
+
+def _restored_settlement_policy(position: dict[str, Any], settings: dict[str, Any]) -> dict[str, str]:
+    """`{"settlement_policy": ...}` when the row still carries the per-pass marker, else `{}`.
+
+    `deferred_to_next_settlement_pass` is a PER-PASS scheduling fact written
+    into a PERSISTENT column, and nothing took it back off (Codex P2 wave-42).
+    Restoration uses the same predicate the ordinary policy branches use, so it
+    cannot downgrade a genuine `final_settlement_only` position to mark exits;
+    and it returns empty for a row that is not carrying the marker, so it can
+    never rewrite a policy it was not asked about.
+    """
+    if str(position.get("settlement_policy") or "") != _SETTLEMENT_DEFERRED_POLICY:
+        return {}
+    return {
+        "settlement_policy": (
+            "final_settlement_only"
+            if _settlement_only_shadow_position(position, settings)
+            else "mark_exit_allowed"
+        )
+    }
+
+
 def _settlement_only_shadow_position(position: dict[str, Any], settings: dict[str, Any]) -> bool:
     if not boolish(settings.get("settlement_only_fast_crypto_updown", True)):
         return False
@@ -691,6 +715,19 @@ def _settle_due_positions(
                     "closed_at": timestamp,
                     "updated_at": timestamp,
                     "close_reason": "shadow_clean_settlement",
+                    # The deferral, if any, is over (Codex P2 wave-42). The
+                    # mark-update loop skips non-open rows, so without this a
+                    # position deferred in one pass and settled in the next
+                    # stayed labelled `deferred_to_next_settlement_pass` on a
+                    # CLOSED row, reading "still waiting" forever.
+                    #
+                    # Conditional, and empty for every row not carrying the
+                    # marker: this function's registered contract is that the
+                    # budget/heartbeat/staging work changed only WHEN it writes,
+                    # never WHAT it writes, and an unconditional field here
+                    # rewrote the policy of every settled position that was
+                    # never deferred at all.
+                    **_restored_settlement_policy(position, settings),
                     "exit_price": settlement_price,
                     "realised_pnl_usdc": pnl,
                     "unrealised_pnl_usdc": 0.0,
@@ -707,6 +744,24 @@ def _settle_due_positions(
                 },
             )
         )
+    else:
+        # THE LOOP CAN END WITHOUT A NEXT ITERATION TO CHECK (Codex P1 wave-42).
+        # The budget test above runs at the TOP of each pass through the loop,
+        # so an overrun is noticed by the FOLLOWING iteration -- and the last or
+        # only due position has no following iteration. A lookup that started
+        # inside the budget and returned outside it therefore left
+        # `budget_expired` false, and the staged batch was applied and published
+        # despite the registered no-partial-write contract. Structurally the
+        # same defect as the wave-36 cap ordering, reached through loop
+        # EXHAUSTION rather than through a competing break: the rollback was
+        # correct both times and simply never ran.
+        #
+        # Nothing is left unattempted on this path, so no position is added to
+        # `abandoned_ids` here. The discard branch below fills it from the
+        # staged set, which is exactly the right membership: every position this
+        # pass resolved and is about to throw away is deferred to the next one.
+        if budget_seconds > 0 and (time.monotonic() - started_monotonic) >= budget_seconds:
+            budget_expired = True
     staged_ids = {str(row.get("shadow_position_id") or "") for row, _, _ in staged}
     discarded = 0
     if budget_expired:
@@ -1244,10 +1299,20 @@ def _update_shadow_cohort_evidence_locked(
         position["unrealised_pnl_usdc"] = pnl
         position["return_pct"] = return_pct
         position["updated_at"] = now
+        position_id = str(position.get("shadow_position_id") or "")
+        if position_id not in settlement_deferred:
+            # THE DEFERRAL IS PER-PASS, THE FIELD IS PERSISTENT (Codex P2
+            # wave-42). The marker is written into shadow_positions.csv and no
+            # later branch ever took it back off, so a position abandoned once
+            # by a budget-expired pass carried the label for the rest of its
+            # life, through every subsequent pass that checked it normally. The
+            # row then reads "still waiting on settlement" when it is not --
+            # the opposite of the disclosure the label was added to provide.
+            position.update(_restored_settlement_policy(position, settings))
         close_reason = ""
-        if str(position.get("shadow_position_id") or "") in settlement_deferred:
+        if position_id in settlement_deferred:
             # Marked, disclosed, and deliberately not closed this pass.
-            position["settlement_policy"] = "deferred_to_next_settlement_pass"
+            position["settlement_policy"] = _SETTLEMENT_DEFERRED_POLICY
         elif _settlement_only_shadow_position(position, settings):
             position["settlement_policy"] = "final_settlement_only"
         elif return_pct >= take_profit:
@@ -1512,17 +1577,37 @@ def _update_shadow_cohort_evidence_locked(
                 os.unlink(staged)
             except FileNotFoundError:
                 pass
-    if heartbeat is not None and heartbeat.critical_section_overran:
-        # A bounded wedge, recorded loudly rather than looking like a normal
-        # long hold.
-        summary["shadow_ledger_critical_section_overran"] = True
+    def _refresh_lock_diagnostics() -> None:
+        """Re-snapshot the heartbeat state into `summary`.
+
+        THE SNAPSHOT MUST BE TAKEN AFTER THE TRAILING WRITES, NOT BEFORE
+        (Codex P2 wave-42). The wave-36 fix continued the heartbeat through the
+        three trailing writes; the diagnostics were still captured once, before
+        any of them. So every persisted and returned summary omitted those
+        beats -- and with them any `heartbeat_write_failures` or
+        `heartbeat_cap_stopped` state they produced. The lock is deleted on
+        return, so that snapshot is the ONLY durable record: a heartbeat failure
+        while publishing the summary or the history was reported as never having
+        happened, by the very artifact added to report it.
+
+        Called again after each trailing beat rather than once, because a beat
+        cannot appear in the file it is beating for. `update_summary_published`
+        is by construction the one beat no artifact can carry.
+        """
+        if heartbeat is None:
+            return
+        summary["shadow_lock_heartbeat"] = heartbeat.as_dict()
+        if heartbeat.critical_section_overran:
+            # A bounded wedge, recorded loudly rather than looking like a normal
+            # long hold.
+            summary["shadow_ledger_critical_section_overran"] = True
+
     if fill_append is not None and fill_append.dropped_fields:
         # WO-128.3: the legacy-header tolerance (WO-119) is kept, but a field
         # it could not persist is recorded in the reported result rather than
         # vanishing - the visible trace that a versioned ledger path is due.
         summary["shadow_fill_fields_dropped_by_legacy_header"] = list(fill_append.dropped_fields)
-    if heartbeat is not None:
-        summary["shadow_lock_heartbeat"] = heartbeat.as_dict()
+    _refresh_lock_diagnostics()
     # THE HEARTBEAT CONTINUES THROUGH THE TRAILING WRITES (Codex P2 wave-36).
     # `fills_published` was the last progress notification in the function, but
     # three writes follow it. Individually progressing yet cumulatively past the
@@ -1532,11 +1617,16 @@ def _update_shadow_cohort_evidence_locked(
     # its older snapshot. That is two writers on the same artifacts, which is
     # the failure this lock exists to prevent, reached through the one phase the
     # whole-function heartbeat did not cover.
+    # The history is written FIRST so both published summaries can carry the
+    # beats it produced; the ordering is otherwise immaterial, since `summary`
+    # is unchanged by the history writer.
+    _write_shadow_pnl_history(cfg, summary)
+    _progress("pnl_history_published")
+    _refresh_lock_diagnostics()
     summary_file = str(settings.get("summary_file", "shadow_signal_cohort_pnl.json"))
     write_json(cfg.governance_root / summary_file, summary)
     _progress("summary_published")
-    _write_shadow_pnl_history(cfg, summary)
-    _progress("pnl_history_published")
+    _refresh_lock_diagnostics()
     write_json(cfg.governance_root / "shadow_cohort_update_summary.json", summary)
     _progress("update_summary_published")
     return summary

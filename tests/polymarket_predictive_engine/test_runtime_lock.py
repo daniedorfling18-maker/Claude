@@ -233,3 +233,105 @@ def test_write_failure_leaves_no_lock_and_no_orphan_temp(tmp_path: Path, monkeyp
     assert not lock_path.exists()
     leftovers = list(lock_path.parent.glob(".*.tmp")) if lock_path.parent.exists() else []
     assert leftovers == []
+
+
+def _held_heartbeat(cfg: EngineConfig):
+    lock = runtime_lock.acquire_runtime_lock(cfg, "shadow_cohort", stale_after_seconds=999999)
+    assert lock.acquired is True
+    return lock, runtime_lock.RuntimeLockHeartbeat(
+        lock, cap_seconds=999999.0, critical_section_max_seconds=999999.0
+    )
+
+
+def test_a_holder_that_lost_the_lock_refuses_to_publish(tmp_path: Path) -> None:
+    """Fail closed at the one point where it is decidable (Codex P1 wave-42).
+
+    Stale reclaim renames the lock aside, verifies, and restores it -- and in
+    the gap a third caller can acquire. No filesystem CAS closes that window:
+    `os.replace` rebinds a name atomically but unconditionally. What IS
+    decidable is whether WE still hold the lock at the moment it matters, so
+    the critical section refuses to run when a foreign owner token is sitting
+    at the path.
+    """
+    cfg = _cfg(tmp_path)
+    lock, heartbeat = _held_heartbeat(cfg)
+
+    # Someone else reclaimed and now holds it.
+    stolen = dict(lock.payload)
+    stolen["owner_token"] = "a-different-process-entirely"
+    runtime_lock._rewrite_lock_payload(lock.path, stolen)
+
+    with pytest.raises(runtime_lock.RuntimeLockOwnershipLost):
+        with heartbeat.critical_section():
+            raise AssertionError("the ledger publishes must not run under a lock we lost")
+    assert heartbeat.ownership_lost is True
+    assert heartbeat.as_dict()["heartbeat_ownership_lost"] is True
+
+
+def test_a_holder_that_lost_the_lock_does_not_stamp_over_the_new_owner(tmp_path: Path) -> None:
+    """Republishing would strand the lane, not merely be wrong (Codex P1 wave-42).
+
+    The beat rewrites the whole payload, OWNER TOKEN INCLUDED. Stamped over a
+    new holder, its `release_runtime_lock` -- which validates the token before
+    unlinking -- would refuse to release, leaving the lock held until the stale
+    window elapsed all over again.
+    """
+    cfg = _cfg(tmp_path)
+    lock, heartbeat = _held_heartbeat(cfg)
+
+    stolen = dict(lock.payload)
+    stolen["owner_token"] = "a-different-process-entirely"
+    runtime_lock._rewrite_lock_payload(lock.path, stolen)
+    before = json.loads(lock.path.read_text(encoding="utf-8"))
+
+    heartbeat.note_progress("settlement_position")
+
+    after = json.loads(lock.path.read_text(encoding="utf-8"))
+    assert after == before, "the losing holder overwrote the new owner's payload"
+    assert after["owner_token"] == "a-different-process-entirely"
+    assert heartbeat.beats == 0
+
+
+def test_an_absent_lock_file_is_treated_as_lost_not_as_still_held(tmp_path: Path) -> None:
+    """This process never unlinks its own lock before release, so absence answers the question."""
+    cfg = _cfg(tmp_path)
+    lock, heartbeat = _held_heartbeat(cfg)
+    lock.path.unlink()
+
+    with pytest.raises(runtime_lock.RuntimeLockOwnershipLost):
+        with heartbeat.critical_section():
+            raise AssertionError("unreachable")
+    assert heartbeat.ownership_lost is True
+
+
+def test_an_unreadable_lock_payload_is_ambiguous_and_does_not_abort_the_pass(tmp_path: Path) -> None:
+    """The fail-safe split: proof of loss stops the pass, ambiguity is counted.
+
+    `read_json` returns its default for a MISSING file and for an unreadable
+    one alike. Collapsing the two would put a transient read error on the
+    fail-closed side and abort passes for no reason.
+    """
+    cfg = _cfg(tmp_path)
+    lock, heartbeat = _held_heartbeat(cfg)
+    lock.path.write_text("{not json at all", encoding="utf-8")
+
+    entered = False
+    with heartbeat.critical_section():
+        entered = True
+    assert entered is True
+    assert heartbeat.ownership_lost is False
+    assert heartbeat.as_dict()["heartbeat_ownership_checks_inconclusive"] >= 1
+
+
+def test_the_ordinary_held_case_still_beats_and_publishes(tmp_path: Path) -> None:
+    """The over-correction guard: an intact, still-ours lock is untouched by any of this."""
+    cfg = _cfg(tmp_path)
+    lock, heartbeat = _held_heartbeat(cfg)
+
+    assert heartbeat.note_progress("settlement_position") is True
+    assert heartbeat.beats == 1
+    with heartbeat.critical_section():
+        pass
+    assert heartbeat.ownership_lost is False
+    assert heartbeat.as_dict()["heartbeat_ownership_checks_inconclusive"] == 0
+    runtime_lock.release_runtime_lock(lock)

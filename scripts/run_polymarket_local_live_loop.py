@@ -721,13 +721,19 @@ def _lightweight_shadow_maintenance(cfg, features: list[dict[str, Any]]) -> dict
             seen.add(key)
     marked_rows = _merge_websocket_marks_into_predictions(rows, features)
     shadow = update_shadow_cohort_evidence(cfg, marked_rows)
-    # WO-143b.1 F4 (caller-honesty contract): a `skipped_*` status -- including
-    # the internal `shadow_cohort` lock skip added by WO-143b -- means nothing
-    # reached the shadow ledger this tick, so `prediction_rows` (the count of
-    # rows this pass forwarded to the updater) must be 0 rather than
-    # `len(rows)`. The status is surfaced verbatim under `shadow` below.
+    # WO-143b.1 F4 (caller-honesty contract): a non-writing status -- a
+    # `skipped_*` including the internal `shadow_cohort` lock skip added by
+    # WO-143b, or `disabled` -- means nothing reached the shadow ledger this
+    # tick, so `prediction_rows` (the count of rows this pass forwarded to the
+    # updater) must be 0 rather than `len(rows)`. The status is surfaced
+    # verbatim under `shadow` below.
+    #
+    # ALLOW-LISTED ON THE WRITING SIDE (Codex P2 wave-42): the `skipped_*`
+    # deny-list did not match `disabled`, so a disabled deployment claimed to
+    # have forwarded every row of the tick. `computed` is the only status under
+    # which either ledger is written.
     shadow_status = shadow.get("status") if isinstance(shadow, dict) else None
-    shadow_skipped = isinstance(shadow_status, str) and shadow_status.startswith("skipped_")
+    shadow_skipped = shadow_status != "computed"
     cohort: dict[str, Any] = {}
     try:
         con = connect_db(cfg.database_path)

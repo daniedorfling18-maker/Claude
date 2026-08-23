@@ -8107,11 +8107,27 @@ instance, so the contract is registered once, here, for all callers.
 
 **The caller-honesty contract.** A caller that reports how many candidates
 reached the shadow updater MUST derive that number from the update's outcome,
-not from the size of what it passed in. Concretely: **when the update is
-skipped — whether because the callee returned a `skipped_*` status OR because
-the caller elected not to call it at all** — the reported forwarded count is
-`0`, and the caller's artifact additionally carries the skip status verbatim so
-the skip is visible rather than inferred from a zero.
+not from the size of what it passed in. Concretely: **when the update did not
+WRITE — for any reason — the reported forwarded count is `0`**, and the
+caller's artifact additionally carries the status verbatim so the reason is
+visible rather than inferred from a zero.
+
+**AMENDED 2026-08-23 (Codex P2 wave-42): stated as an ALLOW-LIST on the
+writing side, not a deny-list on the non-writing one.** The original wording
+enumerated the non-writing cases — a `skipped_*` status, or the caller electing
+not to call at all — and every implementation of it wrote
+`startswith("skipped_")`. That does not match `disabled`, which is what
+`update_shadow_cohort_evidence` returns when `shadow_cohort_validation.enabled`
+is false and under which it writes neither ledger: a disabled deployment
+produced receipts claiming delivery of evidence that was never recorded. The
+enumeration is the wrong shape here — a status added later defaults to "claim
+delivery" and the failure is silent, which is how this one survived four call
+sites. `computed` is the only status under which either shadow ledger is
+written, so it is the only status under which a caller may claim a forward.
+Every call site that reports a count now tests `status != "computed"`, which
+also subsumes the locally synthesised statuses (`skipped_scoring_only`,
+`skipped_prediction_cycle_lock_held`, `not_run`) the original wording had to
+name one by one.
 
 **Wording corrected 2026-08-01 after review.** The original said only "when the
 returned status is any `skipped_*` value". That antecedent is never satisfied on

@@ -442,7 +442,11 @@ def build_longshot_bias_scan(
     )
     if not isinstance(shadow_update_status, str) or not shadow_update_status:
         shadow_update_status = "not_run"
-    shadow_update_skipped = shadow_update_status.startswith("skipped_") or shadow_update_status == "not_run"
+    # ALLOW-LISTED ON THE WRITING SIDE (Codex P2 wave-42): `disabled` is also a
+    # non-writing outcome and the `skipped_*`/`not_run` deny-list did not cover
+    # it, so a disabled deployment reported rows as opened that never reached a
+    # ledger. `computed` is the only status under which anything is written.
+    shadow_update_skipped = shadow_update_status != "computed"
     summary = {
         **summary,
         "candidate_file": str(root / "longshot_bias_candidates.csv"),

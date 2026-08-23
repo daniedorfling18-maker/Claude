@@ -716,6 +716,13 @@ def _settle_due_positions(
         # and it must not be closed on a stale mark before the next pass can
         # write it.
         abandoned_ids.extend(sorted(staged_ids))
+        # The COUNT must agree with the LIST (Codex P2 wave-38). Extending the
+        # ids without recomputing the count let the artifact report, say, two
+        # abandoned positions while carrying five abandoned ids -- and the
+        # registered day-after check reads the COUNT, so it understated the
+        # deferred workload by exactly the settlements this pass resolved and
+        # then correctly refused to write.
+        abandoned = len(abandoned_ids)
         staged = []
         # Only positions with NOTHING to discard -- checked and unresolved --
         # advance in the rotation. The discarded ones stay at its head.
@@ -1468,12 +1475,26 @@ def _update_shadow_cohort_evidence_locked(
         critical_section = (
             heartbeat.critical_section() if heartbeat is not None else contextlib.nullcontext()
         )
+        # NOTHING BUT THE REPLACES INSIDE (Codex P1 wave-38). `_progress` reaches
+        # `heartbeat.note_progress`, which creates a temp file, writes it,
+        # FSYNCS it and replaces the lock payload. Beating between the two
+        # ledger replaces put all of that I/O inside the one section that is
+        # supposed to be two atomic renames: a slow or stuck filesystem there
+        # leaves the positions snapshot published WITHOUT its matching
+        # append-only fill -- the torn pair this lock exists to prevent -- and
+        # makes the "replace-only" section unbounded, which is exactly what its
+        # own critical_section_max_seconds bound assumes it is not.
+        #
+        # The beats move to either side. Progress is still recorded for both
+        # phases; it is simply not recorded from inside the window where the
+        # ledgers are momentarily inconsistent with each other.
         with critical_section:
             os.replace(staged_positions, positions_path)
-            _progress("positions_published")
             if new_fill_rows:
                 os.replace(staged_fills, fills_path)
-                _progress("fills_published")
+        _progress("positions_published")
+        if new_fill_rows:
+            _progress("fills_published")
     finally:
         for staged in (staged_positions, staged_fills):
             try:

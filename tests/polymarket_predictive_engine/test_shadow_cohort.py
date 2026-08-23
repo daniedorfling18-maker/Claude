@@ -1157,6 +1157,82 @@ def test_wo143b1_f1_the_heartbeat_covers_the_trailing_writes(tmp_path, monkeypat
         assert expected in labels, f"no progress notification for {expected}: {labels}"
 
 
+def test_wo143b1_f1_the_critical_section_holds_only_the_ledger_replaces(tmp_path, monkeypatch):
+    """No heartbeat I/O between the two ledger replaces (Codex P1 wave-38).
+
+    `_progress` reaches note_progress, which creates, writes and FSYNCS a temp
+    file before replacing the lock payload. Beating between the replaces put
+    that inside the one section meant to be two atomic renames, so a stuck
+    filesystem could leave positions published without their matching
+    append-only fill.
+    """
+    from polymarket_predictive_engine import runtime_lock as runtime_lock_module
+
+    cfg = _settling_cfg(tmp_path)
+    _seed_due_positions(cfg, 1)
+
+    inside: list[str] = []
+    depth = {"n": 0}
+
+    real_section = runtime_lock_module.RuntimeLockHeartbeat.critical_section
+    real_beat = runtime_lock_module.RuntimeLockHeartbeat.record_progress
+
+    def _tracked_section(self):
+        import contextlib
+
+        @contextlib.contextmanager
+        def _wrapper():
+            depth["n"] += 1
+            try:
+                with real_section(self):
+                    yield
+            finally:
+                depth["n"] -= 1
+
+        return _wrapper()
+
+    def _tracked_beat(self, label=""):
+        if depth["n"] > 0:
+            inside.append(str(label))
+        return real_beat(self, label)
+
+    monkeypatch.setattr(runtime_lock_module.RuntimeLockHeartbeat, "critical_section", _tracked_section)
+    monkeypatch.setattr(runtime_lock_module.RuntimeLockHeartbeat, "record_progress", _tracked_beat)
+
+    update_shadow_cohort_evidence(cfg, [])
+
+    assert inside == [], f"heartbeat I/O ran inside the ledger critical section: {inside}"
+
+
+def test_wo143b1_f1_the_abandoned_count_matches_the_abandoned_ids(tmp_path, monkeypatch):
+    """The count feeds the registered day-after check; the list must match it.
+
+    Discarded staged settlements were added to settlement_abandoned_ids without
+    recomputing settlement_positions_abandoned, so the artifact could report
+    fewer abandoned positions than it named (Codex P2 wave-38).
+    """
+    cfg = _settling_cfg(tmp_path, settlement_budget_seconds=0.25)
+    _seed_due_positions(cfg, 6)
+
+    calls: list[str] = []
+
+    def _resolves_then_stalls(_cfg, position, *, timeout_seconds):
+        calls.append(str(position.get("shadow_position_id")))
+        if len(calls) > 2:
+            time.sleep(0.3)
+        return 1.0, "resolved_stub"
+
+    monkeypatch.setattr(shadow_cohort_module, "_settlement_price_for_position", _resolves_then_stalls)
+
+    summary = update_shadow_cohort_evidence(cfg, [])
+
+    assert summary["settlement_budget_expired"] is True
+    assert summary["settlement_resolved_discarded_on_expiry"] >= 1
+    assert summary["settlement_positions_abandoned"] == len(summary["settlement_abandoned_ids"]), (
+        "the day-after check reads the count, so it must not understate the list"
+    )
+
+
 def test_wo143b1_f1_lock_is_released_after_a_budget_expired_pass(tmp_path, monkeypatch):
     # F1 test (8): a budget expiry is a normal, bounded outcome -- it must not
     # leave the shadow_cohort lock held.

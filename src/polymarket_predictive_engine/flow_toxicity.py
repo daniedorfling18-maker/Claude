@@ -228,9 +228,21 @@ def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], set[str
     # on the numeric side, on the one field here that is not a number.
     # Absent stays None, because older collector summaries genuinely do not
     # publish the field; PRESENT-but-not-a-boolean fails closed to False.
+    # KEY PRESENCE, not value-is-None (Codex P2 wave-43). JSON `null`
+    # deserialises to Python None, so `raw_complete is None` could not tell an
+    # ABSENT legacy field from one that is present and explicitly null -- and
+    # the second is precisely the malformed case the adjacent contract says
+    # must fail closed. A summary carrying `"complete": null` alongside
+    # status="ok", positive leaderboard_rows_added and no legacy
+    # requested_limit therefore took the legacy path, left membership_unknown
+    # false, and published wallets outside a short fetched prefix as
+    # definitively absent. `requested_limit` below already drew this
+    # distinction; this is the same defect on the field that one was modelled
+    # on.
     probe = producer.get("leaderboard_probe_params") if isinstance(producer, dict) else None
+    complete_present = isinstance(probe, dict) and "complete" in probe
     raw_complete = probe.get("complete") if isinstance(probe, dict) else None
-    if raw_complete is None:
+    if not complete_present:
         leaderboard_complete = None
     elif isinstance(raw_complete, bool):
         leaderboard_complete = raw_complete
@@ -1951,6 +1963,61 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
                 reasons.append("incomplete_sample")
                 row["toxicity_block_reasons"] = ";".join(reasons)
                 unverified_blocks += 1
+            # THE PERCENTILE IS UNVERIFIABLE IN BOTH DIRECTIONS (Codex P1
+            # wave-43). Rules 13c and 13m protect a market whose PRIOR row
+            # already carried a percentile veto. The reordering cuts the other
+            # way too: a market that lost nothing and was clean before can be
+            # pushed ABOVE 0.90 by the corrected sample, and its fresh
+            # `toxic_blocked=false` row is then accepted as a measured
+            # clearance by requote_alerts.py:502-535 and
+            # stage_ticket_eligibility.py:195-218. Protecting only markets that
+            # already held a veto covers the half where a veto is LOST and is
+            # silent on the half where one is never GAINED.
+            #
+            # NOT "block every fresh row during a partial corpus", which is what
+            # closing this the obvious way would mean: a single malformed trade
+            # print would then veto the entire universe, and an over-block that
+            # large is the kind that gets quietly fixed OPEN later. The
+            # reordering is BOUNDED, so the block is bounded to match. Adding
+            # back the rows of one market can move that market past any other,
+            # changing an untouched market's rank by at most one position each
+            # -- so with L markets holding rejections, a market at rank r can
+            # reach at worst rank r+L, i.e. percentile (r+L)/(N-1). Only a
+            # market whose WORST CASE clears 0.90 is unverifiable; everything
+            # further down is provably still clean whatever the missing rows
+            # say.
+            #
+            # The bound is deliberately loose in two directions, both
+            # fail-closed: L counts every market with a rejection rather than
+            # only those currently sorting above the market under test, and a
+            # wholly rejected market absent from the fresh table still counts
+            # toward L even though restoring it would also raise N.
+            unverifiable_percentile_blocks = 0
+            lost_market_count = (
+                len(fresh_rows_by_market) if taint_all else len(rejected_markets)
+            )
+            if lost_market_count:
+                ordered_fresh = sorted(
+                    fresh_rows_by_market.items(),
+                    key=lambda item: float(item[1].get("vpin_raw") or 0.0),
+                )
+                denominator = max(1, len(ordered_fresh) - 1)
+                for rank, (market, fresh_row) in enumerate(ordered_fresh):
+                    row = fresh_by_market.get(market)
+                    if row is not fresh_row:
+                        continue  # a retained prior row already carries the veto
+                    if row["toxic_blocked"]:
+                        continue
+                    worst_case_percentile = min(1.0, (rank + lost_market_count) / denominator)
+                    if worst_case_percentile <= REGISTERED_PERCENTILE_BLOCK:
+                        continue
+                    row["toxic_blocked"] = True
+                    reasons = [
+                        r for r in str(row["toxicity_block_reasons"] or "").split(";") if r
+                    ]
+                    reasons.append("percentile_unverifiable")
+                    row["toxicity_block_reasons"] = ";".join(reasons)
+                    unverifiable_percentile_blocks += 1
             # A WHOLLY REJECTED NEW MARKET HAS NO ROW TO CORRECT (Codex P1
             # wave-32). Both loops above iterate over rows that already exist --
             # the prior CSV, or the fresh table. A market seen for the FIRST
@@ -2003,7 +2070,9 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
                 summary["market_blocks_on_carried_clean_rows"] = len(carried_clean_blocked)
             if unverified_blocks:
                 summary["market_blocks_on_unverified_sample"] = unverified_blocks
-            if retained_blocks or unverified_blocks:
+            if unverifiable_percentile_blocks:
+                summary["market_blocks_on_unverifiable_percentile"] = unverifiable_percentile_blocks
+            if retained_blocks or unverified_blocks or unverifiable_percentile_blocks:
                 rows_out = [
                     fresh_by_market.get(str(row["market"]), row) for row in rows_out
                 ]

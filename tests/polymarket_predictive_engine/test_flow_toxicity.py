@@ -2293,9 +2293,112 @@ def test_an_incomplete_sample_cannot_certify_a_market_clean(tmp_path):
     assert summary["market_blocks_on_unverified_sample"] == 1
     assert after["0xb"]["toxic_blocked"] == "True"
     assert "incomplete_sample" in after["0xb"]["toxicity_block_reasons"]
-    # 0xc lost nothing and stays measured and clean -- the block is scoped to
-    # the market whose coverage is actually in doubt.
-    assert after["0xc"]["toxic_blocked"] == "False"
+    # 0xc lost nothing, so `incomplete_sample` -- this rule -- does not reach
+    # it. AMENDED at wave-43: with only three markets and one of them holding
+    # rejections, 0xc's WORST-CASE percentile is 1.0, so rule 20 blocks it for
+    # a different and correctly named reason. The scoping this line was written
+    # to pin is still pinned: the reason is not `incomplete_sample`.
+    assert "incomplete_sample" not in after["0xc"]["toxicity_block_reasons"]
+    assert after["0xc"]["toxicity_block_reasons"] == "percentile_unverifiable"
+
+
+def test_a_clean_market_near_the_threshold_blocks_when_the_ordering_is_unverifiable(tmp_path):
+    """The percentile is unverifiable in BOTH directions (Codex P1 wave-43).
+
+    Rules 13c and 13m protect a market whose PRIOR row already held a
+    percentile veto. The reordering cuts the other way too: a market that lost
+    nothing and was clean can be pushed ABOVE 0.90 by the corrected sample, and
+    its fresh clean row is then accepted as a measured clearance. Protecting
+    only markets that already held a veto covers the half where a veto is lost
+    and is silent on the half where one is never gained.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    tokens = [f"tok-{index}" for index in range(12)]
+    for token in tokens:
+        _features(cfg, token, [(310, 0.70)])
+    prints_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+
+    def _universe(extra=()):
+        rows = []
+        # A spread of imbalances so the percentile ladder has real rungs, and
+        # the market under test sits just below the 0.90 cut rather than at the
+        # bottom where nothing could reach it.
+        for index, token in enumerate(tokens):
+            buys = 4 + index
+            rows.extend(_flow(f"0x{index:02d}", token, f"w{index}", buys=buys, sells=4))
+        rows.extend(extra)
+        return rows
+
+    write_csv(prints_path, _universe(), fieldnames=_FLOW_FIELDS)
+    build_flow_toxicity(cfg)
+    before = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+    # Rank 10 of 12 -> percentile 10/11 = 0.909, already over the cut; rank 9 ->
+    # 9/11 = 0.818, under it. The second is the market this rule is about.
+    assert before["0x09"]["toxic_blocked"] == "False"
+    assert before["0x09"]["percentile_block"] == "False"
+
+    # One market loses a row. 0x09 lost nothing, and its own VPIN is unchanged
+    # -- but the market that lost rows could, once corrected, sort below it and
+    # push it over the cut.
+    corrupt = {"market": "0x00", "asset_id": "tok-0", "wallet": "w0",
+               "side": "BUY", "price": 1.5, "size": 100, "timestamp": 99}
+    write_csv(prints_path, _universe(extra=[corrupt]), fieldnames=_FLOW_FIELDS)
+    summary = build_flow_toxicity(cfg)
+    after = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+
+    assert summary["malformed_trade_rows_excluded"] == 1
+    assert after["0x09"]["toxic_blocked"] == "True", (
+        "a clean market one rank below the cut cannot be certified clean while the "
+        "ordering that produced its rank is unverifiable"
+    )
+    assert "percentile_unverifiable" in after["0x09"]["toxicity_block_reasons"]
+    assert summary["market_blocks_on_unverifiable_percentile"] >= 1
+
+
+def test_the_unverifiable_percentile_block_is_bounded_not_universe_wide(tmp_path):
+    """The over-correction guard, and the reason this rule is a bound at all.
+
+    Closing wave-43's finding the obvious way -- "treat the percentile as
+    unavailable for every fresh row during a partial corpus" -- means a single
+    malformed trade print vetoes the entire universe. An over-block that large
+    is the kind that gets quietly fixed OPEN later, which is how the rule it
+    would replace would be lost. The reordering is bounded, so the block is
+    bounded to match: adding back one market's rows moves an untouched market
+    by at most one rank, so only markets whose WORST CASE clears 0.90 are
+    unverifiable. Everything further down is provably still clean whatever the
+    missing rows say, and must stay quotable.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    tokens = [f"tok-{index}" for index in range(12)]
+    for token in tokens:
+        _features(cfg, token, [(310, 0.70)])
+    prints_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    rows = []
+    for index, token in enumerate(tokens):
+        rows.extend(_flow(f"0x{index:02d}", token, f"w{index}", buys=4 + index, sells=4))
+    rows.append({"market": "0x00", "asset_id": "tok-0", "wallet": "w0",
+                 "side": "BUY", "price": 1.5, "size": 100, "timestamp": 99})
+    write_csv(prints_path, rows, fieldnames=_FLOW_FIELDS)
+
+    summary = build_flow_toxicity(cfg)
+    after = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+
+    assert summary["malformed_trade_rows_excluded"] == 1
+    blocked = {market for market, row in after.items() if row["toxic_blocked"] == "True"}
+    assert blocked, "the fixture must actually block something"
+    assert len(blocked) < len(after), (
+        "one malformed row vetoed the whole universe; the bound is not bounding"
+    )
+    # The low-rank markets are provably clean whatever the missing rows say.
+    for market in ("0x01", "0x02", "0x03", "0x04"):
+        assert after[market]["toxic_blocked"] == "False", (
+            f"{market} sits far below the cut and cannot be reordered across it by "
+            "one market's rows, so it must stay quotable"
+        )
 
 
 def test_a_truncated_leaderboard_request_cannot_settle_membership(tmp_path):
@@ -3515,3 +3618,48 @@ def test_wallet_artifact_states_its_own_invocation_flags(tmp_path):
 
     assert rows and rows[0]["paper_trading_invoked"] == "False"
     assert rows[0]["live_trading_invoked"] == "False"
+
+
+def test_an_explicitly_null_complete_flag_does_not_settle_membership(tmp_path):
+    """`null` is present-and-malformed, not absent (Codex P2 wave-43).
+
+    JSON `null` deserialises to Python None, so a value check could not tell an
+    ABSENT legacy `complete` from one present and explicitly null -- and the
+    adjacent contract says a present non-boolean fails closed. With status=ok,
+    positive leaderboard_rows_added and no legacy requested_limit, even a short
+    current snapshot therefore left membership_unknown false and published
+    wallets outside the fetched prefix as definitively absent.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    summary_path = cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json"
+    producer = read_json(summary_path)
+    # A refreshed leaderboard, so `leaderboard_rows_added` cannot be what
+    # withholds membership -- the null flag has to do it on its own.
+    producer["leaderboard_rows_added"] = 1
+    producer["leaderboard_probe_params"] = {"complete": None}
+    write_json(summary_path, producer)
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [
+            {"market": "0xa", "asset_id": "tok-a", "wallet": "outsider", "side": "BUY",
+             "price": 0.5, "size": 100, "timestamp": 0},
+            {"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY",
+             "price": 0.5, "size": 100, "timestamp": 1},
+        ],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert rows["outsider"]["on_current_leaderboard"] == "unknown", (
+        "a present-but-null completeness flag was read as a legacy absent field and "
+        "settled membership off a snapshot whose completeness is unstated"
+    )
+    # The control: `smart1` IS in the snapshot, and its membership is unknown
+    # for the same reason -- the question is whether the SNAPSHOT settles
+    # anything, not whether this particular wallet appears in it.
+    assert rows["smart1"]["on_current_leaderboard"] == "unknown"

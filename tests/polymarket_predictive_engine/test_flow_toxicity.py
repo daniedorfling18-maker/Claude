@@ -2250,37 +2250,49 @@ def test_a_snapshot_shorter_than_its_own_request_cannot_settle_membership(tmp_pa
     assert rows["smart1"]["on_current_leaderboard"] == "unknown"
 
 
-def test_an_all_rejected_ledger_blocks_every_preserved_market(tmp_path):
-    """Preserving is not enough on the all-rejected path either (wave-34).
+def test_an_all_rejected_ledger_blocks_the_markets_it_implicates(tmp_path):
+    """The all-rejected path applies the same rules -- and the same SCOPE.
 
-    Rules 13f-13j were all built in the branch that runs when SOME rows
-    survive. When every row is rejected the code merely preserved the old
-    table, so a previously clean market kept toxic_blocked=false and an
-    attributable market seen for the first time got no row at all --
-    requote_alerts raises nothing in either case, on the one path where the
-    sample is WHOLLY unmeasurable.
+    Wave-34 closed the first half: on the all-rejected path the code merely
+    preserved the old table, so a previously clean market kept
+    toxic_blocked=false and a first-seen market got no row at all.
+
+    Wave-35 closed the second: that conversion ignored rejected_markets
+    entirely and blocked EVERY preserved row, including a market that had
+    simply aged out of the rolling ledger. requote_alerts does not age these
+    rows, so such a market would stay blocked indefinitely -- and the
+    all-rejected branch would contradict the scoping rules 13d and 13f apply
+    whenever any row survives. "Every row was rejected" means the rows the
+    ledger HELD were all bad; it does not mean every market is implicated.
     """
     cfg = _config(tmp_path)
     _leaderboard(cfg)
     _trade_summary(cfg)
-    for token in ("tok-a", "tok-b"):
+    for token in ("tok-a", "tok-b", "tok-c", "tok-d"):
         _features(cfg, token, [(310, 0.70)])
     prints_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    # 0xc is balanced-and-clean; 0xd is balanced-and-clean and will DEPART.
     write_csv(
         prints_path,
-        [*_flow("0xa", "tok-a", "w1", buys=6, sells=2), *_flow("0xc", "tok-c", "w3", buys=4, sells=4)],
+        [
+            *_flow("0xa", "tok-a", "w1", buys=6, sells=2),
+            *_flow("0xc", "tok-c", "w3", buys=4, sells=4),
+            *_flow("0xd", "tok-d", "w4", buys=4, sells=4),
+        ],
         fieldnames=_FLOW_FIELDS,
     )
     build_flow_toxicity(cfg)
     before = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
     assert before["0xc"]["toxic_blocked"] == "False"
+    assert before["0xd"]["toxic_blocked"] == "False"
 
-    # EVERY row of the next refresh is rejected, including rows for a market
-    # (0xb) that has never been seen before.
+    # EVERY row of the next refresh is rejected. They name 0xa and 0xc, plus a
+    # market never seen before (0xb). 0xd has no rows at all -- it aged out.
     write_csv(
         prints_path,
         [
             *[{**row, "price": 1.5} for row in _flow("0xa", "tok-a", "w1", buys=6, sells=2)],
+            *[{**row, "price": 1.5} for row in _flow("0xc", "tok-c", "w3", buys=4, sells=4)],
             *[{**row, "price": 1.5} for row in _flow("0xb", "tok-b", "w2", buys=4, sells=0)],
         ],
         fieldnames=_FLOW_FIELDS,
@@ -2290,16 +2302,49 @@ def test_an_all_rejected_ledger_blocks_every_preserved_market(tmp_path):
 
     assert summary["status"] == "malformed_trade_corpus"
     assert summary["market_axis_preserved"] is True
-    # Preserved rows that read clean are converted -- nothing survived, so no
-    # market's coverage is verified.
-    assert summary["market_blocks_on_carried_clean_rows"] >= 1
+    # IMPLICATED and previously clean -> converted.
+    assert summary["market_blocks_on_carried_clean_rows"] == 1
     assert after["0xc"]["toxic_blocked"] == "True"
     assert "unmeasurable_sample" in after["0xc"]["toxicity_block_reasons"]
-    # And the never-before-seen market gets a synthetic veto rather than no row.
+    # NOT implicated -> left exactly as it was. Blocking it would be permanent,
+    # because nothing ages these rows.
+    assert after["0xd"] == before["0xd"]
+    assert after["0xd"]["toxic_blocked"] == "False"
+    # First-seen and implicated -> synthetic veto rather than no row at all.
     assert summary["market_blocks_on_unmeasurable_sample"] == 1
-    assert "0xb" in after
     assert after["0xb"]["toxic_blocked"] == "True"
     assert after["0xb"]["toxicity_block_reasons"] == "wholly_rejected_sample"
+
+
+def test_an_all_rejected_ledger_naming_nothing_blocks_every_preserved_market(tmp_path):
+    """A rejection naming neither market nor token still taints everything."""
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    for token in ("tok-a", "tok-d"):
+        _features(cfg, token, [(310, 0.70)])
+    prints_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    write_csv(
+        prints_path,
+        [*_flow("0xa", "tok-a", "w1", buys=6, sells=2), *_flow("0xd", "tok-d", "w4", buys=4, sells=4)],
+        fieldnames=_FLOW_FIELDS,
+    )
+    build_flow_toxicity(cfg)
+    before = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+    assert before["0xd"]["toxic_blocked"] == "False"
+
+    write_csv(
+        prints_path,
+        [{"market": "", "asset_id": "", "wallet": "w9", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 1}],
+        fieldnames=_FLOW_FIELDS,
+    )
+    summary = build_flow_toxicity(cfg)
+    after = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+
+    assert summary["status"] == "malformed_trade_corpus"
+    # Nothing can be pinned to it, so every preserved clean row is unverified.
+    assert after["0xd"]["toxic_blocked"] == "True"
+    assert "unmeasurable_sample" in after["0xd"]["toxicity_block_reasons"]
 
 
 def test_a_wholly_rejected_new_market_still_gets_a_veto(tmp_path):

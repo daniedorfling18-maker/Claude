@@ -1558,9 +1558,34 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
         preserved_markets = {
             str(row.get("market") or "") for row in preserved_rows if str(row.get("market") or "")
         }
+        # SCOPED, exactly as the surviving-rows path is (Codex P2 wave-35).
+        # Converting every preserved row here bypassed rejected_markets and
+        # rejected_tokens entirely, so a market that merely AGED OUT of the
+        # rolling ledger -- with nothing to do with the corruption -- was
+        # blocked as unmeasurable. Worse than a stale veto: requote_alerts does
+        # not age these rows, so that market would stay blocked indefinitely,
+        # and the all-rejected branch would contradict the scoped behaviour
+        # rules 13d and 13f apply whenever any row survives.
+        #
+        # "Every row was rejected" does not mean "every market is implicated".
+        # It means the rows the ledger HELD were all bad, and those rows name
+        # which markets and tokens lost coverage. Only a rejection naming
+        # NEITHER identifier leaves every absence unverifiable.
+        taint_everything = bool(unattributable_rejections)
+
+        def _implicated(row: dict[str, Any]) -> bool:
+            if taint_everything:
+                return True
+            return (
+                str(row.get("market") or "") in rejected_markets
+                or str(row.get("asset_id") or "") in rejected_tokens
+            )
+
         converted = 0
         for row in preserved_rows:
             if str(row.get("toxic_blocked") or "").strip().lower() == "true":
+                continue
+            if not _implicated(row):
                 continue
             row["toxic_blocked"] = True
             reasons = [r for r in str(row.get("toxicity_block_reasons") or "").split(";") if r]

@@ -16,7 +16,7 @@ import math
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
-from statistics import mean
+from statistics import mean, median
 from tempfile import TemporaryDirectory
 from typing import Any
 
@@ -130,6 +130,27 @@ def _settings(cfg: EngineConfig) -> dict[str, Any]:
     }
     merged.update({k: v for k, v in raw.items() if v is not None})
     return merged
+
+
+def _median_stamp(stamps: list[float]) -> float:
+    """The statistical median of sorted fill timestamps, or 0.0 when empty.
+
+    `stamps[len(stamps) // 2]` is the UPPER MIDDLE observation, not the median,
+    and the two differ on every even-sized corpus (Codex P1 wave-41). When the
+    two middle fills straddle a quiet interval the difference is not a rounding
+    detail: the cutoff moves by the whole gap, admitting pre-split markets whose
+    label windows would still cross the true median. The artifact's registered
+    contract says MEDIAN fill time splits the sample, and this cutoff is frozen
+    permanently on first computation, so an off-by-one-observation split would
+    outlive every later run.
+
+    One helper for all three call sites -- the freeze, the non-persisting
+    in-memory split, and the invalid-state fallback -- because they must agree;
+    three inline copies of the same expression is how they would stop agreeing.
+    """
+    if not stamps:
+        return 0.0
+    return float(median(stamps))
 
 
 def _stamp(value: Any) -> float | None:
@@ -509,6 +530,23 @@ def _build_price_index(
             bounds = target_bounds.get(token)
             if bounds is None:
                 continue
+            # A ROW OF A DIFFERENT CORPUS IS NOT A MALFORMED FEATURE (Codex P2
+            # wave-41). `_feature_paths` scans every gzip in
+            # polymarket_training_archive, and trade_print_collector.py:243-246
+            # deliberately archives EXPIRING TRADE PRINTS into that same
+            # directory. Those rows carry `asset_id` -- so they reach here
+            # whenever they share a target token -- but no `source_timestamp`
+            # and no `midpoint` at all, and the wave-28 counter scored every one
+            # of them as a malformed feature. On a healthy production archive
+            # that reports widespread feature corruption, which is worse than no
+            # counter: an alarm that always fires is one operators learn to
+            # ignore.
+            #
+            # Schema, not content: a row missing BOTH feature columns is a
+            # different corpus and is skipped silently. A row that HAS them and
+            # cannot be parsed is a genuine malformed feature and still counts.
+            if "source_timestamp" not in row and "midpoint" not in row:
+                continue
             # VENUE timestamp only -- no fallback to collection time (Codex
             # P1 wave-23). websocket_normaliser.py:165-170 persists a BLANK
             # source_timestamp when an event omits `timestamp`, so the fallback
@@ -755,9 +793,9 @@ def _frozen_split_stamp(
         # wallet_split_was_frozen=true while reusing that boundary forever. The
         # failure must be contained to the rejected run, so no state is created.
         stamps = sorted(float(trade["stamp"]) for trade in trades)
-        return (stamps[len(stamps) // 2] if stamps else 0.0), False
+        return (_median_stamp(stamps)), False
     stamps = sorted(float(trade["stamp"]) for trade in trades)
-    split_stamp = stamps[len(stamps) // 2] if stamps else 0.0
+    split_stamp = _median_stamp(stamps)
     if stamps:
         write_json(
             path,
@@ -1522,7 +1560,7 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
                     # written. Do not re-enter the freeze path, whose defensive
                     # raise would fire here and block that rebuild.
                     stamps = sorted(float(trade["stamp"]) for trade in trades)
-                    split_stamp = stamps[len(stamps) // 2] if stamps else 0.0
+                    split_stamp = _median_stamp(stamps)
                     split_was_frozen = False
                 else:
                     split_stamp, split_was_frozen = _frozen_split_stamp(
@@ -1759,7 +1797,9 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
             # So the protected set differs by kind. A market that lost rows has
             # BOTH readings unverifiable. Every other fresh market has a
             # trustworthy raw reading and an untrustworthy percentile one, so it
-            # is protected only where its prior block was percentile-ONLY.
+            # is protected wherever its prior block had a PERCENTILE COMPONENT --
+            # whether or not a raw one coincided (Codex P1 wave-41; the earlier
+            # "percentile-ONLY" reading is answered at the predicate below).
             # A FLAG, not a set: "taint everything" has to cover markets ABSENT
             # from the fresh table too, and `set(fresh_by_market)` by
             # construction cannot contain one -- so the set form silently failed
@@ -1861,10 +1901,23 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
                 if not prior_blocked or fresh["toxic_blocked"]:
                     continue
                 if not _lost_rows(market):
-                    prior_raw_block = str(prior.get("raw_imbalance_block") or "").strip().lower() == "true"
-                    if prior_raw_block:
-                        # Market-local reading, and this market lost nothing:
-                        # the fresh measurement is trustworthy and wins.
+                    # KEYED ON THE PERCENTILE BLOCK, not the raw one (Codex P1
+                    # wave-41). The wave-31 form skipped retention whenever the
+                    # prior row carried a raw block -- but a row can carry BOTH,
+                    # and then the raw half being re-measurable says nothing
+                    # about the percentile half, which is universe-relative and
+                    # still unverifiable. So a market with both blocks was
+                    # treated exactly like a market with only a raw block, and
+                    # its fresh clean row cleared a live veto during a malformed
+                    # refresh. The question was never "was raw set" but "is any
+                    # component of this veto unverifiable", and only the
+                    # percentile component can be.
+                    prior_percentile_block = (
+                        str(prior.get("percentile_block") or "").strip().lower() == "true"
+                    )
+                    if not prior_percentile_block:
+                        # Purely market-local veto, and this market lost
+                        # nothing: the fresh measurement is trustworthy and wins.
                         continue
                 # Case (b): keep the prior BLOCKING row verbatim, original
                 # generated_at_utc included, so the retained veto is visibly

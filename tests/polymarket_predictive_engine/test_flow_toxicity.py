@@ -1709,6 +1709,38 @@ def test_window_partition_invariants_hold_across_the_split_boundary(tmp_path, of
             )
 
 
+def test_the_frozen_split_is_the_median_not_the_upper_middle_fill(tmp_path):
+    """An even corpus has no single middle observation (Codex P1 wave-41).
+
+    `stamps[len(stamps) // 2]` returns the UPPER MIDDLE fill. On an odd corpus
+    that IS the median; on an even one it is the larger of the two middles, and
+    the gap between them is whatever quiet interval separates them -- here the
+    whole 997-second lull between the two markets.
+
+    Eight fills: market A at t=0..3, market B at t=1000..1003. Sorted, the two
+    middle observations are 3 and 1000, so the median is 501.5 and the upper
+    middle is 1000.0. Every fill of B, an entire market, sits on the ranking
+    side of the wrong cutoff and the evaluation sample loses half its corpus.
+
+    This matters more than an ordinary off-by-one because the cutoff is FROZEN
+    on first computation and reused forever: a split taken from the upper middle
+    is not corrected by any later run.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _window_sweep_corpus(cfg, 1000)
+
+    build_flow_toxicity(cfg)
+    state = read_json(cfg.output_root / "maker_carry" / "flow_toxicity_wallet_split.json")
+
+    assert state["corpus_rows_at_freeze"] == 8, "the corpus must be EVEN for this to bite"
+    assert state["split_stamp"] == 501.5, (
+        "the registered contract splits the sample at the MEDIAN fill time; "
+        "1000.0 is the upper middle observation, not the median"
+    )
+
+
 @pytest.mark.parametrize("shift", [0, 1, 3600, 86_400, 10 * 86_400])
 def test_the_windows_are_invariant_under_a_clock_shift(tmp_path, shift):
     """Advancing every venue clock by a constant changes nothing.
@@ -2147,6 +2179,78 @@ def test_feature_rejections_are_counted_separately_from_trade_rejections(tmp_pat
     assert summary["status"] == "ok"
 
 
+def test_a_percentile_veto_is_retained_even_when_a_raw_block_coincides(tmp_path):
+    """Both blocks set is not the same as only a raw block (Codex P1 wave-41).
+
+    Rule 13c skipped retention whenever the prior row carried a raw block, on
+    the reasoning that a market-local reading is trustworthy when the market
+    lost nothing. True of the RAW half -- and silent about the percentile half,
+    which is universe-relative and still unverifiable. A market carrying BOTH
+    was therefore treated like one carrying only a raw block, and its fresh
+    clean row cleared a live veto during a malformed refresh.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    for token in ("tok-a", "tok-b", "tok-c", "tok-d"):
+        _features(cfg, token, [(310, 0.70)])
+    prints_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    # FOUR markets, because `_percentiles` awards 1.0 to whichever market ranks
+    # top. With three balanced markets 0xb keeps the top slot by default and its
+    # fresh row blocks on its own, so the retention branch is never reached and
+    # the test proves nothing. 0xd carries a standing half-imbalance -- under
+    # the 0.90 raw floor, so it never blocks on raw -- purely so that it, not
+    # 0xb, is the top-ranked market once 0xb goes balanced.
+    #
+    # 0xb one-sided: it takes BOTH the raw floor and the top percentile.
+    write_csv(
+        prints_path,
+        [
+            *_flow("0xa", "tok-a", "w1", buys=4, sells=4),
+            *_flow("0xc", "tok-c", "w3", buys=4, sells=4),
+            *_flow("0xd", "tok-d", "w4", buys=6, sells=2),
+            *_flow("0xb", "tok-b", "w2", buys=12, sells=0),
+        ],
+        fieldnames=_FLOW_FIELDS,
+    )
+    build_flow_toxicity(cfg)
+    before = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+    assert before["0xb"]["raw_imbalance_block"] == "True"
+    assert before["0xb"]["percentile_block"] == "True"
+
+    # 0xb itself loses NOTHING; 0xa loses a row. 0xb's fresh flow is balanced,
+    # so its raw reading is genuinely clean -- but the percentile it held was
+    # measured against a universe that just changed.
+    write_csv(
+        prints_path,
+        [
+            *_flow("0xa", "tok-a", "w1", buys=4, sells=4),
+            {"market": "0xa", "asset_id": "tok-a", "wallet": "w1",
+             "side": "BUY", "price": 1.5, "size": 100, "timestamp": 99},
+            *_flow("0xc", "tok-c", "w3", buys=4, sells=4),
+            *_flow("0xd", "tok-d", "w4", buys=6, sells=2),
+            *_flow("0xb", "tok-b", "w2", buys=4, sells=4),
+        ],
+        fieldnames=_FLOW_FIELDS,
+    )
+    summary = build_flow_toxicity(cfg)
+    after = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+
+    assert summary["malformed_trade_rows_excluded"] == 1
+    assert summary["market_blocks_retained_on_partial_sample"] == 1
+    assert after["0xb"]["toxic_blocked"] == "True", (
+        "a veto with an unverifiable percentile component must not be cleared "
+        "just because it also carried a verifiable raw one"
+    )
+    # Retained VERBATIM, original generated_at_utc and stale measurements
+    # included, so the carried veto reads as stale rather than as a fresh
+    # finding.
+    assert after["0xb"] == before["0xb"]
+    # 0xd is the control: it lost nothing, held no prior veto, and its fresh
+    # percentile block is a genuine measurement rather than a carried one.
+    assert after["0xd"]["percentile_block"] == "True"
+
+
 def test_an_incomplete_sample_cannot_certify_a_market_clean(tmp_path):
     """Unverified is not clean (Codex P1 wave-31).
 
@@ -2462,6 +2566,64 @@ def test_a_lock_acquisition_failure_invalidates_stale_wallet_evidence(tmp_path, 
         "rankings readable as healthy"
     )
     assert read_json(cfg.output_root / "maker_carry" / "flow_toxicity_summary.json")["status"] == "build_failed"
+
+
+def test_archived_trade_prints_are_not_counted_as_malformed_features(tmp_path):
+    """A row of a different corpus is not a corrupt feature (Codex P2 wave-41).
+
+    trade_print_collector archives expiring TRADE prints into
+    polymarket_training_archive, which `_feature_paths` scans wholesale. Those
+    rows carry asset_id but neither source_timestamp nor midpoint, so the
+    wave-28 counter scored every one as a malformed feature -- reporting
+    widespread corruption on a healthy archive.
+    """
+    import gzip as _gzip
+
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    archive = cfg.output_root / "polymarket_training_archive"
+    archive.mkdir(parents=True, exist_ok=True)
+    # Expiring trade prints, in the shape the collector archives them: the same
+    # target token, and none of the feature columns.
+    with _gzip.open(archive / "expired_trade_prints.csv.gz", "wt", encoding="utf-8", newline="") as handle:
+        handle.write("asset_id,price,size,side,timestamp\n")
+        for index in range(5):
+            handle.write(f"tok-a,0.5,100,BUY,{index}\n")
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+
+    assert summary["status"] == "ok"
+    assert summary["malformed_feature_rows_excluded"] == 0, (
+        "archived trade prints are a different registered corpus, not corrupt features"
+    )
+
+
+def test_a_genuinely_malformed_feature_row_is_still_counted(tmp_path):
+    """The other side: HAVING the columns and failing to parse still counts."""
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    features_path = cfg.output_root / "polymarket_training" / "websocket_market_features.csv"
+    rows = read_csv_rows(features_path)
+    rows.append({"source_timestamp": "320", "collected_at_utc": "320", "asset_id": "tok-a", "midpoint": "not-a-price"})
+    write_csv(features_path, rows, fieldnames=["source_timestamp", "collected_at_utc", "asset_id", "midpoint"])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY", "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    summary = build_flow_toxicity(cfg)
+
+    assert summary["malformed_feature_rows_excluded"] == 1
 
 
 def test_a_missing_trade_ledger_is_not_a_quiet_day(tmp_path):

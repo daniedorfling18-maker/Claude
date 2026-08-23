@@ -927,15 +927,22 @@ def test_wo143b1_f1_resolved_settlements_are_discarded_when_the_budget_expires(t
     positions = read_csv_rows(cfg.output_root / "polymarket_shadow" / "shadow_positions.csv")
     assert positions, "positions must still be on disk"
     assert all(str(row.get("status")).lower() == "open" for row in positions)
-    # And they keep their place at the head of the rotation: a discarded
-    # settlement whose checkpoint had advanced would sort LAST next pass,
-    # starving the position it just resolved.
+    # And they DO advance in the rotation, which is the wave-40 correction to
+    # this test's original claim. Holding their checkpoints back was meant to
+    # keep them first in line, but it starved every later due position: a lookup
+    # that repeatedly runs past the budget would be resolved and discarded
+    # forever while others were never attempted. Advancing defers the discarded
+    # position by one rotation -- settlement is idempotent and the position
+    # stays open -- rather than starving it. The checkpoint is a SCHEDULING
+    # record, not a publication record; the fail-closed guarantee is the
+    # unwritten ledger asserted above, not a withheld checkpoint.
     checkpoints = read_json(
         cfg.governance_root / "shadow_settlement_checkpoints.json"
     ) or {}
     recorded = set((checkpoints.get("last_settlement_check_utc") or {}))
-    assert not (recorded & set(calls[:2])), (
-        "a discarded settlement must not advance its own rotation checkpoint"
+    assert set(calls) <= recorded, (
+        "every position checked this pass must advance in the rotation, or a "
+        "repeatedly-slow lookup starves everything behind it"
     )
 
 

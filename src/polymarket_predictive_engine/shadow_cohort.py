@@ -724,11 +724,22 @@ def _settle_due_positions(
         # then correctly refused to write.
         abandoned = len(abandoned_ids)
         staged = []
-        # Only positions with NOTHING to discard -- checked and unresolved --
-        # advance in the rotation. The discarded ones stay at its head.
-        checkpoints.update(
-            {key: value for key, value in checked_now.items() if key not in staged_ids}
-        )
+        # EVERY position checked this pass advances in the rotation, including
+        # the discarded ones (Codex P1 wave-40). Holding their checkpoints back
+        # was meant to keep them first in line, but it created a NEW starvation:
+        # if the same lookup repeatedly runs past the budget, it is repeatedly
+        # resolved and discarded while later due positions are never attempted
+        # at all -- exactly the permanent starvation F1's oldest-first rotation
+        # exists to prevent, reintroduced by the rollback that fixed the partial
+        # write.
+        #
+        # The wave-35 worry was wrong. Advancing the checkpoint does not starve
+        # the discarded position; it defers it by ONE rotation, which is what
+        # rotation means. Settlement is idempotent, the position stays open, and
+        # it is re-resolved when its turn comes round -- while everyone else
+        # gets a turn in the meantime. A checkpoint is a SCHEDULING record, not
+        # a publication record.
+        checkpoints.update(checked_now)
     else:
         for position, updates, fill_kwargs in staged:
             position.update(updates)

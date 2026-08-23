@@ -15,19 +15,23 @@ def _cfg(tmp_path: Path) -> EngineConfig:
     return EngineConfig(raw={"paths": {"output_root": str(tmp_path / "outputs")}}, path=tmp_path / "config.yaml")
 
 
-def _write_lock(cfg: EngineConfig, *, acquired_at_utc: str) -> Path:
+def _write_lock(
+    cfg: EngineConfig, *, acquired_at_utc: str, owner_token: str | None = None
+) -> Path:
+    """A persisted lock. `owner_token` defaults to THIS process' token.
+
+    The token, not the pid, is what identifies an owner (wave-40): a pid is
+    namespace-local, and the VPS stack shares ./outputs across namespaces.
+    """
+    payload = {
+        "name": "prediction_cycle",
+        "pid": os.getpid(),
+        "acquired_at_utc": acquired_at_utc,
+        "owner_token": runtime_lock._PROCESS_OWNER_TOKEN if owner_token is None else owner_token,
+    }
     path = runtime_lock.runtime_lock_path(cfg, "prediction_cycle")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "name": "prediction_cycle",
-                "pid": os.getpid(),
-                "acquired_at_utc": acquired_at_utc,
-            }
-        ),
-        encoding="utf-8",
-    )
+    path.write_text(json.dumps(payload), encoding="utf-8")
     return path
 
 
@@ -52,7 +56,7 @@ def _iso_minutes_ago(minutes: float) -> str:
     return stamp.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def test_runtime_lock_replaces_same_pid_lock_from_prior_process_start(
+def test_runtime_lock_replaces_same_owner_lock_from_prior_process_start(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -68,8 +72,50 @@ def test_runtime_lock_replaces_same_pid_lock_from_prior_process_start(
 
     assert lock.acquired is True
     assert lock.stale_lock_replaced is True
-    assert lock.stale_lock_reason == "same_pid_lock_predates_current_process"
+    assert lock.stale_lock_reason == "same_owner_lock_predates_current_process"
     runtime_lock.release_runtime_lock(lock)
+
+
+def test_runtime_lock_does_not_reclaim_a_foreign_owner_sharing_our_pid(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A pid match is not an ownership match (Codex P1 wave-40).
+
+    The VPS Compose stack runs the live loop and the scheduler in SEPARATE PID
+    namespaces while sharing ./outputs, so two LIVE processes routinely carry
+    the same namespace-local number. Matching on pid alone read the other
+    container's fresh holder as this process' own dead orphan and unlinked it,
+    admitting both shadow-ledger writers.
+    """
+    cfg = _cfg(tmp_path)
+    monkeypatch.setattr(runtime_lock, "_PROCESS_STARTED_AT_UTC", _iso_minutes_ago(10))
+    # Same pid, DIFFERENT owner: another container's live process.
+    _write_lock(cfg, acquired_at_utc=_iso_minutes_ago(30), owner_token="another-container")
+
+    lock = runtime_lock.acquire_runtime_lock(cfg, "prediction_cycle", stale_after_seconds=999999)
+
+    assert lock.acquired is False, (
+        "a pid shared across namespaces is not evidence that the holder is dead"
+    )
+    assert lock.stale_lock_replaced is False
+
+
+def test_runtime_lock_does_not_reclaim_a_payload_without_an_owner_token(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A pre-token payload falls through to the ordinary stale timeout."""
+    cfg = _cfg(tmp_path)
+    monkeypatch.setattr(runtime_lock, "_PROCESS_STARTED_AT_UTC", _iso_minutes_ago(10))
+    _write_lock(cfg, acquired_at_utc=_iso_minutes_ago(30), owner_token="")
+
+    lock = runtime_lock.acquire_runtime_lock(cfg, "prediction_cycle", stale_after_seconds=999999)
+
+    assert lock.acquired is False, (
+        "an unmatched payload must wait out the stale timeout: slower reclaim, "
+        "never a wrongful one"
+    )
 
 
 def test_runtime_lock_keeps_same_process_lock_after_process_start(

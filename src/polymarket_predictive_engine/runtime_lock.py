@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,19 @@ from .utils import ensure_dir, now_utc, parse_timestamp, read_json
 
 
 _PROCESS_STARTED_AT_UTC = now_utc()
+# A NAMESPACE-INDEPENDENT owner token (Codex P1 wave-40). `pid` alone does not
+# identify a process across containers: the VPS Compose stack runs the live loop
+# and the scheduler in SEPARATE PID namespaces while sharing ./outputs, so two
+# live processes routinely hold the same namespace-local number. With only that
+# number plus a second-resolution start stamp,
+# `_same_pid_lock_predates_current_process` could read a FRESH holder in another
+# container as this process' own dead orphan and unlink its lock -- admitting
+# both shadow-ledger writers, which is the failure the lock exists to prevent.
+#
+# uuid4 is unique without coordination and needs no host facts (no boot id, no
+# cgroup path, nothing to read or parse), so it cannot collide across namespaces
+# and cannot fail on a platform that does not expose those.
+_PROCESS_OWNER_TOKEN = uuid.uuid4().hex
 
 
 @dataclass(frozen=True)
@@ -89,21 +103,29 @@ def _valid_lock_payload(payload: dict[str, Any]) -> bool:
     )
 
 
-def _same_pid_lock_predates_current_process(payload: dict[str, Any]) -> bool:
-    """Detect a persisted lock from a prior process that reused our PID.
+def _same_owner_lock_predates_current_process(payload: dict[str, Any]) -> bool:
+    """Detect a persisted lock left behind by an EARLIER RUN OF THIS PROCESS.
 
-    Container restarts can reuse the same small PID. If a lock file lives on a
-    bind-mounted volume, a new process may see an old lock with its own PID and
-    wait until the wall-clock stale timeout even though the owner process is
-    gone. Comparing the lock's acquisition time to this process' start time
-    lets the next process fail open for stale locks while preserving normal
-    same-process mutual exclusion.
+    A container restart can reuse the same small PID, so a lock on a bind-mounted
+    volume can carry this process' own number while its writer is long gone;
+    without this check the next run waits out the whole stale timeout for
+    nothing.
+
+    Matched on `owner_token`, NOT on pid (Codex P1 wave-40). A pid identifies a
+    process only within its namespace, and the VPS Compose stack runs the live
+    loop and the scheduler in SEPARATE namespaces sharing ./outputs -- so two
+    LIVE processes routinely carry the same number, and pid equality plus an
+    older acquisition time was treated as proof of a dead orphan. That let this
+    check unlink a fresh holder in another container and admit both
+    shadow-ledger writers: the exact concurrency failure the lock exists to
+    prevent, sitting inside the mechanism meant to prevent it.
+
+    A payload with no `owner_token` predates this field and can no longer be
+    matched. It falls through to the ordinary stale timeout, which is the
+    conservative direction: a slower reclaim, never a wrongful one.
     """
-    try:
-        existing_pid = int(payload.get("pid"))
-    except (TypeError, ValueError):
-        return False
-    if existing_pid != os.getpid():
+    existing_token = str(payload.get("owner_token") or "")
+    if not existing_token or existing_token != _PROCESS_OWNER_TOKEN:
         return False
     acquired_at = parse_timestamp(payload.get("acquired_at_utc"))
     process_started_at = parse_timestamp(_PROCESS_STARTED_AT_UTC)
@@ -315,10 +337,25 @@ class RuntimeLockHeartbeat:
         content is built in temp files OUTSIDE it -- so it is
         near-instantaneous by construction.
         """
-        self._critical_section_entered_monotonic = time.monotonic()
+        entered = time.monotonic()
+        self._critical_section_entered_monotonic = entered
         try:
             yield self
         finally:
+            # MEASURED ON EXIT, not only by a beat landing while open (Codex P2
+            # wave-40). `_beating_allowed` sets the overrun flag, so the flag
+            # could only ever be raised if a heartbeat happened to be attempted
+            # DURING the section -- and once the beats were correctly moved
+            # outside it (wave-38, to keep the section replace-only), nothing
+            # inside could raise it at all. A blocking os.replace would clear
+            # the start time here and the summary would omit
+            # shadow_ledger_critical_section_overran entirely: the bound that
+            # makes "replace-only" auditable, silently unenforceable.
+            #
+            # Measuring here needs no beat and cannot be moved out of reach by
+            # rearranging the callers.
+            if (time.monotonic() - entered) > self._critical_section_max_seconds:
+                self._critical_section_overran = True
             self._critical_section_entered_monotonic = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -343,6 +380,7 @@ def acquire_runtime_lock(
         "name": name,
         "pid": os.getpid(),
         "process_started_at_utc": _PROCESS_STARTED_AT_UTC,
+        "owner_token": _PROCESS_OWNER_TOKEN,
         "acquired_at_utc": now_utc(),
     }
     try:
@@ -355,8 +393,8 @@ def acquire_runtime_lock(
         stale_reason = ""
         if age is not None and stale_after_seconds > 0 and age > stale_after_seconds:
             stale_reason = f"age_seconds>{stale_after_seconds:g}"
-        elif _same_pid_lock_predates_current_process(existing_payload):
-            stale_reason = "same_pid_lock_predates_current_process"
+        elif _same_owner_lock_predates_current_process(existing_payload):
+            stale_reason = "same_owner_lock_predates_current_process"
         elif not _valid_lock_payload(existing_payload) and stale_after_seconds > 0:
             # Atomic publishing means this process never creates a malformed
             # lock.  Treat an externally corrupt lock as ambiguous until its
@@ -440,9 +478,16 @@ def acquire_runtime_lock(
 def release_runtime_lock(lock: RuntimeLockResult) -> None:
     if not lock.acquired:
         return
+    # Validated on the OWNER TOKEN too (Codex P1 wave-40): a pid check alone
+    # would let this process delete a lock another container's identically
+    # numbered process had since taken.
     current = read_json(lock.path, default={}) or {}
-    if isinstance(current, dict) and current.get("pid") not in {None, lock.payload.get("pid")}:
-        return
+    if isinstance(current, dict):
+        current_token = current.get("owner_token")
+        if current_token not in {None, lock.payload.get("owner_token")}:
+            return
+        if current.get("pid") not in {None, lock.payload.get("pid")}:
+            return
     try:
         lock.path.unlink()
     except FileNotFoundError:

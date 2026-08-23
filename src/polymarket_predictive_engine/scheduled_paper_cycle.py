@@ -54,22 +54,25 @@ LOCK_WAIT_SLEEP_SECONDS = 10.0
 # freshness, and is unset in config.
 MAX_WEBSOCKET_OBSERVATION_AGE_SECONDS = 1800.0
 
-# WO-143.7 fix round: how far into the future an observation timestamp may sit
-# before it is treated as UNMEASURABLE rather than as fresh. Without this, a
-# row corrupted to 2099 (or written by a clock-skewed collector) produces a
-# negative age, clamps to 0.0, and reads as maximally fresh forever -- a
-# permanent fail-open that no ceiling can catch, because the corrupt row is
-# always "newer" than every honest one.
+# NO future-timestamp tolerance, deliberately. An earlier fix round added a
+# 60-second allowance borrowed from WO-93's `h1_future_timestamp_tolerance_
+# seconds`; it is removed [Codex P1, external review of this branch]. Two
+# reasons, and the second is why removing beats registering:
 #
-# Literal basis (A1): 60 seconds is the repository's already-registered
-# future-timestamp allowance for exactly this concept --
-# `h1_future_timestamp_tolerance_seconds: 60`
-# (polymarket_predictive_config.example.yaml:261, WO-93's tighten-only H1
-# prerequisite block). Reusing that number keeps one clock-skew allowance
-# across the repo instead of inventing a second, looser one. It is a fixed
-# module constant rather than a config key: widening it is precisely the
-# fail-open this closes, so there is no tighten-only direction to expose.
-FUTURE_OBSERVATION_TOLERANCE_SECONDS = 60.0
+#   1. It was UNREGISTERED for this gate. WO-143 registers the 1800s age
+#      ceiling and excludes any other new gate or threshold. A literal
+#      registered for H1 is registered for H1, not borrowed into a scheduler
+#      success gate by resemblance.
+#   2. It left a narrower copy of the fail-open it was added to close. A row
+#      1-60s ahead still clamps to age 0.0 and is always "newer" than every
+#      honest row -- so one corrupt observation could mask an entirely stale
+#      corpus and let the run refresh `last_success_utc`.
+#
+# No allowance is needed: the collector writes `collected_at_utc` on the SAME
+# VPS host as this scheduler, so there is no cross-host clock to reconcile and
+# a future-dated observation is anomalous rather than early. That is the same
+# same-host argument registered for the leaderboard producer's freshness
+# window. Any future-dated row is UNMEASURABLE, which the caller blocks on.
 
 _RECEIPT_RELATIVE = Path("polymarket_model_governance") / "scheduled_paper_cycle.json"
 _LIVE_SUMMARY_RELATIVE = Path("polymarket_model_governance") / "mispricing_alpha_live_summary.json"
@@ -153,9 +156,8 @@ def _websocket_observation_age_seconds(cfg: EngineConfig) -> float | None:
     enumerates: an absent file, an empty file, a malformed file (whose
     garbage-keyed `csv.DictReader` rows carry none of the timestamp
     columns), rows whose timestamps are unparseable, and rows whose
-    timestamps are non-finite -- plus rows dated further into the future
-    than `FUTURE_OBSERVATION_TOLERANCE_SECONDS`, which would otherwise clamp
-    to an age of 0.0 and read as maximally fresh forever.
+    timestamps are non-finite -- plus rows dated into the future AT ALL, which
+    would otherwise clamp to an age of 0.0 and read as maximally fresh forever.
     """
 
     rows = read_csv_rows(cfg.output_root / _WEBSOCKET_FEATURES_RELATIVE)
@@ -190,10 +192,11 @@ def _websocket_observation_age_seconds(cfg: EngineConfig) -> float | None:
     age = (datetime.now(timezone.utc) - freshest).total_seconds()
     if not math.isfinite(age):
         return None
-    # A future-dated observation would otherwise clamp to 0.0 below and read
-    # as maximally fresh forever. Beyond the registered clock-skew tolerance
-    # it is unmeasurable, not fresh, so the caller blocks on it.
-    if age < -FUTURE_OBSERVATION_TOLERANCE_SECONDS:
+    # A future-dated observation would otherwise clamp to 0.0 below and read as
+    # maximally fresh forever -- and, being always "newer" than every honest
+    # row, would mask a wholly stale corpus. Same-host collector, so there is no
+    # skew to tolerate: ANY future date is unmeasurable, not fresh.
+    if age < 0:
         return None
     return max(0.0, age)
 

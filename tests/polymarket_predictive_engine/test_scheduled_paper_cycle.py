@@ -934,20 +934,18 @@ def test_143_7b_future_dated_observation_is_unmeasurable_not_maximally_fresh(tmp
     # A timestamp corrupted to the future (or a clock-skewed collector row)
     # produced a negative age that clamped to 0.0 -- maximally fresh, forever,
     # and unreachable by any ceiling because the corrupt row is always
-    # "newer" than every honest one. Beyond the registered skew tolerance it
-    # is unmeasurable, so the cycle blocks.
-    tolerance = scheduled_paper_cycle.FUTURE_OBSERVATION_TOLERANCE_SECONDS
-    assert tolerance == 60.0
+    # "newer" than every honest one.
+    #
+    # There is NO tolerance window. The 60s allowance this test used to assert
+    # was unregistered for this gate and left a narrower copy of the same
+    # fail-open: a row 1-60s ahead still clamped to 0.0 and still outranked
+    # every honest row, so one corrupt observation could mask a wholly stale
+    # corpus. The collector shares this scheduler's host, so there is no skew
+    # to tolerate.
+    assert not hasattr(scheduled_paper_cycle, "FUTURE_OBSERVATION_TOLERANCE_SECONDS")
 
-    # Inside the tolerance: a benignly skewed clock still measures.
-    skewed = _config(tmp_path / "skewed")
-    _seed_websocket_fixture(skewed, collected_at_utc=_fresh_stamp(-(tolerance / 2)))
-    age = scheduled_paper_cycle._websocket_observation_age_seconds(skewed)
-    assert age is not None
-    assert age == pytest.approx(0.0, abs=1e-12)
-
-    # Beyond the tolerance: unmeasurable, never fresh.
-    for seconds_ahead in (tolerance + 120, 86_400, 365 * 24 * 3600):
+    # Even ONE second ahead is unmeasurable, never fresh.
+    for seconds_ahead in (1, 30, 60, 180, 86_400, 365 * 24 * 3600):
         future = _config(tmp_path / f"future-{int(seconds_ahead)}")
         _seed_websocket_fixture(future, collected_at_utc=_fresh_stamp(-seconds_ahead))
         assert scheduled_paper_cycle._websocket_observation_age_seconds(future) is None, seconds_ahead

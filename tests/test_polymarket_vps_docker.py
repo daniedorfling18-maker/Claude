@@ -9,13 +9,6 @@ from pathlib import Path
 
 import yaml
 
-import sys
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from polymarket_predictive_engine.degraded_state_watchdog import (  # noqa: E402
-    MARKED_JOBS,
-)
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -1468,14 +1461,34 @@ def test_book_pulse_disabled_stamps_intentional_skip_at_exit_zero(tmp_path):
 # ---------------------------------------------------------------------------
 
 _WO152_SCHEDULER = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
-# The watchdog owns the canonical membership; the scheduler's call sites are
-# asserted against it rather than against a hand-copied list.
+# A REGISTERED SNAPSHOT, deliberately hand-written, NOT an import.
 #
-# It is now actually IMPORTED. This was a duplicate frozenset directly under a
-# comment claiming it was not one, and it drifted the moment MARKED_JOBS gained
-# an entry -- so the test failed for the copy being stale rather than for the
-# scheduler being wrong, which is the opposite of what it exists to detect.
-_WO152_MARKED_JOBS = MARKED_JOBS
+# It was briefly changed to `= MARKED_JOBS` on the reasoning that the comment
+# above says the watchdog owns the membership. That was wrong and is reverted
+# [Codex P1, external review of this branch]: WO-152 registers MARKED_JOBS
+# VERBATIM as a fixed set, derived as "the freshness table's keys minus the
+# three safety lanes". Importing the constant makes any expansion of that
+# frozen surface approve itself -- watchdog and scheduler grow together and the
+# test still passes -- which is precisely the drift this exists to detect.
+#
+# It is nine rather than WO-152's original eight because WO-143 adds
+# `paper_cycle` to the freshness table and it is not a safety lane, so the
+# registered DERIVATION yields nine. That expansion is recorded as an
+# amendment in docs/POLYMARKET_CODEX_WORK_ORDERS.md; this literal is the
+# snapshot of it. Changing it should require changing the registration too.
+_WO152_MARKED_JOBS = frozenset(
+    {
+        "governance_refresh",
+        "clv_snapshot",
+        "locked_card_refresh",
+        "training_harvest",
+        "maker_study_intraday",
+        "trade_prints",
+        "book_pulse",
+        "ledger_anchor",
+        "paper_cycle",
+    }
+)
 
 
 def _wo152_env(out_dir: Path) -> dict:

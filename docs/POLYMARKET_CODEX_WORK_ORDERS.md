@@ -12660,7 +12660,8 @@ runs at all while the loop is held, which is what makes this mechanism
 observable in the first place. Both halves are load-bearing and both are
 properties of code this WO does not change.
 
-Call sites: exactly the 8 jobs in `MARKED_JOBS` (Writes §2).
+Call sites: exactly the jobs in `MARKED_JOBS` (Writes §2) — 8 as first registered, 9 after
+WO-143's amendment adds `paper_cycle`.
 `grep -n "STARTED_AT=" scripts/run_vps_ops_scheduler.sh` returns exactly **10**
 assignments: `:143, :384, :414, :447, :570, :666, :702, :721, :746, :782`.
 Of those 10, `:143` is `stamp_status`'s own parameter bridge (not a `date`
@@ -12706,28 +12707,60 @@ widening, and the unbounded jobs needed their own bound (below).
 
 ### Writes §2 — the watchdog attributes a stale window to the job that held the loop, or discloses that it could not
 
-**Scope.** `MARKED_JOBS` is `REGISTERED_JOB_FRESHNESS_MAX_SECONDS`'s 11 keys
-(`degraded_state_watchdog.py:56-73`, re-counted this session: exactly 11) minus
+**Scope.** `MARKED_JOBS` is `REGISTERED_JOB_FRESHNESS_MAX_SECONDS`'s keys
+(`degraded_state_watchdog.py:56-73`, 11 when first registered) minus
 the 3 safety-lane entities (`executor_ops_monitor`, `degraded_state_watchdog`,
-`maker_safety_refresh`) — 8 jobs. `_attribute_starvation` is called **only**
+`maker_safety_refresh`) — 8 jobs then, 9 after WO-143 adds `paper_cycle` to the
+freshness table (see the amendment below). `_attribute_starvation` is called **only**
 when `job_name in MARKED_JOBS`; that call-site guard is load-bearing
 (`DRAG_BUDGET_SECONDS` and `IN_FLIGHT_STALE_AFTER_SECONDS` are keyed on
-`MARKED_JOBS`'s 8-and-5 members respectively and raise `KeyError` for anything
+`MARKED_JOBS`'s members respectively — 8-and-5 as first registered, 9-and-6 after WO-143's
+amendment — and raise `KeyError` for anything
 else — execution-confirmed this session for all three safety-lane names).
 Safety-lane starvation carries **no** attribution keys and produces **no**
 sidecar row; its evaluation row is unchanged from `main`.
 
+**AMENDMENT (WO-143, registered with this branch — the ninth attributed job).**
+`MARKED_JOBS` is derived above as "the freshness table's keys minus the three safety-lane entities".
+WO-143 adds `paper_cycle` to `REGISTERED_JOB_FRESHNESS_MAX_SECONDS` (a 5h completion ceiling) and it
+is not a safety lane, so the DERIVATION now yields **9**, not 8, and the verbatim block below is
+amended to match. This is recorded rather than inferred because the block is registered verbatim: a
+build that silently grew the frozen set would be an unregistered expansion of WO-152's attribution
+surface, which is exactly what external review caught on the first attempt at this.
+
+Registered with it, each derived and not invented:
+- `IN_FLIGHT_STALE_AFTER_SECONDS["paper_cycle"] = 3600` — 2x `PAPER_CYCLE_TIMEOUT`, which
+  run_vps_ops_scheduler.sh:105-114 clamps two-sided to an 1800s MAXIMUM, so the default is also the
+  worst case. The 2x follows `book_pulse`, the closest precedent: a job wrapping ONE timed child gets
+  double it, leaving room for interpreter start and teardown.
+- `DRAG_BUDGET_SECONDS["paper_cycle"] = 3600` — ceiling minus interval (5h − 4h), as for every other
+  entry in that table.
+- a `mark_in_flight paper_cycle` call site in the scheduler, matching `run_book_pulse` exactly.
+
+WHY THE EXPANSION RATHER THAN AN EXEMPTION: the alternative is to leave `paper_cycle` on the
+freshness surface alone, which makes it a FOURTH member of the unmarked-with-a-ceiling set that
+`test_wo152_safety_lane_entities_are_never_attributed` pins to exactly the three safety lanes. That
+test is correct and was not touched; a 4-hour scoring job is not a safety lane, so the honest
+reading of the registered derivation is that it must be marked.
+
+NOTE ON THE TEST SNAPSHOT: `tests/test_polymarket_vps_docker.py` keeps a HAND-WRITTEN copy of this
+set, and it must stay hand-written. It was briefly changed to import the constant, which would have
+let any future expansion approve itself — watchdog and scheduler growing together with the test
+still green. The copy is the drift detector against this registered block.
+
 ```python
 # _attribute_starvation and its constant tables - registered verbatim.
+# AMENDED by WO-143: paper_cycle is the ninth member (see the amendment above).
 MARKED_JOBS = frozenset({
     "governance_refresh", "clv_snapshot", "locked_card_refresh",
     "training_harvest", "maker_study_intraday", "trade_prints",
-    "book_pulse", "ledger_anchor",
+    "book_pulse", "ledger_anchor", "paper_cycle",
 })
 UNBOUNDED_MARKED_JOBS = frozenset({"maker_study_intraday", "locked_card_refresh", "ledger_anchor"})
 IN_FLIGHT_STALE_AFTER_SECONDS = {
     "governance_refresh": 4200, "clv_snapshot": 5400,
     "training_harvest": 27600, "trade_prints": 3000, "book_pulse": 480,
+    "paper_cycle": 3600,
 }
 # An ORPHAN bound for the 3 jobs above with no scheduler-enforced due-cadence to
 # overrun WHILE RUNNING. Each value is that job's OWN existing

@@ -2524,6 +2524,28 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    for the life of the experiment. All three call sites — the freeze, the non-persisting in-memory
    split, and the invalid-state fallback — go through ONE helper, because they must agree and three
    inline copies of the same expression is how they stop agreeing.
+23. THE LATEST SNAPSHOT IS CHOSEN BY INSTANT, NOT BY STRING ORDER [Codex P2 wave-43]. `_instant_key`
+   took a lexical `max` over `snapshot_at_utc`, which is an instant ordering only while every stamp
+   uses the same offset and the same textual form. `2026-08-23T01:00:00+02:00` sorts AFTER
+   `2026-08-23T00:30:00Z` and is an instant thirty minutes EARLIER, so the older snapshot could be
+   selected as the latest — and rule 8c's revision check and the freshness window both still pass,
+   because both compare the stamps they are handed. Definitive `on_current_leaderboard` values were
+   then published from the stale snapshot. Selection and grouping now use the PARSED UTC instant.
+   THE FAILURE DIRECTION FOR AN UNPARSEABLE STAMP IS FIXED AT THE SAME TIME, and this is the larger
+   half. Lexically `"not-a-time"` outsorts every real ISO timestamp and BECOMES the selected instant
+   — the hazard rule 8f exists to disclose. Under the new key every unparseable row sorts BELOW every
+   parseable one, so garbage can no longer decide the selection at all. Rule 8f still renders
+   membership unknown in that case; this removes the second, independent way one bad row did damage,
+   which is the point — a disclosure rule and a selection rule are not substitutes for each other.
+   Two rows expressing the SAME instant in different forms now group together, because they describe
+   one snapshot and always did. The LEGACY `latest_date` selection is untouched: it keys on
+   `snapshot_date`, whose ISO date strings do sort correctly, and it feeds the parent's frozen
+   market-axis tier split.
+   PREVIOUSLY DEFERRED, then taken back. This was carried as a standing-input item on the grounds
+   that mixed-offset stamps are not something the collector emits today. That is true and it is not
+   a reason: the consumer must not depend on a producer's incidental formatting habit, and the
+   unparseable-stamp half of the same defect was reachable from any corrupt row.
+
 22. THE PERCENTILE IS UNVERIFIABLE IN BOTH DIRECTIONS [Codex P1 wave-43]. Rules 13c and 13m protect
    a market whose PRIOR row already carried a percentile veto, on the reasoning that a reordering
    can strip a veto from a market that lost nothing. The reordering cuts the OTHER way with equal
@@ -2673,9 +2695,9 @@ the matrix without the total), and even when the count was right the MAPPING was
 behaviour was missing from the list while another entry claimed a standalone test that did not exist.
 This list is GENERATED from the test file and verified by diffing the names in both directions, so it
 cannot omit a real test or invent one that does not exist. Anyone changing it should regenerate
-rather than hand-edit. All 93 live in
-tests/polymarket_predictive_engine/test_flow_toxicity.py. That is 93 test FUNCTIONS; pytest collects
-108 cases, because THREE tests are parametrised: rule 15's two S4 sweeps (7 offsets and 5 clock
+rather than hand-edit. All 94 live in
+tests/polymarket_predictive_engine/test_flow_toxicity.py. That is 94 test FUNCTIONS; pytest collects
+109 cases, because THREE tests are parametrised: rule 15's two S4 sweeps (7 offsets and 5 clock
 shifts) and rule 0b's negative-epoch contract (6 forms), for 15 extra cases. An
 auditor comparing this count to pytest output should expect the difference [noted at wave-26 so the
 mismatch is not later read as the drift this generated list exists to prevent].
@@ -2866,6 +2888,8 @@ mismatch is not later read as the drift this generated list exists to prevent].
     The wallet CSV states both invocation flags itself.
 93. `test_an_explicitly_null_complete_flag_does_not_settle_membership`
     Rule 8e: `"complete": null` is PRESENT-and-malformed, not absent, so it fails closed and on_current_leaderboard is `unknown` for a wallet in the snapshot and one outside it alike.
+94. `test_the_latest_snapshot_is_chosen_by_instant_not_by_string_order`
+    Rule 23: two runs one day apart in instant terms, the earlier written with a +02:00 offset so it sorts LAST as text; the wallet from the genuinely newer run is the one reported as currently ranked.
 
 ## FAILURE PATH
 

@@ -3663,3 +3663,64 @@ def test_an_explicitly_null_complete_flag_does_not_settle_membership(tmp_path):
     # for the same reason -- the question is whether the SNAPSHOT settles
     # anything, not whether this particular wallet appears in it.
     assert rows["smart1"]["on_current_leaderboard"] == "unknown"
+
+
+def test_the_latest_snapshot_is_chosen_by_instant_not_by_string_order(tmp_path):
+    """A lexical max over ISO strings is not an instant ordering (Codex P2 wave-43).
+
+    `2026-08-23T01:00:00+02:00` sorts AFTER `2026-08-23T00:30:00Z` and is an
+    instant thirty minutes EARLIER. Rule 8c's revision check and the freshness
+    window both still pass, because both compare the stamps they are handed --
+    so definitive membership was published from the older snapshot.
+
+    Two collector runs on one UTC date, one written with a +02:00 offset. The
+    newer run dropped `faded` and added `risen`; the wallet the artifact calls
+    currently ranked is the one that decides which run was read.
+    """
+    cfg = _config(tmp_path)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    # Both stamps must be in the PAST and inside the freshness ceiling, or the
+    # future-dated and stale rules decide the outcome instead of this one.
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    newer = now - timedelta(hours=1)
+    older = newer - timedelta(minutes=30)
+    newer_zulu_form = newer.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # The SAME instant as `older`, written with a +02:00 offset, so it sorts
+    # after `newer` as text while being earlier in time.
+    older_offset_form = (older + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S+02:00")
+    assert older_offset_form > newer_zulu_form, (
+        "the fixture must actually produce the lexical inversion it is testing"
+    )
+    day = newer_zulu_form[:10]
+    write_csv(
+        cfg.output_root / "wallet_intelligence" / "leaderboard_history.csv",
+        [
+            {"snapshot_date": day, "snapshot_at_utc": older_offset_form, "wallet": "faded", "rank": "1"},
+            {"snapshot_date": day, "snapshot_at_utc": newer_zulu_form, "wallet": "risen", "rank": "1"},
+        ],
+        fieldnames=["snapshot_date", "snapshot_at_utc", "wallet", "rank"],
+    )
+    write_json(
+        cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json",
+        {"status": "ok", "generated_at_utc": newer_zulu_form},
+    )
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [
+            {"market": "0xa", "asset_id": "tok-a", "wallet": "risen", "side": "BUY",
+             "price": 0.5, "size": 100, "timestamp": 0},
+            {"market": "0xa", "asset_id": "tok-a", "wallet": "faded", "side": "BUY",
+             "price": 0.5, "size": 100, "timestamp": 1},
+        ],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    build_flow_toxicity(cfg)
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+
+    assert rows["risen"]["on_current_leaderboard"] == "True", (
+        "the +02:00 row sorts last as text but is the EARLIER instant; selecting it "
+        "publishes membership from the stale snapshot"
+    )
+    assert rows["faded"]["on_current_leaderboard"] == "False"

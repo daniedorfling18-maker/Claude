@@ -425,8 +425,35 @@ def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], set[str
         [row for row in rows if str(row.get("snapshot_date") or row.get("snapshot_at_utc") or "") == latest_date]
     )
 
-    def _instant_key(row: dict[str, Any]) -> str:
-        return str(row.get("snapshot_at_utc") or row.get("snapshot_date") or "")
+    def _instant_key(row: dict[str, Any]) -> tuple[int, float, str]:
+        """Order snapshots by their PARSED UTC instant, not by the raw string.
+
+        A lexical `max` over ISO strings is only an instant ordering when every
+        string uses the same offset and the same textual form (Codex P2
+        wave-43). `2026-08-23T01:00:00+02:00` sorts after `2026-08-23T00:30:00Z`
+        while representing an instant thirty minutes EARLIER, so the older
+        snapshot could be selected as the latest -- and rule 8c's revision check
+        and the freshness window both still pass, because both compare the
+        stamps they are given. Definitive membership was then published from the
+        stale snapshot.
+
+        The tuple's leading flag also fixes the failure direction for an
+        unparseable stamp: lexically `"not-a-time"` outsorts every real ISO
+        timestamp and BECOMES the selected instant, which is the hazard rule 8f
+        exists to disclose. Here every unparseable row sorts below every
+        parseable one, so garbage can no longer decide the selection. Rule 8f's
+        `revision_torn` still renders membership unknown in that case -- this
+        removes the second, independent way the same bad row did damage.
+
+        Two rows expressing the SAME instant in different forms are grouped
+        together, which is why the raw text is dropped from the key once it has
+        parsed: they describe one snapshot and always did.
+        """
+        raw = str(row.get("snapshot_at_utc") or row.get("snapshot_date") or "")
+        parsed = parse_timestamp(raw)
+        if parsed is None:
+            return (0, 0.0, raw)
+        return (1, parsed.timestamp(), "")
 
     latest_instant = max(_instant_key(row) for row in rows)
     instant_rows = [row for row in rows if _instant_key(row) == latest_instant]

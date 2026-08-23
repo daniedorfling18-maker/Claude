@@ -588,6 +588,7 @@ def _settle_due_positions(
             "settled_positions": 0,
             "settlement_errors": 0,
             "settlement_positions_abandoned": 0,
+            "settlement_abandoned_ids": [],
             "settlement_budget_expired": False,
         }
     max_checks = int(settings.get("settlement_max_positions_per_cycle", 25))
@@ -604,6 +605,20 @@ def _settle_due_positions(
     errors = 0
     abandoned = 0
     budget_expired = False
+    # STAGED settlements, applied only if the pass completes (Codex P1 wave-35
+    # on #416). The registered contract for this budget is "abandons remaining
+    # positions with a partial, fail-closed status and NO partial write", and
+    # mutating the position plus appending its SELL_SHADOW fill inline IS the
+    # partial write: a later lookup pushes the pass over budget and the caller
+    # publishes both ledgers carrying settlements from a pass recorded as
+    # incomplete. The existing test missed it because every stubbed lookup
+    # returned unresolved, so nothing was ever staged to leak.
+    staged: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
+    # Checkpoints are staged alongside, because a DISCARDED settlement whose
+    # checkpoint had been persisted would sort LAST next pass -- permanently
+    # starving the position it just resolved, the exact failure F1's
+    # oldest-first rotation exists to prevent.
+    checked_now: dict[str, str] = {}
     reasons: dict[str, int] = defaultdict(int)
     # WO-143b.1 F1: oldest-checked-first, so a budget that cannot reach every
     # due position rotates through them across passes instead of starving the
@@ -615,9 +630,13 @@ def _settle_due_positions(
         if str(position.get("status") or "").lower() == "open"
         and _should_check_settlement(position, grace_minutes=grace_minutes)
     ]
+    abandoned_ids: list[str] = []
     for index, position in enumerate(due):
         if checks >= max_checks:
             abandoned = len(due) - index
+            abandoned_ids = [
+                str(row.get("shadow_position_id") or "") for row in due[index:]
+            ]
             break
         # The budget is checked between iterations. It cannot bound a single
         # unbounded urlopen read -- that is precisely why the progress-derived
@@ -627,11 +646,14 @@ def _settle_due_positions(
         if budget_seconds > 0 and (time.monotonic() - started_monotonic) >= budget_seconds:
             budget_expired = True
             abandoned = len(due) - index
+            abandoned_ids = [
+                str(row.get("shadow_position_id") or "") for row in due[index:]
+            ]
             break
         if str(position.get("status") or "").lower() != "open":
             continue
         checks += 1
-        checkpoints[str(position.get("shadow_position_id") or "")] = timestamp
+        checked_now[str(position.get("shadow_position_id") or "")] = timestamp
         if heartbeat is not None:
             heartbeat.note_progress("settlement_position")
         try:
@@ -652,27 +674,52 @@ def _settle_due_positions(
         cost = safe_float(position.get("cost_basis_usdc")) or 0.0
         proceeds = quantity * settlement_price
         pnl = proceeds - cost
-        position["latest_mark_price"] = settlement_price
-        position["status"] = "closed"
-        position["closed_at"] = timestamp
-        position["updated_at"] = timestamp
-        position["close_reason"] = "shadow_clean_settlement"
-        position["exit_price"] = settlement_price
-        position["realised_pnl_usdc"] = pnl
-        position["unrealised_pnl_usdc"] = 0.0
-        position["return_pct"] = pnl / cost if cost > 0 else 0.0
-        _append_fill(
-            fills,
-            position_id=str(position.get("shadow_position_id")),
-            side="SELL_SHADOW",
-            timestamp=timestamp,
-            price=settlement_price,
-            quantity=quantity,
-            notional=proceeds,
-            row=position,
-            reason="shadow_clean_settlement",
+        staged.append(
+            (
+                position,
+                {
+                    "latest_mark_price": settlement_price,
+                    "status": "closed",
+                    "closed_at": timestamp,
+                    "updated_at": timestamp,
+                    "close_reason": "shadow_clean_settlement",
+                    "exit_price": settlement_price,
+                    "realised_pnl_usdc": pnl,
+                    "unrealised_pnl_usdc": 0.0,
+                    "return_pct": pnl / cost if cost > 0 else 0.0,
+                },
+                {
+                    "position_id": str(position.get("shadow_position_id")),
+                    "side": "SELL_SHADOW",
+                    "timestamp": timestamp,
+                    "price": settlement_price,
+                    "quantity": quantity,
+                    "notional": proceeds,
+                    "reason": "shadow_clean_settlement",
+                },
+            )
         )
-        settled += 1
+    staged_ids = {str(row.get("shadow_position_id") or "") for row, _, _ in staged}
+    discarded = 0
+    if budget_expired:
+        discarded = len(staged)
+        # A position whose settlement was RESOLVED and then discarded is
+        # abandoned for this pass too: its true exit price is the settlement,
+        # and it must not be closed on a stale mark before the next pass can
+        # write it.
+        abandoned_ids.extend(sorted(staged_ids))
+        staged = []
+        # Only positions with NOTHING to discard -- checked and unresolved --
+        # advance in the rotation. The discarded ones stay at its head.
+        checkpoints.update(
+            {key: value for key, value in checked_now.items() if key not in staged_ids}
+        )
+    else:
+        for position, updates, fill_kwargs in staged:
+            position.update(updates)
+            _append_fill(fills, row=position, **fill_kwargs)
+            settled += 1
+        checkpoints.update(checked_now)
     # Persist the rotation state even when the budget expired -- especially
     # then, since that is exactly the pass whose unreached tail must be first
     # in line next time.
@@ -692,6 +739,19 @@ def _settle_due_positions(
         # as such rather than looking like a complete one that simply found
         # less to do, and the abandoned count is named in the day-after check.
         "settlement_positions_abandoned": abandoned,
+        # NAMED, not just counted (Codex P1 wave-35 on #416). The oldest-first
+        # rotation only helps across PASSES; within this one an abandoned
+        # position already past maximum_holding_hours was closed as
+        # shadow_time_exit at a stale mark immediately below, before the
+        # rotation could ever prioritise it -- recreating precisely the P&L
+        # distortion _settlement_check_sort_key's docstring says it exists to
+        # prevent. The rotation test hid it by setting the holding limit to ten
+        # million hours.
+        "settlement_abandoned_ids": abandoned_ids,
+        # Settlements this pass RESOLVED and then threw away on expiry. Named
+        # so a reader can tell a pass that found nothing from one that found
+        # something and correctly refused to write it.
+        "settlement_resolved_discarded_on_expiry": discarded,
         "settlement_budget_expired": budget_expired,
         "settlement_status": "partial_budget_expired" if budget_expired else "complete",
     }
@@ -1135,6 +1195,13 @@ def _update_shadow_cohort_evidence_locked(
     )
     closed_this_cycle += int(settlement.get("settled_positions") or 0)
     _progress("settlement_complete")
+    # Positions this pass could not settle are held OPEN for the next one. They
+    # are still marked to market below -- that is reporting -- but no mark-based
+    # rule may CLOSE them, because their true exit is the settlement price and
+    # closing at a stale mark is the distortion the rotation exists to prevent.
+    settlement_deferred = {
+        str(identifier) for identifier in (settlement.get("settlement_abandoned_ids") or []) if identifier
+    }
     for position in positions:
         if str(position.get("status") or "").lower() != "open":
             continue
@@ -1152,7 +1219,10 @@ def _update_shadow_cohort_evidence_locked(
         position["return_pct"] = return_pct
         position["updated_at"] = now
         close_reason = ""
-        if _settlement_only_shadow_position(position, settings):
+        if str(position.get("shadow_position_id") or "") in settlement_deferred:
+            # Marked, disclosed, and deliberately not closed this pass.
+            position["settlement_policy"] = "deferred_to_next_settlement_pass"
+        elif _settlement_only_shadow_position(position, settings):
             position["settlement_policy"] = "final_settlement_only"
         elif return_pct >= take_profit:
             close_reason = "shadow_take_profit"

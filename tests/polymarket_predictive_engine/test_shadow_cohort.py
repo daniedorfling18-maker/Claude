@@ -887,6 +887,169 @@ def test_wo143b1_f1_settlement_budget_expiry_is_partial_and_writes_no_ledger_row
     assert not fills_path.exists() or read_csv_rows(fills_path) == []
 
 
+def test_wo143b1_f1_resolved_settlements_are_discarded_when_the_budget_expires(tmp_path, monkeypatch):
+    """The no-partial-write contract, exercised with settlements that RESOLVE.
+
+    The test above stubs every lookup as unresolved, so nothing is ever staged
+    and its "no SELL_SHADOW row" assertion cannot fail. This one resolves the
+    first few positions and only then blocks past the budget, which is the case
+    the registered contract is actually about: "abandons remaining positions
+    with a partial, fail-closed status and NO partial write" (Codex P1 wave-35).
+    """
+    cfg = _settling_cfg(tmp_path, settlement_budget_seconds=0.25)
+    _seed_due_positions(cfg, 5)
+
+    calls: list[str] = []
+
+    def _resolves_then_stalls(_cfg, position, *, timeout_seconds):
+        calls.append(str(position.get("shadow_position_id")))
+        if len(calls) > 2:
+            time.sleep(0.3)
+        return 1.0, "resolved_stub"
+
+    monkeypatch.setattr(shadow_cohort_module, "_settlement_price_for_position", _resolves_then_stalls)
+
+    summary = update_shadow_cohort_evidence(cfg, [])
+
+    assert summary["settlement_budget_expired"] is True
+    assert summary["settlement_status"] == "partial_budget_expired"
+    # BEHAVIOUR FIRST, so this fails on the partial write itself rather than on
+    # a missing counter key: without the staging fix these two are 2 and one
+    # SELL_SHADOW row respectively.
+    assert summary["settled_positions"] == 0
+    fills_path = cfg.output_root / "polymarket_shadow" / "shadow_fills.csv"
+    assert not fills_path.exists() or read_csv_rows(fills_path) == []
+    # Settlements WERE resolved this pass and were thrown away rather than
+    # written -- the distinction the counter exists to make.
+    assert summary["settlement_resolved_discarded_on_expiry"] >= 1
+    # The positions stay OPEN, so the next pass can settle them properly.
+    positions = read_csv_rows(cfg.output_root / "polymarket_shadow" / "shadow_positions.csv")
+    assert positions, "positions must still be on disk"
+    assert all(str(row.get("status")).lower() == "open" for row in positions)
+    # And they keep their place at the head of the rotation: a discarded
+    # settlement whose checkpoint had advanced would sort LAST next pass,
+    # starving the position it just resolved.
+    checkpoints = read_json(
+        cfg.governance_root / "shadow_settlement_checkpoints.json"
+    ) or {}
+    recorded = set((checkpoints.get("last_settlement_check_utc") or {}))
+    assert not (recorded & set(calls[:2])), (
+        "a discarded settlement must not advance its own rotation checkpoint"
+    )
+
+
+def test_wo143b1_f1_abandoned_positions_are_not_closed_at_a_stale_mark(tmp_path, monkeypatch):
+    """The rotation only helps ACROSS passes; this is the within-pass hole.
+
+    An abandoned position already past maximum_holding_hours was closed as
+    shadow_time_exit at its stale mark immediately after the settlement pass
+    gave up on it -- before the oldest-first rotation could ever prioritise it,
+    and recreating exactly the P&L distortion _settlement_check_sort_key's
+    docstring says that rotation exists to prevent (Codex P1 wave-35).
+
+    Note the holding limit: the existing rotation test sets it to ten million
+    hours, which is what hid this. Here it is deliberately SHORT, so every due
+    position is also past it.
+    """
+    cfg = _settling_cfg(
+        tmp_path,
+        settlement_budget_seconds=0.25,
+        # The seeded positions opened 2026-07-01 and are far past this.
+        maximum_holding_hours=1,
+    )
+    _seed_due_positions(cfg, 5)
+
+    calls: list[str] = []
+
+    def _stalls(_cfg, position, *, timeout_seconds):
+        calls.append(str(position.get("shadow_position_id")))
+        time.sleep(0.2)
+        return None, "unresolved_stub"
+
+    monkeypatch.setattr(shadow_cohort_module, "_settlement_price_for_position", _stalls)
+
+    summary = update_shadow_cohort_evidence(cfg, [])
+
+    assert summary["settlement_budget_expired"] is True
+
+    rows = {
+        str(row.get("shadow_position_id")): row
+        for row in read_csv_rows(cfg.output_root / "polymarket_shadow" / "shadow_positions.csv")
+    }
+    # Derived from what the provider was ASKED, not from the new summary field,
+    # so this assertion fails on the behaviour rather than on a missing key.
+    abandoned = set(rows) - set(calls)
+    assert abandoned, "the budget must have stopped the pass short of every position"
+    for position_id in abandoned:
+        row = rows[position_id]
+        assert str(row.get("status")).lower() == "open", (
+            f"{position_id} was abandoned by settlement and must stay open for the next pass"
+        )
+        assert str(row.get("close_reason") or "") != "shadow_time_exit"
+    # No SELL_SHADOW fill was manufactured for them at a stale mark.
+    fills_path = cfg.output_root / "polymarket_shadow" / "shadow_fills.csv"
+    fill_ids = {str(row.get("shadow_position_id")) for row in read_csv_rows(fills_path)} if fills_path.exists() else set()
+    assert not (fill_ids & abandoned)
+    # And the pass NAMES them, so the caller can hold them rather than
+    # re-deriving the set from what it happened to observe.
+    assert set(summary["settlement_abandoned_ids"]) == abandoned
+
+
+def test_wo143b1_f1_reclaim_does_not_delete_a_heartbeat_written_mid_reclaim(tmp_path):
+    """The reclaim decision must be re-verified against the file it deletes.
+
+    The decision is made from a payload read before the unlink, and a live
+    holder can heartbeat in between. A plain unlink then deletes a FRESH
+    heartbeat while the holder's os.replace reports success -- so the contender
+    acquires, the holder believes it still holds, and both publish the shadow
+    ledgers concurrently (Codex P1 wave-35).
+
+    The interleaving is forced deterministically by beating from inside the
+    read that the reclaim decision is made from.
+    """
+    from polymarket_predictive_engine import runtime_lock as runtime_lock_module
+
+    cfg = _settling_cfg(tmp_path)
+    held = runtime_lock_module.acquire_runtime_lock(cfg, "shadow_cohort", stale_after_seconds=0.01)
+    assert held.acquired
+    path = held.path
+
+    time.sleep(0.05)  # the lock is now past its stale window
+
+    real_read_json = runtime_lock_module.read_json
+    beaten = {"done": False}
+
+    def _beat_during_the_decision(target, *args, **kwargs):
+        payload = real_read_json(target, *args, **kwargs)
+        if not beaten["done"] and Path(target) == path:
+            beaten["done"] = True
+            # The holder makes progress and re-stamps AFTER the contender has
+            # read the stale payload but BEFORE it acts on that decision.
+            fresh = dict(held.payload)
+            fresh["heartbeat_at_utc"] = now_utc()
+            fresh["heartbeat_count"] = 1
+            runtime_lock_module._rewrite_lock_payload(path, fresh)
+        return payload
+
+    runtime_lock_module.read_json = _beat_during_the_decision
+    try:
+        contender = runtime_lock_module.acquire_runtime_lock(
+            cfg, "shadow_cohort", stale_after_seconds=0.01
+        )
+    finally:
+        runtime_lock_module.read_json = real_read_json
+
+    assert beaten["done"], "the test must actually have forced the interleaving"
+    assert contender.acquired is False, (
+        "a holder that heartbeated mid-reclaim still holds the lock"
+    )
+    # The holder's fresh heartbeat survives on disk -- it was not deleted.
+    surviving = real_read_json(path, default={}) or {}
+    assert surviving.get("heartbeat_count") == 1
+    # No reclaim temp file is left behind.
+    assert not list(path.parent.glob(f".{path.name}.*.reclaim"))
+
+
 def test_wo143b1_f1_lock_is_released_after_a_budget_expired_pass(tmp_path, monkeypatch):
     # F1 test (8): a budget expiry is a normal, bounded outcome -- it must not
     # leave the shadow_cohort lock held.

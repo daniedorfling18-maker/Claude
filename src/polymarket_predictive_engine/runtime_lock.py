@@ -355,10 +355,52 @@ def acquire_runtime_lock(
             if mtime_age > stale_after_seconds:
                 stale_reason = f"corrupt_payload_mtime_age_seconds>{stale_after_seconds:g}"
         if stale_reason:
+            # RENAME-TO-CLAIM, then VERIFY (Codex P1 wave-35 on #416). A plain
+            # unlink here is a time-of-check/time-of-use hole: the decision above
+            # was made from a payload read at :339, and a live holder can
+            # heartbeat between that read and this line. The unlink then deletes
+            # a FRESH heartbeat, the holder's os.replace reports success, the
+            # contender acquires, and both publish the shadow ledgers
+            # concurrently -- the precise failure this lock exists to prevent.
+            #
+            # os.rename is atomic, so exactly one of the two operations wins.
+            # Whichever it is, the file we end up holding tells us: if it still
+            # carries the payload we judged stale, our reclaim is sound; if it
+            # carries anything else, the holder beat us and proved itself alive.
+            claim = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.reclaim")
+            claimed = True
             try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
+                os.rename(str(path), str(claim))
+            except (FileNotFoundError, OSError):
+                claimed = False
+            if claimed:
+                captured = read_json(claim, default={}) or {}
+                captured_payload = captured if isinstance(captured, dict) else {}
+                if captured_payload != existing_payload:
+                    # The holder heartbeated between the read and the rename.
+                    # Put its evidence back and do NOT reclaim. os.link rather
+                    # than os.rename, because the holder may already have
+                    # republished at the original path and a rename would
+                    # silently overwrite that newer file.
+                    try:
+                        os.link(str(claim), str(path))
+                    except (FileExistsError, OSError):
+                        pass
+                    try:
+                        os.unlink(str(claim))
+                    except FileNotFoundError:
+                        pass
+                    return RuntimeLockResult(
+                        name=name,
+                        path=path,
+                        acquired=False,
+                        payload=payload,
+                        existing_payload=captured_payload,
+                    )
+                try:
+                    os.unlink(str(claim))
+                except FileNotFoundError:
+                    pass
             try:
                 _try_acquire(path, payload)
                 return RuntimeLockResult(

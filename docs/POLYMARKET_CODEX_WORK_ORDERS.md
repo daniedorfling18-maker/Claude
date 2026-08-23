@@ -2546,6 +2546,42 @@ REGISTERED SAMPLE RULES, each fail-closed and each disclosed per wallet rather t
    a reason: the consumer must not depend on a producer's incidental formatting habit, and the
    unparseable-stamp half of the same defect was reachable from any corrupt row.
 
+24. AN UNRESOLVABLE TOKEN IS UNATTRIBUTABLE IN PRACTICE [Codex P1 wave-44]. Rule 13j introduced the
+   token tier on the stated premise that "requote_alerts keys on asset_id as well, so a blank market
+   still reaches the quote that needs blocking". BOTH HALVES OF THAT PREMISE ARE FALSE in the
+   consumers as written, and this was verified in them rather than assumed:
+     requote_alerts.py:502-504 builds its lookup as
+       `next((toxicity[key] for key in (condition_id, token_id) if key and key in toxicity), None)`
+       — condition FIRST, and `next` stops at the first hit. A binary condition has TWO token ids
+       and this table stores only ONE per market row (`rows[0]["asset_id"]`), so a rejection naming
+       the other token yields a blank-market veto that a CLEAN condition row silently shadows.
+     stage_ticket_eligibility.py:120-123 keys `toxicity_rows` on `market` alone and drops
+       blank-market rows outright, so it never sees a token-only veto AT ALL.
+   So the token tier protects only the case where the token's condition has no row in the table,
+   and this module cannot tell that case from the shadowed one — not knowing the token's condition
+   is exactly what made it an orphan. An orphan therefore falls back to the tier that needs no
+   addressing at all: it sets the GLOBAL TAINT, as a rejection naming nothing already does. The
+   synthetic token row is still emitted, because it does work in the unshadowed case.
+   THE EXTENSION IS SMALL AND ITS COST IS BOUNDED: an orphan requires a print whose `market` is
+   blank AND whose token nothing in this run or the prior table pairs to a market — the same order
+   of rarity as the fully unattributable rejection that already triggers the global taint. Rule
+   13j's RESOLVABLE path is untouched and pinned by its own regression test, since escalating that
+   too would turn every token-named rejection into a universe-wide veto and delete the scoping 13j
+   exists to provide.
+   TEST NOTE, registered because a two-market fixture proves nothing here: `_percentiles` awards 1.0
+   to whichever market ranks top, so on two markets the second one blocks in the CLEAN baseline. The
+   fixtures use a twelve-market imbalance ladder, and the discriminator is `incomplete_sample` on a
+   LOW-RANK market — out of reach of rule 22's bound from a single rejection, and reachable by rule
+   13f only when the taint is global.
+25. ONE RUN, ONE CLOCK [Codex P2 wave-44]. `_top_wallets` called `now_utc()` again instead of using
+   the `generated_at` the build had already stamped. A build starting just before the leaderboard
+   summary crosses the registered 25-hour ceiling and reaching that function after it published
+   `generated_at_utc` at a moment when membership WAS settled, while emitting `unknown` /
+   `leaderboard_unavailable` — so an auditor re-deriving the verdict from the artifact's own stated
+   run time gets the OPPOSITE answer, and the artifact is not reproducible from itself. The build
+   clock is passed in as a KEYWORD-ONLY parameter WITH NO DEFAULT, deliberately: a default is how a
+   later caller silently reintroduces the second clock.
+
 22. THE PERCENTILE IS UNVERIFIABLE IN BOTH DIRECTIONS [Codex P1 wave-43]. Rules 13c and 13m protect
    a market whose PRIOR row already carried a percentile veto, on the reasoning that a reordering
    can strip a veto from a market that lost nothing. The reordering cuts the OTHER way with equal
@@ -2695,9 +2731,9 @@ the matrix without the total), and even when the count was right the MAPPING was
 behaviour was missing from the list while another entry claimed a standalone test that did not exist.
 This list is GENERATED from the test file and verified by diffing the names in both directions, so it
 cannot omit a real test or invent one that does not exist. Anyone changing it should regenerate
-rather than hand-edit. All 94 live in
-tests/polymarket_predictive_engine/test_flow_toxicity.py. That is 94 test FUNCTIONS; pytest collects
-109 cases, because THREE tests are parametrised: rule 15's two S4 sweeps (7 offsets and 5 clock
+rather than hand-edit. All 97 live in
+tests/polymarket_predictive_engine/test_flow_toxicity.py. That is 97 test FUNCTIONS; pytest collects
+112 cases, because THREE tests are parametrised: rule 15's two S4 sweeps (7 offsets and 5 clock
 shifts) and rule 0b's negative-epoch contract (6 forms), for 15 extra cases. An
 auditor comparing this count to pytest output should expect the difference [noted at wave-26 so the
 mismatch is not later read as the drift this generated list exists to prevent].
@@ -2890,6 +2926,12 @@ mismatch is not later read as the drift this generated list exists to prevent].
     Rule 8e: `"complete": null` is PRESENT-and-malformed, not absent, so it fails closed and on_current_leaderboard is `unknown` for a wallet in the snapshot and one outside it alike.
 94. `test_the_latest_snapshot_is_chosen_by_instant_not_by_string_order`
     Rule 23: two runs one day apart in instant terms, the earlier written with a +02:00 offset so it sorts LAST as text; the wallet from the genuinely newer run is the one reported as currently ranked.
+95. `test_an_unresolvable_token_taints_every_market`
+    Rule 24: a blank-market print naming a token nothing pairs to a market still emits its synthetic veto AND taints every market; `incomplete_sample` on a low-rank market is the discriminator.
+96. `test_a_resolvable_token_does_not_taint_unrelated_markets`
+    Rule 24 over-correction guard: a token the table CAN pair with a market stays scoped to that market, so rule 13j's attribution is not collapsed into a universe-wide veto.
+97. `test_leaderboard_freshness_uses_the_build_clock_not_a_second_reading`
+    Rule 25: the clock is advanced 36 hours BETWEEN the build's stamp and the freshness read; the published membership must be the one the stamped run time implies.
 
 ## FAILURE PATH
 

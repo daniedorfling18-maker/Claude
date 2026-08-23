@@ -178,7 +178,20 @@ def _iter_csv_any(path: Path) -> Iterator[dict[str, str]]:
             yield {str(k): "" if v is None else str(v) for k, v in row.items()}
 
 
-def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], set[str], bool]:
+def _top_wallets(
+    cfg: EngineConfig, limit: int = 100, *, run_clock_utc: str
+) -> tuple[set[str], set[str], bool]:
+    """`run_clock_utc` is the BUILD's clock, not this function's (Codex P2 wave-44).
+
+    Keyword-only and with NO default, deliberately: reading the clock again
+    here made the freshness verdict unreproducible from the artifact that
+    reports it. A build starting just before the leaderboard summary crosses
+    the 25-hour ceiling and reaching this function after it stamped
+    `generated_at_utc` at a moment when membership WAS settled, while emitting
+    `unknown` / `leaderboard_unavailable` -- so an auditor re-deriving the
+    verdict from the artifact's own stated run time gets the opposite answer.
+    A default would let a future caller reintroduce the second clock silently.
+    """
     # The leaderboard has a producer too, and its retained rows survive a failed
     # refresh (wallet_intelligence_collector.py:366-372 keeps the old history
     # and records the error in its summary). Treating any nonempty file as
@@ -371,7 +384,7 @@ def _top_wallets(cfg: EngineConfig, limit: int = 100) -> tuple[set[str], set[str
     # both steps of the SAME harvest process on the SAME host
     # (training_harvest.py:88), so there is no cross-host clock to reconcile and
     # a summary stamped in the future is malformed, not merely early.
-    now = parse_timestamp(now_utc())
+    now = parse_timestamp(run_clock_utc)
     age_seconds = (now - summary_stamp).total_seconds() if (now and summary_stamp) else None
     producer_stale = (
         age_seconds is None
@@ -1562,7 +1575,7 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
         trade_ledger_present,
     ) = _trade_rows(cfg)
     trade_corpus_status = _trade_corpus_status(cfg)
-    tier_wallets, current_wallets, missing_wallet_data = _top_wallets(cfg)
+    tier_wallets, current_wallets, missing_wallet_data = _top_wallets(cfg, run_clock_utc=generated_at)
     by_market: dict[str, list[dict[str, Any]]] = {}
     for trade in trades:
         by_market.setdefault(trade["market"], []).append(trade)
@@ -1887,6 +1900,39 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
                     rejected_markets.add(resolved)
                 else:
                     orphan_tokens.add(token)
+            # AN UNRESOLVABLE TOKEN IS UNATTRIBUTABLE IN PRACTICE (Codex P1
+            # wave-44), so it taints everything exactly as a rejection naming
+            # nothing does. Rule 13j introduced the token tier on the premise
+            # that "requote_alerts keys on asset_id as well, so a blank market
+            # still reaches the quote that needs blocking". That premise is
+            # FALSE in two ways, both verified in the consumers:
+            #
+            #   requote_alerts.py:502-504 builds its lookup as
+            #     `next((toxicity[key] for key in (condition_id, token_id) ...))`
+            #     -- condition_id FIRST, and `next` stops at the first hit. A
+            #     binary condition has two token ids and the table stores only
+            #     ONE per market row (`rows[0]["asset_id"]`), so a rejection
+            #     naming the OTHER token produces a blank-market veto that a
+            #     clean condition row silently shadows.
+            #   stage_ticket_eligibility.py:120-123 keys `toxicity_rows` on
+            #     `market` alone and drops blank-market rows outright, so it
+            #     never sees a token-only veto AT ALL.
+            #
+            # The synthetic row is still emitted below, because it does work in
+            # the one case that remains -- a token whose condition has no row in
+            # the table, where requote_alerts falls through to the token key.
+            # But since this module cannot tell that case from the shadowed one
+            # (it does not know the token's condition; that is what made it an
+            # orphan), it must assume the veto is invisible and fall back to the
+            # tier that needs no addressing at all.
+            #
+            # THE EXTENSION IS SMALL AND THE COST IS BOUNDED: an orphan requires
+            # a print whose market is blank AND whose token nothing else in this
+            # run or the prior table pairs to a market, which is the same order
+            # of rarity as the fully unattributable rejection that already
+            # triggers this. Reassignment rather than a second flag so
+            # `_lost_rows`, which closes over this name, sees the widened taint.
+            taint_all = taint_all or bool(orphan_tokens)
             # Token-only prior rows first: they have no market to match against
             # the fresh table, so the only questions are whether this run
             # re-created them and whether their absence is verifiable.

@@ -3724,3 +3724,157 @@ def test_the_latest_snapshot_is_chosen_by_instant_not_by_string_order(tmp_path):
         "publishes membership from the stale snapshot"
     )
     assert rows["faded"]["on_current_leaderboard"] == "False"
+
+
+def _ladder_universe(cfg, extra=()):
+    """Twelve markets on a rising imbalance ladder, plus any extra rows.
+
+    Twelve, not two: `_percentiles` awards 1.0 to whichever market ranks top,
+    so on a two-market corpus the second market blocks in the CLEAN baseline
+    and no fixture built on it can distinguish one rule from another. The
+    ladder also keeps rule 22's worst-case bound surgical, so a block on a
+    low-rank market is attributable to the taint rather than to the bound.
+    """
+    tokens = [f"tok-{index}" for index in range(12)]
+    for token in tokens:
+        _features(cfg, token, [(310, 0.70)])
+    rows = []
+    for index, token in enumerate(tokens):
+        rows.extend(_flow(f"0x{index:02d}", token, f"w{index}", buys=4 + index, sells=4))
+    rows.extend(extra)
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        rows,
+        fieldnames=_FLOW_FIELDS,
+    )
+
+
+def test_an_unresolvable_token_taints_every_market(tmp_path):
+    """A token-only veto neither consumer can see is not attribution (Codex P1 wave-44).
+
+    Rule 13j introduced the token tier on the premise that requote_alerts keys
+    on asset_id as well, so a blank-market veto still reaches the quote. Both
+    halves of that are false in the consumers as written:
+    `requote_alerts.py:502-504` builds its lookup as
+    `next((toxicity[key] for key in (condition_id, token_id) ...))` -- condition
+    FIRST, and `next` stops at the first hit, so a clean condition row shadows
+    the token row; and `stage_ticket_eligibility.py:120-123` keys on `market`
+    alone and drops blank-market rows outright, so it never sees one at all.
+
+    A binary condition has two token ids and this table stores only one per
+    market row, so a rejection naming the other token is unresolvable -- and
+    this module cannot tell a shadowed veto from a visible one, because not
+    knowing the token's condition is what made it an orphan.
+
+    `incomplete_sample` on a LOW-RANK market is the discriminator: rule 22's
+    bound cannot reach that market from one rejection, and rule 13f only
+    reaches it when the taint is global.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    _ladder_universe(cfg)
+    build_flow_toxicity(cfg)
+    before = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+    assert before["0x01"]["toxic_blocked"] == "False"
+
+    # A malformed print with NO market, naming a token nothing pairs to one.
+    _ladder_universe(cfg, extra=[
+        {"market": "", "asset_id": "tok-orphan", "wallet": "w0",
+         "side": "BUY", "price": 1.5, "size": 100, "timestamp": 99},
+    ])
+    summary = build_flow_toxicity(cfg)
+    rows = read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")
+    by_token = {row["asset_id"]: row for row in rows}
+    by_market = {row["market"]: row for row in rows if row["market"]}
+
+    assert summary["malformed_trade_rows_excluded"] == 1
+    # The synthetic token row is still emitted -- it does work where the token's
+    # condition has no row at all and requote_alerts falls through to the token key.
+    assert by_token["tok-orphan"]["toxic_blocked"] == "True"
+    assert by_token["tok-orphan"]["market"] == ""
+    # And because it may equally be shadowed, the rejection taints every market.
+    assert "incomplete_sample" in by_market["0x01"]["toxicity_block_reasons"], (
+        "an unresolvable token names no condition, so no market's coverage is "
+        "verifiable -- and a low-rank market is out of reach of rule 22's bound"
+    )
+    assert by_market["0x01"]["toxic_blocked"] == "True"
+
+
+def test_a_resolvable_token_does_not_taint_unrelated_markets(tmp_path):
+    """The over-correction guard: rule 13j's resolvable path is unchanged.
+
+    A token the table CAN pair with a market is attributable, and only that
+    market is affected. If the wave-44 escalation reached this case it would
+    turn every token-named rejection into a universe-wide veto, which is the
+    scoping rule 13j exists to provide.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    # Blank market, but tok-0 IS paired with 0x00 by the surviving rows.
+    _ladder_universe(cfg, extra=[
+        {"market": "", "asset_id": "tok-0", "wallet": "w0",
+         "side": "BUY", "price": 1.5, "size": 100, "timestamp": 99},
+    ])
+
+    summary = build_flow_toxicity(cfg)
+    by_market = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv") if row["market"]}
+
+    assert summary["malformed_trade_rows_excluded"] == 1
+    assert "incomplete_sample" in by_market["0x00"]["toxicity_block_reasons"]
+    assert by_market["0x01"]["toxic_blocked"] == "False", (
+        "a resolvable token names its market; unrelated markets must age out normally"
+    )
+    assert by_market["0x01"]["toxicity_block_reasons"] == ""
+
+
+def test_leaderboard_freshness_uses_the_build_clock_not_a_second_reading(tmp_path, monkeypatch):
+    """One run, one clock (Codex P2 wave-44).
+
+    A build starting just before the leaderboard summary crosses the 25-hour
+    ceiling and reaching `_top_wallets` after it stamped `generated_at_utc` at
+    a moment when membership WAS settled, while emitting `unknown` -- so an
+    auditor re-deriving the verdict from the artifact's own stated run time
+    gets the opposite answer.
+
+    The clock is advanced past the ceiling BETWEEN the build's stamp and the
+    freshness read, which is exactly the straddle.
+    """
+    cfg = _config(tmp_path)
+    stamp = now_utc()
+    _leaderboard(cfg, stamp=stamp)
+    _trade_summary(cfg)
+    _features(cfg, "tok-a", [(310, 0.70)])
+    write_csv(
+        cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv",
+        [{"market": "0xa", "asset_id": "tok-a", "wallet": "smart1", "side": "BUY",
+          "price": 0.5, "size": 100, "timestamp": 0}],
+        fieldnames=["market", "asset_id", "wallet", "side", "price", "size", "timestamp"],
+    )
+
+    readings = {"count": 0}
+    real_now = flow_toxicity.now_utc
+
+    def _clock():
+        readings["count"] += 1
+        if readings["count"] == 1:
+            # The build's own stamp: membership is comfortably settled here.
+            return stamp
+        # Every later reading is a day and a half on, well past the ceiling.
+        return (
+            datetime.fromisoformat(stamp.replace("Z", "+00:00")) + timedelta(hours=36)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    monkeypatch.setattr(flow_toxicity, "now_utc", _clock)
+    build_flow_toxicity(cfg)
+    monkeypatch.setattr(flow_toxicity, "now_utc", real_now)
+
+    rows = {row["wallet"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity_wallets.csv")}
+    summary = read_json(cfg.output_root / "maker_carry" / "flow_toxicity_summary.json")
+
+    assert summary["generated_at_utc"] == stamp
+    assert rows["smart1"]["on_current_leaderboard"] == "True", (
+        "the artifact stamps a run time at which the producer was fresh, so the "
+        "membership verdict it publishes must be the one that run time implies"
+    )

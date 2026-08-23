@@ -1541,6 +1541,71 @@ def _build_flow_toxicity_locked(cfg: EngineConfig) -> dict[str, Any]:
         # The failure is disclosed on the wallet artifact and in the summary,
         # which are the honest places for it.
         summary["market_axis_preserved"] = True
+        # PRESERVING IS NOT ENOUGH ON THIS PATH EITHER (Codex P1 wave-34).
+        # Rules 13f-13j were all built in the `else` branch, so when EVERY row
+        # is rejected none of them ran: a previously clean market kept
+        # toxic_blocked=false, and an attributable market seen for the first
+        # time got no row at all. requote_alerts.py:502-535 raises nothing in
+        # either case, even though the current sample is WHOLLY unmeasurable --
+        # which is the strongest case for blocking there is, and the one path
+        # that skipped it.
+        #
+        # The all-rejected corpus taints everything by construction: nothing
+        # survived, so no market's coverage is verified. Every retained row is
+        # converted, and every attributable market with no row at all gets a
+        # synthetic one, on exactly the rule 13g terms.
+        preserved_rows = read_csv_rows(path)
+        preserved_markets = {
+            str(row.get("market") or "") for row in preserved_rows if str(row.get("market") or "")
+        }
+        converted = 0
+        for row in preserved_rows:
+            if str(row.get("toxic_blocked") or "").strip().lower() == "true":
+                continue
+            row["toxic_blocked"] = True
+            reasons = [r for r in str(row.get("toxicity_block_reasons") or "").split(";") if r]
+            reasons.append("unmeasurable_sample")
+            row["toxicity_block_reasons"] = ";".join(reasons)
+            converted += 1
+        synthetic = [
+            *((market, "") for market in sorted(rejected_markets - preserved_markets)),
+            *(
+                ("", token)
+                for token in sorted(
+                    rejected_tokens
+                    - {str(row.get("asset_id") or "") for row in preserved_rows}
+                )
+                if token
+            ),
+        ]
+        for market, asset_id in synthetic:
+            preserved_rows.append(
+                {
+                    "generated_at_utc": generated_at,
+                    "market": market,
+                    "asset_id": asset_id,
+                    "toxicity_score": 0.0,
+                    "vpin_raw": 0.0,
+                    "volume_buckets": 0,
+                    "trades_seen": 0,
+                    "smart_fill_count": 0,
+                    "crowd_fill_count": 0,
+                    "smart_fill_markout": None,
+                    "crowd_fill_markout": None,
+                    "missing_price_points": 0,
+                    "raw_imbalance_block": False,
+                    "percentile_block": False,
+                    "markout_coverage_ratio": 0.0,
+                    "toxic_blocked": True,
+                    "toxicity_block_reasons": "wholly_rejected_sample",
+                }
+            )
+        if converted:
+            summary["market_blocks_on_carried_clean_rows"] = converted
+        if synthetic:
+            summary["market_blocks_on_unmeasurable_sample"] = len(synthetic)
+        if converted or synthetic:
+            write_csv(path, preserved_rows, fieldnames=TOXICITY_FIELDS)
     else:
         # PARTIAL exclusions clear vetoes too (Codex P1 wave-25). The branch
         # above catches only the all-rejected corpus. When SOME rows survive,

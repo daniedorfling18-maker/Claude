@@ -71,7 +71,7 @@ def _trade_summary(cfg, status: str = "ok", *, only: str | None = None) -> None:
     ]
     for name in names:
         row_status = status if (only is None or name == only) else "ok"
-        payload = {"status": row_status, "generated_at_utc": "2026-08-22T00:00:00Z"}
+        payload = {"status": row_status, "generated_at_utc": now_utc()}
         # The two collectors ALWAYS publish markets_polled in production
         # (trade_print_collector.py:373, :487); backfill never does. A fixture
         # that omits it is not a healthy summary.
@@ -1184,8 +1184,8 @@ def test_an_unusable_leaderboard_snapshot_is_unavailable_not_empty(tmp_path):
         cfg.output_root / "wallet_intelligence" / "leaderboard_history.csv",
         [
             {
-                "snapshot_date": "2026-08-22",
-                "snapshot_at_utc": "2026-08-22T00:00:00Z",
+                "snapshot_date": now_utc()[:10],
+                "snapshot_at_utc": now_utc(),
                 "wallet": "",
                 "rank": "1",
             }
@@ -1194,7 +1194,7 @@ def test_an_unusable_leaderboard_snapshot_is_unavailable_not_empty(tmp_path):
     )
     write_json(
         cfg.output_root / "wallet_intelligence" / "wallet_intelligence_summary.json",
-        {"status": "ok", "generated_at_utc": "2026-08-22T00:00:00Z"},
+        {"status": "ok", "generated_at_utc": now_utc()},
     )
     _trade_summary(cfg)
     _features(cfg, "tok-a", [(310, 0.70)])
@@ -2250,6 +2250,58 @@ def test_a_snapshot_shorter_than_its_own_request_cannot_settle_membership(tmp_pa
     assert rows["smart1"]["on_current_leaderboard"] == "unknown"
 
 
+def test_an_all_rejected_ledger_blocks_every_preserved_market(tmp_path):
+    """Preserving is not enough on the all-rejected path either (wave-34).
+
+    Rules 13f-13j were all built in the branch that runs when SOME rows
+    survive. When every row is rejected the code merely preserved the old
+    table, so a previously clean market kept toxic_blocked=false and an
+    attributable market seen for the first time got no row at all --
+    requote_alerts raises nothing in either case, on the one path where the
+    sample is WHOLLY unmeasurable.
+    """
+    cfg = _config(tmp_path)
+    _leaderboard(cfg)
+    _trade_summary(cfg)
+    for token in ("tok-a", "tok-b"):
+        _features(cfg, token, [(310, 0.70)])
+    prints_path = cfg.output_root / "polymarket_trade_prints" / "trade_prints.csv"
+    write_csv(
+        prints_path,
+        [*_flow("0xa", "tok-a", "w1", buys=6, sells=2), *_flow("0xc", "tok-c", "w3", buys=4, sells=4)],
+        fieldnames=_FLOW_FIELDS,
+    )
+    build_flow_toxicity(cfg)
+    before = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+    assert before["0xc"]["toxic_blocked"] == "False"
+
+    # EVERY row of the next refresh is rejected, including rows for a market
+    # (0xb) that has never been seen before.
+    write_csv(
+        prints_path,
+        [
+            *[{**row, "price": 1.5} for row in _flow("0xa", "tok-a", "w1", buys=6, sells=2)],
+            *[{**row, "price": 1.5} for row in _flow("0xb", "tok-b", "w2", buys=4, sells=0)],
+        ],
+        fieldnames=_FLOW_FIELDS,
+    )
+    summary = build_flow_toxicity(cfg)
+    after = {row["market"]: row for row in read_csv_rows(cfg.output_root / "maker_carry" / "flow_toxicity.csv")}
+
+    assert summary["status"] == "malformed_trade_corpus"
+    assert summary["market_axis_preserved"] is True
+    # Preserved rows that read clean are converted -- nothing survived, so no
+    # market's coverage is verified.
+    assert summary["market_blocks_on_carried_clean_rows"] >= 1
+    assert after["0xc"]["toxic_blocked"] == "True"
+    assert "unmeasurable_sample" in after["0xc"]["toxicity_block_reasons"]
+    # And the never-before-seen market gets a synthetic veto rather than no row.
+    assert summary["market_blocks_on_unmeasurable_sample"] == 1
+    assert "0xb" in after
+    assert after["0xb"]["toxic_blocked"] == "True"
+    assert after["0xb"]["toxicity_block_reasons"] == "wholly_rejected_sample"
+
+
 def test_a_wholly_rejected_new_market_still_gets_a_veto(tmp_path):
     """Nothing to carry and nothing to correct (Codex P1 wave-32).
 
@@ -2672,12 +2724,21 @@ def test_a_leaderboard_newer_than_its_summary_cannot_settle_membership(tmp_path)
 
     # Now the collector has published the NEXT cycle's rows but not yet its
     # summary. Same wallet, same status, only the stamps disagree.
+    # DERIVED from the run clock, not a literal. `_leaderboard` stamps the
+    # summary at now_utc(), so a hard-coded "next day" stamp stops being newer
+    # than the summary the moment the real date reaches it -- which is exactly
+    # what happened on 2026-08-23, when this test began passing its baseline and
+    # failing its premise. The rows must be newer than the summary BY
+    # CONSTRUCTION.
+    newer = (
+        datetime.now(timezone.utc) + timedelta(hours=1)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
     write_csv(
         cfg.output_root / "wallet_intelligence" / "leaderboard_history.csv",
         [
             {
-                "snapshot_date": "2026-08-23",
-                "snapshot_at_utc": "2026-08-23T00:00:00Z",
+                "snapshot_date": newer[:10],
+                "snapshot_at_utc": newer,
                 "wallet": "smart1",
                 "rank": "1",
             }

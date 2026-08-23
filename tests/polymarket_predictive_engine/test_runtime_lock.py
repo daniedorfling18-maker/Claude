@@ -368,3 +368,41 @@ def test_two_acquisitions_in_one_process_have_distinct_fencing_tokens(tmp_path: 
     runtime_lock.release_runtime_lock(first)
     assert second.path.exists(), "the stale holder deleted the live lock on its way out"
     runtime_lock.release_runtime_lock(second)
+
+
+def test_a_lock_taken_between_the_check_and_the_entry_beat_aborts_the_section(tmp_path: Path) -> None:
+    """The entry beat's verdict is acted on, not only recorded (Codex P1 wave-42c).
+
+    `critical_section` checks ownership and then writes a cap-exempt entry
+    beat: two separate filesystem reads, so a contender can take the lock
+    between them. `_write_beat` detects the foreign fencing token, latches
+    `ownership_lost` and RETURNS -- silently, because its own contract is "do
+    not stamp over a new holder", not "stop the caller". Without re-reading
+    that verdict the section opened anyway and the stale writer published both
+    ledgers under the contender's lock.
+    """
+    cfg = _cfg(tmp_path)
+    lock, heartbeat = _held_heartbeat(cfg)
+
+    calls = {"count": 0}
+    real_read = runtime_lock.read_json
+
+    def _steal_after_the_first_check(path, default=None):
+        payload = real_read(path, default=default)
+        calls["count"] += 1
+        if calls["count"] == 1 and isinstance(payload, dict):
+            # The first probe sees the lock as ours; a contender takes it
+            # immediately afterwards, before the entry beat reads it again.
+            stolen = dict(payload)
+            stolen["fencing_token"] = "the-contender"
+            runtime_lock._rewrite_lock_payload(lock.path, stolen)
+        return payload
+
+    runtime_lock.read_json = _steal_after_the_first_check
+    try:
+        with pytest.raises(runtime_lock.RuntimeLockOwnershipLost):
+            with heartbeat.critical_section():
+                raise AssertionError("the section must not open once the entry beat says we lost it")
+    finally:
+        runtime_lock.read_json = real_read
+    assert heartbeat.ownership_lost is True

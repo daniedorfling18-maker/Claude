@@ -1862,3 +1862,125 @@ def test_wo143b1_trailing_publication_stops_once_the_lock_is_lost(tmp_path, monk
         assert read_json(path)["written_by"] == "the-contender", (
             f"{path.name} was overwritten from the losing writer's older snapshot"
         )
+
+
+def test_wo143b1_a_future_settlement_checkpoint_is_treated_as_never_checked(tmp_path, monkeypatch):
+    """A future stamp starves exactly as an unparseable one does (Codex P2 wave-42c).
+
+    The wave-42 fix dropped values that would not PARSE and stopped there. A
+    perfectly parseable timestamp after the run clock -- a wall-clock
+    correction, a corrupted sidecar -- sorts after every current stamp and
+    reproduces the identical starvation. Unparseable and out-of-range are the
+    same fault wearing different clothes.
+    """
+    cfg = _settling_cfg(tmp_path, settlement_max_positions_per_cycle=2)
+    _seed_due_positions(cfg, 3)
+    write_json(
+        cfg.governance_root / "shadow_settlement_checkpoints.json",
+        {
+            "generated_at_utc": "2026-08-01T00:00:00Z",
+            "last_settlement_check_utc": {
+                "pos-0": "2026-08-01T00:00:00Z",
+                "pos-1": "2026-08-01T00:00:01Z",
+                "pos-2": "2099-01-01T00:00:00Z",
+            },
+        },
+    )
+
+    checked: list[str] = []
+
+    def _recording_provider(_cfg, position, *, timeout_seconds):
+        checked.append(str(position.get("shadow_position_id")))
+        return None, "unresolved_stub"
+
+    monkeypatch.setattr(shadow_cohort_module, "_settlement_price_for_position", _recording_provider)
+    update_shadow_cohort_evidence(cfg, [])
+
+    assert checked[0] == "pos-2", (
+        "a checkpoint in the future sorted after every current stamp and starved its "
+        "position; it must fall back to NEVER CHECKED, which sorts first"
+    )
+
+
+def test_wo143b1_the_checkpoint_sidecar_is_not_published_after_the_lock_is_lost(tmp_path, monkeypatch):
+    """Fenced like every other publication (Codex P2 wave-42c).
+
+    The sidecar was written unconditionally, and BEFORE the ledger ownership
+    check that would have raised -- so a writer whose lookup stalled past the
+    stale window could replace a replacement writer's newer rotation state from
+    its own pre-stall snapshot. The lost timestamps repeatedly reprioritise
+    already-checked positions and delay the due tail: the starvation this
+    sidecar exists to prevent, caused by the sidecar's own write.
+    """
+    cfg = _settling_cfg(tmp_path)
+    _seed_due_positions(cfg, 1)
+    sidecar = cfg.governance_root / "shadow_settlement_checkpoints.json"
+    lock_path = runtime_lock.runtime_lock_path(cfg, "shadow_cohort")
+
+    def _reclaimed_during_the_lookup(_cfg, _position, *, timeout_seconds):
+        payload = json.loads(lock_path.read_text(encoding="utf-8"))
+        payload["fencing_token"] = "the-contender"
+        lock_path.write_text(json.dumps(payload), encoding="utf-8")
+        sidecar.parent.mkdir(parents=True, exist_ok=True)
+        write_json(sidecar, {"generated_at_utc": "2099-01-01T00:00:00Z", "written_by": "the-contender"})
+        return None, "unresolved_stub"
+
+    monkeypatch.setattr(
+        shadow_cohort_module, "_settlement_price_for_position", _reclaimed_during_the_lookup
+    )
+
+    with pytest.raises(runtime_lock.RuntimeLockOwnershipLost):
+        update_shadow_cohort_evidence(cfg, [])
+
+    assert read_json(sidecar)["written_by"] == "the-contender", (
+        "the losing writer replaced the newer holder's rotation state from its "
+        "pre-stall snapshot"
+    )
+
+
+def test_wo143b1_the_history_write_is_gated_before_entry_not_only_after(tmp_path, monkeypatch):
+    """A loss already latched must stop the history write too (Codex P2 wave-42c).
+
+    The wave-42 gate sat AFTER the history call, so a loss detected by the
+    ledger phase's own beat still let the daily history be rewritten from the
+    older snapshot -- overwriting a newer writer's history. The contender takes
+    the lock as the positions ledger is replaced, which is inside the critical
+    section (so entry does not raise) and before the beat that follows it.
+    """
+    cfg = _settling_cfg(tmp_path)
+    _seed_due_positions(cfg, 1)
+    monkeypatch.setattr(
+        shadow_cohort_module,
+        "_settlement_price_for_position",
+        lambda _cfg, _position, *, timeout_seconds: (1.0, "clean_settlement"),
+    )
+
+    lock_path = runtime_lock.runtime_lock_path(cfg, "shadow_cohort")
+    real_replace = shadow_cohort_module.os.replace
+
+    def _steal_as_the_ledger_is_published(src, dst):
+        result = real_replace(src, dst)
+        if str(dst).endswith("shadow_positions.csv"):
+            payload = json.loads(lock_path.read_text(encoding="utf-8"))
+            payload["fencing_token"] = "the-contender"
+            lock_path.write_text(json.dumps(payload), encoding="utf-8")
+        return result
+
+    history_calls: list[int] = []
+    real_history = shadow_cohort_module._write_shadow_pnl_history
+
+    def _counting_history(cfg_arg, summary_arg):
+        history_calls.append(1)
+        return real_history(cfg_arg, summary_arg)
+
+    monkeypatch.setattr(shadow_cohort_module.os, "replace", _steal_as_the_ledger_is_published)
+    monkeypatch.setattr(shadow_cohort_module, "_write_shadow_pnl_history", _counting_history)
+
+    summary = update_shadow_cohort_evidence(cfg, [])
+
+    assert summary["shadow_lock_heartbeat"]["heartbeat_ownership_lost"] is True
+    assert history_calls == [], (
+        "the history writer ran under a lock this pass had already lost, and would "
+        "have overwritten the newer holder's history from an older snapshot"
+    )
+    assert summary["shadow_summary_publication_abandoned_on_lost_lock"] is True

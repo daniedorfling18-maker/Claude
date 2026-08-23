@@ -264,6 +264,15 @@ class RuntimeLockHeartbeat:
     def ownership_lost(self) -> bool:
         return self._ownership_lost
 
+    def confirm_ownership(self) -> bool | None:
+        """Public probe: True still ours, False provably not, None unreadable.
+
+        Callers that publish an artifact OUTSIDE `critical_section` need the
+        same question answered, and reaching into the private probe from
+        another module is how a caller ends up depending on its internals.
+        """
+        return self._still_owns_lock()
+
     def _still_owns_lock(self) -> bool | None:
         """Whether the lock file still names US. ``None`` when unreadable.
 
@@ -460,6 +469,21 @@ class RuntimeLockHeartbeat:
         # which is exactly the case here. It re-checks ownership itself, so a
         # lost lock still cannot be stamped over.
         self._write_beat()
+        # AND THE BEAT'S OWN VERDICT IS ACTED ON (Codex P1 wave-42c). The check
+        # above and this beat are two separate filesystem reads, so a contender
+        # can take the lock between them: `_write_beat` then detects the foreign
+        # fencing token, latches `ownership_lost`, and RETURNS -- silently,
+        # because its own contract is "do not stamp over a new holder", not
+        # "stop the caller". Without this re-read the section opened anyway and
+        # the stale writer published both ledgers under the contender's lock.
+        # The same defect shape as the trailing-write gate: a check whose result
+        # was recorded and not enforced.
+        if self._ownership_lost:
+            raise RuntimeLockOwnershipLost(
+                f"runtime lock {self._lock.name!r} at {self._lock.path} was taken by another holder "
+                "between the ownership check and the critical-section entry heartbeat; refusing to "
+                "publish the artifacts it serialises."
+            )
         entered = time.monotonic()
         self._critical_section_entered_monotonic = entered
         try:

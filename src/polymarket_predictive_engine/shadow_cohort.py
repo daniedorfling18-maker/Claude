@@ -556,7 +556,7 @@ def _settlement_checkpoints_path(cfg: EngineConfig) -> Path:
     return cfg.governance_root / "shadow_settlement_checkpoints.json"
 
 
-def _read_settlement_checkpoints(cfg: EngineConfig) -> dict[str, str]:
+def _read_settlement_checkpoints(cfg: EngineConfig, *, run_clock_utc: str) -> dict[str, str]:
     """Per-position last-settlement-check times (WO-143b.1 F1 anti-starvation).
 
     Held in a governance SIDECAR rather than as a `last_settlement_check_utc`
@@ -589,10 +589,24 @@ def _read_settlement_checkpoints(cfg: EngineConfig) -> dict[str, str]:
     # Dropping is the fail-safe direction: an absent checkpoint means NEVER
     # CHECKED, which sorts FIRST, so a corrupt entry costs one early re-check
     # rather than indefinite starvation.
+    # A FUTURE stamp is not a completed check either (Codex P2 wave-42c). The
+    # wave-42 fix dropped values that would not PARSE and stopped there, but a
+    # perfectly parseable timestamp after the run clock -- a wall-clock
+    # correction, a corrupted sidecar -- sorts after every current stamp and
+    # reproduces the identical starvation: the other entries keep rotating on
+    # earlier stamps while that position stays last until the future arrives.
+    # Unparseable and out-of-range are the same fault wearing different clothes,
+    # and fixing only the first is how the second survives a fix round.
+    now = parse_timestamp(run_clock_utc)
     resolved: dict[str, str] = {}
     for key, value in checkpoints.items():
         text = str(value or "").strip()
-        if not text or parse_timestamp(text) is None:
+        if not text:
+            continue
+        parsed = parse_timestamp(text)
+        if parsed is None:
+            continue
+        if now is not None and parsed > now:
             continue
         resolved[str(key)] = text
     return resolved
@@ -666,7 +680,7 @@ def _settle_due_positions(
     # WO-143b.1 F1: oldest-checked-first, so a budget that cannot reach every
     # due position rotates through them across passes instead of starving the
     # tail forever.
-    checkpoints = _read_settlement_checkpoints(cfg)
+    checkpoints = _read_settlement_checkpoints(cfg, run_clock_utc=timestamp)
     due = [
         position
         for position in sorted(positions, key=lambda row: _settlement_check_sort_key(row, checkpoints))
@@ -823,7 +837,14 @@ def _settle_due_positions(
     # Persist the rotation state even when the budget expired -- especially
     # then, since that is exactly the pass whose unreached tail must be first
     # in line next time.
-    if checks:
+    # FENCED LIKE EVERY OTHER PUBLICATION (Codex P2 wave-42c). This sidecar was
+    # written unconditionally, and before the ledger ownership check that would
+    # have raised -- so a writer whose lookup stalled past the stale window
+    # could replace a replacement writer's newer rotation state from its own
+    # pre-stall snapshot. The lost timestamps repeatedly reprioritise
+    # already-checked positions and delay the due tail: the starvation this
+    # sidecar exists to prevent, caused by the sidecar's own write.
+    if checks and (heartbeat is None or heartbeat.confirm_ownership() is not False):
         write_json(
             _settlement_checkpoints_path(cfg),
             {
@@ -1667,8 +1688,18 @@ def _update_shadow_cohort_evidence_locked(
     # The history is written FIRST so both published summaries can carry the
     # beats it produced; the ordering is otherwise immaterial, since `summary`
     # is unchanged by the history writer.
-    _write_shadow_pnl_history(cfg, summary)
-    _progress("pnl_history_published")
+    #
+    # GATED BEFORE ENTRY, not only after (Codex P2 wave-42c). The wave-42 gate
+    # sat after this call, so a loss already latched by the ledger phase still
+    # let the history be rewritten from the older snapshot. KNOWN LIMITATION,
+    # registered rather than papered over: a loss occurring DURING this call
+    # cannot be undone -- the write has happened by the time the next beat
+    # detects it. That residue is the same unclosable check-then-write window
+    # as the reclaim thread, and the gate narrows it to the duration of one
+    # write instead of the whole trailing phase.
+    if _publication_still_permitted():
+        _write_shadow_pnl_history(cfg, summary)
+        _progress("pnl_history_published")
     _refresh_lock_diagnostics()
     summary_file = str(settings.get("summary_file", "shadow_signal_cohort_pnl.json"))
     if _publication_still_permitted():

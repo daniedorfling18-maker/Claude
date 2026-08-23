@@ -9,6 +9,13 @@ from pathlib import Path
 
 import yaml
 
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from polymarket_predictive_engine.degraded_state_watchdog import (  # noqa: E402
+    MARKED_JOBS,
+)
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -1463,18 +1470,12 @@ def test_book_pulse_disabled_stamps_intentional_skip_at_exit_zero(tmp_path):
 _WO152_SCHEDULER = ROOT / "scripts" / "run_vps_ops_scheduler.sh"
 # The watchdog owns the canonical membership; the scheduler's call sites are
 # asserted against it rather than against a hand-copied list.
-_WO152_MARKED_JOBS = frozenset(
-    {
-        "governance_refresh",
-        "clv_snapshot",
-        "locked_card_refresh",
-        "training_harvest",
-        "maker_study_intraday",
-        "trade_prints",
-        "book_pulse",
-        "ledger_anchor",
-    }
-)
+#
+# It is now actually IMPORTED. This was a duplicate frozenset directly under a
+# comment claiming it was not one, and it drifted the moment MARKED_JOBS gained
+# an entry -- so the test failed for the copy being stale rather than for the
+# scheduler being wrong, which is the opposite of what it exists to detect.
+_WO152_MARKED_JOBS = MARKED_JOBS
 
 
 def _wo152_env(out_dir: Path) -> dict:

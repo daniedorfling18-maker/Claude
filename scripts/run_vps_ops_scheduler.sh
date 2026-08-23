@@ -810,6 +810,12 @@ run_paper_cycle_job() {
   fi
   log "paper_cycle: starting"
   PAPER_CYCLE_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  # WO-152 invariant: every job carrying a freshness ceiling is marked in
+  # flight unless it is a safety lane, so the watchdog can tell "running long"
+  # from "never ran". paper_cycle has a 5h ceiling and is plainly not a safety
+  # lane. WO-143 predates WO-152, so the marker was simply never added; the
+  # registered test caught it the moment the two branches met.
+  mark_in_flight paper_cycle "$PAPER_CYCLE_STARTED_AT"
   (
     set -e
     timeout "$PAPER_CYCLE_TIMEOUT" python -m polymarket_predictive_engine.cli scheduled-paper-cycle --config "$CONFIG_PATH" --paper-source websocket

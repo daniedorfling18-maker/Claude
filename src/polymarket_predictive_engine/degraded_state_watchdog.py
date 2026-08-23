@@ -149,6 +149,7 @@ MARKED_JOBS = frozenset(
         "trade_prints",
         "book_pulse",
         "ledger_anchor",
+        "paper_cycle",
     }
 )
 UNBOUNDED_MARKED_JOBS = frozenset({"maker_study_intraday", "locked_card_refresh", "ledger_anchor"})
@@ -161,6 +162,11 @@ IN_FLIGHT_STALE_AFTER_SECONDS = {
     "training_harvest": 27600,
     "trade_prints": 3000,
     "book_pulse": 480,
+    # 2x PAPER_CYCLE_TIMEOUT, which run_vps_ops_scheduler.sh:105-114 clamps
+    # two-sided to a 1800s MAXIMUM, so the default is also the worst case. The
+    # 2x follows book_pulse, the closest precedent: a job wrapping ONE timed
+    # child gets double it, leaving room for interpreter start and teardown.
+    "paper_cycle": 3600,
 }
 # An ORPHAN bound for the 3 jobs above with no scheduler-enforced due-cadence to
 # overrun WHILE RUNNING. Each value is that job's OWN existing
@@ -184,6 +190,8 @@ DRAG_BUDGET_SECONDS = {
     "trade_prints": 300,
     "book_pulse": 600,
     "ledger_anchor": 50400,
+    # ceiling - interval, as for every entry here: 5h - 4h.
+    "paper_cycle": 3600,
 }
 
 

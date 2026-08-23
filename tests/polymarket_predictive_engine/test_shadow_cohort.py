@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 import types
 from pathlib import Path
 
@@ -1048,6 +1049,112 @@ def test_wo143b1_f1_reclaim_does_not_delete_a_heartbeat_written_mid_reclaim(tmp_
     assert surviving.get("heartbeat_count") == 1
     # No reclaim temp file is left behind.
     assert not list(path.parent.glob(f".{path.name}.*.reclaim"))
+
+
+def test_wo143b1_f1_the_position_cap_cannot_mask_a_budget_expiry(tmp_path, monkeypatch):
+    """The cap must not be reached before the budget is checked (wave-36).
+
+    With more due positions than settlement_max_positions_per_cycle, a final
+    permitted lookup that pushed elapsed time past the budget was met on the
+    next iteration by the CAP branch instead. budget_expired stayed false, the
+    staged settlements published, and the pass reported "complete" after
+    exceeding its own fail-closed budget -- bypassing the staging rollback
+    entirely rather than defeating it.
+    """
+    cfg = _settling_cfg(
+        tmp_path,
+        settlement_budget_seconds=0.25,
+        # Fewer permitted checks than due positions, so the cap is reachable.
+        settlement_max_positions_per_cycle=3,
+    )
+    _seed_due_positions(cfg, 6)
+
+    def _resolves_slowly(_cfg, position, *, timeout_seconds):
+        time.sleep(0.12)
+        return 1.0, "resolved_stub"
+
+    monkeypatch.setattr(shadow_cohort_module, "_settlement_price_for_position", _resolves_slowly)
+
+    summary = update_shadow_cohort_evidence(cfg, [])
+
+    # Three lookups at 0.12s each exceed the 0.25s budget, so the pass MUST
+    # report expiry rather than a clean cap-limited completion.
+    assert summary["settlement_budget_expired"] is True
+    assert summary["settlement_status"] == "partial_budget_expired"
+    # And the fail-closed contract holds: nothing written.
+    assert summary["settled_positions"] == 0
+    fills_path = cfg.output_root / "polymarket_shadow" / "shadow_fills.csv"
+    assert not fills_path.exists() or read_csv_rows(fills_path) == []
+
+
+def test_wo143b1_f1_a_future_heartbeat_does_not_wedge_the_lane(tmp_path):
+    """A future heartbeat is malformed evidence, not fresh evidence (wave-36).
+
+    A parseable future heartbeat_at_utc was selected as the lock's age basis
+    and its negative age clamped to zero, and _valid_lock_payload performs no
+    heartbeat sanity check -- so even a DEAD owner stayed non-stale until that
+    date arrived and every shadow update was skipped until then.
+    """
+    from polymarket_predictive_engine import runtime_lock as runtime_lock_module
+
+    cfg = _settling_cfg(tmp_path)
+    held = runtime_lock_module.acquire_runtime_lock(cfg, "shadow_cohort", stale_after_seconds=60)
+    assert held.acquired
+    # The owner is gone; only its lock file remains, long past its stale window
+    # and carrying a heartbeat from a corrupted clock. Ages are set explicitly
+    # rather than by sleeping: now_utc() has SECOND resolution, so a sub-second
+    # sleep measures an age of exactly 0.0 and the test would pass vacuously.
+    wedged = dict(held.payload)
+    # A FOREIGN pid, deliberately. This test runs in the process that took the
+    # lock, and an own-pid lock older than the process start is reclaimed by
+    # `_same_pid_lock_predates_current_process` regardless of any heartbeat --
+    # which made the first version of this test pass without the fix, on a path
+    # it was not trying to exercise at all.
+    wedged["pid"] = 999_999
+    wedged["acquired_at_utc"] = (
+        datetime.now(timezone.utc) - timedelta(hours=1)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    wedged["heartbeat_at_utc"] = "2099-01-01T00:00:00Z"
+    runtime_lock_module._rewrite_lock_payload(held.path, wedged)
+
+    contender = runtime_lock_module.acquire_runtime_lock(
+        cfg, "shadow_cohort", stale_after_seconds=60
+    )
+
+    assert contender.acquired is True, (
+        "a far-future heartbeat must degrade to the ordinary stale timeout, "
+        "not hold the lane until 2099"
+    )
+
+
+def test_wo143b1_f1_the_heartbeat_covers_the_trailing_writes(tmp_path, monkeypatch):
+    """Progress continues past the ledgers, through the three trailing writes.
+
+    fills_published was the final notification in the function while three
+    writes followed it, so a cumulatively slow tail let the lock age out while
+    this writer was still advancing -- and a contender that reclaimed could be
+    overwritten by the original writer's older snapshot (Codex P2 wave-36).
+    """
+    cfg = _settling_cfg(tmp_path)
+    _seed_due_positions(cfg, 1)
+
+    labels: list[str] = []
+    from polymarket_predictive_engine import runtime_lock as runtime_lock_module
+
+    real = runtime_lock_module.RuntimeLockHeartbeat.record_progress
+
+    def _capture(self, label=""):
+        labels.append(str(label))
+        return real(self, label)
+
+    monkeypatch.setattr(
+        runtime_lock_module.RuntimeLockHeartbeat, "record_progress", _capture
+    )
+
+    update_shadow_cohort_evidence(cfg, [])
+
+    for expected in ("summary_published", "pnl_history_published", "update_summary_published"):
+        assert expected in labels, f"no progress notification for {expected}: {labels}"
 
 
 def test_wo143b1_f1_lock_is_released_after_a_budget_expired_pass(tmp_path, monkeypatch):

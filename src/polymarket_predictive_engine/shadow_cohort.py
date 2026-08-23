@@ -632,19 +632,27 @@ def _settle_due_positions(
     ]
     abandoned_ids: list[str] = []
     for index, position in enumerate(due):
-        if checks >= max_checks:
+        # THE BUDGET IS CHECKED FIRST, before the position cap (Codex P1
+        # wave-36). With more due positions than max_checks, a final permitted
+        # lookup that pushed elapsed time past the budget was met on the next
+        # iteration by the CAP branch instead: budget_expired stayed false, the
+        # staged settlements were published, and the pass reported "complete"
+        # while leaving positions unprocessed after exceeding its own
+        # fail-closed budget. The cap ordering bypassed the staging rollback
+        # entirely -- the rollback was correct and simply never ran.
+        #
+        # It cannot bound a single unbounded urlopen read -- that is precisely
+        # why the progress-derived heartbeat, not this budget, is the primary
+        # defence -- but it does stop a pass of individually-completing-but-slow
+        # lookups from running past the stale window.
+        if budget_seconds > 0 and (time.monotonic() - started_monotonic) >= budget_seconds:
+            budget_expired = True
             abandoned = len(due) - index
             abandoned_ids = [
                 str(row.get("shadow_position_id") or "") for row in due[index:]
             ]
             break
-        # The budget is checked between iterations. It cannot bound a single
-        # unbounded urlopen read -- that is precisely why the progress-derived
-        # heartbeat, not this budget, is the primary defence -- but it does
-        # stop a pass of individually-completing-but-slow lookups from running
-        # past the stale window.
-        if budget_seconds > 0 and (time.monotonic() - started_monotonic) >= budget_seconds:
-            budget_expired = True
+        if checks >= max_checks:
             abandoned = len(due) - index
             abandoned_ids = [
                 str(row.get("shadow_position_id") or "") for row in due[index:]
@@ -1483,8 +1491,20 @@ def _update_shadow_cohort_evidence_locked(
         summary["shadow_fill_fields_dropped_by_legacy_header"] = list(fill_append.dropped_fields)
     if heartbeat is not None:
         summary["shadow_lock_heartbeat"] = heartbeat.as_dict()
+    # THE HEARTBEAT CONTINUES THROUGH THE TRAILING WRITES (Codex P2 wave-36).
+    # `fills_published` was the last progress notification in the function, but
+    # three writes follow it. Individually progressing yet cumulatively past the
+    # stale window, they let the lock age out while this writer was still
+    # advancing -- a contender could then reclaim, write a NEWER summary and
+    # history, and be overwritten moments later when this writer finished with
+    # its older snapshot. That is two writers on the same artifacts, which is
+    # the failure this lock exists to prevent, reached through the one phase the
+    # whole-function heartbeat did not cover.
     summary_file = str(settings.get("summary_file", "shadow_signal_cohort_pnl.json"))
     write_json(cfg.governance_root / summary_file, summary)
+    _progress("summary_published")
     _write_shadow_pnl_history(cfg, summary)
+    _progress("pnl_history_published")
     write_json(cfg.governance_root / "shadow_cohort_update_summary.json", summary)
+    _progress("update_summary_published")
     return summary

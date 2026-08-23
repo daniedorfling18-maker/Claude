@@ -57,6 +57,19 @@ def _lock_age_seconds(payload: dict[str, Any]) -> float | None:
         return None
     latest = acquired_at
     heartbeat_at = parse_timestamp(payload.get("heartbeat_at_utc"))
+    # A FUTURE heartbeat is malformed evidence, not fresh evidence (Codex P1
+    # wave-36). After a wall-clock correction or sidecar corruption, a
+    # parseable future `heartbeat_at_utc` was selected here and its negative age
+    # clamped to zero by the max() below -- and `_valid_lock_payload` performs
+    # no heartbeat sanity check, so even a DEAD owner stayed non-stale until
+    # that date arrived and every shadow update was skipped until then. A
+    # permanent wedge from one bad field.
+    #
+    # Ignoring it degrades to the ordinary stale timeout on `acquired_at_utc`,
+    # which is exactly the pre-heartbeat behaviour: a heartbeat may only ever
+    # make a lock look FRESHER than its acquisition, never fresher than now.
+    if heartbeat_at is not None and heartbeat_at > now:
+        heartbeat_at = None
     if heartbeat_at is not None and heartbeat_at > latest:
         latest = heartbeat_at
     return max(0.0, (now - latest).total_seconds())

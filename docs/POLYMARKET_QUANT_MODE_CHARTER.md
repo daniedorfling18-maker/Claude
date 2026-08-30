@@ -67,6 +67,48 @@ estimator named in advance. The cohort had also been described to the gate as be
 best-of-39. Capacity then killed what was left. The falsifier working is the one thing on this board
 that went right.
 
+### H1 deserves its own line too, because it is the lane with all the machinery
+
+The maker lane is not merely one dead hypothesis among five — it is the only lane with a live-test
+surface, a decision policy, a quote sheet, a toxicity veto and four work orders still in flight. It
+is also, on the measurements available, the MOST conclusively dead rather than the least, and the
+distinction matters for what happens next.
+
+Every other lane failed for want of a signal or for want of evidence. This one failed by producing a
+large, confident, NEGATIVE number: gross **$3.02/day** against adverse selection **$63.62/day**, a
+factor of **21**. The power ladder below does not apply to it. That ladder exists to size how long it
+takes to DETECT a small positive edge hiding in noise; here the measured quantity is large and
+negative, and more observations measure the hole more precisely rather than filling it.
+
+**The two things that could plausibly rescue the lane, priced rather than waved at:**
+
+1. **The measurement-coverage defect is real and is not enough.** A class-X trace (2026-08-05) found
+   the maker-carry portfolio empty NOT because its member failed a predicate but because
+   `_yield_first_shortlist` measures only the top `max_book_candidates` (40) by expected gross
+   reward; the incumbent ranked outside that and was evicted with disposition
+   `not_in_candidate_scan`, which by construction means "we do not know", not "it failed". WO-154
+   exists to fix exactly that. But the evicted member was worth **$3.06/day net carry**: retaining
+   every scan-evicted incumbent adds single-digit dollars per day against a $63.62/day charge.
+   The selection bias also runs AGAINST the hypothesis rather than for it — shortlisting by expected
+   gross reward means the measured portfolio was already skewed toward the best-looking markets, so
+   full coverage should pull measured gross down or flat, not up.
+2. **A better toxicity veto is the wrong lever, despite looking like the right one.** Its whole
+   purpose is to cut adverse selection. But the $63.62/day was measured WITH the market-axis veto
+   already live and feeding `requote_alerts.py` and `stage_ticket_eligibility.py`, and every
+   fail-open closed on that surface makes the veto more conservative — blocking more, which reduces
+   adverse selection and gross carry together. Closing a 21x gap would require removing ~95% of
+   adverse selection while leaving gross intact. Nothing measured suggests that shape.
+
+**THE ONE NUMBER TO VERIFY BEFORE ACTING ON THIS PARAGRAPH.** The maker-lane conclusion rests on
+$3.02 gross against $63.62 adverse selection. Both are recorded here as universe-wide, but no
+Polymarket output artifact is committed to this repository, so no reader — including the agent that
+wrote this — can re-derive either from the repo alone. And the systemic defect identified immediately
+below is precisely this: two numbers computed over different populations. **Confirm on the VPS that
+those two figures cover the same population over the same period.** The conclusion tolerates
+substantial error in the magnitude — a threefold mistake still leaves the lane deeply negative — but
+it does not survive the two numbers being scoped to different universes, and that is the single check
+worth making before this section is treated as settled.
+
 ### Why the whole board reads this way — one defect, five times
 
 **Every component was scoped to a different population, and none intersected the one being traded:**
@@ -110,12 +152,34 @@ for them:**
 2. **A DATED ALTERNATIVE** — a *new* registered hypothesis with a *new* pre-committed deadline, with
    the population-scope defect fixed first.
 
-**Close-out state at the time of writing:** PR #452 landed (the suite no longer misreports the
-regime). PR #451 — the H3 instrument, the only tested class with no measurement at all — remains
-open with two review threads deliberately unresolved for the owner: that its registration followed
-rather than preceded its build, and that its ranking sample erodes under the rolling 200,000-row
-ledger. Reading the wallet axis once would complete the board and make the NO unanimous rather than
-4-of-5; whether to merge it is the owner's decision, as is every merge.
+**Close-out state, updated 2026-08-23.** PR #452 landed and is `main`'s tip; `main` is green
+(2155 passed, 3 skipped — one further failure is a git-worktree artifact, not a defect: the restore
+shell requires `.git` to be a directory and it is a file inside a worktree). PR #451 — the H3
+instrument, the only tested class with no measurement at all — remains open after eleven rounds of
+external review (134 threads, 132 resolved) with two deliberately unresolved for the owner: that its
+registration followed rather than preceded its build, and that its ranking sample erodes under the
+rolling 200,000-row ledger. Reading the wallet axis once would complete the board and make the NO
+unanimous rather than 4-of-5.
+
+**RECOMMENDATION — AGENT-AUTHORED ADVICE, NOT A DECISION.** The owner asked for a call on
+2026-08-23 and this records the answer given. It does not substitute for, pre-empt or stand in for
+the owner's choice between (1) and (2) above, and no later reader may treat it as that choice having
+been made.
+
+> Take option (1), STOP, and take it now rather than after H3. The registered verdict is terminal and
+> the single extension is spent, so H3 cannot reopen this question under the protocol — it can only
+> seed a NEW hypothesis with a NEW deadline. Read the wallet axis once anyway, for the completeness
+> of the record and as possible seed evidence, but not as an input to the closed question. Keep the
+> paper system running as a telemetry archive; freeze the research surface; land fail-open and
+> record-integrity fixes only, and no eligibility changes. In particular WO-154 should NOT land under
+> a stop: its own registration states it is not tighten-only, that it changes which markets can hold
+> a portfolio slot, and that the owner must ratify that framing — a ratification that only carries
+> meaning if the lane is being funded.
+
+**What would reopen the maker lane**, stated so the stop is falsifiable rather than a mood: adverse
+selection per unit of gross carry moving by an order of magnitude, measured on one population over
+one period. That is a new registered hypothesis with a new pre-committed deadline, not a resumption
+of this one.
 
 **Unchanged throughout:** paper/dry-run only, no live order path, no gate, threshold or eligibility
 loosened, VPS-only runtime, and every owner-routed merge and deploy left to the owner.

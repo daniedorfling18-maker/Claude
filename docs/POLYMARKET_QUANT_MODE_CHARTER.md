@@ -34,6 +34,35 @@ tests were reading the calendar. Fixed in PR #452, which also added the coverage
 this land silently — nothing in the suite had ever run the engine under the real clock, so nothing
 stated which regime the system was in.
 
+### Lane map — read this before any number below
+
+These lanes are routinely confused, including by the agents writing this document, because their
+artifacts sit side by side and their numbers get quoted in sequence. **They fail for opposite
+reasons and their P&L figures are not comparable.**
+
+| lane | mechanism | realised | the number usually quoted | what that number is |
+|---|---|---|---|---|
+| **maker carry (H1)** | RESTS quotes, earns venue reward share | **$0.00 — never filled**, 3,290 observations over 40 days | +$1.68/day | a SIMULATION, adverse selection charged at $0.00 |
+| **shadow cohort (directional)** | BUYS AT THE ASK, exits on take-profit / stop-loss / time | **-$218.01** across 200 closed positions | -$218.01 | SIMULATED paper positions, no real money |
+| **smart-flow CLV (H3)** | follows public wallets | never ran | — | `fills_seen: 0`, input never collected |
+| **dutch book (H2)** | riskless baskets | 0 flagged in 300 events | $0.00 max basket | a genuine measurement, genuinely zero |
+| **calibration** | probability reliability | never ran | — | `resolved_markets: 0` |
+
+`shadow_positions.csv` carries `shadow_source` values `alpha_candidate_learning`,
+`near_miss_learning`, `longshot_bias` and `shadow_trade_candidate` — **no maker source** — and
+`policy_version: shadow-cohort-v3-ask-fill-relative-spread`, i.e. it TAKES liquidity. Any maker
+conclusion drawn from it is a category error.
+
+**Can a maker lane lose money? Yes — that is the central risk of market making.** You quote both
+sides and are filled disproportionately by counterparties who know more than you; that is adverse
+selection, and `maker_fill_replay.json` exists to measure it. **This** maker lane has no returns of
+either sign because nobody ever traded against it. It is also why its adverse-selection charge is
+$0.00 in the model and rests on three observed fills: there is almost nothing to measure.
+
+The two failures are therefore opposite in kind, and conflating them loses the distinction that
+matters most: **the maker lane has no evidence; the directional lane has ample evidence that it does
+not work.**
+
 ### What the NO is a verdict on
 
 `no_for_tested_edge_classes` — the tested classes, each with the measurement that closed it:

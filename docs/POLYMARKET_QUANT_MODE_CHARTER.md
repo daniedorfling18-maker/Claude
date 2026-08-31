@@ -144,6 +144,40 @@ before checking. The check took minutes once the telemetry mirror was consulted.
 cannot be re-derived from a named artifact is not evidence, and that rule applies to this document's
 own authors.
 
+### Verification pass, 2026-08-23 — every figure above checked against `origin/vps-telemetry`
+
+After the H1 error was found, the rest of the board was checked the same way rather than assumed
+sound. Snapshot `2026-08-21T02:00:09Z`. **The H1 error was ISOLATED, not systemic:** every other
+substantive figure either verifies exactly or has moved with time in the expected direction.
+
+| claim as recorded | artifact | result |
+|---|---|---|
+| H1 net **-$60.60/day**, adverse **$63.62/day** | `maker_carry_study.json` | **WRONG** — +$1.68/day, adverse at most $0.68/day. Corrected above. |
+| H2 **0** flagged in **300** events | `implication_scan.json` | **VERIFIED EXACTLY** — `events_scanned: 300`, `flagged_deviations: 0` |
+| H2 max executable basket **$0.00** | `event_group_scan.json` | **VERIFIED EXACTLY** — `max_executable_basket_usd: 0.0`, 67 neg-risk groups |
+| attribution drops ~**49.5%** of closed positions | `edge_attribution.json` | **VERIFIED, slightly worse** — 117 of 226 skipped = **51.8%** |
+| calibration join **0 / 16,910** | `family_calibration_scorecard.json` | **VERIFIED** — now **0 / 17,420**, `families_scored: 0` |
+| directional model, **109** positions | `closing_line_value.json` | **VERIFIED** — `positions_scored: 109` of 227 seen; mean final CLV **+0.008424**; **beat_close_rate 0.3945** |
+| ~**200,000** attributed fills | `flow_toxicity_summary.json` | **VERIFIED** — `trades_seen: 198,555` |
+| decision layer **88** rewarded markets | `maker_carry_study.json` | **MOVED** — now **80**; same order, time-varying |
+| markout coverage **176 -> 259** markets | `flow_toxicity_summary.json` | **MOVED SUBSTANTIALLY** — now **530** markets scored |
+| H4 capacity **$4-10 at touch** | — | **NOT VERIFIABLE HERE.** No telemetry artifact carries it; it came from a live Gamma read in an earlier session and remains unverified. |
+
+**Two things this pass changes beyond H1.**
+
+1. **`beat_close_rate` is 0.3945.** The scored positions beat the closing line under 40% of the time.
+   Note also Gate A's own caveat, recorded in `profit_verdict.json`: `unit_mean_final_clv` and
+   `units_beating_close` are one-release compatibility ALIASES for settlement-return fields and are
+   "not true pre-event CLV". The lane's headline metric is not measuring what its name says.
+2. **Markout coverage is now 530 markets**, not the 176 -> 259 that PR #451's case for the wallet
+   axis is built on. That argument — coverage tripled while smart-fill markets moved 16 -> 17 —
+   should be re-derived at current coverage before the H3 read is interpreted, not carried forward.
+
+**Standing rule this pass establishes:** every quantitative claim in this document names the artifact
+it came from, and any claim that cannot be pointed at a file in `origin/vps-telemetry` is marked
+unverified rather than stated flat. The H1 figure survived four months of repetition because nobody,
+including its authors, could say which file it came from.
+
 ### Why the whole board reads this way — one defect, five times
 
 **Every component was scoped to a different population, and none intersected the one being traded:**

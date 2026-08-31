@@ -40,7 +40,7 @@ stated which regime the system was in.
 
 | hypothesis | state | the measurement |
 |---|---|---|
-| **H1** sharp-anchor maker carry | **insufficient_evidence**, capacity-capped | net carry **+$1.68/day** against a $3.33/day target; **$50.40/month** against $100/month. Adverse selection at most **$0.68/day**, not the $63.62 first recorded here — see the corrected section below. M-A and M-B both PENDING. The capital curve is flat from $500 to $2,000: one market, $470 deployed. |
+| **H1** sharp-anchor maker carry | **insufficient_evidence**, capacity-capped | net carry **+$1.68/day** against a $3.33/day target; **$50.40/month** against $100/month. Adverse selection is **UNMEASURED** — the $63.62 first recorded here is unsupported, and the $0.68 that replaced it rests on **3 confirmed fills** with 77.5% of opportunities lacking book state, which is why M-B is pending. M-A also PENDING. The load-bearing fact is capacity: the capital curve is flat from $500 to $2,000 at one market and $470 deployed. |
 | **H2** dutch-book consistency | dead | **0** flagged in 300 events; maximum executable basket **$0.00**. |
 | **H3** smart-flow CLV | **unmeasured** | the wallet axis is the instrument and it is still in PR #451. |
 | directional model | refuted | claimed **+0.08337/share**; realised 95% upper bound **+0.01435** across 109 positions. |
@@ -143,6 +143,61 @@ an agent that could not re-derive them and said so in the same breath — then r
 before checking. The check took minutes once the telemetry mirror was consulted. An assertion that
 cannot be re-derived from a named artifact is not evidence, and that rule applies to this document's
 own authors.
+
+### Second pass, same day — the remaining figures, and a correction to the correction
+
+**`$0.68/day adverse selection` was itself over-confident, and is withdrawn as a measurement.**
+`maker_fill_replay.json` publishes `implied_adverse_usd_per_day: 0.682944`, which is where that
+number came from — but the same artifact says what stands behind it:
+
+```
+confirmed_fills:                          3
+last_in_queue_evaluable_opportunities:   22
+no_contemporaneous_state_opportunities: 316
+no_contemporaneous_state_rate:      0.77451
+```
+
+**Three confirmed fills.** 77.5% of opportunities have no contemporaneous book state at all. That is
+not a small adverse-selection charge; it is an ABSENT one, and it is precisely why gate M-B reads
+`pending` with `mb1_tier0_coverage_sufficient: false`. The honest statement is that the maker lane's
+COST side is unmeasured — neither the $63.62 that was asserted nor the $0.68 that replaced it is
+supported evidence. The revenue side rests on a single market. **Capacity remains the only
+load-bearing fact about this lane, because it is the only one derived from a full population rather
+than from a handful of fills.**
+
+**H3 is unmeasured for a specific, findable reason.** `smart_flow_clv.json` reports `fills_seen: 0`,
+`fills_scored: 0`, `wallets: []`, reading `inputs/polymarket/public_wallet_fills.csv` — and it was
+last generated **2026-07-17**, a month before every other artifact in the snapshot. The lane did not
+fail to find an edge; its input was never collected and its job stopped running. This is why PR
+#451's approach — measuring the wallet axis from the 198,555-fill trade-print corpus instead — is
+the right instrument rather than merely a bigger one.
+
+**The "smart wallet" definition verifies exactly, and is worse than the phrase suggests.** The
+latest leaderboard snapshot carries 100 rows and 100 distinct wallets, with
+`leaderboard_probe_params: {orderBy: "PNL", timePeriod: "ALL", requested_limit: 100, complete: true}`.
+"Smart" means **top-100 by lifetime profit**. A new number sharpens the population defect further:
+of 80 holder groups observed in the tracked markets, `holder_leaderboard_overlap_count` is **4**.
+The wallets actually holding positions in the markets under study barely intersect the list the
+study calls smart.
+
+**The resolved-corpus figure was a request size, not a corpus size.** `historical_resolution_summary.json`:
+`requested_closed_markets: 1000`, `fetched_markets: 681`, `clean_settlement_markets: 680`. The
+recorded "0 / 1000" conflated the two. The substance survives on three independent artifacts —
+`clean_settled_joined_rows: 0` against 17,420 rejections, `families_scored: 0`, and a leakage-safe
+substrate still at `status: collecting` with `midpoint_only_rows_accepted: 0` — but the phrasing
+should be "0 usable joins from a 680-market clean-settled corpus", not "0 / 1000".
+
+**The power ladder cannot be verified from this mirror, and is now marked accordingly.** The push
+script tails every CSV to its last 200 rows (`CSV_TAIL_LINES=200`), so full position history is not
+present, and the quantities that ARE present are on a different basis from the `sd 0.226` the ladder
+uses (per-share dollars vs fractional return). What the available tail supports, recorded as its own
+data point rather than as a check on the ladder: the last **200 closed shadow positions** have mean
+`return_pct` **-0.1090** with sd **0.4771**, and mean `realised_pnl_usdc` **-$1.09** with sd **$4.77**.
+A negative mean on the shadow cohort is consistent with the terminal NO; the ladder's own inputs
+remain unverified.
+
+**Standing limitation of this mirror, worth knowing before the next reader trusts a CSV-derived
+number from it:** JSON artifacts are complete; CSV artifacts are the last 200 rows only.
 
 ### Verification pass, 2026-08-23 — every figure above checked against `origin/vps-telemetry`
 

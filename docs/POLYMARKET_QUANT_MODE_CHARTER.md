@@ -74,7 +74,72 @@ reporting **+186% ROI** with a `nan` confidence bound — a bucket that reads si
 both the edge-attribution and shadow-cohort artifacts, so its ROI is a data defect, almost certainly
 the blank-identity join collision WO-163 documents.
 
+### The three blockers, DIAGNOSED — 2026-08-23
+
+The earlier framing ("the inputs were never populated") was too coarse and partly wrong. Each of the
+three fails differently, and two contain the same self-reinforcing shape as the maker ladder.
+
+**BLOCKER A — sharp odds (H1's signal). The data ARRIVES; it cannot be joined, and the throttle
+guarantees it never will be.** `sharp_odds_fetch_summary.json` shows the fetch WORKING: 30 rows
+normalized from Pinnacle, `errors: 0`. So the input is not empty. But
+`sharp_anchor_coverage.json` reports `total_rows_fetched: 30`, `total_rows_joined: 0`,
+`total_rows_mapped: 0`, `mappable_count: 0` against `total_polymarket_rows_eligible: 140` — and
+`total_stale_rows: 30`, i.e. **every fetched row is stale**.
+
+Two distinct faults:
+1. **Mapping.** Of three configured sports, two return `skipped_unknown_sport`
+   (`soccer_fifa_world_cup_winner`, `soccer_fifa_world_cup` — keys the provider does not have), and
+   the third, `basketball_nba_championship_winner` outrights, maps to nothing we trade.
+   `sharp_fetch_suppression.json`: `classification: no_mappable_market`, `zero_join_streak: 14`.
+2. **A LOOP.** Because joins are zero, suppression demotes the family to `slow_probe` — "14
+   consecutive fetched cycles produced zero joins; slow-probe every 24h". But
+   `h1_max_anchor_age_seconds` is **21,600 (6 hours)**. A 24-hour probe cadence cannot produce an
+   anchor young enough to be usable, so rows are stale, so joins stay zero, so the throttle persists.
+   **Identical in shape to the maker ladder: the condition that triggers the throttle is the one the
+   throttle prevents you from clearing.**
+
+Fixing this is CONFIGURATION plus loop-breaking, not new collection: choose provider sports that
+overlap the traded universe, and make the suppression cadence respect the freshness ceiling it feeds.
+
+**BLOCKER B — wallet fills (H3's signal). No writer exists.** `grep` across `src/` and `scripts/`
+finds exactly one reference to `public_wallet_fills.csv`: `smart_flow_clv.py:243`, which READS it.
+Nothing anywhere writes it. This is not a broken collector — **there is no collector**. H3 has never
+been asked its question because nothing was ever built to ask it. Note this is precisely the gap PR
+#451 routes around, by measuring the wallet axis from the 198,555-fill trade-print corpus instead.
+
+**BLOCKER C — the calibration join. A brittle exact-triple key, and the label side almost certainly
+cannot satisfy it.** `market_relative_validation.py:172` keys predictions on
+`(market_id, token_id, prediction_timestamp)`; `_label_index` at :140-141 builds the label side on
+the same triple and indexes a label **only if `all(key)`** — that is, only if the label row carries a
+NON-EMPTY `prediction_timestamp`. Labels are read from
+`outputs/polymarket_training/labels.csv` (`family_calibration.py:150`), i.e. settlement data, which
+has no natural prediction timestamp. If that column is blank, **no label is ever indexed, the index
+is empty, and every prediction falls to `"no clean settled label"`** — which is exactly 0 joined
+against 17,420 rejected.
+
+This is a hypothesis with a decisive test, and PR #446 already publishes it: the rejection histogram.
+If `no clean settled label` is ~100% of the 17,420, the diagnosis is confirmed and the fix is to join
+on `(market_id, token_id)` within a temporal validity window rather than on exact string equality of
+a timestamp. **#446 is unmerged; merging it answers this in one cycle.**
+
+### What is actually actionable, and by whom
+
+| blocker | nature | who |
+|---|---|---|
+| A — sharp odds mapping + throttle loop | config + a loop-breaking rule | repo work, then VPS deploy |
+| B — wallet fills | a collector that does not exist | build, or rely on #451's route around it |
+| C — calibration join | one join predicate; **diagnosis testable by merging #446** | repo work |
+| maker ladder | **BLOCKED — `decision_policy` is registered tighten-only** | owner amendment required |
+
+The ladder cannot be fixed by an agent: WO-50's config states "Frozen defaults; future amendments may
+only tighten and must carry a dated comment", and raising `stage0_capital_usd` from $100 toward the
+$470 a qualifying market needs is a LOOSENING. It requires a dated owner amendment. Recorded here so
+the catch-22 is visible rather than quietly worked around.
+
+### What this route buys — stated so it is not mistaken for optimism
+
 ### The definitive route — to knowledge, not to profit
+
 
 There is no defensible route to profit in this data. Continuing to slice it would manufacture one:
 100 rules were already searched with a holdout and returned zero, and the failure that killed H4 was

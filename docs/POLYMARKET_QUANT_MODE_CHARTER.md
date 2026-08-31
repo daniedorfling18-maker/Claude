@@ -144,6 +144,66 @@ before checking. The check took minutes once the telemetry mirror was consulted.
 cannot be re-derived from a named artifact is not evidence, and that rule applies to this document's
 own authors.
 
+### Calibration and the shadow cohort — the last two untested surfaces
+
+**Calibration has never run on anything.** `calibration_bias_study.json`: `resolved_markets: 0`,
+`curve_rows: 0`, `status: insufficient_data`, `min_markets_per_bin: 200`. `calibration_curve.csv` is
+a header and nothing else. Together with `family_calibration_scorecard` at
+`clean_settled_joined_rows: 0` and `smart_flow_clv.json` at `fills_seen: 0`, **three separate lanes
+report zero input rows**. None of them found no edge; none of them ran. That is a collection failure
+wearing the costume of a negative result, and it is the single most repeated shape on this board.
+
+**The shadow cohort's exit policy is a pure bet on skill, and the bet lost.** From the last 200
+closed positions:
+
+| close reason | n | mean | total |
+|---|---|---|---|
+| `shadow_stop_loss` | 64 | **-$6.005** | -$384.35 |
+| `shadow_take_profit` | 49 | **+$4.309** | +$211.13 |
+| `shadow_time_exit` | 84 | -$0.410 | -$34.47 |
+| `shadow_clean_settlement` | 3 | -$3.440 | -$10.32 |
+
+**Net: -$218.01.**
+
+The exits are configured asymmetrically — `take_profit_return: 0.25`, `stop_loss_return: 0.35` — and
+they fire as designed: the realised gain/loss ratio is **1.394** against a configured **1.400**. That
+asymmetry sets a breakeven:
+
+```
+breakeven take-profit rate (from realised P&L):  58.2%
+actual take-profit rate:                         43.4%   (49 of 113)
+```
+
+**The realised take rate is below the realised breakeven rate**, which alone accounts for the
+negative total and requires no theory.
+
+It is worse than that. For a driftless process the chance of touching +25% before -35% is
+approximately `0.35 / (0.25 + 0.35) = 58.3%` — which is the breakeven rate, *by construction*. The
+policy is therefore engineered so that **a no-skill strategy breaks exactly even**, and everything
+above or below the line is skill. Against that benchmark:
+
+```
+binomial test vs 0.583:  expected 65.9, observed 49, z = -3.23, one-sided p = 0.00062
+```
+
+The strategy performs **significantly worse than a coin flip** at p = 0.0006. *Caveat: the driftless
+benchmark assumes a martingale in return space, while these are bounded probability instruments, so
+58.3% is an approximation. The breakeven figure of 58.2% is not — it is computed from realised gains
+and losses, and 43.4% is below it either way.*
+
+This corroborates the estimator result from an entirely different direction. The claimed-versus-
+realised test says the signal carries no information; the exit-policy test says the realised trading
+is significantly worse than chance under a policy calibrated to make chance break even.
+
+**By cohort, nothing survives.** Five cohorts with n>=8: `crypto` -$0.345, `ai_model_leader`
++$0.403, `worldcup` -$2.238, `unknown` -$5.057 (significantly negative), `tennis_match` -$0.588.
+**Cohorts with an interval strictly above zero: zero.**
+
+**One structural observation with consequences beyond the research question.** Only **3 of 200**
+closed positions exited by `shadow_clean_settlement`; 197 closed on marks. The entire settlement
+machinery — the budget, the rotation, the deferral markers, every finding in PR #416 — governs about
+**1.5%** of closures. That is worth knowing before deciding how much more review that PR deserves.
+
 ### Tests run on the gathered data, 2026-08-23 — the model's claims carry no information
 
 The board had been assembled from summary FIELDS. The position-level artifacts are complete in the

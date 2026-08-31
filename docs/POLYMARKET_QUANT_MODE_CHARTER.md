@@ -144,6 +144,60 @@ before checking. The check took minutes once the telemetry mirror was consulted.
 cannot be re-derived from a named artifact is not evidence, and that rule applies to this document's
 own authors.
 
+### Was there ever a maker profit? No — and the projection is not evidence of one
+
+Recorded because it is the question any later reader will ask of a lane described as
+"+$1.68/day", and because the honest answer needs all four facts together.
+
+**1. Realised: zero, over forty days.** `maker_live_test_history.csv`, 3,290 observations from
+2026-07-12 to 2026-08-21:
+
+```
+rewards_usd_total     min/max =  0.0    /  0.0
+inventory_pnl_usd     min/max = -0.0067 /  0.0
+net_score_usd         min/max = -0.0067 /  0.0
+```
+
+Total rewards ever earned: **$0.00**. Best P&L ever recorded: **$0.00**. Worst: minus two thirds of
+one cent. `maker_live_test.json` describes itself as a "READ-ONLY scoreboard for a human-run
+experiment. This system never places orders; it only watches the wallet the human chose to trade
+from." **CAVEAT, stated rather than glossed:** it is not establishable from telemetry whether the
+operator ever placed the quotes the sheet recommended. If they did not, $0.00 is an untested model
+rather than a refuted one. It is not, either way, evidence of foregone profit.
+
+**2. The "+$1.68/day net" charges NOTHING for adverse selection.** From `maker_fill_replay.json`:
+
+```
+study_adverse_usd_per_day:             0.0        <- what the $1.68 subtracts
+simulated_adverse_charge_usd_per_day:  0.0
+realized_adverse_usd_per_day:          0.682944   <- what was actually observed
+```
+
+It is a GROSS figure wearing the word "net". Subtracting even the tiny three-fill realised charge
+takes it to roughly **$1.00/day**, about $30/month.
+
+**3. The realism correction was never computed.** `simulation_to_reality_haircut: None`,
+`realism_ratio: None`, `realism_ratio_by_source: {"archive": "insufficient_coverage", "official": null}`.
+The artifact's own note states the stake: "A numeric haircut above 1 means the maker-carry study may
+undercharge adverse selection." The haircut is absent, so the size of the undercharge is unknown —
+only its direction, and its direction is against the projection.
+
+**4. The fill assumption that generates the reward share is 86% unconfirmed.**
+`confirmed_fill_ratio: 0.136364` — 3 confirmed of 22 opportunities, `simulated_fills_per_day: 0.281946`.
+
+**Therefore:** the projection does not say a profit was available and missed. It says that under a
+model which assumes fills land as simulated and adverse selection is free, one market yields $1.68/day
+against a flat capital curve capping the lane near $50/month. Every term in that sentence is either
+an upper bound, unconfirmed, or uncharged. The registered maker verdict — `insufficient_evidence`
+with M-A and M-B both pending — is the correct description of this lane, and it always was.
+
+**Scoreboard labelling defect, found while checking the above and unrelated to the research
+question.** Of the 3,290 scoreboard observations, **1,068 read `winning_so_far`** on a lane whose
+`net_score_usd` never once exceeded 0.0. The registered scoring rule requires the score "held
+positive across a week"; the classifier evidently treats zero as positive. A dashboard reading
+"winning" for a third of its life, on zero fills and zero rewards, is a live reporting defect that
+survives any decision about the research surface.
+
 ### Second pass, same day — the remaining figures, and a correction to the correction
 
 **`$0.68/day adverse selection` was itself over-confident, and is withdrawn as a measurement.**

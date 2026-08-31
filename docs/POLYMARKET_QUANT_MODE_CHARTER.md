@@ -425,6 +425,76 @@ many more decisions are needed to detect an edge of size X; this asks whether th
 the decisions knows anything, and the answer is no. That question was answerable at any point in the
 last month from artifacts already in the repository.
 
+### The maker business case at scale — capacity was MY error, not the market's
+
+Owner stated 2026-08-23 that capital is not the constraint. That reframes the question, and the
+answer overturns what this document said twice.
+
+**The "$50/month ceiling" was wrong.** It came from the registered capital curve being flat from $500
+to $5,000 — but that curve is flat because the SIZER caps position size, not because the economics
+saturate. The share model (`published_v2`) makes reward share a function of our resting size against
+competitors: `share = our_score / (our_score + competitor_score)`. Scaling the position scales the
+share. For the one sized market (`pot_usd_per_day: 100`, `our_score_per_side: 112.5`, mean
+competitor score 46,309):
+
+| multiple | capital | share | gross/month |
+|---|---|---|---|
+| 1x | $94 | 0.24% | $7 |
+| 5x (as sized) | $470 | 1.2% | $36 |
+| 25x | $2,350 | 5.7% | $172 |
+| 100x | $9,400 | 19.5% | $586 |
+| 500x | $47,000 | 54.9% | $1,645 |
+
+**Aggregate across all 34 band-eligible candidates**, total addressable pot **$6,319/day =
+$189,570/month**, with the capital required to reach a given share of every pot:
+
+| target share | capital required | gross/month | gross return on capital |
+|---|---|---|---|
+| 5% | $780,840 | $9,479 | ~14.6%/yr |
+| 10% | $1,648,440 | $18,957 | ~13.8%/yr |
+| 25% | $4,945,319 | $47,392 | ~11.5%/yr |
+| 50% | $14,835,957 | $94,785 | ~7.7%/yr |
+
+Returns decline with scale, as a saturating share model requires. **So a business case exists and is
+quantifiable: roughly 12-15%/year GROSS at achievable scale.** That is a real number and this
+document previously denied it.
+
+### The single parameter the case turns on, and it is the one never measured
+
+**Adverse selection across those same 34 eligible markets, at MINIMUM size, is already
+$543.98/day = $16,319/month.** Compare that with the gross at 5% share: **$315.95/day**. At minimum
+size the measured pick-off cost ALREADY EXCEEDS the gross reward of a 5%-share position — and every
+figure in the tables above is gross.
+
+The decisive question is therefore **how adverse selection scales with position size**, and that is
+precisely the quantity nobody has ever measured:
+
+- the sized market shows `adverse_selection_usd_per_day: 0.0` and `pickoff_events_per_day: 0.0` — at
+  ONE-FIFTH of the deployed size;
+- `simulation_to_reality_haircut: None`, `realism_ratio: None`, archive coverage
+  `insufficient_coverage`;
+- `confirmed_fills: 3`, `no_contemporaneous_state_rate: 0.775`;
+- gate M-B is `pending` on exactly this, with `mb1_tier0_coverage_sufficient: false`.
+
+**If adverse selection scales linearly with size, the business case is deeply negative at every rung
+of the table above. If it scales far sub-linearly, the case is roughly 12-15%/year gross before it.
+Nothing in the repository distinguishes these two worlds.**
+
+### What this makes the right experiment — and it is small
+
+Not "collect more data" and not a capital commitment. **Quote the same market at 1x, 5x and 25x
+minimum size and measure the pick-off rate at each**, with the estimator named in advance. That
+directly measures the one unknown parameter, costs on the order of $2,350 at the top rung, and
+resolves whether the table above is a business case or an illusion. It is also exactly the evidence
+M-B is waiting for, which no amount of passive observation can produce, because the system currently
+rests at a size where zero pickoffs occur by construction.
+
+**Recorded correction.** This document asserted twice that the maker lane was capacity-capped near
+$50/month and had no funding case. That was an artifact of reading the sizer's output rather than
+the share model beneath it. The honest position: **the ceiling is set by capital and competitor
+density, both of which scale, and the case is undetermined because its single dominant cost has
+never been measured above minimum size.**
+
 ### The maker candidate set, analysed — and the pattern behind every blocker
 
 `maker_carry_candidates.csv` carries all 41 measured candidates with per-market gross, adverse

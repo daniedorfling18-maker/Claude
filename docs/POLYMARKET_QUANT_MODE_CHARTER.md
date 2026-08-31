@@ -34,6 +34,68 @@ tests were reading the calendar. Fixed in PR #452, which also added the coverage
 this land silently — nothing in the suite had ever run the engine under the real clock, so nothing
 stated which regime the system was in.
 
+### THE FINDING: most of this board was never tested, because its inputs were never delivered
+
+Searched for a route to profit in the gathered data, 2026-08-23. There is none — and the reason is
+not that the hypotheses were tested and failed. **Six lanes report zero input rows, and three of them
+read external files that were never populated.**
+
+| lane | what it reports | its input |
+|---|---|---|
+| `smart_flow_clv` — **H3's instrument** | `fills_seen: 0` | `inputs/polymarket/public_wallet_fills.csv` |
+| `sharp_anchor_summary` — **H1's signal source** | `direct_token_joins: 0`, `fundamental_rows: 0` | `inputs/polymarket/sharp_odds.csv` |
+| `crypto_fundamental_summary` — **H4's signal source** | `fundamental_rows: 0`, `status: no_targets` | `inputs/polymarket/crypto_targets.csv` |
+| `calibration_bias_study` | `resolved_markets: 0`, `curve_rows: 0` | — |
+| `family_calibration_scorecard` | `clean_settled_joined_rows: 0` of 17,420 | — |
+| `leakage_safe_training_summary` | `midpoint_only_rows_accepted: 0`, `status: collecting` | — |
+
+**H1 is "sharp-anchor maker carry" and the sharp-anchor lane has never joined a single token.
+H4 is "crypto up/down" and the crypto fundamental lane has zero targets. H3's wallet fills are zero.**
+The three hypotheses recorded on this board as dead or unmeasured share a common property: the data
+that would have tested them never arrived.
+
+**This does NOT invalidate the terminal verdict.** Gate A had real data — 55 independent settled
+units behind 70 finals — and it failed on that data at p=0.9476. The registered verdict is sound, and
+its wording is more precise than the board that surrounds it: `no_for_tested_edge_classes`. The
+classes that were actually tested returned NO. **The board then presented untested classes as dead,
+which the verdict itself never claimed.**
+
+**The one lane with data confirms the picture rather than rescuing it.** `mispricing_alpha_summary`
+trained on 724 rows across 80 markets and learned `global_bias: 6.68e-06` — a bias of seven
+millionths, i.e. nothing. That is the estimator whose claimed edge of +0.0837/share carries no
+information about outcomes. A model that learned nothing, claiming a lot, predicting nothing:
+internally consistent.
+
+**A proper search was already run and found nothing.** `edge_strategy_search` ranked 100 rules over a
+60-market development set and a 20-market holdout: `promotable_rules: 0`, all 100 failing the same
+composite gate. Only four rules clear dev>0, holdout>0 and minimum sample; two are
+`tennis_tennis_set` with `holdout_roi_ci_low` at **-0.60**, and two are in the `unknown` family
+reporting **+186% ROI** with a `nan` confidence bound — a bucket that reads significantly NEGATIVE in
+both the edge-attribution and shadow-cohort artifacts, so its ROI is a data defect, almost certainly
+the blank-identity join collision WO-163 documents.
+
+### The definitive route — to knowledge, not to profit
+
+There is no defensible route to profit in this data. Continuing to slice it would manufacture one:
+100 rules were already searched with a holdout and returned zero, and the failure that killed H4 was
+precisely a best-of-39 selection presented without its selection breadth. **The route that exists is
+to make the untested lanes testable**, and every step has a definite completion criterion rather than
+a hoped-for result:
+
+1. **Populate the three external inputs** — `sharp_odds.csv`, `public_wallet_fills.csv`,
+   `crypto_targets.csv`. Bounded engineering, not research. Until these exist, H1, H3 and H4 have
+   never been asked the question.
+2. **Resize the maker ladder** so its first rung can fund the smallest genuinely qualifying market.
+   Currently stages 0 and 1 yield $0.00/day on the only qualifying market, making M-A and M-B
+   unreachable by construction.
+3. **Fix the calibration join** — 0 usable rows from 17,420 attempts, with the rejection histogram
+   already published by PR #446 and unmerged.
+
+**Stated plainly so nobody mistakes it for optimism:** completing all three yields the ability to
+TEST, not an expectation of profit. The measured ceiling on the maker lane remains ~$50/month gross
+and the only estimator with data attached is provably uninformative. What changes is that the answer
+would then mean something, which today it largely does not.
+
 ### Lane map — read this before any number below
 
 These lanes are routinely confused, including by the agents writing this document, because their

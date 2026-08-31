@@ -144,6 +144,71 @@ before checking. The check took minutes once the telemetry mirror was consulted.
 cannot be re-derived from a named artifact is not evidence, and that rule applies to this document's
 own authors.
 
+### Tests run on the gathered data, 2026-08-23 — the model's claims carry no information
+
+The board had been assembled from summary FIELDS. The position-level artifacts are complete in the
+mirror (not truncated: 109 rows, under the 200-row tail), so the obvious tests were finally run
+rather than quoted. `edge_attribution_positions.csv`, using the identity the artifact itself
+publishes — `exit - entry_fill == settlement_surprise + line_movement - execution_cost`, per share.
+
+**1. What the model claims, against what happened.**
+
+| quantity | n | mean | 95% CI |
+|---|---|---|---|
+| `model_claimed_edge_per_share` | 98 | **+0.08371** | [+0.07483, +0.09258] |
+| realised edge per share (identity) | 109 | **-0.02660** | [-0.06898, +0.01577] |
+| `line_movement_per_share` | 109 | -0.00020 | [-0.06875, +0.06836] |
+| `settlement_surprise_per_share` | 109 | -0.02916 | [-0.10167, +0.04336] |
+
+The model claims **+8.4 cents per share with a confidently positive interval**. Realised is
+**-2.7 cents**, indistinguishable from zero and pointing the wrong way. This independently reproduces
+Gate A's conclusion by a different route — Gate A clustered into 55 units and got -0.013943 at
+p=0.9476; this is the per-share identity on the raw positions.
+
+**2. Does a bigger claimed edge predict a better outcome? No.**
+
+```
+corr(claimed, realised) = +0.0738      bootstrap 95% CI [-0.1789, +0.3514]
+```
+
+Zero is comfortably inside the interval. The tercile split is not even monotonic:
+
+| claimed tercile | n | mean claimed | mean realised |
+|---|---|---|---|
+| low | 32 | +0.0395 | **+0.0177** |
+| mid | 32 | +0.0887 | **-0.1403** |
+| high | 34 | +0.1206 | **+0.0494** |
+
+The middle tercile is the worst of the three. **The model's edge estimate carries no usable
+information about the outcome.** That is a stronger and more specific statement than "no edge was
+found": the estimator itself is uninformative, so collecting more decisions from the same estimator
+does not converge on anything.
+
+**3. Every cohort searched, and none survives.** Six cohorts have n>=5:
+
+| cohort | n | mean | 95% CI | |
+|---|---|---|---|---|
+| crypto | 21 | +0.0504 | [-0.0075, +0.1083] | spans zero |
+| worldcup | 7 | -0.1591 | [-0.3496, +0.0313] | spans zero |
+| unknown | 7 | -0.2821 | [-0.4318, -0.1325] | **negative** |
+| ai_model_leader | 6 | -0.0233 | [-0.0420, -0.0046] | **negative** |
+| near_miss_learning\|worldcup | 5 | +0.1811 | [-0.2281, +0.5903] | spans zero |
+| structural\|longshot_no\|ai_model_leader | 5 | -0.0924 | [-0.2382, +0.0534] | spans zero |
+
+**Cohorts with an interval strictly above zero: ZERO.** Two are significantly negative. The best,
+`crypto`, spans zero before any correction for having run six tests.
+
+**Caveat, stated because it cuts one way only:** positions can share markets, and this per-share
+test does not cluster. Gate A found 55 independent units behind 70 finals, so effective n is roughly
+half and the true intervals are WIDER than shown. Since every point estimate is already at or below
+zero, clustering cannot rescue a positive result — it can only move these further from significance.
+
+**What this changes.** The directional lane is not "insufficient evidence pending more data". It is a
+measured absence of skill in the estimator, on the data already gathered. The power ladder asks how
+many more decisions are needed to detect an edge of size X; this asks whether the thing generating
+the decisions knows anything, and the answer is no. That question was answerable at any point in the
+last month from artifacts already in the repository.
+
 ### Was there ever a maker profit? No — and the projection is not evidence of one
 
 Recorded because it is the question any later reader will ask of a lane described as

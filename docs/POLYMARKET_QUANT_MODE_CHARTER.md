@@ -425,6 +425,73 @@ many more decisions are needed to detect an edge of size X; this asks whether th
 the decisions knows anything, and the answer is no. That question was answerable at any point in the
 last month from artifacts already in the repository.
 
+### The maker candidate set, analysed — and the pattern behind every blocker
+
+`maker_carry_candidates.csv` carries all 41 measured candidates with per-market gross, adverse
+selection and net carry. It had never been analysed; the whole maker argument had been made from the
+one market that got sized. Three findings, and the third is the important one.
+
+**1. Adverse selection is CONCENTRATED, not pervasive — my "56x" framing was misleading.**
+Aggregate adverse across 41 candidates is **$588.11/day** against **$10.54/day** aggregate gross. But:
+
+```
+top 3 markets            = $425.14 = 72.3% of ALL adverse selection
+  $275.57  skin-cancer-vaccine-fda-approved-by-december-31-2027
+  $ 76.60  skin-cancer-vaccine-bla-submitted-by-june-30-2027
+  $ 72.98  us-x-iran-ceasefire-continues-through-september-30
+markets with adverse EXACTLY 0.0: 7 of 41
+```
+
+The aggregate is dominated by three toxic markets that the portfolio sizer correctly excludes. So the
+correct statement is neither "$63.62/day of adverse selection" nor "$0.68/day": **per-market measured
+adverse ranges from $0.00 to $275.57, and the sizer's job is precisely to avoid the tail.** Both
+earlier figures in this document were summary statistics standing in for a distribution.
+
+**2. The sized market's adverse selection was measured at MINIMUM size, then the position was
+scaled 5x.** `mojtaba-khamenei` measures `gross_reward_usd_per_day: 0.3413`,
+`adverse_selection_usd_per_day: 0.0`, `pickoff_events_per_day: 0.0`, on `capital_usd: 94.0`. The
+portfolio reports $1.68/day on $470 — the same market at `size_multiple: 5`. **The adverse charge of
+zero was observed at one-fifth of the deployed size, with zero pickoff events**, and a resting order
+five times larger is a five-times-larger target. This is exactly what M-B's
+`mb1_tier0_coverage_sufficient: false` is refusing to certify, and it is the correct refusal.
+
+**3. THE PAYOUT FLOOR MAKES MINIMUM-SIZE QUOTING UNPAYABLE — and that closes the third loop.**
+M-C pays nothing below **$1.00/market/day**. Against the measured candidates:
+
+```
+candidates earning >= $1.00/day at MINIMUM size:  2 of 41
+median gross at minimum size:                     $0.138/day
+=> the median market must be quoted at 7.2x minimum size to be paid AT ALL
+```
+
+Now read the quote sheet's own standing rule 2: *"Minimum-size start: Start at minimum size for a
+full reward day before any size-up."* **At minimum size, 39 of 41 markets pay exactly zero.** A
+"full reward day" at minimum size is therefore unobtainable in 95% of the universe, so the
+precondition for sizing up can never be met, so the position never reaches a size that earns
+anything.
+
+### The pattern: three gates whose entry conditions are unreachable from their own starting state
+
+This is the finding that generalises, and it is worth more than any individual number here.
+
+| gate | the rule | why it cannot be entered |
+|---|---|---|
+| **maker capital ladder** | advance to stage 2 by realising >= 0.5x modelled rewards at stage 1 | stage 1's $250 cannot fund the $470 the qualifying market needs, so realisation is $0 |
+| **sharp-odds freshness** | anchors must be < 6h old (`h1_max_anchor_age_seconds: 21600`) | zero joins demote the fetch to a 24h `slow_probe`, which cannot produce a 6h-old anchor |
+| **maker payout floor** | size up only after a full reward day at minimum size | minimum size earns $0.00 in 39 of 41 markets, so no qualifying reward day exists |
+
+Each was written as a prudent safeguard. Each is individually reasonable. **Each makes its own
+success condition unreachable from the state the system actually starts in**, and none of the three
+was detected by any gate, watchdog or review — because every component reports itself healthy while
+waiting for a precondition that cannot arrive. `maker_verdict: insufficient_evidence` is the honest
+output of a system that is structurally prevented from gathering evidence.
+
+**This reframes the entire board.** The recorded verdict is that the tested edge classes returned NO.
+What the data actually shows is that **three of the lanes were never able to start**, and the
+mechanism was not missing data or a broken collector in any of the three cases — it was a
+self-referential precondition. That is a design-review finding, not a research finding, and it is
+the one thing on this board that would be worth fixing before any hypothesis is ever re-registered.
+
 ### The maker ladder is unpassable for the only market that qualifies
 
 Raised by the owner 2026-08-23 — "the maker lane could have made money and we didn't use the

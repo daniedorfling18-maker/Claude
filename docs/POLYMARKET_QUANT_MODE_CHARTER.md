@@ -298,6 +298,59 @@ many more decisions are needed to detect an edge of size X; this asks whether th
 the decisions knows anything, and the answer is no. That question was answerable at any point in the
 last month from artifacts already in the repository.
 
+### The maker ladder is unpassable for the only market that qualifies
+
+Raised by the owner 2026-08-23 — "the maker lane could have made money and we didn't use the
+opportunity" — and it is substantially right, for a reason worth registering.
+
+**First, the revenue mechanism was described wrongly earlier in this document.** Polymarket's maker
+rewards accrue to RESTING liquidity inside a spread band, not to fills:
+`quote_size_shares: "rewards_min_size per market, both sides"`,
+`quote_distance: "per-market best of [0.25, 0.5, 0.75] x rewards_max_spread from mid"`,
+`share_model_details: "...our hypothetical quote enters both sides symmetrically"`. Fills are the
+RISK side, not the income side. So **$0.00 realised is not evidence the model was wrong — it is
+evidence nobody placed the orders.** Any earlier reading of the $0.00 as a refutation was mistaken.
+
+**Second, and decisively: the opportunity was unreachable under the system's own governance.** The
+quote sheet of 2026-08-20 carries `Indicated action: defer_funding_continue_study` at
+`Ladder stage permitted: 0 (binding capital $100.0)`. Against the registered capital curve:
+
+| ladder stage | permitted capital | yield on the one qualifying market |
+|---|---|---|
+| stage 0 (current) | $100 | **$0.00/day** |
+| stage 1 | $250 | **$0.00/day** |
+| stage 2 | $500 | $1.68/day |
+
+The single market clearing every screen requires **$470**. At stages 0 and 1 the lane therefore
+yields exactly nothing.
+
+**This creates a closed loop.** Reaching stage 2 requires `stage1_min_consecutive_days: 7` plus
+`stage2_additional_days: 14`, and `stage2_reward_realisation_multiple: 0.5` — realised rewards at
+half the modelled rate. But at stage 1 the permitted $250 cannot fund a $470 position, so realised
+rewards are $0.00, so the 0.5x multiple can never be demonstrated, so stage 2 is never reached.
+**The evidence needed to unlock the capital can only be produced by deploying the capital.**
+
+M-A and M-B are therefore `pending` not because the lane was tested and found wanting, but because
+the registered ladder makes the test impossible to run. That is a DESIGN FAULT in the ladder, not a
+finding about the market: the rungs are round numbers ($100 / $250 / $500) chosen independently of
+the position sizes the rewarded universe actually presents.
+
+**What this changes.** Everything else on this board is a measurement that came back empty. This one
+is a measurement that was never allowed to start, and unlike the others it is cheaply fixable — a
+first rung sized to the smallest genuinely qualifying market rather than to a round number, with the
+realisation multiple assessed against what that rung can actually deploy. The maker lane is thus the
+one lane where `insufficient_evidence` is self-inflicted and self-perpetuating, and the one where a
+dated alternative has a concrete first step that is not "collect more data".
+
+**What it does NOT change.** The scale ceiling stands: even fully funded and fully realised, this is
+roughly $50/month gross and ~$30/month net of the observed adverse charge, on a capital curve flat
+from $500 to $5,000. Fixing the ladder makes the lane TESTABLE; it does not make it fundable. Those
+are different claims and only the first is supported.
+
+**Also unchanged: nothing was ever traded.** The sheet states "This system places NO orders", and
+acting on it is "a human decision, with human money, outside the bot's paper-only governance". The
+foregone amount is a projection of what resting quotes would have earned, not a realised loss.
+
 ### Was there ever a maker profit? No — and the projection is not evidence of one
 
 Recorded because it is the question any later reader will ask of a lane described as

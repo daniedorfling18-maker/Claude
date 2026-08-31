@@ -40,7 +40,7 @@ stated which regime the system was in.
 
 | hypothesis | state | the measurement |
 |---|---|---|
-| **H1** sharp-anchor maker carry | dead | gross **$3.02/day** across the entire eligible universe against a $3.33/day target; adverse selection **$63.62/day**, 21x the gross. Net **-$60.60/day**. |
+| **H1** sharp-anchor maker carry | **insufficient_evidence**, capacity-capped | net carry **+$1.68/day** against a $3.33/day target; **$50.40/month** against $100/month. Adverse selection at most **$0.68/day**, not the $63.62 first recorded here — see the corrected section below. M-A and M-B both PENDING. The capital curve is flat from $500 to $2,000: one market, $470 deployed. |
 | **H2** dutch-book consistency | dead | **0** flagged in 300 events; maximum executable basket **$0.00**. |
 | **H3** smart-flow CLV | **unmeasured** | the wallet axis is the instrument and it is still in PR #451. |
 | directional model | refuted | claimed **+0.08337/share**; realised 95% upper bound **+0.01435** across 109 positions. |
@@ -48,15 +48,33 @@ stated which regime the system was in.
 
 Market calibration is also unmeasured.
 
-**PROVENANCE, stated rather than implied**: these figures were read from VPS telemetry during the
-2026-08 review. None of the Polymarket output artifacts are committed to this repository
-(`git ls-files outputs` returns nothing under any Polymarket path), so **no reader can re-derive
-them from the repo alone** — they are a record of a reading, not a reproducible computation. The
+**PROVENANCE, and the correction it should have forced sooner**: these figures were recorded as a
+reading of VPS telemetry during the 2026-08 review. No Polymarket output artifact is committed to
+this repository (`git ls-files outputs` returns nothing under any Polymarket path) — but the
+`vps-telemetry` MIRROR BRANCH does carry a periodic snapshot, expressly so that sessions without VPS
+network access can read live state, and consulting it is what exposed the H1 figures above as wrong
+by two orders of magnitude. **Any figure in this section that has not been checked against
+`origin/vps-telemetry` should be treated as unverified.** The
 registered protocol, its dates and the terminal regime ARE verifiable here, in `profit_verdict.py`
-and its tests. The live gate states are VPS-resident: **the terminal read should be confirmed on the
-VPS before the record is treated as final.** Every measurement available at the time of writing had
-the gates not all passing, which is why the expected outcome is NO; that is an expectation from the
-evidence, not a printed live verdict.
+and its tests.
+
+**CONFIRMED 2026-08-23 — the verdict has printed, and it is no longer an expectation.** Read from
+`origin/vps-telemetry`, snapshot `2026-08-21T02:00:09Z`, artifact
+`outputs/polymarket_model_governance/profit_verdict.json`, generated `2026-08-21T01:59:04Z` — after
+the terminal instant:
+
+```json
+"verdict": "no_for_tested_edge_classes",
+"extension_resolution": { "regime": "terminal", "terminal_no_applied": true,
+                          "terminal_read_due_utc": "2026-08-19T23:59:00Z" }
+```
+
+Gate A **FAILED** on its own measurement: 55 independent settled market units, equal-weight unit
+mean net settlement return per dollar **-0.013943**, one-sided sign-test p **0.947605** against
+alpha 0.10 — "the settled positions were not profitable on average". Gates B and C are
+`not_evaluated` by construction, each being reachable only after the one before it passes. An
+earlier version of this paragraph said the terminal read still needed confirming on the VPS; it did
+not, because the mirror branch already carried it.
 
 **H4 deserves its own line, because it was an agent's own claim.** An earlier version of the
 research plan asserted crypto up/down cleared the 4c/share bar on n=9 with a line-movement lower
@@ -67,47 +85,64 @@ estimator named in advance. The cohort had also been described to the gate as be
 best-of-39. Capacity then killed what was left. The falsifier working is the one thing on this board
 that went right.
 
-### H1 deserves its own line too, because it is the lane with all the machinery
+### H1 / the maker lane — CORRECTED 2026-08-23 against live telemetry
 
-The maker lane is not merely one dead hypothesis among five — it is the only lane with a live-test
-surface, a decision policy, a quote sheet, a toxicity veto and four work orders still in flight. It
-is also, on the measurements available, the MOST conclusively dead rather than the least, and the
-distinction matters for what happens next.
+**The first version of this section was wrong, and wrong in the direction that made the case for
+stopping sound stronger than the evidence supports.** It asserted gross **$3.02/day** against
+adverse selection **$63.62/day** — a factor of 21 — and a net of **-$60.60/day**, and it called the
+maker lane the most conclusively dead of the tested classes. It also flagged, correctly, that no
+output artifact is committed to this repository and that the figures could not be re-derived here.
 
-Every other lane failed for want of a signal or for want of evidence. This one failed by producing a
-large, confident, NEGATIVE number: gross **$3.02/day** against adverse selection **$63.62/day**, a
-factor of **21**. The power ladder below does not apply to it. That ladder exists to size how long it
-takes to DETECT a small positive edge hiding in noise; here the measured quantity is large and
-negative, and more observations measure the hole more precisely rather than filling it.
+They have now been checked, and they do not survive. The `vps-telemetry` mirror branch — which
+exists precisely so that remote sessions with no VPS network access can read live state — carries
+the snapshot pushed at **2026-08-21T02:00:09Z**. Against that snapshot:
 
-**The two things that could plausibly rescue the lane, priced rather than waved at:**
+| quantity | asserted | measured |
+|---|---|---|
+| portfolio net carry | **-$60.60/day** | **+$1.68/day** (`portfolio_net_carry_usd_per_day`) |
+| adverse selection | **$63.62/day** | **at most $0.68/day** anywhere in the entire snapshot |
+| maker verdict | "dead" | **`insufficient_evidence`** (M-A pending, M-B pending, M-C pass) |
 
-1. **The measurement-coverage defect is real and is not enough.** A class-X trace (2026-08-05) found
-   the maker-carry portfolio empty NOT because its member failed a predicate but because
-   `_yield_first_shortlist` measures only the top `max_book_candidates` (40) by expected gross
-   reward; the incumbent ranked outside that and was evicted with disposition
-   `not_in_candidate_scan`, which by construction means "we do not know", not "it failed". WO-154
-   exists to fix exactly that. But the evicted member was worth **$3.06/day net carry**: retaining
-   every scan-evicted incumbent adds single-digit dollars per day against a $63.62/day charge.
-   The selection bias also runs AGAINST the hypothesis rather than for it — shortlisting by expected
-   gross reward means the measured portfolio was already skewed toward the best-looking markets, so
-   full coverage should pull measured gross down or flat, not up.
-2. **A better toxicity veto is the wrong lever, despite looking like the right one.** Its whole
-   purpose is to cut adverse selection. But the $63.62/day was measured WITH the market-axis veto
-   already live and feeding `requote_alerts.py` and `stage_ticket_eligibility.py`, and every
-   fail-open closed on that surface makes the veto more conservative — blocking more, which reduces
-   adverse selection and gross carry together. Closing a 21x gap would require removing ~95% of
-   adverse selection while leaving gross intact. Nothing measured suggests that shape.
+Every adverse-selection field in the whole telemetry tree reads `0.0`, `0.004`, `0.236902`,
+`0.524231` or `0.682944` per day. The $63.62 figure appears nowhere. The lane is **not** losing
+money on its own measurement; it is earning a little and falling short of its target.
 
-**THE ONE NUMBER TO VERIFY BEFORE ACTING ON THIS PARAGRAPH.** The maker-lane conclusion rests on
-$3.02 gross against $63.62 adverse selection. Both are recorded here as universe-wide, but no
-Polymarket output artifact is committed to this repository, so no reader — including the agent that
-wrote this — can re-derive either from the repo alone. And the systemic defect identified immediately
-below is precisely this: two numbers computed over different populations. **Confirm on the VPS that
-those two figures cover the same population over the same period.** The conclusion tolerates
-substantial error in the magnitude — a threefold mistake still leaves the lane deeply negative — but
-it does not survive the two numbers being scoped to different universes, and that is the single check
-worth making before this section is treated as settled.
+**What is actually true of the maker lane, from the artifact:**
+
+- Sized portfolio net carry **$1.68/day** against a registered target of **$3.33/day**;
+  **$50.40/month** against the `$100/month` goal, with `clears_100_per_month_target: false`.
+- **One** market in the portfolio (`mojtaba-khamenei-seen-in-public-by-december-31`), **$470**
+  deployed of a $500 cap, `markout_measured: true`.
+- **M-A carry evidence: PENDING** — 8 runs at or above target against 7 required, but
+  `latest_run_at_target: false`, and the registered rule requires the latest run to count. The lane
+  oscillates around its target rather than clearing it.
+- **M-B adverse realism: PENDING** — `mb1_tier0_coverage_sufficient: false`. The adverse charge is
+  NOT yet measured to the registered standard on every portfolio market, so the true pick-off cost
+  may be higher than the observed $0.68/day. Higher, however, is not $63.62.
+- The study's own honesty clause: net carry is an **UPPER BOUND** on the reward-share side and an
+  approximation on the pick-off side.
+
+**THE ARGUMENT THAT SURVIVES IS CAPACITY, NOT LOSS.** The registered capital curve is flat:
+
+| capital cap | capital used | markets | net/day |
+|---|---|---|---|
+| $250 | $0 | 0 | $0.00 |
+| $500 | $470 | 1 | $1.68 |
+| $1,000 | $470 | 1 | $1.68 |
+| $2,000 | $470 | 1 | $1.68 |
+
+**More capital buys nothing.** The lane saturates at one market and $470 deployed, so its ceiling is
+roughly **$50/month measured and $100/month at its own target**, at any capital level. That is the
+honest reason the maker lane does not carry a funding case — not that it bleeds, but that it cannot
+absorb money. No fix to measurement coverage, veto quality or shortlist breadth changes a ceiling
+set by how much reward-share capacity exists in an 80-market rewarded universe.
+
+**Process note, recorded because it is the same failure this document catalogues elsewhere.** The
+erroneous figures were carried forward from a prior session's analysis and repeated here as fact by
+an agent that could not re-derive them and said so in the same breath — then recommended acting
+before checking. The check took minutes once the telemetry mirror was consulted. An assertion that
+cannot be re-derived from a named artifact is not evidence, and that rule applies to this document's
+own authors.
 
 ### Why the whole board reads this way — one defect, five times
 

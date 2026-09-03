@@ -1,8 +1,18 @@
 # Pre-registered protocol: does maker adverse selection scale with position size?
 
-**Status: DRAFT PROTOCOL — NOT REGISTERED, NOT DISPATCHED.** Written 2026-08-23 at owner request.
-Registration is a separate owner decision. Nothing here authorises an order, and Stage 2 below is a
-human action outside this system's paper-only governance.
+**Status: WITHDRAWN — NOT ADMISSIBLE, NOT REGISTERED, NOT DISPATCHED.** Written 2026-08-23 at owner
+request. Nothing here authorises an order, and Stage 2 below is a human action outside this system's
+paper-only governance.
+
+> **Do not build from this document.** An independent S8 admission gate failed it on **seven of ten
+> rules (A1, A2, A5, A6, A8, A9, A10)**, and the estimator below was subsequently shown to be
+> incapable of measuring what it claims: our quote size enters the replay at exactly one site, the
+> `min(quote_size_shares, fillable)` cap at `maker_fill_replay.py:1960`, so the ratio is constant in
+> size when nothing caps and falls purely in proportion to capping when it does. On the delivered
+> corpus the 1x adverse is exactly $0.00, so the pre-registered denominator vanishes. **The
+> authoritative record is the dated result "the maker scaling axis is not observationally
+> identifiable" (2026-09-03) in `docs/POLYMARKET_QUANT_MODE_CHARTER.md`.** This file is retained only
+> as the artifact that record refers to.
 
 **Pre-registration is the point.** The estimator, the sample floor and the kill conditions are fixed
 in this document BEFORE any sweep is run. H4 died because a best-of-39 selection was presented

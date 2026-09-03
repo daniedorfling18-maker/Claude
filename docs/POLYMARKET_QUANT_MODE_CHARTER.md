@@ -1675,3 +1675,150 @@ class ever reached the four conditions above, and the registered evidence clock 
 expired. This definition still stands as the standard any FUTURE registered hypothesis must meet —
 it is not a live checklist for the classes already answered, and nothing below it authorises
 re-opening one.
+
+---
+
+## 2026-09-03 — Registered result: the maker scaling axis is not observationally identifiable
+
+**This is a measurement result, not a policy change.** No gate, threshold, eligibility rule or
+capital ceiling is altered. Nothing here authorises an order, a rung, or a spend.
+
+The maker business case turns on one unmeasured quantity — **how adverse selection scales with
+resting position size.** Every figure in that case is gross (see the candidate analysis at line 505
+of this charter: $588.11/day aggregate adverse against $10.54/day aggregate gross across the same 41
+rows). If adverse selection is linear in size the case is negative at every rung; if strongly
+sub-linear it stands.
+
+Two designs were drafted to measure it. Each went through the S8 admission checklist by an
+independent gate — never the agent that drafted it. **Both returned NOT ADMISSIBLE and neither was
+registered.** The reasons are the result worth keeping.
+
+### Design 1 — the offline size sweep is a capping meter, not a scaling measurement
+
+The proposal: replay the existing corpus at 1x / 5x / 25x `rewards_min_size_shares` and read
+`adverse_per_dollar(k) = realized_adverse_usd(k) / capital_deployed(k)`.
+
+**Our quote size enters the replay at exactly one computational site.** In
+`src/polymarket_predictive_engine/maker_fill_replay.py`, `quote_size_shares` has six occurrences;
+five are field-name tuples, contract parsing and a CSV column. The single computational use is
+`:1960`, `fill_size = min(float(entry["quote_size_shares"]), fillable)`, and `:1975` scales the
+adverse charge by that capped size. Everything else is size-independent: `per_share` is
+`fill_price - later["midpoint"]`; `_queue_depth_at_quote` (`:395`) takes
+`(state, *, direction, quote)` with **no size argument at all**; `fillable` is
+`trade["size"] - depth_ahead`.
+
+So with per-share markout `p_i` and fillable `F_i` exogenous, minimum size `S`, 1x capital `C_1`:
+
+> `adverse_per_dollar(k) = SUM_i p_i * min(k*S, F_i) / (k * C_1)`
+
+- **Nothing capped:** `k` cancels top and bottom, so the ratio is **constant in k** — verified
+  numerically on a non-degenerate markout vector, where 1x, 5x and 25x all return
+  `0.034042553191`. No data can move it.
+- **Something capped:** the numerator saturates while the denominator grows linearly, so the ratio
+  falls **in proportion to how much capping occurred** — toward the favourable "strongly sub-linear"
+  reading, carrying no adverse-selection information at all.
+
+Recorded so the algebra is not overstated later: `:2045` applies `max(0.0, adverse_5m / span_days)`,
+so on a corpus with negative aggregate markout the numerator is zero at every rung and the ratio is
+`0/0` — undefined rather than constant. The conclusion is unchanged.
+
+**On the corpus that exists the design is inoperable, not merely weak.** From
+`maker_carry/maker_fill_replay.json` (`generated_at_utc: 2026-08-21T01:42:15Z`) the three confirmed
+fills carry 5-minute markouts of `+0.015`, `-0.02`, `+0.005` per share and `fillable` of `3534.35`,
+`471.82`, `340.63` shares. At 1x (200 shares) nothing caps and realised adverse is
+`200 * (0.015 - 0.02 + 0.005) =` **exactly $0.00**, so the pre-registered denominator vanishes.
+Excluding liquidity-capped fills — as any honest version must, since a rung whose size could never
+have filled was never measured at that size — the usable sample is **3 fills at 1x, 1 at 5x, 0 at
+25x**, against the registered fill floor of 10
+(`polymarket_predictive_config.example.yaml:295`).
+
+**There is no repair.** Historical counterparties cannot respond to an order that was never placed,
+so no replay of recorded prints can show size affecting who trades against us.
+
+### Design 2 — the observational size-response regression is confounded, in the favourable direction
+
+The replacement used the market's own liquidity as a natural experiment: treatment = resting depth at
+the trade price, outcome = markout per share signed so positive is adverse to the resting side,
+estimator = slope of markout on `log2(depth / rewards_min_size_shares)` with market fixed effects.
+It fixed the vanishing denominator — a slope is defined when mean markout is zero — and failed for
+four new reasons, **all biasing the answer the same way.**
+
+1. **Endogeneity.** Resting depth is *chosen*. Makers post size when they expect benign flow and
+   pull when they expect toxic flow, so depth is negatively correlated with expected adverse
+   selection by construction. Biases the slope **downward** — toward "scaling is fine."
+2. **Measurement error in the treatment.** Book state may lag the trade by up to
+   `max_book_state_lag_seconds: 1800` (`polymarket_predictive_config.example.yaml:221`); the three
+   delivered fills show entry-state lags of **403, 877 and 638 seconds**, with 512 book states across
+   14 days. Classical error in a regressor attenuates the slope toward zero. Same direction.
+3. **Collider selection.** Observations exist only where a trade occurred, and whether a queue is
+   crossed depends jointly on its depth and on how informed the flow is.
+4. **It measures the wrong intervention.** `_queue_depth_at_quote` returns *total* depth at or better
+   across all participants — a hundred 20-share orders and one 2,000-share order are identical to it,
+   while the business question is the size of a single order. And the ladder projection maps onto
+   multiplying the whole queue by 25: placing our own order moves depth from `D` to `D+q`, so on the
+   delivered market (`depth_ahead: 3802.05`) going from 200 to 5,000 shares moves the regressor by
+   **1.1371 doublings, not `log2(25) = 4.6439`** — a **4.08x** overstatement of the relevant span,
+   and where the slope is negative it overstates the favourable reading.
+
+Two engineering findings from the drafting, kept because both patterns recur:
+
+- **A constraint on reuse, not a defect in current code.** On the `quote_aligned_depth` branch
+  (`maker_fill_replay.py:417-418`) `_queue_depth_at_quote` **ignores its `quote` argument** and
+  returns `resting_bid_depth_at_quote`, a column recorded for *our* quote price. Correct where the
+  replay calls it (at our own quote); silently wrong for any caller evaluating it at another price.
+  Future reuse must exclude rows whose returned source is not `full_book_levels`.
+- **A fail-open class.** A degeneracy guard written on the variance of a regressor does **not**
+  protect a fixed-effects estimator, whose denominator is the *within*-market sum of squares. Five
+  markets each resting at one distinct depth gives raw variance `2.0` — guard silent — and a
+  within-market denominator of **exactly `0.0`**. The slope is `nan`, `nan > 0` is `False`, and a
+  kill condition keyed on a positive slope never fires. Fail-open, again toward keeping the lane
+  open.
+
+### The result
+
+**The maker adverse-selection scaling axis cannot be identified from this system's observational
+data.** The confound is structural, not a matter of craft: resting size is chosen in response to
+expected adverse selection, so no design built on observed sizes separates "large orders are picked
+off worse" from "makers post large when they expect not to be." Two independent designs failed, and
+every failure channel in both biased toward the same favourable conclusion.
+
+**The only design that identifies the effect assigns size rather than observing it** — randomised
+live quoting with rung assigned to trading day at random. That requires capital at risk and is a
+human action outside this system's paper-only governance.
+
+### What this does NOT establish
+
+**The axis is UNMEASURED, not measured-null.** Nothing here licenses a claim that adverse selection
+scales sub-linearly, linearly, or super-linearly. A biased-toward-zero instrument returning zero is
+not evidence of no effect, and **this section must never be cited as a favourable finding.** The
+maker business case remains unresolved in the direction that matters, and its gross figures remain
+gross.
+
+### Governance record
+
+- Three independent admission passes were run across the two drafts; the drafting agent never gated
+  its own work. All returned **NOT ADMISSIBLE**. **Neither design was registered**, and registering a
+  draft with its failures noted was specifically not done — that is the outcome S8 exists to prevent.
+- **No gate, threshold, eligibility rule or capital ceiling was changed**, and no live order path was
+  added or enabled.
+- The proposed 25x rung exceeds two registered ceilings: `capital_cap_usd: 500`
+  (`polymarket_predictive_config.example.yaml:153`) at a peak of `25 * $94 = $2,350`, and
+  `max_size_multiple: 5` (`src/polymarket_predictive_engine/maker_carry_study.py:185`), a registered
+  **maximum** the draft squared to reach 25. **Raising either is an owner decision. No agent may
+  make, imply, or record it, and nothing in this section does.**
+- A drafting error worth naming: the ladder's top rung was described as "anchored on a delivered
+  value" when `size_multiple` appears **zero** times in the registered config and the real constant
+  is a maximum of 5. A registered ceiling squared is not a registered basis.
+- **State of the draft on this branch.** `docs/MAKER_PICKOFF_SCALING_EXPERIMENT.md` is the Design 1
+  text as it stood before the gate ran, and it FAILED that gate on seven of ten rules. Its own header
+  now records this. The corrected Design 1 and the whole of Design 2 were written in an ephemeral
+  container worktree and lost unpushed; this section is the surviving record of both, rebuilt from
+  source lines in this checkout and artifacts on `origin/vps-telemetry`.
+
+### Day-after check
+
+This is a terminal record of a measurement attempt, so its check is documentary: the maker scaling
+axis appears in no artifact as a measured quantity, no gate reads a scaling ratio or slope, and
+`mb1_tier0_coverage_sufficient` remains `false` until a design that identifies the effect is
+registered and run. If any future artifact publishes a scaling figure, it must name which design
+produced it and how that design escapes all four confounds enumerated above.

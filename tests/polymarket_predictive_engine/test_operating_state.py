@@ -19,6 +19,9 @@ from polymarket_predictive_engine.operating_state import (
     build_operating_state,
     front_door_drift_violations,
 )
+from polymarket_predictive_engine.operating_state import (
+    REGISTERED_PREMIUM_SAMPLE_FLOOR,
+)
 from polymarket_predictive_engine.utils import read_json, write_csv, write_json
 
 
@@ -335,27 +338,42 @@ def test_p1_prime_is_unknown_when_the_premium_artifact_is_absent(tmp_path: Path)
     assert "premium_support.json" in p1["evidence"]
 
 
-def test_p1_prime_fails_closed_on_short_sample_and_non_finite_capacity(tmp_path: Path) -> None:
-    """Hand-computed boundary: 59 observations against a floor of 60 is short by
-    exactly one and must not pass, and a NaN capacity must not pass either.
-    Both are the fail-closed branch required by S5/A2."""
+def test_p1_prime_enforces_the_registered_floor_not_the_artifacts_own(tmp_path: Path) -> None:
+    """The floor is a module constant, not a field the producer supplies.
+
+    An earlier revision compared n_observed against the artifact's own
+    n_required, so a producer declaring n_required=0 with n_observed=0 read
+    "met" — a precondition guarding automated execution passing on an artifact
+    reporting no observations. Every case below is hand-computed against
+    REGISTERED_PREMIUM_SAMPLE_FLOOR, and the artifact may raise that floor but
+    never lower it.
+    """
     cfg = _config(tmp_path)
     _write_complete_evidence(cfg)
     path = cfg.output_root / "premium_evidence" / "premium_support.json"
+    baseline = read_json(path)
 
-    for field, value in (("n_observed", 59), ("capacity_usd", float("nan"))):
-        payload = read_json(path)
-        payload["premia"]["h5_variance_risk_premium"][field] = value
+    floor = REGISTERED_PREMIUM_SAMPLE_FLOOR
+    cases = [
+        ({"n_observed": floor, "n_required": floor}, "met"),
+        ({"n_observed": floor - 1, "n_required": floor}, "not_met"),
+        ({"n_observed": 0, "n_required": 0}, "not_met"),
+        ({"n_observed": 0, "n_required": -5}, "not_met"),
+        ({"n_observed": floor, "n_required": 0}, "met"),
+        ({"n_observed": floor + 39, "n_required": floor + 40}, "not_met"),
+        ({"n_observed": floor + 40, "n_required": floor + 40}, "met"),
+        ({"n_observed": floor, "n_required": float("nan")}, "not_met"),
+        ({"n_observed": floor, "capacity_usd": float("nan")}, "not_met"),
+        ({"n_observed": floor, "capacity_usd": 0}, "not_met"),
+    ]
+    for overrides, expected in cases:
+        payload = json.loads(json.dumps(baseline))
+        payload["premia"]["h5_variance_risk_premium"].update(overrides)
         write_json(path, payload)
 
         result = build_operating_state(cfg)
         p1 = next(row for row in result["wo67_preconditions"] if row["id"] == "P1'")
-        assert p1["state"] == "not_met", f"{field}={value} must fail closed"
-
-        payload["premia"]["h5_variance_risk_premium"][field] = (
-            60 if field == "n_observed" else 50000.0
-        )
-        write_json(path, payload)
+        assert p1["state"] == expected, f"{overrides} expected {expected}"
 
 
 def test_missing_p4_artifact_names_the_generator_instead_of_bare_unknown(tmp_path: Path) -> None:

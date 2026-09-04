@@ -6,20 +6,36 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# The seven elements the registry's own freeze paragraph requires of any primary,
-# plus the A11 disclosure S8 added after two successive estimators were each
-# found incapable of measuring what they claimed. A new primary that omits any
-# of these is not registerable, and this test is what makes that mechanical.
-REQUIRED_PRIMARY_ELEMENTS = (
+# The seven elements the freeze paragraph names, transcribed from it verbatim:
+# "an economic mechanism, independent unit, sample floor, cost model,
+# multiple-test correction, stopping rule, and promotion/abandonment rule".
+#
+# An earlier revision of this list silently dropped "multiple-test correction"
+# and inserted "Support gate" in its place. That made the list a description of
+# what the new primaries happened to contain rather than a check against the
+# standard, so it could not fail — and it omitted precisely the element both new
+# primaries were missing, the selective-reporting control this registry exists
+# to enforce. The list is now derived from the freeze paragraph.
+FREEZE_PARAGRAPH_ELEMENTS = (
     "- Economic mechanism:",
     "- Independent unit:",
     "- Sample floor:",
     "- Cost model:",
-    "- Support gate:",
+    "- Multiple-test correction:",
     "- Stopping rule:",
     "- Promotion / abandonment:",
+)
+
+# House-shape elements required in addition to the freeze paragraph's seven:
+# the support gate every primary is read through, and the A11 disclosure S8
+# added after two successive estimators were each found incapable of measuring
+# what they claimed.
+ADDITIONAL_REQUIRED_ELEMENTS = (
+    "- Support gate:",
     "- A11 bias-direction disclosure:",
 )
+
+REQUIRED_PRIMARY_ELEMENTS = FREEZE_PARAGRAPH_ELEMENTS + ADDITIONAL_REQUIRED_ELEMENTS
 
 # Primaries added after the original 2026-07-12 freeze. Hypotheses 1-3 predate
 # both the seven-element requirement and A11, so they are not held to the
@@ -56,6 +72,27 @@ def test_every_post_freeze_primary_carries_the_required_elements() -> None:
         body = matching[0]
         missing = [e for e in REQUIRED_PRIMARY_ELEMENTS if e not in body]
         assert not missing, f"{label} is missing required elements: {missing}"
+
+
+def test_required_element_list_matches_the_freeze_paragraph() -> None:
+    """The element list must be derived from the freeze paragraph, not from what
+    the current primaries happen to contain. This is what stops the guard being
+    silently recalibrated to whatever was written."""
+    registry = (ROOT / "docs" / "EXPERIMENT_REGISTRY.md").read_text(encoding="utf-8")
+    paragraph = " ".join(registry.split())
+
+    for phrase in (
+        "an economic mechanism",
+        "independent unit",
+        "sample floor",
+        "cost model",
+        "multiple-test correction",
+        "stopping rule",
+        "and promotion/abandonment rule",
+    ):
+        assert phrase in paragraph, f"freeze paragraph no longer names {phrase!r}"
+
+    assert len(FREEZE_PARAGRAPH_ELEMENTS) == 7
 
 
 def test_post_freeze_primaries_are_anti_retroactive() -> None:

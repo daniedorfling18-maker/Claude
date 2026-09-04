@@ -71,7 +71,7 @@ untrue, regardless of signatures.
 
 | # | Precondition | Proof artifact required |
 |---|---|---|
-| P1 | Maker gates evidence-supported | `maker_carry_study.json` with M-A/M-B/M-C pass, dated within 48h of signing |
+| P1' | Registered premium support gate cleared | `premium_evidence/premium_support.json` showing a registered premium past its support gate, sample floor reached, capacity documented, tail cap registered. Supersedes the original P1 (M-A/M-B/M-C pass) per the 2026-09-04 amendment |
 | P2 | Human Stage-1 ladder complete | Micro-drill runbook results logged + $100 human stage executed with clean reconciliation and kill criteria untriggered |
 | P4 | Independent review control operational | Per the WO-67 registration, NO executor code exists before this amendment — not even dark/flagged branch code. P4 at signing means the review CONTROL is standing and demonstrated: the WO-69 PR gate runs on every PR, and non-author review is the working practice (link recent gate runs). The executor is built AFTER signing (registration prices this at days), reviewed by a non-author, and only then merged |
 | P5 | Custody design approved | Written custody document reviewed and accepted by the owner; link |

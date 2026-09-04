@@ -191,9 +191,10 @@ in `docs/EXPERIMENT_REGISTRY.md`:
 5. (H6) perpetual funding carry.
 
 H5 and H6 were added by the dated 2026-09-04 registry amendment, which took
-effect on its merge commit. Hypotheses 1-3 have all reached a terminal or
-unmeasured state; see the charter. The count is five, not three, and any
-document still saying three is stale.
+effect on its merge commit. H1 has returned a terminal verdict and H3 remains
+unmeasured, but **H2's registered window is still open** — its fixed calendar
+stop is 2026-09-10T13:38:47Z — so H2 continues to its own stopping rule and is
+not superseded by this amendment.
 
 Crypto up/down is a timing/infrastructure diagnostic with negative forward
 evidence. Do not spend modelling or collection-priority work trying to revive it.

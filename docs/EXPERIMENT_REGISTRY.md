@@ -325,15 +325,25 @@ or authorize paper/live capital. Funding remains closed and WO-67 blocked.
   Implied-minus-realised variance before costs is NOT the primary metric.
 - Sample floor: at least 60 independent cycles across both underlyings over at
   least 180 calendar days, and additionally `n >= 7.849 * sigma^2 / delta^2`.
-  *Basis for 60:* three times the registered `min_daily_observations: 20`
-  (`polymarket_predictive_config.example.yaml:304`), tripled because the
-  bootstrap resamples cycles rather than days and needs enough clusters to
-  produce a non-degenerate interval. *Basis for 180 days:* a shorter window can
+  *Basis for 60:* the cluster bootstrap resamples cycles, and a percentile
+  interval cannot place its 10th-percentile lower bound below the smallest
+  order statistic, so `n` must satisfy `1/n <= 0.10` — that is, `n >= 10` — just
+  to produce a non-degenerate bound. 60 is six times that minimum, so the bound
+  rests on 6 order statistics rather than 1.
+  `min_daily_observations: 20` (`polymarket_predictive_config.example.yaml:304`)
+  is deliberately NOT the basis: its own registered block states "No gate,
+  sizing rule, policy, broker, or order path reads these statistics", and this
+  floor is read by a gate. *Basis for 180 days:* a shorter window can
   sit entirely inside one volatility regime, and this premium is earned in calm
   periods and repaid in shocks, so a calm-only window measures the wrong thing.
   *Basis for 7.849:* `(1.96 + 0.8416)^2`, the 5% two-sided and 80% power
-  standard-normal quantiles; `sigma` is the measured per-cycle standard
-  deviation and `delta` the registered all-in round-trip cost.
+  standard-normal quantiles. `sigma` is the measured per-cycle standard
+  deviation. `delta` is the all-in round-trip cost **computed from the venue fee
+  schedule registered in config under `h5_variance_risk_premium.cost_model`
+  before the window opens**; until that key exists, no gate may read this
+  hypothesis. An earlier revision called `delta` "the registered all-in
+  round-trip cost" while no such registered value existed anywhere in config or
+  code, which is A1's own derivation repeated.
 - Cost model: the venue fee schedule must be captured from Deribit's own fee
   documentation or endpoint and registered in config before any gate reads.
   Until it is, a conservative fallback applies and **the gate cannot pass on the
@@ -341,23 +351,47 @@ or authorize paper/live capital. Funding remains closed and WO-67 blocked.
   pattern at `src/polymarket_common/fees.py:25`. Costs are charged per cycle at
   the executable side of the book, never at the midpoint.
 - Support gate: aggregate net premium positive; cycle-clustered bootstrap 90%
-  lower bound above zero; and no single underlying supplies more than 35% of
-  positive net premium. *Basis:* mirrors the registered H2 support gate in this
+  lower bound above zero **after subtracting the summed per-channel bias bound
+  published under the A11 disclosure below**; and no single underlying supplies
+  more than 35% of positive net premium. *Basis:* mirrors the registered H2 support gate in this
   file — "event-clustered bootstrap 90% lower bound above zero" and "no single
   event supplies more than 35% of positive net profit" — with the cluster
   changed from event to option cycle. Cited by content rather than line number
   because intra-file line citations drift with every amendment.
-- A11 bias-direction disclosure: **four identified channels push the estimate
-  the same way, toward a larger apparent premium.** (i) Excluding illiquid
-  expiries removes exactly the stressed periods where realised exceeds implied.
-  (ii) A short measurement window is likely to be calm. (iii) Omitting
-  delta-hedge slippage understates cost. (iv) Measuring only cycles the position
-  survived is survivorship. One channel pushes the other way: discrete hedging
-  error inflates measured realised variance and so shrinks the apparent premium.
-  Because the aggregate points one way, the design does not rest on the point
-  estimate — the gate reads a 90% lower bound, stressed windows are mandatory
-  inclusions rather than exclusions, and hedge costs enter the primary metric
-  rather than a footnote.
+- A11 bias-direction disclosure: **seven identified channels push the estimate
+  the same way, toward a larger apparent premium, and none identified pushes the
+  other way.** (i) Excluding illiquid expiries removes exactly the stressed
+  periods where realised exceeds implied. (ii) A short measurement window is
+  likely to be calm. (iii) Omitting delta-hedge slippage understates cost.
+  (iv) Measuring only cycles the position survived is survivorship. (v) The
+  sample floor is itself computed from `sigma` measured on the window under
+  test, so a calm window lowers the required `n` and permits the terminal read
+  sooner — the floor loosens precisely when the upward bias is largest.
+  (vi) BTC and ETH are the two assets whose variance risk premium is the most
+  documented in the class, so selecting them conditions the universe on the
+  answer. (vii) The 90-day extension is a second look taken when the interim
+  result sits near the gate.
+
+  An earlier revision claimed one channel pushed the other way — that discrete
+  hedging error inflates measured realised variance. **That was wrong and is
+  withdrawn:** hedging error is a profit-and-loss effect on the position, while
+  realised variance is measured from the return series independently of how the
+  position is hedged.
+
+  A11 requires an explicit argument that the effect exceeds the aggregate bias,
+  and **that argument cannot be made from data that does not yet exist.** So the
+  support gate below carries a bias bound rather than a claim: the estimator
+  must publish a signed upper bound for each channel above, and the gate passes
+  only if the 90% lower bound **net of the summed bias bound** still exceeds
+  zero. A 90% lower bound alone is not responsive — it corrects for sampling
+  variability, not for bias in the estimand, and is displaced upward by exactly
+  the same amount as the point estimate.
+- Multiple-test correction: H5 and H6 form one family of two and are corrected
+  together under Benjamini-Hochberg FDR at 10% across the complete tested
+  family, including null and negative cells. Reporting only the surviving
+  premium is prohibited. Any partition inspected within this hypothesis joins
+  the same family and is corrected with it, so inspecting more partitions
+  raises the bar rather than lowering it.
 - Stopping rule: evaluate at 120 independent cycles or 365 calendar days,
   whichever comes first, with one registered extension of at most 90 days
   available exactly once. If the support gate is not met at the terminal read,
@@ -395,18 +429,35 @@ or authorize paper/live capital. Funding remains closed and WO-67 blocked.
   fallback rule and the same prohibition on passing a gate using the fallback
   alone.
 - Support gate: aggregate net carry positive; week-clustered bootstrap 90% lower
-  bound above zero; no single underlying supplies more than 35% of positive net
-  carry. *Basis:* mirrors the registered H2 support gate in this file, cited by
+  bound above zero **after subtracting the summed per-channel bias bound
+  published under the A11 disclosure below**; no single underlying supplies more
+  than 35% of positive net carry. *Basis:* mirrors the registered H2 support gate in this file, cited by
   content under H5 above, with the cluster changed from event to weekly period.
-- A11 bias-direction disclosure: **three identified channels push toward a
-  larger apparent carry.** (i) Measuring only periods the short leg survived is
-  survivorship, and liquidation is precisely the tail being paid for.
-  (ii) Ignoring idle collateral overstates return on capital. (iii) Assuming
-  basis convergence at period end books an unrealised gain as carry. No
-  identified channel pushes the other way, so under A11 this design may not rest
-  on the point estimate: the gate reads a 90% lower bound, liquidated periods
-  are counted at their realised loss rather than dropped, and idle collateral is
-  charged in the denominator.
+- A11 bias-direction disclosure: **six identified channels push toward a larger
+  apparent carry and none identified pushes the other way.** (i) Measuring only
+  periods the short leg survived is survivorship, and liquidation is precisely
+  the tail being paid for. (ii) Ignoring idle collateral overstates return on
+  capital. (iii) Assuming basis convergence at period end books an unrealised
+  gain as carry. (iv) Entry conditioned on observed persistently positive
+  funding selects periods on the signal and then measures realised carry over
+  them. (v) The sample floor is computed from `sigma` on the window under test,
+  so a calm window lowers the required `n`. (vi) The cost model covers fees and
+  financing only, omitting venue and withdrawal risk, which is a genuine cost of
+  holding the carry.
+
+  An earlier revision substituted "may not rest on the point estimate" for what
+  A11 actually requires. **That substitution is withdrawn** — it paraphrased the
+  rule into a weaker form this design happened to satisfy, which is the failure
+  A11 exists to prevent. As with H5, the argument that the effect exceeds the
+  aggregate bias cannot be made before the data exists, so the support gate
+  carries the same bias bound: the 90% lower bound must exceed zero **after
+  subtracting the summed per-channel bias bound**.
+- Multiple-test correction: H5 and H6 form one family of two and are corrected
+  together under Benjamini-Hochberg FDR at 10% across the complete tested
+  family, including null and negative cells. Reporting only the surviving
+  premium is prohibited. Any partition inspected within this hypothesis joins
+  the same family and is corrected with it, so inspecting more partitions
+  raises the bar rather than lowering it.
 - Stopping rule: evaluate at 120 independent weekly periods or 365 calendar
   days, whichever comes first, with one registered extension of at most 90 days
   available exactly once. If the support gate is not met at the terminal read,

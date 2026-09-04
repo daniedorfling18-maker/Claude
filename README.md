@@ -102,7 +102,7 @@ exit evidence uses actual bid/ask prices, spread, depth, fees, adverse selection
 and cost attribution. Historical/model/reconstructed/shadow/paper/live evidence
 classes remain separate, and promotion requires prospective out-of-sample proof.
 
-Promotion-oriented research is frozen to the three hypotheses registered in
+Promotion-oriented research is frozen to the five hypotheses registered in
 [`docs/EXPERIMENT_REGISTRY.md`](docs/EXPERIMENT_REGISTRY.md):
 
 1. sharp-anchor maker carry;

@@ -479,6 +479,13 @@ def _key_custody_approval(repo_root: Path) -> tuple[str, str]:
     return "not_met", "custody design and/or Amendment A1 lacks the exact dated APPROVED status line"
 
 
+# P1' sample floor, registered 2026-09-04 in docs/EXPERIMENT_REGISTRY.md under
+# H5 and H6 ("at least 60 independent cycles" / "60 independent weekly
+# periods"). Held here rather than read from the artifact so that a producer
+# cannot declare its own weaker floor; the artifact may raise it, never lower it.
+REGISTERED_PREMIUM_SAMPLE_FLOOR = 60
+
+
 def _premium_support_state(payload: Mapping[str, Any]) -> tuple[str, str]:
     """P1' — at least one registered premium has cleared its support gate.
 
@@ -486,10 +493,16 @@ def _premium_support_state(payload: Mapping[str, Any]) -> tuple[str, str]:
     M-A/M-B/M-C pass"), which became unreachable when the hypothesis those
     gates serve returned a terminal no_for_tested_edge_classes.
 
-    Fail-closed (S5/A2): a missing artifact, a missing field, a non-finite
-    number, or a sample that is projected rather than reached all read as NOT
-    met. Only an explicit true, a positive finite capacity, and an observed
-    sample that has actually reached its required floor can satisfy this.
+    Fail-closed (S5/A2). Every one of these reads NOT met: a missing artifact,
+    a missing field, a non-finite number, a sample projected rather than
+    reached, and a self-declared floor at or below zero.
+
+    The registered floor is enforced HERE and does not come from the artifact.
+    An earlier revision took `n_required` from the payload and compared
+    `n_observed >= n_required`, so a producer declaring `n_required: 0` with
+    `n_observed: 0` read `met` — a precondition guarding automated execution
+    passing on an artifact reporting no observations at all. The floor is now a
+    module constant and the artifact can only ever raise it, never lower it.
     """
     if not payload:
         return UNKNOWN, (
@@ -509,7 +522,19 @@ def _premium_support_state(payload: Mapping[str, Any]) -> tuple[str, str]:
         observed = _finite(row.get("n_observed"))
         required = _finite(row.get("n_required"))
         tail_cap = _explicit_bool(row, "tail_position_cap_registered")
-        reached = observed is not None and required is not None and observed >= required
+        # The artifact may raise its own floor above the registered minimum but
+        # may never lower it: a producer cannot weaken its own precondition.
+        effective_floor = (
+            max(required, REGISTERED_PREMIUM_SAMPLE_FLOOR)
+            if required is not None
+            else None
+        )
+        reached = (
+            observed is not None
+            and effective_floor is not None
+            and effective_floor >= REGISTERED_PREMIUM_SAMPLE_FLOOR
+            and observed >= effective_floor
+        )
         if (
             gate is True
             and fdr is True
@@ -522,6 +547,7 @@ def _premium_support_state(payload: Mapping[str, Any]) -> tuple[str, str]:
         details.append(
             f"{name}: support_gate_passed={gate}; fdr_applied={fdr}; "
             f"capacity_usd={capacity}; n_observed={observed}; n_required={required}; "
+            f"registered_floor={REGISTERED_PREMIUM_SAMPLE_FLOOR}; "
             f"tail_position_cap_registered={tail_cap}"
         )
     state = "met" if qualifying else "not_met"

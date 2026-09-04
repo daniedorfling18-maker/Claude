@@ -46,9 +46,10 @@ outputs/performance/operating_state.json
 > because the mechanism and its risks are still an accurate account of the
 > experiment. It is **not** a statement that the lane is live.
 
-Three research hypotheses are registered in
+Five research hypotheses are registered in
 [`docs/EXPERIMENT_REGISTRY.md`](docs/EXPERIMENT_REGISTRY.md); the registry
-permits exactly these three and no fourth. H1, sharp-anchor maker carry, was
+permits exactly these five, and a further primary may not be inferred from an
+existing module or an attractive dashboard result. H1, sharp-anchor maker carry, was
 the priority lane: it was the only one with a pre-registered profit campaign
 (the frozen M-A/M-B/M-C gates in `maker_carry_study.py`), a registered
 validation ladder, and a registered — and blocked — path toward any future
@@ -107,7 +108,13 @@ Promotion-oriented research is frozen to the five hypotheses registered in
 
 1. sharp-anchor maker carry;
 2. persistent dutch-book consistency opportunities;
-3. structural-bias/smart-flow cohorts with positive executable CLV.
+3. structural-bias/smart-flow cohorts with positive executable CLV;
+4. (H5) variance risk premium on crypto options;
+5. (H6) perpetual funding carry.
+
+H5 and H6 are registered but neither support gate can pass yet: A11 requires an
+explicit argument that the effect exceeds the aggregate bias, and every
+identified bias channel in both points the favourable way.
 
 Crypto up/down and unregistered lanes are diagnostic only. No gate may be
 loosened to force trades or a `$100/month` headline.

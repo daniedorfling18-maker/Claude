@@ -191,10 +191,11 @@ in `docs/EXPERIMENT_REGISTRY.md`:
 5. (H6) perpetual funding carry.
 
 H5 and H6 were added by the dated 2026-09-04 registry amendment, which took
-effect on its merge commit. H1 has returned a terminal verdict and H3 remains
-unmeasured, but **H2's registered window is still open** — its fixed calendar
-stop is 2026-09-10T13:38:47Z — so H2 continues to its own stopping rule and is
-not superseded by this amendment.
+effect on its merge commit. It adds lanes; it supersedes none. H1's registry
+status remains "active registered study" and H2's window is open until
+2026-09-10T13:38:47Z, so both continue to their own registered stopping rules.
+H5 and H6 are registered but neither support gate can pass yet, for the A11
+reason recorded against each.
 
 Crypto up/down is a timing/infrastructure diagnostic with negative forward
 evidence. Do not spend modelling or collection-priority work trying to revive it.

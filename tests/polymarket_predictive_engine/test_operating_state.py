@@ -19,9 +19,6 @@ from polymarket_predictive_engine.operating_state import (
     build_operating_state,
     front_door_drift_violations,
 )
-from polymarket_predictive_engine.operating_state import (
-    REGISTERED_PREMIUM_SAMPLE_FLOOR,
-)
 from polymarket_predictive_engine.utils import read_json, write_csv, write_json
 
 
@@ -74,22 +71,6 @@ def _write_complete_evidence(cfg: EngineConfig) -> None:
             "generated_at_utc": generated,
             "ladder_stage_permitted": 1,
             "ladder": {"stage": 1, "consecutive_live_ok_days": 7},
-        },
-    )
-    write_json(
-        cfg.output_root / "premium_evidence" / "premium_support.json",
-        {
-            "generated_at_utc": generated,
-            "premia": {
-                "h5_variance_risk_premium": {
-                    "support_gate_passed": True,
-                    "fdr_applied": True,
-                    "capacity_usd": 50000.0,
-                    "n_observed": 60,
-                    "n_required": 60,
-                    "tail_position_cap_registered": True,
-                }
-            },
         },
     )
     performance = cfg.output_root / "performance"
@@ -208,7 +189,7 @@ def test_operating_state_derives_rows_and_wo67_preconditions(tmp_path: Path, mon
     assert rows["degraded_state_watchdog"]["state"] == "OK"
     assert rows["deploy_acceptance"]["state"] == "NOT_RUN"
     assert {identifier: row["state"] for identifier, row in preconditions.items()} == {
-        "P1'": "met",
+        "P1": "met",
         "P2": "met",
         "P3": "met",
         "P4": "met",
@@ -321,59 +302,6 @@ def test_p3_and_p5_exact_doc_patterns_distinguish_signed_unsigned_and_unreadable
     )
     assert _owner_authorisation(repo)[0] == "met"
     assert _key_custody_approval(repo)[0] == "met"
-
-
-def test_p1_prime_is_unknown_when_the_premium_artifact_is_absent(tmp_path: Path) -> None:
-    """P1' was repointed off the maker gates on 2026-09-04. With no premium
-    support artifact written at all, it must read UNKNOWN and name its
-    producer rather than silently reading as met."""
-    cfg = _config(tmp_path)
-    _write_complete_evidence(cfg)
-    (cfg.output_root / "premium_evidence" / "premium_support.json").unlink()
-
-    result = build_operating_state(cfg)
-    p1 = next(row for row in result["wo67_preconditions"] if row["id"] == "P1'")
-
-    assert p1["state"] == "UNKNOWN"
-    assert "premium_support.json" in p1["evidence"]
-
-
-def test_p1_prime_enforces_the_registered_floor_not_the_artifacts_own(tmp_path: Path) -> None:
-    """The floor is a module constant, not a field the producer supplies.
-
-    An earlier revision compared n_observed against the artifact's own
-    n_required, so a producer declaring n_required=0 with n_observed=0 read
-    "met" — a precondition guarding automated execution passing on an artifact
-    reporting no observations. Every case below is hand-computed against
-    REGISTERED_PREMIUM_SAMPLE_FLOOR, and the artifact may raise that floor but
-    never lower it.
-    """
-    cfg = _config(tmp_path)
-    _write_complete_evidence(cfg)
-    path = cfg.output_root / "premium_evidence" / "premium_support.json"
-    baseline = read_json(path)
-
-    floor = REGISTERED_PREMIUM_SAMPLE_FLOOR
-    cases = [
-        ({"n_observed": floor, "n_required": floor}, "met"),
-        ({"n_observed": floor - 1, "n_required": floor}, "not_met"),
-        ({"n_observed": 0, "n_required": 0}, "not_met"),
-        ({"n_observed": 0, "n_required": -5}, "not_met"),
-        ({"n_observed": floor, "n_required": 0}, "met"),
-        ({"n_observed": floor + 39, "n_required": floor + 40}, "not_met"),
-        ({"n_observed": floor + 40, "n_required": floor + 40}, "met"),
-        ({"n_observed": floor, "n_required": float("nan")}, "not_met"),
-        ({"n_observed": floor, "capacity_usd": float("nan")}, "not_met"),
-        ({"n_observed": floor, "capacity_usd": 0}, "not_met"),
-    ]
-    for overrides, expected in cases:
-        payload = json.loads(json.dumps(baseline))
-        payload["premia"]["h5_variance_risk_premium"].update(overrides)
-        write_json(path, payload)
-
-        result = build_operating_state(cfg)
-        p1 = next(row for row in result["wo67_preconditions"] if row["id"] == "P1'")
-        assert p1["state"] == expected, f"{overrides} expected {expected}"
 
 
 def test_missing_p4_artifact_names_the_generator_instead_of_bare_unknown(tmp_path: Path) -> None:
@@ -586,7 +514,7 @@ def test_dashboard_and_daily_harvest_consume_generated_operating_state(tmp_path:
     generated = {
         "status": "incomplete_unknown_inputs",
         "rows": [{"question": "Latest deployed SHA", "state": "UNKNOWN", "evidence": "missing", "source": "telemetry"}],
-        "wo67_preconditions": [{"id": "P1'", "title": "Premium support gate", "state": "UNKNOWN", "evidence": "missing"}],
+        "wo67_preconditions": [{"id": "P1", "title": "Maker gates", "state": "UNKNOWN", "evidence": "missing"}],
     }
     write_json(cfg.output_root / "performance" / "operating_state.json", generated)
     acceptance = {"status": "FAIL", "target_deploy_sha": "badsha", "rollback_ref": "goodsha"}

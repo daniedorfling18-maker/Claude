@@ -2587,25 +2587,7 @@ is met. Filing it now makes the eventual build a days-long mechanical job
 with zero design debate.
 
 PRECONDITIONS (all required, in order):
-  P1. SUPERSEDED 2026-09-04 by P1' below. The original read "Maker gates
-      M-A/M-B/M-C pass (registered metrics, no amendments)". It was superseded
-      for being scoped to ONE lane while sitting in the precondition chain for
-      every executor, not for being unreachable - see the correction in the
-      amendment below. It is recorded here rather than deleted so the change
-      stays auditable.
-  P1'. LANE-SCOPED. The registered hypothesis whose strategy an executor
-      implements has passed its own registered support gate on a prospective
-      out-of-sample window, with Benjamini-Hochberg FDR applied across the full
-      family, its measured capacity documented, its required sample floor
-      ACTUALLY REACHED rather than projected, and its tail-risk position cap
-      registered.
-
-      For WO-67 specifically, that lane is H1 sharp-anchor maker carry, because
-      WO-67 executes resting maker quotes from the Polymarket quote sheet and
-      nothing else. **WO-67 therefore remains BLOCKED.** H5 and H6 are different
-      strategies on different venues; clearing their gates does not unblock this
-      work order, and executing them requires a separate registration, exactly
-      as ARCHITECTURE item 6 below already demands.
+  P1. Maker gates M-A/M-B/M-C pass (registered metrics, no amendments).
   P2. The HUMAN live test completes WO-50 Stage 1: >= 7 consecutive
       positive real days with fills <= 2x model - the model must be
       verified by human-executed evidence first, so any later divergence
@@ -2622,72 +2604,44 @@ PRECONDITIONS (all required, in order):
       no withdrawal), stored ONLY in the VPS .env (never repo, never
       chat, never telemetry), rotation procedure documented.
 
-AMENDMENT 2026-09-04 - P1 repointed to P1'.
+WITHDRAWN AMENDMENT 2026-09-04 - the P1 repoint was proposed and withdrawn.
 
-Why: P1 named three specific maker gates, so it was a precondition for ONE
-lane written as though it were the precondition for every lane. Any future
-registered hypothesis would have inherited a requirement to prove the maker
-lane before executing anything of its own. P1' generalises it: an executor
-requires ITS OWN lane's support gate, which is what P1 was registered to mean.
+A change repointing P1 to a lane-scoped "P1'" reading
+`outputs/premium_evidence/premium_support.json` was drafted, gated three times,
+and WITHDRAWN before merge. It is recorded here so the attempt is auditable and
+so the same design is not proposed again without the defect being fixed.
 
-Correction to an earlier draft of this amendment, recorded rather than quietly
-fixed. That draft asserted P1 "can never close". **That is not what the register
-says.** WO-149's entry states that `run_book_pulse` never fires on the VPS, so
-no `official_book_pulse.json` is produced and `mb1_tier0_coverage_sufficient`
-stays `false` - and then: "Merging this WO did not move M-B; deploying it is
+Why withdrawn: it LOOSENED a registered live-order precondition while asserting
+it had not. Verified by executing the proposed evaluator:
+
+  - the original P1 read three registered gate states from
+    `maker_carry_study.json`, an artifact a registered producer writes on the
+    VPS every cycle;
+  - the proposal read five self-declared fields from an artifact NOTHING in this
+    repository writes, with no lane whitelist, no registry cross-check and no
+    freshness bound. An unregistered lane name returned `met`; the string
+    "yes" as `support_gate_passed` returned `met`; `capacity_usd: 0.0000001`
+    returned `met`; a 2019-dated and a 2099-dated artifact both returned `met`.
+
+`AGENTS.md` forbids loosening any gate, threshold or eligibility rule, and this
+is the chain that authorises a live order path. A weaker check here is exactly
+what that prohibition exists to stop.
+
+Also withdrawn with it: the claim that P1 "can never close". WO-149 records that
+`run_book_pulse` never fires on the VPS, so `mb1_tier0_coverage_sufficient`
+stays `false`, and then - "Merging this WO did not move M-B; deploying it is
 what will." M-B is blocked on a PENDING DEPLOY, an operational task, not on an
-impossibility. The case for generalising P1 rests on its wrong scope, not on
-unreachability, and the earlier claim is withdrawn.
+impossibility.
 
-What did NOT change: P2 through P5 are untouched. P2 in particular stays as
-written - the human live test must still complete first, because "the model
-must be verified by human-executed evidence first, so any later divergence is
-attributable to the executor, not the model". Automating ahead of that makes
-every future failure ambiguous between model and executor.
+What survives the withdrawal: P1's real defect is its SCOPE. It names three
+maker gates, so one lane's precondition sits in the chain for every future
+executor. That is worth fixing, but it cannot be fixed by pointing the gate at a
+self-declared artifact. Repoint it only when a registered producer writes the
+evidence, so the gate reads engine-produced state rather than producer
+assertions - i.e. after the H5/H6 support evaluator exists, not before.
 
-Fail-safe direction (S5): P1' reads
-`outputs/premium_evidence/premium_support.json`. A missing artifact reads
-UNKNOWN and names its producer; a missing field, a non-finite capacity, or a
-sample that is projected rather than reached all read not_met. Only an explicit
-true on every condition, a positive finite capacity, and an observed sample
-that has reached its floor can satisfy it. Implemented at
-`src/polymarket_predictive_engine/operating_state.py` in
-`_premium_support_state`.
-
-Touched files (A10) - `git diff --stat` must show exactly these six:
-  1. `docs/POLYMARKET_CODEX_WORK_ORDERS.md` - this amendment.
-  2. `docs/EXPERIMENT_REGISTRY.md` - H5 and H6.
-  3. `AGENTS.md` - the research-focus freeze list.
-  4. `src/polymarket_predictive_engine/operating_state.py` - P1' evaluator.
-  5. `tests/test_experiment_registry.py` - freeze guard.
-  6. `tests/polymarket_predictive_engine/test_operating_state.py` - P1' coverage.
-  Also updated for consistency, carrying no registered clause of their own:
-  `README.md`, `docs/POLYMARKET_CURRENT_STATE.md`,
-  `docs/DRAFT_OWNER_AMENDMENT_WO67.md`, `.claude/skills/wo-lifecycle/SKILL.md`,
-  `docs/ENGINEERING_STANDARDS.md`.
-
-Enumerated offline tests, with hand-computed expectations (A10/S4):
-  1. `n_observed=60, n_required=60` -> `met`. Exactly at the registered floor of
-     60; the inclusive side of the boundary.
-  2. `n_observed=59, n_required=60` -> `not_met`. Short by exactly one.
-  3. `n_observed=0, n_required=0` -> `not_met`. A producer declaring a zero
-     floor cannot satisfy its own precondition; the registered 60 governs.
-  4. `n_required=-5, n_observed=0` -> `not_met`. A negative declared floor is
-     not a floor.
-  5. `n_observed=60, n_required=0` -> `met`. The artifact may not lower the
-     floor, and 60 meets the registered one.
-  6. `n_observed=99, n_required=100` -> `not_met`; `100/100` -> `met`. The
-     artifact MAY raise its own floor above 60.
-  7. `capacity_usd` of `NaN`, `+inf`, `-inf`, `0` or `-1` -> `not_met`.
-  8. `n_required` missing or `NaN` -> `not_met`.
-  9. Artifact absent -> `UNKNOWN`, and the evidence string names its producer.
-  10. `premia` supplied as a list rather than a mapping -> `not_met`.
-  Each must be confirmed to FAIL with its own guard reverted.
-
-Day-after check: `operating_state.json` carries a `wo67_preconditions` row with
-`id: "P1'"`, and that row reads UNKNOWN until the lane's support evaluator has
-produced its artifact. No row reads `met` on an artifact that does not exist,
-and no row reads `met` on an artifact reporting fewer than 60 observations.
+P1 through P5 therefore stand exactly as originally registered, and WO-67
+remains BLOCKED.
 
 ARCHITECTURE (registered 2026-07-12):
 1. `maker_executor.py` consumes ONLY signed-off artifacts: the quote

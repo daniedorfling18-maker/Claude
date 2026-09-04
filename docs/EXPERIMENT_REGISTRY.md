@@ -17,8 +17,9 @@ Exactly three primary hypotheses were permitted at registration; the
 4. (H5) Variance risk premium on crypto options.
 5. (H6) Perpetual funding carry.
 
-No fourth primary may be inferred from an existing module or attractive
-dashboard result. Adding or replacing a primary requires a dated owner-approved
+No further primary may be inferred from an existing module or attractive
+dashboard result. (This read "no fourth" when the list held three; the
+prohibition is on inference, not on a particular count.) Adding or replacing a primary requires a dated owner-approved
 amendment written before the new evaluation window begins, including an
 economic mechanism, independent unit, sample floor, cost model, multiple-test
 correction, stopping rule, and promotion/abandonment rule.
@@ -323,17 +324,23 @@ or authorize paper/live capital. Funding remains closed and WO-67 blocked.
   of option spread crossed at entry and exit, delta-hedge transaction costs,
   financing on posted collateral, and the cost of the protective long leg.
   Implied-minus-realised variance before costs is NOT the primary metric.
-- Sample floor: at least 60 independent cycles across both underlyings over at
+- Sample floor: at least 30 independent cycles across both underlyings over at
   least 180 calendar days, and additionally `n >= 7.849 * sigma^2 / delta^2`.
-  *Basis for 60:* the cluster bootstrap resamples cycles, and a percentile
-  interval cannot place its 10th-percentile lower bound below the smallest
-  order statistic, so `n` must satisfy `1/n <= 0.10` — that is, `n >= 10` — just
-  to produce a non-degenerate bound. 60 is six times that minimum, so the bound
-  rests on 6 order statistics rather than 1.
+  *Basis for 30:* the floor H2 already registers in this file for a
+  cluster-bootstrapped primary — "at least 30 independent event-day episodes".
+  This is precedent adoption, stated as such, not an independent derivation.
+  The power requirement binds above it wherever it is larger, so the effective
+  floor is `max(30, 7.849 * sigma^2 / delta^2)`.
+
+  An earlier revision set this to 60 and derived it from `1/n <= 0.10`, claiming
+  a percentile interval needs `n >= 10` for a non-degenerate bound. **That
+  derivation was unsound and is withdrawn:** the lemma constrains a percentile
+  of the raw data, not the bootstrap distribution of the mean the gate actually
+  reads, and a non-degenerate bound exists at n=3. The 6x applied on top of it
+  had no basis either.
   `min_daily_observations: 20` (`polymarket_predictive_config.example.yaml:304`)
   is deliberately NOT the basis: its own registered block states "No gate,
-  sizing rule, policy, broker, or order path reads these statistics", and this
-  floor is read by a gate. *Basis for 180 days:* a shorter window can
+  sizing rule, policy, broker, or order path reads these statistics". *Basis for 180 days:* a shorter window can
   sit entirely inside one volatility regime, and this premium is earned in calm
   periods and repaid in shocks, so a calm-only window measures the wrong thing.
   *Basis for 7.849:* `(1.96 + 0.8416)^2`, the 5% two-sided and 80% power
@@ -358,7 +365,7 @@ or authorize paper/live capital. Funding remains closed and WO-67 blocked.
   event supplies more than 35% of positive net profit" — with the cluster
   changed from event to option cycle. Cited by content rather than line number
   because intra-file line citations drift with every amendment.
-- A11 bias-direction disclosure: **seven identified channels push the estimate
+- A11 bias-direction disclosure: **ten identified channels push the estimate
   the same way, toward a larger apparent premium, and none identified pushes the
   other way.** (i) Excluding illiquid expiries removes exactly the stressed
   periods where realised exceeds implied. (ii) A short measurement window is
@@ -370,7 +377,13 @@ or authorize paper/live capital. Funding remains closed and WO-67 blocked.
   (vi) BTC and ETH are the two assets whose variance risk premium is the most
   documented in the class, so selecting them conditions the universe on the
   answer. (vii) The 90-day extension is a second look taken when the interim
-  result sits near the gate.
+  result sits near the gate. (viii) The bias bounds are themselves an estimator,
+  and under-declaring one is unambiguously favourable because it shrinks the
+  subtraction. (ix) H5 and H6 were selected from the space of already-documented
+  positive risk premia, so the hypothesis family that generated them is larger
+  than the two the FDR correction covers. (x) The primary metric is per unit of
+  capital at the executable side for one unit, so the measured premium is an
+  upper bound at any capacity above that.
 
   An earlier revision claimed one channel pushed the other way — that discrete
   hedging error inflates measured realised variance. **That was wrong and is
@@ -378,14 +391,27 @@ or authorize paper/live capital. Funding remains closed and WO-67 blocked.
   realised variance is measured from the return series independently of how the
   position is hedged.
 
-  A11 requires an explicit argument that the effect exceeds the aggregate bias,
-  and **that argument cannot be made from data that does not yet exist.** So the
-  support gate below carries a bias bound rather than a claim: the estimator
-  must publish a signed upper bound for each channel above, and the gate passes
-  only if the 90% lower bound **net of the summed bias bound** still exceeds
-  zero. A 90% lower bound alone is not responsive — it corrects for sampling
-  variability, not for bias in the estimand, and is displaced upward by exactly
-  the same amount as the point estimate.
+  A11 requires an explicit argument that the effect exceeds the aggregate bias.
+  **That argument cannot be made from data that does not yet exist, so this
+  hypothesis is registered but its support gate CANNOT PASS until it can.** That
+  is the rule working, not a technicality to route around.
+
+  The route to passing is a bias bound with teeth, and three properties are
+  required before any gate reads one. (a) Each channel's bound is produced by a
+  **named derivation method registered in this file before the window opens** —
+  a bound the producer merely asserts is not a bound. (b) Each bound carries a
+  registered non-zero minimum, because a bound of zero reduces the gate to
+  `LB90 > 0`, the very thing this paragraph calls non-responsive. (c) The bounds
+  are computed by a component other than the one whose lane they gate, since a
+  producer publishing its own bias correction can pass itself.
+
+  An earlier revision required only that the estimator "publish a signed upper
+  bound for each channel". **Withdrawn:** with all bounds published as zero the
+  gate reduced exactly to `LB90 > 0`, and with any bound negative it was looser
+  than that — the same self-declared-threshold defect this project has already
+  had to fix once in code. A 90% lower bound alone is not responsive: it
+  corrects for sampling variability, not for bias in the estimand, and is
+  displaced upward by bias by the same amount as the point estimate.
 - Multiple-test correction: H5 and H6 form one family of two and are corrected
   together under Benjamini-Hochberg FDR at 10% across the complete tested
   family, including null and negative cells. Reporting only the surviving
@@ -421,7 +447,7 @@ or authorize paper/live capital. Funding remains closed and WO-67 blocked.
   both legs' fees, borrow or margin financing, basis change over the period,
   and the collateral held idle against liquidation. Headline funding rate is NOT
   the primary metric.
-- Sample floor: at least 60 independent weekly periods across both underlyings
+- Sample floor: at least 30 independent weekly periods across both underlyings
   over at least 180 calendar days, and additionally
   `n >= 7.849 * sigma^2 / delta^2` on the same terms as H5. *Bases:* as H5.
 - Cost model: Binance spot and futures fee schedules captured from the venue and
@@ -433,7 +459,7 @@ or authorize paper/live capital. Funding remains closed and WO-67 blocked.
   published under the A11 disclosure below**; no single underlying supplies more
   than 35% of positive net carry. *Basis:* mirrors the registered H2 support gate in this file, cited by
   content under H5 above, with the cluster changed from event to weekly period.
-- A11 bias-direction disclosure: **six identified channels push toward a larger
+- A11 bias-direction disclosure: **nine identified channels push toward a larger
   apparent carry and none identified pushes the other way.** (i) Measuring only
   periods the short leg survived is survivorship, and liquidation is precisely
   the tail being paid for. (ii) Ignoring idle collateral overstates return on
@@ -443,15 +469,19 @@ or authorize paper/live capital. Funding remains closed and WO-67 blocked.
   them. (v) The sample floor is computed from `sigma` on the window under test,
   so a calm window lowers the required `n`. (vi) The cost model covers fees and
   financing only, omitting venue and withdrawal risk, which is a genuine cost of
-  holding the carry.
+  holding the carry. (vii) The bias bounds are themselves an estimator whose
+  under-declaration is favourable. (viii) H5 and H6 were selected from the space
+  of documented positive premia, so the generating family exceeds two. (ix) The
+  per-unit premium is an upper bound at any capacity above one unit.
 
   An earlier revision substituted "may not rest on the point estimate" for what
   A11 actually requires. **That substitution is withdrawn** — it paraphrased the
   rule into a weaker form this design happened to satisfy, which is the failure
-  A11 exists to prevent. As with H5, the argument that the effect exceeds the
-  aggregate bias cannot be made before the data exists, so the support gate
-  carries the same bias bound: the 90% lower bound must exceed zero **after
-  subtracting the summed per-channel bias bound**.
+  A11 exists to prevent. As with H5, the argument A11 requires cannot be made
+  before the data exists, so **H6 is registered but its support gate cannot pass
+  until it can**, under the same three conditions on any bias bound: a
+  registered derivation method per channel, a registered non-zero minimum, and
+  computation by a component other than the one whose lane it gates.
 - Multiple-test correction: H5 and H6 form one family of two and are corrected
   together under Benjamini-Hochberg FDR at 10% across the complete tested
   family, including null and negative cells. Reporting only the surviving
@@ -517,6 +547,7 @@ this study; every verdict rendering carries the settlement-return caveat.
   are diagnostics only.
 - Crypto up/down remains frozen after negative evidence; unfreezing requires a
   new owner-approved registry amendment and fresh OOS window.
-- Politics, awards, long-dated macro, and every family not named in H1–H3 are
+- Politics, awards, long-dated macro, and every family not named in H1–H3, H5 or
+  H6 are
   parked. Passive low-cost collection may continue, but no promotion-oriented
   modelling or agent time is allocated without amendment.

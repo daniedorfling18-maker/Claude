@@ -74,25 +74,52 @@ def test_every_post_freeze_primary_carries_the_required_elements() -> None:
         assert not missing, f"{label} is missing required elements: {missing}"
 
 
-def test_required_element_list_matches_the_freeze_paragraph() -> None:
-    """The element list must be derived from the freeze paragraph, not from what
-    the current primaries happen to contain. This is what stops the guard being
-    silently recalibrated to whatever was written."""
+def _elements_named_by_the_freeze_paragraph(registry: str) -> tuple[str, ...]:
+    """Derive the required element headings from the freeze paragraph itself.
+
+    The freeze paragraph is the standard. Parsing it here — rather than writing
+    the list out by hand — is what stops the guard being recalibrated to
+    whatever the current primaries happen to contain, which is the defect this
+    function exists to close.
+    """
+    flat = " ".join(registry.split())
+    match = re.search(r"including an (.+?rule)\.", flat)
+    assert match, "freeze paragraph no longer states the required elements"
+
+    # "an economic mechanism, independent unit, ..., and promotion/abandonment rule"
+    named = [part.strip() for part in match.group(1).split(",")]
+    named = [re.sub(r"^(an|and) ", "", part) for part in named]
+
+    # Prose name -> the bullet heading a primary must carry. Every prose name
+    # must appear here; an unmapped one fails rather than being skipped.
+    HEADINGS = {
+        "economic mechanism": "- Economic mechanism:",
+        "independent unit": "- Independent unit:",
+        "sample floor": "- Sample floor:",
+        "cost model": "- Cost model:",
+        "multiple-test correction": "- Multiple-test correction:",
+        "stopping rule": "- Stopping rule:",
+        "promotion/abandonment rule": "- Promotion / abandonment:",
+    }
+    unmapped = [n for n in named if n not in HEADINGS]
+    assert not unmapped, f"freeze paragraph names elements with no heading: {unmapped}"
+    return tuple(HEADINGS[n] for n in named)
+
+
+def test_required_element_list_is_derived_from_the_freeze_paragraph() -> None:
+    """FREEZE_PARAGRAPH_ELEMENTS must equal what the freeze paragraph names.
+
+    Mutating the module tuple — for instance dropping "multiple-test
+    correction" and inserting "Support gate", which is the exact defect a
+    previous revision shipped — must fail this test.
+    """
     registry = (ROOT / "docs" / "EXPERIMENT_REGISTRY.md").read_text(encoding="utf-8")
-    paragraph = " ".join(registry.split())
+    derived = _elements_named_by_the_freeze_paragraph(registry)
 
-    for phrase in (
-        "an economic mechanism",
-        "independent unit",
-        "sample floor",
-        "cost model",
-        "multiple-test correction",
-        "stopping rule",
-        "and promotion/abandonment rule",
-    ):
-        assert phrase in paragraph, f"freeze paragraph no longer names {phrase!r}"
-
-    assert len(FREEZE_PARAGRAPH_ELEMENTS) == 7
+    assert FREEZE_PARAGRAPH_ELEMENTS == derived, (
+        "the element list no longer matches the freeze paragraph it cites: "
+        f"list={FREEZE_PARAGRAPH_ELEMENTS} paragraph={derived}"
+    )
 
 
 def test_post_freeze_primaries_are_anti_retroactive() -> None:

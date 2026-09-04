@@ -91,24 +91,6 @@ def _explicit_bool(mapping: Mapping[str, Any], key: str) -> bool | None:
     return None
 
 
-def _finite(value: Any) -> float | None:
-    """Return the value as a float only when it is a real, finite number.
-
-    A2/S5: missing, empty, unparseable, NaN and infinity all return None so
-    that every caller's comparison falls to the fail-closed branch rather than
-    silently comparing against a non-finite value.
-    """
-    if value is None or isinstance(value, bool):
-        return None
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    if number != number or number in (float("inf"), float("-inf")):
-        return None
-    return number
-
-
 def _row(key: str, question: str, state: str, evidence: str, source: str, verified_at: str = "") -> dict[str, str]:
     return {
         "key": key,
@@ -479,90 +461,19 @@ def _key_custody_approval(repo_root: Path) -> tuple[str, str]:
     return "not_met", "custody design and/or Amendment A1 lacks the exact dated APPROVED status line"
 
 
-# P1' sample floor, registered 2026-09-04 in docs/EXPERIMENT_REGISTRY.md under
-# H5 and H6 ("at least 60 independent cycles" / "60 independent weekly
-# periods"). Held here rather than read from the artifact so that a producer
-# cannot declare its own weaker floor; the artifact may raise it, never lower it.
-REGISTERED_PREMIUM_SAMPLE_FLOOR = 60
-
-
-def _premium_support_state(payload: Mapping[str, Any]) -> tuple[str, str]:
-    """P1' — at least one registered premium has cleared its support gate.
-
-    Registered 2026-09-04, superseding the original P1 ("Maker gates
-    M-A/M-B/M-C pass"), which became unreachable when the hypothesis those
-    gates serve returned a terminal no_for_tested_edge_classes.
-
-    Fail-closed (S5/A2). Every one of these reads NOT met: a missing artifact,
-    a missing field, a non-finite number, a sample projected rather than
-    reached, and a self-declared floor at or below zero.
-
-    The registered floor is enforced HERE and does not come from the artifact.
-    An earlier revision took `n_required` from the payload and compared
-    `n_observed >= n_required`, so a producer declaring `n_required: 0` with
-    `n_observed: 0` read `met` — a precondition guarding automated execution
-    passing on an artifact reporting no observations at all. The floor is now a
-    module constant and the artifact can only ever raise it, never lower it.
-    """
-    if not payload:
-        return UNKNOWN, (
-            "premium_support.json has not been produced in this checkout; "
-            "it is written by the registered H5/H6 support evaluator"
-        )
-    premia = _mapping(payload.get("premia"))
-    if not premia:
-        return "not_met", "premium_support.json carries no premia block"
-    qualifying: list[str] = []
-    details: list[str] = []
-    for name in sorted(premia):
-        row = _mapping(premia.get(name))
-        gate = _explicit_bool(row, "support_gate_passed")
-        fdr = _explicit_bool(row, "fdr_applied")
-        capacity = _finite(row.get("capacity_usd"))
-        observed = _finite(row.get("n_observed"))
-        required = _finite(row.get("n_required"))
-        tail_cap = _explicit_bool(row, "tail_position_cap_registered")
-        # The artifact may raise its own floor above the registered minimum but
-        # may never lower it: a producer cannot weaken its own precondition.
-        effective_floor = (
-            max(required, REGISTERED_PREMIUM_SAMPLE_FLOOR)
-            if required is not None
-            else None
-        )
-        reached = (
-            observed is not None
-            and effective_floor is not None
-            and effective_floor >= REGISTERED_PREMIUM_SAMPLE_FLOOR
-            and observed >= effective_floor
-        )
-        if (
-            gate is True
-            and fdr is True
-            and capacity is not None
-            and capacity > 0
-            and reached
-            and tail_cap is True
-        ):
-            qualifying.append(name)
-        details.append(
-            f"{name}: support_gate_passed={gate}; fdr_applied={fdr}; "
-            f"capacity_usd={capacity}; n_observed={observed}; n_required={required}; "
-            f"registered_floor={REGISTERED_PREMIUM_SAMPLE_FLOOR}; "
-            f"tail_position_cap_registered={tail_cap}"
-        )
-    state = "met" if qualifying else "not_met"
-    prefix = f"qualifying={','.join(qualifying) if qualifying else 'none'}; "
-    return state, prefix + "; ".join(details)
-
-
 def _wo67_preconditions(
     cfg: EngineConfig,
     maker_study: Mapping[str, Any],
     decision_policy: Mapping[str, Any],
     merge_gate: Mapping[str, Any],
-    premium_support: Mapping[str, Any],
 ) -> list[dict[str, str]]:
-    p1_state, p1_evidence = _premium_support_state(premium_support)
+    gates = _mapping(maker_study.get("maker_gates"))
+    gate_names = ("M_A_carry_evidence", "M_B_adverse_realism", "M_C_payout_floor")
+    gate_states = {name: _gate_state(gates, name) for name in gate_names}
+    if not maker_study:
+        p1_state = UNKNOWN
+    else:
+        p1_state = "met" if all(state.startswith("pass") for state in gate_states.values()) else "not_met"
 
     ladder = _mapping(decision_policy.get("ladder"))
     stage = decision_policy.get("ladder_stage_permitted", ladder.get("stage"))
@@ -606,13 +517,7 @@ def _wo67_preconditions(
         "with fills inside the registered 2x-model bound"
     )
     return [
-        _precondition(
-            "P1'",
-            "At least one registered premium has cleared its support gate",
-            p1_state,
-            p1_evidence,
-            "premium_evidence/premium_support.json",
-        ),
+        _precondition("P1", "Maker gates M-A/M-B/M-C pass", p1_state, json.dumps(gate_states, sort_keys=True), "maker_carry_study.json"),
         _precondition("P2", "Human live-test Stage 1 complete", p2_state, p2_evidence, "decision_policy.json"),
         _precondition("P3", "Dated owner amendment authorises scoped live path", p3_state, p3_evidence, "AGENTS.md Owner amendments"),
         _precondition("P4", "Independent merge control enforced", p4_state, p4_evidence, "independent_merge_gate.json"),
@@ -795,7 +700,6 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
     degraded_watchdog = _artifact(output_root / "ops_scheduler" / "degraded_state_watchdog.json")
     deploy_acceptance = _artifact(output_root / "ops_scheduler" / "deploy_acceptance.json")
     merge_gate = _artifact(performance / "independent_merge_gate.json")
-    premium_support = _artifact(output_root / "premium_evidence" / "premium_support.json")
     a1_sweep_advisory = build_a1_sweep_advisory(cfg, as_of=as_of)
     telemetry_manifest, telemetry_manifest_path = _telemetry_manifest(cfg)
     artifacts = {
@@ -993,7 +897,7 @@ def build_operating_state(cfg: EngineConfig) -> dict[str, Any]:
     )
     executor_kill_state = "ABSENT" if executor_absent else str(executor_kill.get("status") or UNKNOWN).upper()
 
-    preconditions = _wo67_preconditions(cfg, maker_study, decision_policy, merge_gate, premium_support)
+    preconditions = _wo67_preconditions(cfg, maker_study, decision_policy, merge_gate)
     states = [row["state"] for row in preconditions]
     if all(state == "met" for state in states):
         autonomous_state = "PRECONDITIONS_MET_EXECUTOR_NOT_IMPLEMENTED"

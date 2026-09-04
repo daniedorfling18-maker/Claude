@@ -8,18 +8,14 @@ edge evidence, regardless of its observed numbers.
 
 ## Research-surface freeze (registered 2026-07-12)
 
-Exactly three primary hypotheses were permitted at registration; the
-2026-09-04 amendment below raises that to five.
+Exactly three primary hypotheses are permitted:
 
 1. Sharp-anchor maker carry.
 2. Persistent dutch-book consistency opportunities.
 3. Structural-bias / smart-flow cohorts with positive CLV.
-4. (H5) Variance risk premium on crypto options.
-5. (H6) Perpetual funding carry.
 
-No further primary may be inferred from an existing module or attractive
-dashboard result. (This read "no fourth" when the list held three; the
-prohibition is on inference, not on a particular count.) Adding or replacing a primary requires a dated owner-approved
+No fourth primary may be inferred from an existing module or attractive
+dashboard result. Adding or replacing a primary requires a dated owner-approved
 amendment written before the new evaluation window begins, including an
 economic mechanism, independent unit, sample floor, cost model, multiple-test
 correction, stopping rule, and promotion/abandonment rule.
@@ -28,32 +24,6 @@ For H2 and H3, every observation before the merge commit containing this freeze
 is diagnostic history only. It cannot be back-applied to the gates below. The
 first eligible out-of-sample observation must have a timestamp strictly after
 that merge commit. This prevents retroactive hypothesis registration.
-
-### Amendment 2026-09-04 — two risk-premium primaries added (H5, H6)
-
-This amendment is written BEFORE any H5 or H6 evaluation window begins and
-takes effect on the merge commit that lands it. It does not assert that it has
-been approved; the merge is the approval, and no agent may write, cite, or
-imply otherwise.
-
-**Anti-retroactivity, on the same terms already applied to H2 and H3.** Every
-H5 and H6 observation before this amendment's merge commit is diagnostic
-history only and cannot be back-applied to the gates below. The first eligible
-out-of-sample observation must carry a timestamp strictly after that merge
-commit.
-
-**Why two premia rather than one hypothesis.** Both are compensation for
-bearing risk rather than payment for being right, and in both the quantity is
-observable before entry — a live option chain and a funding rate published
-8-hourly in advance. That is the deliberate contrast with H1-H3, each of which
-required an edge to be estimated, and each of whose estimators drifted toward
-the favourable answer.
-
-**Multiple-testing.** H5 and H6 are two members of one family and are corrected
-together under the Benjamini-Hochberg FDR at 10% policy already registered
-under "Multiple-testing and evidence policy", across the complete tested family
-including null and negative cells. Reporting only the surviving premium is
-prohibited.
 
 ## H1 — PRIMARY: Sharp-anchor maker carry
 
@@ -304,200 +274,6 @@ fee. No result from this retrospective terminal-resolution corpus can replace
 the WO-96 prospective fill-to-final-bid CLV verdict, alter a promotion gate,
 or authorize paper/live capital. Funding remains closed and WO-67 blocked.
 
-## H5 — PRIMARY: Variance risk premium on crypto options
-
-- Economic mechanism: option-implied variance is a risk-neutral expectation
-  carrying a premium for bearing variance risk, so it exceeds subsequently
-  realised variance on average. A defined-risk short-variance position with a
-  delta hedge harvests that spread. The premium is compensation for tail risk,
-  not a forecast — it is paid precisely because the position loses in a
-  volatility shock, and any version of this hypothesis that treats it as free
-  money has misread the mechanism.
-- Universe: BTC and ETH options on Deribit at 7-30 calendar days to expiry,
-  restricted to strikes carrying a two-sided quote. An expiry with no two-sided
-  quote at the protective strike is excluded before measurement, not after.
-- Independent unit: one non-overlapping option cycle per underlying, the next
-  cycle beginning at the previous expiry. **Daily observations are NOT
-  independent**: realised variance is strongly autocorrelated, so overlapping
-  windows inflate the effective sample. The cluster bootstrap resamples cycles.
-- Primary metric: realised premium per cycle per unit of capital at risk, net
-  of option spread crossed at entry and exit, delta-hedge transaction costs,
-  financing on posted collateral, and the cost of the protective long leg.
-  Implied-minus-realised variance before costs is NOT the primary metric.
-- Sample floor: at least 30 independent cycles across both underlyings over at
-  least 180 calendar days, and additionally `n >= 7.849 * sigma^2 / delta^2`.
-  *Basis for 30:* the floor H2 already registers in this file for a
-  cluster-bootstrapped primary — "at least 30 independent event-day episodes".
-  This is precedent adoption, stated as such, not an independent derivation.
-  The power requirement binds above it wherever it is larger, so the effective
-  floor is `max(30, 7.849 * sigma^2 / delta^2)`.
-
-  An earlier revision set this to 60 and derived it from `1/n <= 0.10`, claiming
-  a percentile interval needs `n >= 10` for a non-degenerate bound. **That
-  derivation was unsound and is withdrawn:** the lemma constrains a percentile
-  of the raw data, not the bootstrap distribution of the mean the gate actually
-  reads, and a non-degenerate bound exists at n=3. The 6x applied on top of it
-  had no basis either.
-  `min_daily_observations: 20` (`polymarket_predictive_config.example.yaml:304`)
-  is deliberately NOT the basis: its own registered block states "No gate,
-  sizing rule, policy, broker, or order path reads these statistics". *Basis for 180 days:* a shorter window can
-  sit entirely inside one volatility regime, and this premium is earned in calm
-  periods and repaid in shocks, so a calm-only window measures the wrong thing.
-  *Basis for 7.849:* `(1.96 + 0.8416)^2`, the 5% two-sided and 80% power
-  standard-normal quantiles. `sigma` is the measured per-cycle standard
-  deviation. `delta` is the all-in round-trip cost **computed from the venue fee
-  schedule registered in config under `h5_variance_risk_premium.cost_model`
-  before the window opens**; until that key exists, no gate may read this
-  hypothesis. An earlier revision called `delta` "the registered all-in
-  round-trip cost" while no such registered value existed anywhere in config or
-  code, which is A1's own derivation repeated.
-- Cost model: the venue fee schedule must be captured from Deribit's own fee
-  documentation or endpoint and registered in config before any gate reads.
-  Until it is, a conservative fallback applies and **the gate cannot pass on the
-  fallback alone**, mirroring the registered `CONSERVATIVE_UNKNOWN_RATE = 0.07`
-  pattern at `src/polymarket_common/fees.py:25`. Costs are charged per cycle at
-  the executable side of the book, never at the midpoint.
-- Support gate: aggregate net premium positive; cycle-clustered bootstrap 90%
-  lower bound above zero **after subtracting the summed per-channel bias bound
-  published under the A11 disclosure below**; and no single underlying supplies
-  more than 35% of positive net premium. *Basis:* mirrors the registered H2 support gate in this
-  file — "event-clustered bootstrap 90% lower bound above zero" and "no single
-  event supplies more than 35% of positive net profit" — with the cluster
-  changed from event to option cycle. Cited by content rather than line number
-  because intra-file line citations drift with every amendment.
-- A11 bias-direction disclosure: **ten identified channels push the estimate
-  the same way, toward a larger apparent premium, and none identified pushes the
-  other way.** (i) Excluding illiquid expiries removes exactly the stressed
-  periods where realised exceeds implied. (ii) A short measurement window is
-  likely to be calm. (iii) Omitting delta-hedge slippage understates cost.
-  (iv) Measuring only cycles the position survived is survivorship. (v) The
-  sample floor is itself computed from `sigma` measured on the window under
-  test, so a calm window lowers the required `n` and permits the terminal read
-  sooner — the floor loosens precisely when the upward bias is largest.
-  (vi) BTC and ETH are the two assets whose variance risk premium is the most
-  documented in the class, so selecting them conditions the universe on the
-  answer. (vii) The 90-day extension is a second look taken when the interim
-  result sits near the gate. (viii) The bias bounds are themselves an estimator,
-  and under-declaring one is unambiguously favourable because it shrinks the
-  subtraction. (ix) H5 and H6 were selected from the space of already-documented
-  positive risk premia, so the hypothesis family that generated them is larger
-  than the two the FDR correction covers. (x) The primary metric is per unit of
-  capital at the executable side for one unit, so the measured premium is an
-  upper bound at any capacity above that.
-
-  An earlier revision claimed one channel pushed the other way — that discrete
-  hedging error inflates measured realised variance. **That was wrong and is
-  withdrawn:** hedging error is a profit-and-loss effect on the position, while
-  realised variance is measured from the return series independently of how the
-  position is hedged.
-
-  A11 requires an explicit argument that the effect exceeds the aggregate bias.
-  **That argument cannot be made from data that does not yet exist, so this
-  hypothesis is registered but its support gate CANNOT PASS until it can.** That
-  is the rule working, not a technicality to route around.
-
-  The route to passing is a bias bound with teeth, and three properties are
-  required before any gate reads one. (a) Each channel's bound is produced by a
-  **named derivation method registered in this file before the window opens** —
-  a bound the producer merely asserts is not a bound. (b) Each bound carries a
-  registered non-zero minimum, because a bound of zero reduces the gate to
-  `LB90 > 0`, the very thing this paragraph calls non-responsive. (c) The bounds
-  are computed by a component other than the one whose lane they gate, since a
-  producer publishing its own bias correction can pass itself.
-
-  An earlier revision required only that the estimator "publish a signed upper
-  bound for each channel". **Withdrawn:** with all bounds published as zero the
-  gate reduced exactly to `LB90 > 0`, and with any bound negative it was looser
-  than that — the same self-declared-threshold defect this project has already
-  had to fix once in code. A 90% lower bound alone is not responsive: it
-  corrects for sampling variability, not for bias in the estimand, and is
-  displaced upward by bias by the same amount as the point estimate.
-- Multiple-test correction: H5 and H6 form one family of two and are corrected
-  together under Benjamini-Hochberg FDR at 10% across the complete tested
-  family, including null and negative cells. Reporting only the surviving
-  premium is prohibited. Any partition inspected within this hypothesis joins
-  the same family and is corrected with it, so inspecting more partitions
-  raises the bar rather than lowering it.
-- Stopping rule: evaluate at 120 independent cycles or 365 calendar days,
-  whichever comes first, with one registered extension of at most 90 days
-  available exactly once. If the support gate is not met at the terminal read,
-  the lane returns to diagnostic status. No threshold tuning on that window.
-- Promotion / abandonment: gate met -> promote to backtest (M4) and capacity
-  measurement, not to capital. Gate not met at the terminal read -> abandon the
-  lane and record the result; it may not be revived without a fresh
-  pre-observation amendment and a new out-of-sample window.
-- Status: registered by the merge of this amendment. No collection before that
-  merge counts.
-
-## H6 — PRIMARY: Perpetual funding carry
-
-- Economic mechanism: a perpetual future is tethered to spot by a periodic
-  funding payment between longs and shorts. When funding is persistently
-  positive, a long-spot / short-perpetual position is delta-neutral and collects
-  funding as carry. The rate is **published in advance**, so the carry is known
-  at entry rather than estimated after; the risk borne is basis divergence and
-  short-leg liquidation, and the premium is compensation for exactly that.
-- Universe: BTC and ETH perpetuals on Binance, with the matching spot leg. A
-  period in which either leg lacks a two-sided quote is excluded before
-  measurement.
-- Independent unit: one non-overlapping weekly carry period per underlying.
-  **8-hourly funding observations are NOT independent** — funding is strongly
-  autocorrelated — so the cluster bootstrap resamples weeks, not intervals.
-- Primary metric: realised carry per week per unit of capital at risk, net of
-  both legs' fees, borrow or margin financing, basis change over the period,
-  and the collateral held idle against liquidation. Headline funding rate is NOT
-  the primary metric.
-- Sample floor: at least 30 independent weekly periods across both underlyings
-  over at least 180 calendar days, and additionally
-  `n >= 7.849 * sigma^2 / delta^2` on the same terms as H5. *Bases:* as H5.
-- Cost model: Binance spot and futures fee schedules captured from the venue and
-  registered in config before any gate reads, with the same conservative
-  fallback rule and the same prohibition on passing a gate using the fallback
-  alone.
-- Support gate: aggregate net carry positive; week-clustered bootstrap 90% lower
-  bound above zero **after subtracting the summed per-channel bias bound
-  published under the A11 disclosure below**; no single underlying supplies more
-  than 35% of positive net carry. *Basis:* mirrors the registered H2 support gate in this file, cited by
-  content under H5 above, with the cluster changed from event to weekly period.
-- A11 bias-direction disclosure: **nine identified channels push toward a larger
-  apparent carry and none identified pushes the other way.** (i) Measuring only
-  periods the short leg survived is survivorship, and liquidation is precisely
-  the tail being paid for. (ii) Ignoring idle collateral overstates return on
-  capital. (iii) Assuming basis convergence at period end books an unrealised
-  gain as carry. (iv) Entry conditioned on observed persistently positive
-  funding selects periods on the signal and then measures realised carry over
-  them. (v) The sample floor is computed from `sigma` on the window under test,
-  so a calm window lowers the required `n`. (vi) The cost model covers fees and
-  financing only, omitting venue and withdrawal risk, which is a genuine cost of
-  holding the carry. (vii) The bias bounds are themselves an estimator whose
-  under-declaration is favourable. (viii) H5 and H6 were selected from the space
-  of documented positive premia, so the generating family exceeds two. (ix) The
-  per-unit premium is an upper bound at any capacity above one unit.
-
-  An earlier revision substituted "may not rest on the point estimate" for what
-  A11 actually requires. **That substitution is withdrawn** — it paraphrased the
-  rule into a weaker form this design happened to satisfy, which is the failure
-  A11 exists to prevent. As with H5, the argument A11 requires cannot be made
-  before the data exists, so **H6 is registered but its support gate cannot pass
-  until it can**, under the same three conditions on any bias bound: a
-  registered derivation method per channel, a registered non-zero minimum, and
-  computation by a component other than the one whose lane it gates.
-- Multiple-test correction: H5 and H6 form one family of two and are corrected
-  together under Benjamini-Hochberg FDR at 10% across the complete tested
-  family, including null and negative cells. Reporting only the surviving
-  premium is prohibited. Any partition inspected within this hypothesis joins
-  the same family and is corrected with it, so inspecting more partitions
-  raises the bar rather than lowering it.
-- Stopping rule: evaluate at 120 independent weekly periods or 365 calendar
-  days, whichever comes first, with one registered extension of at most 90 days
-  available exactly once. If the support gate is not met at the terminal read,
-  the lane returns to diagnostic status. No threshold tuning on that window.
-- Promotion / abandonment: as H5 — gate met promotes to backtest and capacity
-  measurement, not to capital; gate not met at the terminal read abandons the
-  lane, revivable only by a fresh pre-observation amendment and a new window.
-- Status: registered by the merge of this amendment. No collection before that
-  merge counts.
-
 ## Multiple-testing and evidence policy
 
 - Each primary has one primary metric. Secondary cuts are descriptive.
@@ -547,7 +323,6 @@ this study; every verdict rendering carries the settlement-return caveat.
   are diagnostics only.
 - Crypto up/down remains frozen after negative evidence; unfreezing requires a
   new owner-approved registry amendment and fresh OOS window.
-- Politics, awards, long-dated macro, and every family not named in H1–H3, H5 or
-  H6 are
+- Politics, awards, long-dated macro, and every family not named in H1–H3 are
   parked. Passive low-cost collection may continue, but no promotion-oriented
   modelling or agent time is allocated without amendment.

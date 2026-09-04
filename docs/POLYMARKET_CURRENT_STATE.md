@@ -26,7 +26,7 @@ Stable constraints remain:
 - stale or missing evidence is `UNKNOWN` and cannot authorize activity;
 - the system remains shadow/dry-run/paper-gated;
 - WO-67 remains blocked until every registered P1-P5 precondition passes;
-- promotion-oriented research is restricted to the five hypotheses in
+- promotion-oriented research is restricted to the three hypotheses in
   `docs/EXPERIMENT_REGISTRY.md`;
 - crypto up/down remains diagnostic only; and
 - no stake, gate, or live-order control may be loosened to force activity.

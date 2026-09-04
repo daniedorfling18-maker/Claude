@@ -2638,7 +2638,8 @@ maker gates, so one lane's precondition sits in the chain for every future
 executor. That is worth fixing, but it cannot be fixed by pointing the gate at a
 self-declared artifact. Repoint it only when a registered producer writes the
 evidence, so the gate reads engine-produced state rather than producer
-assertions - i.e. after the H5/H6 support evaluator exists, not before.
+assertions - i.e. after some registered lane's support evaluator exists and
+writes its verdict, not before.
 
 P1 through P5 therefore stand exactly as originally registered, and WO-67
 remains BLOCKED.

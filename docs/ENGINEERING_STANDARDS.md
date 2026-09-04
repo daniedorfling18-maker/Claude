@@ -116,7 +116,7 @@ review. They are tighten-only: a WO may demand more than this, never less.
    for that stamp class alone; any new liveness stamp adopting a different
    convention must register its basis explicitly. *Derived from:* the
    WO-151 §151.2 escalation and its independent line audit, plus external
-   review, 2026-08-05 — the same defect-derived pattern as A1-A9.
+   review, 2026-08-05 — the same defect-derived pattern as A1-A9 and A11.
 3. **A3 — exhaustive scan roots.** Every "scan all callers/files" rule names its
    roots exhaustively, anchors them off `__file__` rather than the process CWD,
    and asserts a non-zero visit count. *Derived from:*
@@ -157,6 +157,25 @@ review. They are tighten-only: a WO may demand more than this, never less.
     enumerated offline tests with hand-computed expectations (S4), and a
     `Day-after check:` line (S6). *Derived from:* S1-S7 themselves; A10 exists
     so admission is one gate rather than two lists.
+11. **A11 — bias-direction disclosure.** Every estimator names, for each
+    identified bias channel, the direction that channel pushes the result. A
+    design in which every identified channel pushes toward the favourable
+    answer is not admissible without an explicit argument that the effect
+    exceeds the aggregate bias. *Derived from:* the maker adverse-selection
+    scaling protocol, whose two successive estimators were each shown incapable
+    of measuring what they claimed. The first was a capping meter: quote size
+    entered the replay only through
+    `fill_size = min(float(entry["quote_size_shares"]), fillable)` at
+    `src/polymarket_predictive_engine/maker_fill_replay.py:1960`, so the ratio
+    was constant in size when nothing capped and fell in proportion to capping
+    when it did — toward the favourable reading. The second replaced it with a
+    slope on chosen resting depth, where endogenous depth selection, a
+    treatment read from book state up to `max_book_state_lag_seconds: 1800`
+    stale, conditioning on trades that occurred, and total-queue rather than
+    own-order size all biased the estimate the same way. In both cases every
+    identified channel pointed at the business-favourable conclusion and
+    neither drafter noticed until an independent gate ran. Recorded in
+    `docs/POLYMARKET_QUANT_MODE_CHARTER.md`, dated 2026-09-03.
 
 - A draft that fails any rule returns to its drafter. Registering it with the
   failure noted is the outcome this section exists to prevent.

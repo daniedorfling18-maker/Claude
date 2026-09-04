@@ -2587,7 +2587,17 @@ is met. Filing it now makes the eventual build a days-long mechanical job
 with zero design debate.
 
 PRECONDITIONS (all required, in order):
-  P1. Maker gates M-A/M-B/M-C pass (registered metrics, no amendments).
+  P1. SUPERSEDED 2026-09-04 by P1' below. The original read "Maker gates
+      M-A/M-B/M-C pass (registered metrics, no amendments)" and became
+      unreachable when the hypothesis those gates serve returned a terminal
+      no_for_tested_edge_classes. It is recorded here rather than deleted so
+      the change is auditable.
+  P1'. At least one premium registered under the 2026-09-04 registry amendment
+      (H5 variance risk premium, H6 perpetual funding carry) has passed its
+      registered support gate on a prospective out-of-sample window, with
+      Benjamini-Hochberg FDR applied across the full family, its measured
+      capacity documented, its required sample floor ACTUALLY REACHED rather
+      than projected, and its tail-risk position cap registered.
   P2. The HUMAN live test completes WO-50 Stage 1: >= 7 consecutive
       positive real days with fills <= 2x model - the model must be
       verified by human-executed evidence first, so any later divergence
@@ -2603,6 +2613,35 @@ PRECONDITIONS (all required, in order):
   P5. Key custody design approved: scoped relayer API keys (trade-only,
       no withdrawal), stored ONLY in the VPS .env (never repo, never
       chat, never telemetry), rotation procedure documented.
+
+AMENDMENT 2026-09-04 - P1 repointed to P1'.
+
+Why: P1 required maker gates M-A/M-B/M-C to pass. Live telemetry shows
+`M_A_carry_evidence: pending` and `M_B_adverse_realism: pending` with
+`mb1_tier0_coverage_sufficient: false`, and the maker hypothesis those gates
+serve has returned a terminal verdict. A precondition chain whose first link
+can never close blocks every future hypothesis from ever reaching execution,
+which is not what P1 was registered to do - it was registered to require
+evidence, not to require THAT evidence forever.
+
+What did NOT change: P2 through P5 are untouched. P2 in particular stays as
+written - the human live test must still complete first, because "the model
+must be verified by human-executed evidence first, so any later divergence is
+attributable to the executor, not the model". Automating ahead of that makes
+every future failure ambiguous between model and executor.
+
+Fail-safe direction (S5): P1' reads
+`outputs/premium_evidence/premium_support.json`. A missing artifact reads
+UNKNOWN and names its producer; a missing field, a non-finite capacity, or a
+sample that is projected rather than reached all read not_met. Only an explicit
+true on every condition, a positive finite capacity, and an observed sample
+that has reached its floor can satisfy it. Implemented at
+`src/polymarket_predictive_engine/operating_state.py` in
+`_premium_support_state`.
+
+Day-after check: `operating_state.json` carries a `wo67_preconditions` row with
+`id: "P1'"`, and that row reads UNKNOWN until the premium support evaluator has
+produced its artifact. No row reads `met` on an artifact that does not exist.
 
 ARCHITECTURE (registered 2026-07-12):
 1. `maker_executor.py` consumes ONLY signed-off artifacts: the quote

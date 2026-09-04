@@ -6,23 +6,77 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# The seven elements the registry's own freeze paragraph requires of any primary,
+# plus the A11 disclosure S8 added after two successive estimators were each
+# found incapable of measuring what they claimed. A new primary that omits any
+# of these is not registerable, and this test is what makes that mechanical.
+REQUIRED_PRIMARY_ELEMENTS = (
+    "- Economic mechanism:",
+    "- Independent unit:",
+    "- Sample floor:",
+    "- Cost model:",
+    "- Support gate:",
+    "- Stopping rule:",
+    "- Promotion / abandonment:",
+    "- A11 bias-direction disclosure:",
+)
 
-def test_research_surface_is_frozen_to_exactly_three_registered_primaries() -> None:
+# Primaries added after the original 2026-07-12 freeze. Hypotheses 1-3 predate
+# both the seven-element requirement and A11, so they are not held to the
+# element check retroactively — back-applying it would be the retroactive
+# rewriting this registry exists to prevent.
+POST_FREEZE_PRIMARIES = ("H5", "H6")
+
+
+def test_research_surface_is_frozen_to_exactly_five_registered_primaries() -> None:
     registry = (ROOT / "docs" / "EXPERIMENT_REGISTRY.md").read_text(encoding="utf-8")
-    headings = re.findall(r"^## H\d+ — PRIMARY: (.+)$", registry, flags=re.MULTILINE)
+    headings = re.findall(r"^## (H\d+) — PRIMARY: (.+)$", registry, flags=re.MULTILINE)
 
     assert headings == [
-        "Sharp-anchor maker carry",
-        "Persistent dutch-book consistency opportunities",
-        "Structural-bias / smart-flow cohorts with positive CLV",
+        ("H1", "Sharp-anchor maker carry"),
+        ("H2", "Persistent dutch-book consistency opportunities"),
+        ("H3", "Structural-bias / smart-flow cohorts with positive CLV"),
+        ("H5", "Variance risk premium on crypto options"),
+        ("H6", "Perpetual funding carry"),
     ]
-    assert "Exactly three primary hypotheses are permitted" in registry
+    assert "2026-09-04 amendment below raises that to five" in registry
     assert re.search(r"strictly after\s+that merge commit", registry)
     assert "not a fourth primary" in registry.lower()
+
+
+def test_every_post_freeze_primary_carries_the_required_elements() -> None:
+    """A primary added after the freeze must carry all seven required elements
+    plus the A11 bias-direction disclosure, or it is not registerable."""
+    registry = (ROOT / "docs" / "EXPERIMENT_REGISTRY.md").read_text(encoding="utf-8")
+    sections = re.split(r"^## ", registry, flags=re.MULTILINE)
+
+    for label in POST_FREEZE_PRIMARIES:
+        matching = [s for s in sections if s.startswith(f"{label} — PRIMARY:")]
+        assert len(matching) == 1, f"{label} must appear exactly once as a primary"
+        body = matching[0]
+        missing = [e for e in REQUIRED_PRIMARY_ELEMENTS if e not in body]
+        assert not missing, f"{label} is missing required elements: {missing}"
+
+
+def test_post_freeze_primaries_are_anti_retroactive() -> None:
+    """Each new primary must state that pre-merge observations do not count,
+    which is what stops a hypothesis being registered around data already seen.
+
+    Matching is whitespace-normalised: these are wrapped markdown prose, so a
+    literal match would assert on line-wrapping rather than on meaning.
+    """
+    registry = (ROOT / "docs" / "EXPERIMENT_REGISTRY.md").read_text(encoding="utf-8")
+    sections = re.split(r"^## ", registry, flags=re.MULTILINE)
+
+    for label in POST_FREEZE_PRIMARIES:
+        body = next(s for s in sections if s.startswith(f"{label} — PRIMARY:"))
+        flat = " ".join(body.lower().split())
+        assert "registered by the merge of this amendment" in flat
+        assert "no collection before that merge counts" in flat
 
 
 def test_agent_front_door_enforces_registry_without_repeating_dynamic_state() -> None:
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8-sig")
 
     assert "docs/EXPERIMENT_REGISTRY.md" in agents
-    assert "frozen to exactly the three primary hypotheses" in agents
+    assert "frozen to exactly the five primary hypotheses" in agents

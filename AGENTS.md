@@ -181,12 +181,19 @@ docker stats --no-stream
 ## Research focus
 
 The promotion-oriented research surface is
-frozen to exactly the three primary hypotheses
+frozen to exactly the five primary hypotheses
 in `docs/EXPERIMENT_REGISTRY.md`:
 
 1. sharp-anchor maker carry;
 2. persistent dutch-book consistency opportunities;
-3. structural-bias/smart-flow cohorts with positive executable CLV.
+3. structural-bias/smart-flow cohorts with positive executable CLV;
+4. (H5) variance risk premium on crypto options;
+5. (H6) perpetual funding carry.
+
+H5 and H6 were added by the dated 2026-09-04 registry amendment, which took
+effect on its merge commit. Hypotheses 1-3 have all reached a terminal or
+unmeasured state; see the charter. The count is five, not three, and any
+document still saying three is stale.
 
 Crypto up/down is a timing/infrastructure diagnostic with negative forward
 evidence. Do not spend modelling or collection-priority work trying to revive it.

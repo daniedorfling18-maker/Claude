@@ -73,6 +73,22 @@ def _write_complete_evidence(cfg: EngineConfig) -> None:
             "ladder": {"stage": 1, "consecutive_live_ok_days": 7},
         },
     )
+    write_json(
+        cfg.output_root / "premium_evidence" / "premium_support.json",
+        {
+            "generated_at_utc": generated,
+            "premia": {
+                "h5_variance_risk_premium": {
+                    "support_gate_passed": True,
+                    "fdr_applied": True,
+                    "capacity_usd": 50000.0,
+                    "n_observed": 60,
+                    "n_required": 60,
+                    "tail_position_cap_registered": True,
+                }
+            },
+        },
+    )
     performance = cfg.output_root / "performance"
     write_json(
         performance / "independent_merge_gate.json",
@@ -189,7 +205,7 @@ def test_operating_state_derives_rows_and_wo67_preconditions(tmp_path: Path, mon
     assert rows["degraded_state_watchdog"]["state"] == "OK"
     assert rows["deploy_acceptance"]["state"] == "NOT_RUN"
     assert {identifier: row["state"] for identifier, row in preconditions.items()} == {
-        "P1": "met",
+        "P1'": "met",
         "P2": "met",
         "P3": "met",
         "P4": "met",
@@ -302,6 +318,44 @@ def test_p3_and_p5_exact_doc_patterns_distinguish_signed_unsigned_and_unreadable
     )
     assert _owner_authorisation(repo)[0] == "met"
     assert _key_custody_approval(repo)[0] == "met"
+
+
+def test_p1_prime_is_unknown_when_the_premium_artifact_is_absent(tmp_path: Path) -> None:
+    """P1' was repointed off the maker gates on 2026-09-04. With no premium
+    support artifact written at all, it must read UNKNOWN and name its
+    producer rather than silently reading as met."""
+    cfg = _config(tmp_path)
+    _write_complete_evidence(cfg)
+    (cfg.output_root / "premium_evidence" / "premium_support.json").unlink()
+
+    result = build_operating_state(cfg)
+    p1 = next(row for row in result["wo67_preconditions"] if row["id"] == "P1'")
+
+    assert p1["state"] == "UNKNOWN"
+    assert "premium_support.json" in p1["evidence"]
+
+
+def test_p1_prime_fails_closed_on_short_sample_and_non_finite_capacity(tmp_path: Path) -> None:
+    """Hand-computed boundary: 59 observations against a floor of 60 is short by
+    exactly one and must not pass, and a NaN capacity must not pass either.
+    Both are the fail-closed branch required by S5/A2."""
+    cfg = _config(tmp_path)
+    _write_complete_evidence(cfg)
+    path = cfg.output_root / "premium_evidence" / "premium_support.json"
+
+    for field, value in (("n_observed", 59), ("capacity_usd", float("nan"))):
+        payload = read_json(path)
+        payload["premia"]["h5_variance_risk_premium"][field] = value
+        write_json(path, payload)
+
+        result = build_operating_state(cfg)
+        p1 = next(row for row in result["wo67_preconditions"] if row["id"] == "P1'")
+        assert p1["state"] == "not_met", f"{field}={value} must fail closed"
+
+        payload["premia"]["h5_variance_risk_premium"][field] = (
+            60 if field == "n_observed" else 50000.0
+        )
+        write_json(path, payload)
 
 
 def test_missing_p4_artifact_names_the_generator_instead_of_bare_unknown(tmp_path: Path) -> None:
@@ -514,7 +568,7 @@ def test_dashboard_and_daily_harvest_consume_generated_operating_state(tmp_path:
     generated = {
         "status": "incomplete_unknown_inputs",
         "rows": [{"question": "Latest deployed SHA", "state": "UNKNOWN", "evidence": "missing", "source": "telemetry"}],
-        "wo67_preconditions": [{"id": "P1", "title": "Maker gates", "state": "UNKNOWN", "evidence": "missing"}],
+        "wo67_preconditions": [{"id": "P1'", "title": "Premium support gate", "state": "UNKNOWN", "evidence": "missing"}],
     }
     write_json(cfg.output_root / "performance" / "operating_state.json", generated)
     acceptance = {"status": "FAIL", "target_deploy_sha": "badsha", "rollback_ref": "goodsha"}

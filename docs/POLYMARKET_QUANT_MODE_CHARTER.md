@@ -1,11 +1,837 @@
 # Polymarket Quant Mode Charter
 
-Last updated: 2026-07-16
+Last updated: 2026-08-22
 
 This is the **orchestration charter** for turning the Polymarket predictive engine into a full quant
 trading system. It is written for every coding agent working on this repo — Claude, Codex, or any
 other code changer. Read `AGENTS.md` first; this charter adds the quant-mode roadmap on top of it and
 never overrides its safety rules.
+
+## TERMINAL VERDICT — the registered evidence clock expired 2026-08-19
+
+**Recorded 2026-08-22.** This section is dated deliberately: the answer below was pre-committed a
+month before it was read, and it must survive any single container, agent or session. Nothing in
+this section loosens a gate; it closes a question.
+
+### What was registered, and when
+
+On **2026-07-10T21:30:00Z** amendment 7 was registered into `profit_verdict.py`
+(`REGISTERED_EXTENSION_PROTOCOL`, tighten-only): the evidence window could extend **exactly once**,
+through `extension_window_end_utc = 2026-08-19T23:59:00Z`. Amendment 8 (2026-07-17T04:30:00Z) closed
+the pending-on-significance gap, so that at the terminal read **all three gates passing is the only
+outcome that is not a NO** — a failing gate, a pending gate, and an unmet unit floor all resolve to
+`no_for_tested_edge_classes`.
+
+That instant has passed. Checked against the real clock on 2026-08-22T10:57Z, the engine reports the
+terminal regime, and it is not reversible: the single registered extension is spent. The point of
+registering it a month in advance was that the answer could not be renegotiated after being seen.
+It is not being renegotiated here.
+
+**How this surfaced.** `main` went red on 2026-08-22. Six tests had hard-coded the pre-terminal
+verdict string without pinning the clock, so they passed for the whole extension window and failed
+together the moment the deadline arrived. The engine did exactly what it was registered to do; the
+tests were reading the calendar. Fixed in PR #452, which also added the coverage whose absence let
+this land silently — nothing in the suite had ever run the engine under the real clock, so nothing
+stated which regime the system was in.
+
+### THE FINDING: most of this board was never tested, because its inputs were never delivered
+
+Searched for a route to profit in the gathered data, 2026-08-23. There is none — and the reason is
+not that the hypotheses were tested and failed. **Six lanes report zero input rows, and three of them
+read external files that were never populated.**
+
+| lane | what it reports | its input |
+|---|---|---|
+| `smart_flow_clv` — **H3's instrument** | `fills_seen: 0` | `inputs/polymarket/public_wallet_fills.csv` |
+| `sharp_anchor_summary` — **H1's signal source** | `direct_token_joins: 0`, `fundamental_rows: 0` | `inputs/polymarket/sharp_odds.csv` |
+| `crypto_fundamental_summary` — **H4's signal source** | `fundamental_rows: 0`, `status: no_targets` | `inputs/polymarket/crypto_targets.csv` |
+| `calibration_bias_study` | `resolved_markets: 0`, `curve_rows: 0` | — |
+| `family_calibration_scorecard` | `clean_settled_joined_rows: 0` of 17,420 | — |
+| `leakage_safe_training_summary` | `midpoint_only_rows_accepted: 0`, `status: collecting` | — |
+
+**H1 is "sharp-anchor maker carry" and the sharp-anchor lane has never joined a single token.
+H4 is "crypto up/down" and the crypto fundamental lane has zero targets. H3's wallet fills are zero.**
+The three hypotheses recorded on this board as dead or unmeasured share a common property: the data
+that would have tested them never arrived.
+
+**This does NOT invalidate the terminal verdict.** Gate A had real data — 55 independent settled
+units behind 70 finals — and it failed on that data at p=0.9476. The registered verdict is sound, and
+its wording is more precise than the board that surrounds it: `no_for_tested_edge_classes`. The
+classes that were actually tested returned NO. **The board then presented untested classes as dead,
+which the verdict itself never claimed.**
+
+**The one lane with data confirms the picture rather than rescuing it.** `mispricing_alpha_summary`
+trained on 724 rows across 80 markets and learned `global_bias: 6.68e-06` — a bias of seven
+millionths, i.e. nothing. That is the estimator whose claimed edge of +0.0837/share carries no
+information about outcomes. A model that learned nothing, claiming a lot, predicting nothing:
+internally consistent.
+
+**A proper search was already run and found nothing.** `edge_strategy_search` ranked 100 rules over a
+60-market development set and a 20-market holdout: `promotable_rules: 0`, all 100 failing the same
+composite gate. Only four rules clear dev>0, holdout>0 and minimum sample; two are
+`tennis_tennis_set` with `holdout_roi_ci_low` at **-0.60**, and two are in the `unknown` family
+reporting **+186% ROI** with a `nan` confidence bound — a bucket that reads significantly NEGATIVE in
+both the edge-attribution and shadow-cohort artifacts, so its ROI is a data defect, almost certainly
+the blank-identity join collision WO-163 documents.
+
+### The three blockers, DIAGNOSED — 2026-08-23
+
+The earlier framing ("the inputs were never populated") was too coarse and partly wrong. Each of the
+three fails differently, and two contain the same self-reinforcing shape as the maker ladder.
+
+**BLOCKER A — sharp odds (H1's signal). The data ARRIVES; it cannot be joined, and the throttle
+guarantees it never will be.** `sharp_odds_fetch_summary.json` shows the fetch WORKING: 30 rows
+normalized from Pinnacle, `errors: 0`. So the input is not empty. But
+`sharp_anchor_coverage.json` reports `total_rows_fetched: 30`, `total_rows_joined: 0`,
+`total_rows_mapped: 0`, `mappable_count: 0` against `total_polymarket_rows_eligible: 140` — and
+`total_stale_rows: 30`, i.e. **every fetched row is stale**.
+
+Two distinct faults:
+1. **Mapping.** Of three configured sports, two return `skipped_unknown_sport`
+   (`soccer_fifa_world_cup_winner`, `soccer_fifa_world_cup` — keys the provider does not have), and
+   the third, `basketball_nba_championship_winner` outrights, maps to nothing we trade.
+   `sharp_fetch_suppression.json`: `classification: no_mappable_market`, `zero_join_streak: 14`.
+2. **A LOOP.** Because joins are zero, suppression demotes the family to `slow_probe` — "14
+   consecutive fetched cycles produced zero joins; slow-probe every 24h". But
+   `h1_max_anchor_age_seconds` is **21,600 (6 hours)**. A 24-hour probe cadence cannot produce an
+   anchor young enough to be usable, so rows are stale, so joins stay zero, so the throttle persists.
+   **Identical in shape to the maker ladder: the condition that triggers the throttle is the one the
+   throttle prevents you from clearing.**
+
+Fixing this is CONFIGURATION plus loop-breaking, not new collection: choose provider sports that
+overlap the traded universe, and make the suppression cadence respect the freshness ceiling it feeds.
+
+**BLOCKER B — wallet fills (H3's signal). No writer exists.** `grep` across `src/` and `scripts/`
+finds exactly one reference to `public_wallet_fills.csv`: `smart_flow_clv.py:243`, which READS it.
+Nothing anywhere writes it. This is not a broken collector — **there is no collector**. H3 has never
+been asked its question because nothing was ever built to ask it. Note this is precisely the gap PR
+#451 routes around, by measuring the wallet axis from the 198,555-fill trade-print corpus instead.
+
+**BLOCKER C — the calibration join. A brittle exact-triple key, and the label side almost certainly
+cannot satisfy it.** `market_relative_validation.py:172` keys predictions on
+`(market_id, token_id, prediction_timestamp)`; `_label_index` at :140-141 builds the label side on
+the same triple and indexes a label **only if `all(key)`** — that is, only if the label row carries a
+NON-EMPTY `prediction_timestamp`. Labels are read from
+`outputs/polymarket_training/labels.csv` (`family_calibration.py:150`), i.e. settlement data, which
+has no natural prediction timestamp. If that column is blank, **no label is ever indexed, the index
+is empty, and every prediction falls to `"no clean settled label"`** — which is exactly 0 joined
+against 17,420 rejected.
+
+This is a hypothesis with a decisive test, and PR #446 already publishes it: the rejection histogram.
+If `no clean settled label` is ~100% of the 17,420, the diagnosis is confirmed and the fix is to join
+on `(market_id, token_id)` within a temporal validity window rather than on exact string equality of
+a timestamp. **#446 is unmerged; merging it answers this in one cycle.**
+
+### What is actually actionable, and by whom
+
+| blocker | nature | who |
+|---|---|---|
+| A — sharp odds mapping + throttle loop | config + a loop-breaking rule | repo work, then VPS deploy |
+| B — wallet fills | a collector that does not exist | build, or rely on #451's route around it |
+| C — calibration join | one join predicate; **diagnosis testable by merging #446** | repo work |
+| maker ladder | **BLOCKED — `decision_policy` is registered tighten-only** | owner amendment required |
+
+The ladder cannot be fixed by an agent: WO-50's config states "Frozen defaults; future amendments may
+only tighten and must carry a dated comment", and raising `stage0_capital_usd` from $100 toward the
+$470 a qualifying market needs is a LOOSENING. It requires a dated owner amendment. Recorded here so
+the catch-22 is visible rather than quietly worked around.
+
+### What this route buys — stated so it is not mistaken for optimism
+
+### The definitive route — to knowledge, not to profit
+
+
+There is no defensible route to profit in this data. Continuing to slice it would manufacture one:
+100 rules were already searched with a holdout and returned zero, and the failure that killed H4 was
+precisely a best-of-39 selection presented without its selection breadth. **The route that exists is
+to make the untested lanes testable**, and every step has a definite completion criterion rather than
+a hoped-for result:
+
+1. **Populate the three external inputs** — `sharp_odds.csv`, `public_wallet_fills.csv`,
+   `crypto_targets.csv`. Bounded engineering, not research. Until these exist, H1, H3 and H4 have
+   never been asked the question.
+2. **Resize the maker ladder** so its first rung can fund the smallest genuinely qualifying market.
+   Currently stages 0 and 1 yield $0.00/day on the only qualifying market, making M-A and M-B
+   unreachable by construction.
+3. **Fix the calibration join** — 0 usable rows from 17,420 attempts, with the rejection histogram
+   already published by PR #446 and unmerged.
+
+**Stated plainly so nobody mistakes it for optimism:** completing all three yields the ability to
+TEST, not an expectation of profit. The measured ceiling on the maker lane remains ~$50/month gross
+and the only estimator with data attached is provably uninformative. What changes is that the answer
+would then mean something, which today it largely does not.
+
+### Lane map — read this before any number below
+
+These lanes are routinely confused, including by the agents writing this document, because their
+artifacts sit side by side and their numbers get quoted in sequence. **They fail for opposite
+reasons and their P&L figures are not comparable.**
+
+| lane | mechanism | realised | the number usually quoted | what that number is |
+|---|---|---|---|---|
+| **maker carry (H1)** | RESTS quotes, earns venue reward share | **$0.00 — never filled**, 3,290 observations over 40 days | +$1.68/day | a SIMULATION, adverse selection charged at $0.00 |
+| **shadow cohort (directional)** | BUYS AT THE ASK, exits on take-profit / stop-loss / time | **-$218.01** across 200 closed positions | -$218.01 | SIMULATED paper positions, no real money |
+| **smart-flow CLV (H3)** | follows public wallets | never ran | — | `fills_seen: 0`, input never collected |
+| **dutch book (H2)** | riskless baskets | 0 flagged in 300 events | $0.00 max basket | a genuine measurement, genuinely zero |
+| **calibration** | probability reliability | never ran | — | `resolved_markets: 0` |
+
+`shadow_positions.csv` carries `shadow_source` values `alpha_candidate_learning`,
+`near_miss_learning`, `longshot_bias` and `shadow_trade_candidate` — **no maker source** — and
+`policy_version: shadow-cohort-v3-ask-fill-relative-spread`, i.e. it TAKES liquidity. Any maker
+conclusion drawn from it is a category error.
+
+**Can a maker lane lose money? Yes — that is the central risk of market making.** You quote both
+sides and are filled disproportionately by counterparties who know more than you; that is adverse
+selection, and `maker_fill_replay.json` exists to measure it. **This** maker lane has no returns of
+either sign because nobody ever traded against it. It is also why its adverse-selection charge is
+$0.00 in the model and rests on three observed fills: there is almost nothing to measure.
+
+The two failures are therefore opposite in kind, and conflating them loses the distinction that
+matters most: **the maker lane has no evidence; the directional lane has ample evidence that it does
+not work.**
+
+### What the NO is a verdict on
+
+`no_for_tested_edge_classes` — the tested classes, each with the measurement that closed it:
+
+| hypothesis | state | the measurement |
+|---|---|---|
+| **H1** sharp-anchor maker carry | **insufficient_evidence**, capacity-capped | net carry **+$1.68/day** against a $3.33/day target; **$50.40/month** against $100/month. Adverse selection is **UNMEASURED** — the $63.62 first recorded here is unsupported, and the $0.68 that replaced it rests on **3 confirmed fills** with 77.5% of opportunities lacking book state, which is why M-B is pending. M-A also PENDING. The load-bearing fact is capacity: the capital curve is flat from $500 to $2,000 at one market and $470 deployed. |
+| **H2** dutch-book consistency | dead | **0** flagged in 300 events; maximum executable basket **$0.00**. |
+| **H3** smart-flow CLV | **unmeasured** | the wallet axis is the instrument and it is still in PR #451. |
+| directional model | refuted | claimed **+0.08337/share**; realised 95% upper bound **+0.01435** across 109 positions. |
+| **H4** crypto up/down | dead twice | admission gate NOT ADMISSIBLE; capacity **$4-10 at touch** against 3,127 instances/day. |
+
+Market calibration is also unmeasured.
+
+**PROVENANCE, and the correction it should have forced sooner**: these figures were recorded as a
+reading of VPS telemetry during the 2026-08 review. No Polymarket output artifact is committed to
+this repository (`git ls-files outputs` returns nothing under any Polymarket path) — but the
+`vps-telemetry` MIRROR BRANCH does carry a periodic snapshot, expressly so that sessions without VPS
+network access can read live state, and consulting it is what exposed the H1 figures above as wrong
+by two orders of magnitude. **Any figure in this section that has not been checked against
+`origin/vps-telemetry` should be treated as unverified.** The
+registered protocol, its dates and the terminal regime ARE verifiable here, in `profit_verdict.py`
+and its tests.
+
+**CONFIRMED 2026-08-23 — the verdict has printed, and it is no longer an expectation.** Read from
+`origin/vps-telemetry`, snapshot `2026-08-21T02:00:09Z`, artifact
+`outputs/polymarket_model_governance/profit_verdict.json`, generated `2026-08-21T01:59:04Z` — after
+the terminal instant:
+
+```json
+"verdict": "no_for_tested_edge_classes",
+"extension_resolution": { "regime": "terminal", "terminal_no_applied": true,
+                          "terminal_read_due_utc": "2026-08-19T23:59:00Z" }
+```
+
+Gate A **FAILED** on its own measurement: 55 independent settled market units, equal-weight unit
+mean net settlement return per dollar **-0.013943**, one-sided sign-test p **0.947605** against
+alpha 0.10 — "the settled positions were not profitable on average". Gates B and C are
+`not_evaluated` by construction, each being reachable only after the one before it passes. An
+earlier version of this paragraph said the terminal read still needed confirming on the VPS; it did
+not, because the mirror branch already carried it.
+
+**H4 deserves its own line, because it was an agent's own claim.** An earlier version of the
+research plan asserted crypto up/down cleared the 4c/share bar on n=9 with a line-movement lower
+bound of +7.6c. A falsifier was registered against it and the gate executed it: a silently dropped
+-$10 loss; `line_movement` PINS TO SETTLEMENT on up/down markets, making the "skill" component an
+accounting artifact; the wrong variance and the wrong decision rate in the power calculation; and no
+estimator named in advance. The cohort had also been described to the gate as best-of-22 when it was
+best-of-39. Capacity then killed what was left. The falsifier working is the one thing on this board
+that went right.
+
+### H1 / the maker lane — CORRECTED 2026-08-23 against live telemetry
+
+**The first version of this section was wrong, and wrong in the direction that made the case for
+stopping sound stronger than the evidence supports.** It asserted gross **$3.02/day** against
+adverse selection **$63.62/day** — a factor of 21 — and a net of **-$60.60/day**, and it called the
+maker lane the most conclusively dead of the tested classes. It also flagged, correctly, that no
+output artifact is committed to this repository and that the figures could not be re-derived here.
+
+They have now been checked, and they do not survive. The `vps-telemetry` mirror branch — which
+exists precisely so that remote sessions with no VPS network access can read live state — carries
+the snapshot pushed at **2026-08-21T02:00:09Z**. Against that snapshot:
+
+| quantity | asserted | measured |
+|---|---|---|
+| portfolio net carry | **-$60.60/day** | **+$1.68/day** (`portfolio_net_carry_usd_per_day`) |
+| adverse selection | **$63.62/day** | **at most $0.68/day** anywhere in the entire snapshot |
+| maker verdict | "dead" | **`insufficient_evidence`** (M-A pending, M-B pending, M-C pass) |
+
+Every adverse-selection field in the whole telemetry tree reads `0.0`, `0.004`, `0.236902`,
+`0.524231` or `0.682944` per day. The $63.62 figure appears nowhere. The lane is **not** losing
+money on its own measurement; it is earning a little and falling short of its target.
+
+**What is actually true of the maker lane, from the artifact:**
+
+- Sized portfolio net carry **$1.68/day** against a registered target of **$3.33/day**;
+  **$50.40/month** against the `$100/month` goal, with `clears_100_per_month_target: false`.
+- **One** market in the portfolio (`mojtaba-khamenei-seen-in-public-by-december-31`), **$470**
+  deployed of a $500 cap, `markout_measured: true`.
+- **M-A carry evidence: PENDING** — 8 runs at or above target against 7 required, but
+  `latest_run_at_target: false`, and the registered rule requires the latest run to count. The lane
+  oscillates around its target rather than clearing it.
+- **M-B adverse realism: PENDING** — `mb1_tier0_coverage_sufficient: false`. The adverse charge is
+  NOT yet measured to the registered standard on every portfolio market, so the true pick-off cost
+  may be higher than the observed $0.68/day. Higher, however, is not $63.62.
+- The study's own honesty clause: net carry is an **UPPER BOUND** on the reward-share side and an
+  approximation on the pick-off side.
+
+**THE ARGUMENT THAT SURVIVES IS CAPACITY, NOT LOSS.** The registered capital curve is flat:
+
+| capital cap | capital used | markets | net/day |
+|---|---|---|---|
+| $250 | $0 | 0 | $0.00 |
+| $500 | $470 | 1 | $1.68 |
+| $1,000 | $470 | 1 | $1.68 |
+| $2,000 | $470 | 1 | $1.68 |
+
+**More capital buys nothing.** The lane saturates at one market and $470 deployed, so its ceiling is
+roughly **$50/month measured and $100/month at its own target**, at any capital level. That is the
+honest reason the maker lane does not carry a funding case — not that it bleeds, but that it cannot
+absorb money. No fix to measurement coverage, veto quality or shortlist breadth changes a ceiling
+set by how much reward-share capacity exists in an 80-market rewarded universe.
+
+**Process note, recorded because it is the same failure this document catalogues elsewhere.** The
+erroneous figures were carried forward from a prior session's analysis and repeated here as fact by
+an agent that could not re-derive them and said so in the same breath — then recommended acting
+before checking. The check took minutes once the telemetry mirror was consulted. An assertion that
+cannot be re-derived from a named artifact is not evidence, and that rule applies to this document's
+own authors.
+
+### Calibration and the shadow cohort — the last two untested surfaces
+
+**Calibration has never run on anything.** `calibration_bias_study.json`: `resolved_markets: 0`,
+`curve_rows: 0`, `status: insufficient_data`, `min_markets_per_bin: 200`. `calibration_curve.csv` is
+a header and nothing else. Together with `family_calibration_scorecard` at
+`clean_settled_joined_rows: 0` and `smart_flow_clv.json` at `fills_seen: 0`, **three separate lanes
+report zero input rows**. None of them found no edge; none of them ran. That is a collection failure
+wearing the costume of a negative result, and it is the single most repeated shape on this board.
+
+**The shadow cohort's exit policy is a pure bet on skill, and the bet lost.** From the last 200
+closed positions:
+
+| close reason | n | mean | total |
+|---|---|---|---|
+| `shadow_stop_loss` | 64 | **-$6.005** | -$384.35 |
+| `shadow_take_profit` | 49 | **+$4.309** | +$211.13 |
+| `shadow_time_exit` | 84 | -$0.410 | -$34.47 |
+| `shadow_clean_settlement` | 3 | -$3.440 | -$10.32 |
+
+**Net: -$218.01.**
+
+The exits are configured asymmetrically — `take_profit_return: 0.25`, `stop_loss_return: 0.35` — and
+they fire as designed: the realised gain/loss ratio is **1.394** against a configured **1.400**. That
+asymmetry sets a breakeven:
+
+```
+breakeven take-profit rate (from realised P&L):  58.2%
+actual take-profit rate:                         43.4%   (49 of 113)
+```
+
+**The realised take rate is below the realised breakeven rate**, which alone accounts for the
+negative total and requires no theory.
+
+It is worse than that. For a driftless process the chance of touching +25% before -35% is
+approximately `0.35 / (0.25 + 0.35) = 58.3%` — which is the breakeven rate, *by construction*. The
+policy is therefore engineered so that **a no-skill strategy breaks exactly even**, and everything
+above or below the line is skill. Against that benchmark:
+
+```
+binomial test vs 0.583:  expected 65.9, observed 49, z = -3.23, one-sided p = 0.00062
+```
+
+The strategy performs **significantly worse than a coin flip** at p = 0.0006. *Caveat: the driftless
+benchmark assumes a martingale in return space, while these are bounded probability instruments, so
+58.3% is an approximation. The breakeven figure of 58.2% is not — it is computed from realised gains
+and losses, and 43.4% is below it either way.*
+
+This corroborates the estimator result from an entirely different direction. The claimed-versus-
+realised test says the signal carries no information; the exit-policy test says the realised trading
+is significantly worse than chance under a policy calibrated to make chance break even.
+
+**By cohort, nothing survives.** Five cohorts with n>=8: `crypto` -$0.345, `ai_model_leader`
++$0.403, `worldcup` -$2.238, `unknown` -$5.057 (significantly negative), `tennis_match` -$0.588.
+**Cohorts with an interval strictly above zero: zero.**
+
+**One structural observation with consequences beyond the research question.** Only **3 of 200**
+closed positions exited by `shadow_clean_settlement`; 197 closed on marks. The entire settlement
+machinery — the budget, the rotation, the deferral markers, every finding in PR #416 — governs about
+**1.5%** of closures. That is worth knowing before deciding how much more review that PR deserves.
+
+### Tests run on the gathered data, 2026-08-23 — the model's claims carry no information
+
+The board had been assembled from summary FIELDS. The position-level artifacts are complete in the
+mirror (not truncated: 109 rows, under the 200-row tail), so the obvious tests were finally run
+rather than quoted. `edge_attribution_positions.csv`, using the identity the artifact itself
+publishes — `exit - entry_fill == settlement_surprise + line_movement - execution_cost`, per share.
+
+**1. What the model claims, against what happened.**
+
+| quantity | n | mean | 95% CI |
+|---|---|---|---|
+| `model_claimed_edge_per_share` | 98 | **+0.08371** | [+0.07483, +0.09258] |
+| realised edge per share (identity) | 109 | **-0.02660** | [-0.06898, +0.01577] |
+| `line_movement_per_share` | 109 | -0.00020 | [-0.06875, +0.06836] |
+| `settlement_surprise_per_share` | 109 | -0.02916 | [-0.10167, +0.04336] |
+
+The model claims **+8.4 cents per share with a confidently positive interval**. Realised is
+**-2.7 cents**, indistinguishable from zero and pointing the wrong way. This independently reproduces
+Gate A's conclusion by a different route — Gate A clustered into 55 units and got -0.013943 at
+p=0.9476; this is the per-share identity on the raw positions.
+
+**2. Does a bigger claimed edge predict a better outcome? No.**
+
+```
+corr(claimed, realised) = +0.0738      bootstrap 95% CI [-0.1789, +0.3514]
+```
+
+Zero is comfortably inside the interval. The tercile split is not even monotonic:
+
+| claimed tercile | n | mean claimed | mean realised |
+|---|---|---|---|
+| low | 32 | +0.0395 | **+0.0177** |
+| mid | 32 | +0.0887 | **-0.1403** |
+| high | 34 | +0.1206 | **+0.0494** |
+
+The middle tercile is the worst of the three. **The model's edge estimate carries no usable
+information about the outcome.** That is a stronger and more specific statement than "no edge was
+found": the estimator itself is uninformative, so collecting more decisions from the same estimator
+does not converge on anything.
+
+**3. Every cohort searched, and none survives.** Six cohorts have n>=5:
+
+| cohort | n | mean | 95% CI | |
+|---|---|---|---|---|
+| crypto | 21 | +0.0504 | [-0.0075, +0.1083] | spans zero |
+| worldcup | 7 | -0.1591 | [-0.3496, +0.0313] | spans zero |
+| unknown | 7 | -0.2821 | [-0.4318, -0.1325] | **negative** |
+| ai_model_leader | 6 | -0.0233 | [-0.0420, -0.0046] | **negative** |
+| near_miss_learning\|worldcup | 5 | +0.1811 | [-0.2281, +0.5903] | spans zero |
+| structural\|longshot_no\|ai_model_leader | 5 | -0.0924 | [-0.2382, +0.0534] | spans zero |
+
+**Cohorts with an interval strictly above zero: ZERO.** Two are significantly negative. The best,
+`crypto`, spans zero before any correction for having run six tests.
+
+**Caveat, stated because it cuts one way only:** positions can share markets, and this per-share
+test does not cluster. Gate A found 55 independent units behind 70 finals, so effective n is roughly
+half and the true intervals are WIDER than shown. Since every point estimate is already at or below
+zero, clustering cannot rescue a positive result — it can only move these further from significance.
+
+**What this changes.** The directional lane is not "insufficient evidence pending more data". It is a
+measured absence of skill in the estimator, on the data already gathered. The power ladder asks how
+many more decisions are needed to detect an edge of size X; this asks whether the thing generating
+the decisions knows anything, and the answer is no. That question was answerable at any point in the
+last month from artifacts already in the repository.
+
+### The maker business case at scale — capacity was MY error, not the market's
+
+Owner stated 2026-08-23 that capital is not the constraint. That reframes the question, and the
+answer overturns what this document said twice.
+
+**The "$50/month ceiling" was wrong.** It came from the registered capital curve being flat from $500
+to $5,000 — but that curve is flat because the SIZER caps position size, not because the economics
+saturate. The share model (`published_v2`) makes reward share a function of our resting size against
+competitors: `share = our_score / (our_score + competitor_score)`. Scaling the position scales the
+share. For the one sized market (`pot_usd_per_day: 100`, `our_score_per_side: 112.5`, mean
+competitor score 46,309):
+
+| multiple | capital | share | gross/month |
+|---|---|---|---|
+| 1x | $94 | 0.24% | $7 |
+| 5x (as sized) | $470 | 1.2% | $36 |
+| 25x | $2,350 | 5.7% | $172 |
+| 100x | $9,400 | 19.5% | $586 |
+| 500x | $47,000 | 54.9% | $1,645 |
+
+**Aggregate across all 34 band-eligible candidates**, total addressable pot **$6,319/day =
+$189,570/month**, with the capital required to reach a given share of every pot:
+
+| target share | capital required | gross/month | gross return on capital |
+|---|---|---|---|
+| 5% | $780,840 | $9,479 | ~14.6%/yr |
+| 10% | $1,648,440 | $18,957 | ~13.8%/yr |
+| 25% | $4,945,319 | $47,392 | ~11.5%/yr |
+| 50% | $14,835,957 | $94,785 | ~7.7%/yr |
+
+Returns decline with scale, as a saturating share model requires. **So a business case exists and is
+quantifiable: roughly 12-15%/year GROSS at achievable scale.** That is a real number and this
+document previously denied it.
+
+### The single parameter the case turns on, and it is the one never measured
+
+**Adverse selection across those same 34 eligible markets, at MINIMUM size, is already
+$543.98/day = $16,319/month.** Compare that with the gross at 5% share: **$315.95/day**. At minimum
+size the measured pick-off cost ALREADY EXCEEDS the gross reward of a 5%-share position — and every
+figure in the tables above is gross.
+
+The decisive question is therefore **how adverse selection scales with position size**, and that is
+precisely the quantity nobody has ever measured:
+
+- the sized market shows `adverse_selection_usd_per_day: 0.0` and `pickoff_events_per_day: 0.0` — at
+  ONE-FIFTH of the deployed size;
+- `simulation_to_reality_haircut: None`, `realism_ratio: None`, archive coverage
+  `insufficient_coverage`;
+- `confirmed_fills: 3`, `no_contemporaneous_state_rate: 0.775`;
+- gate M-B is `pending` on exactly this, with `mb1_tier0_coverage_sufficient: false`.
+
+**If adverse selection scales linearly with size, the business case is deeply negative at every rung
+of the table above. If it scales far sub-linearly, the case is roughly 12-15%/year gross before it.
+Nothing in the repository distinguishes these two worlds.**
+
+### What this makes the right experiment — and it is small
+
+Not "collect more data" and not a capital commitment. **Quote the same market at 1x, 5x and 25x
+minimum size and measure the pick-off rate at each**, with the estimator named in advance. That
+directly measures the one unknown parameter, costs on the order of $2,350 at the top rung, and
+resolves whether the table above is a business case or an illusion. It is also exactly the evidence
+M-B is waiting for, which no amount of passive observation can produce, because the system currently
+rests at a size where zero pickoffs occur by construction.
+
+**Recorded correction.** This document asserted twice that the maker lane was capacity-capped near
+$50/month and had no funding case. That was an artifact of reading the sizer's output rather than
+the share model beneath it. The honest position: **the ceiling is set by capital and competitor
+density, both of which scale, and the case is undetermined because its single dominant cost has
+never been measured above minimum size.**
+
+### The maker candidate set, analysed — and the pattern behind every blocker
+
+`maker_carry_candidates.csv` carries all 41 measured candidates with per-market gross, adverse
+selection and net carry. It had never been analysed; the whole maker argument had been made from the
+one market that got sized. Three findings, and the third is the important one.
+
+**1. Adverse selection is CONCENTRATED, not pervasive — my "56x" framing was misleading.**
+Aggregate adverse across 41 candidates is **$588.11/day** against **$10.54/day** aggregate gross. But:
+
+```
+top 3 markets            = $425.14 = 72.3% of ALL adverse selection
+  $275.57  skin-cancer-vaccine-fda-approved-by-december-31-2027
+  $ 76.60  skin-cancer-vaccine-bla-submitted-by-june-30-2027
+  $ 72.98  us-x-iran-ceasefire-continues-through-september-30
+markets with adverse EXACTLY 0.0: 7 of 41
+```
+
+The aggregate is dominated by three toxic markets that the portfolio sizer correctly excludes. So the
+correct statement is neither "$63.62/day of adverse selection" nor "$0.68/day": **per-market measured
+adverse ranges from $0.00 to $275.57, and the sizer's job is precisely to avoid the tail.** Both
+earlier figures in this document were summary statistics standing in for a distribution.
+
+**2. The sized market's adverse selection was measured at MINIMUM size, then the position was
+scaled 5x.** `mojtaba-khamenei` measures `gross_reward_usd_per_day: 0.3413`,
+`adverse_selection_usd_per_day: 0.0`, `pickoff_events_per_day: 0.0`, on `capital_usd: 94.0`. The
+portfolio reports $1.68/day on $470 — the same market at `size_multiple: 5`. **The adverse charge of
+zero was observed at one-fifth of the deployed size, with zero pickoff events**, and a resting order
+five times larger is a five-times-larger target. This is exactly what M-B's
+`mb1_tier0_coverage_sufficient: false` is refusing to certify, and it is the correct refusal.
+
+**3. THE PAYOUT FLOOR MAKES MINIMUM-SIZE QUOTING UNPAYABLE — and that closes the third loop.**
+M-C pays nothing below **$1.00/market/day**. Against the measured candidates:
+
+```
+candidates earning >= $1.00/day at MINIMUM size:  2 of 41
+median gross at minimum size:                     $0.138/day
+=> the median market must be quoted at 7.2x minimum size to be paid AT ALL
+```
+
+Now read the quote sheet's own standing rule 2: *"Minimum-size start: Start at minimum size for a
+full reward day before any size-up."* **At minimum size, 39 of 41 markets pay exactly zero.** A
+"full reward day" at minimum size is therefore unobtainable in 95% of the universe, so the
+precondition for sizing up can never be met, so the position never reaches a size that earns
+anything.
+
+### The pattern: three gates whose entry conditions are unreachable from their own starting state
+
+This is the finding that generalises, and it is worth more than any individual number here.
+
+| gate | the rule | why it cannot be entered |
+|---|---|---|
+| **maker capital ladder** | advance to stage 2 by realising >= 0.5x modelled rewards at stage 1 | stage 1's $250 cannot fund the $470 the qualifying market needs, so realisation is $0 |
+| **sharp-odds freshness** | anchors must be < 6h old (`h1_max_anchor_age_seconds: 21600`) | zero joins demote the fetch to a 24h `slow_probe`, which cannot produce a 6h-old anchor |
+| **maker payout floor** | size up only after a full reward day at minimum size | minimum size earns $0.00 in 39 of 41 markets, so no qualifying reward day exists |
+
+Each was written as a prudent safeguard. Each is individually reasonable. **Each makes its own
+success condition unreachable from the state the system actually starts in**, and none of the three
+was detected by any gate, watchdog or review — because every component reports itself healthy while
+waiting for a precondition that cannot arrive. `maker_verdict: insufficient_evidence` is the honest
+output of a system that is structurally prevented from gathering evidence.
+
+**This reframes the entire board.** The recorded verdict is that the tested edge classes returned NO.
+What the data actually shows is that **three of the lanes were never able to start**, and the
+mechanism was not missing data or a broken collector in any of the three cases — it was a
+self-referential precondition. That is a design-review finding, not a research finding, and it is
+the one thing on this board that would be worth fixing before any hypothesis is ever re-registered.
+
+### The maker ladder is unpassable for the only market that qualifies
+
+Raised by the owner 2026-08-23 — "the maker lane could have made money and we didn't use the
+opportunity" — and it is substantially right, for a reason worth registering.
+
+**First, the revenue mechanism was described wrongly earlier in this document.** Polymarket's maker
+rewards accrue to RESTING liquidity inside a spread band, not to fills:
+`quote_size_shares: "rewards_min_size per market, both sides"`,
+`quote_distance: "per-market best of [0.25, 0.5, 0.75] x rewards_max_spread from mid"`,
+`share_model_details: "...our hypothetical quote enters both sides symmetrically"`. Fills are the
+RISK side, not the income side. So **$0.00 realised is not evidence the model was wrong — it is
+evidence nobody placed the orders.** Any earlier reading of the $0.00 as a refutation was mistaken.
+
+**Second, and decisively: the opportunity was unreachable under the system's own governance.** The
+quote sheet of 2026-08-20 carries `Indicated action: defer_funding_continue_study` at
+`Ladder stage permitted: 0 (binding capital $100.0)`. Against the registered capital curve:
+
+| ladder stage | permitted capital | yield on the one qualifying market |
+|---|---|---|
+| stage 0 (current) | $100 | **$0.00/day** |
+| stage 1 | $250 | **$0.00/day** |
+| stage 2 | $500 | $1.68/day |
+
+The single market clearing every screen requires **$470**. At stages 0 and 1 the lane therefore
+yields exactly nothing.
+
+**This creates a closed loop.** Reaching stage 2 requires `stage1_min_consecutive_days: 7` plus
+`stage2_additional_days: 14`, and `stage2_reward_realisation_multiple: 0.5` — realised rewards at
+half the modelled rate. But at stage 1 the permitted $250 cannot fund a $470 position, so realised
+rewards are $0.00, so the 0.5x multiple can never be demonstrated, so stage 2 is never reached.
+**The evidence needed to unlock the capital can only be produced by deploying the capital.**
+
+M-A and M-B are therefore `pending` not because the lane was tested and found wanting, but because
+the registered ladder makes the test impossible to run. That is a DESIGN FAULT in the ladder, not a
+finding about the market: the rungs are round numbers ($100 / $250 / $500) chosen independently of
+the position sizes the rewarded universe actually presents.
+
+**What this changes.** Everything else on this board is a measurement that came back empty. This one
+is a measurement that was never allowed to start, and unlike the others it is cheaply fixable — a
+first rung sized to the smallest genuinely qualifying market rather than to a round number, with the
+realisation multiple assessed against what that rung can actually deploy. The maker lane is thus the
+one lane where `insufficient_evidence` is self-inflicted and self-perpetuating, and the one where a
+dated alternative has a concrete first step that is not "collect more data".
+
+**What it does NOT change.** The scale ceiling stands: even fully funded and fully realised, this is
+roughly $50/month gross and ~$30/month net of the observed adverse charge, on a capital curve flat
+from $500 to $5,000. Fixing the ladder makes the lane TESTABLE; it does not make it fundable. Those
+are different claims and only the first is supported.
+
+**Also unchanged: nothing was ever traded.** The sheet states "This system places NO orders", and
+acting on it is "a human decision, with human money, outside the bot's paper-only governance". The
+foregone amount is a projection of what resting quotes would have earned, not a realised loss.
+
+### Was there ever a maker profit? No — and the projection is not evidence of one
+
+Recorded because it is the question any later reader will ask of a lane described as
+"+$1.68/day", and because the honest answer needs all four facts together.
+
+**1. Realised: zero, over forty days.** `maker_live_test_history.csv`, 3,290 observations from
+2026-07-12 to 2026-08-21:
+
+```
+rewards_usd_total     min/max =  0.0    /  0.0
+inventory_pnl_usd     min/max = -0.0067 /  0.0
+net_score_usd         min/max = -0.0067 /  0.0
+```
+
+Total rewards ever earned: **$0.00**. Best P&L ever recorded: **$0.00**. Worst: minus two thirds of
+one cent. `maker_live_test.json` describes itself as a "READ-ONLY scoreboard for a human-run
+experiment. This system never places orders; it only watches the wallet the human chose to trade
+from." **CAVEAT, stated rather than glossed:** it is not establishable from telemetry whether the
+operator ever placed the quotes the sheet recommended. If they did not, $0.00 is an untested model
+rather than a refuted one. It is not, either way, evidence of foregone profit.
+
+**2. The "+$1.68/day net" charges NOTHING for adverse selection.** From `maker_fill_replay.json`:
+
+```
+study_adverse_usd_per_day:             0.0        <- what the $1.68 subtracts
+simulated_adverse_charge_usd_per_day:  0.0
+realized_adverse_usd_per_day:          0.682944   <- what was actually observed
+```
+
+It is a GROSS figure wearing the word "net". Subtracting even the tiny three-fill realised charge
+takes it to roughly **$1.00/day**, about $30/month.
+
+**3. The realism correction was never computed.** `simulation_to_reality_haircut: None`,
+`realism_ratio: None`, `realism_ratio_by_source: {"archive": "insufficient_coverage", "official": null}`.
+The artifact's own note states the stake: "A numeric haircut above 1 means the maker-carry study may
+undercharge adverse selection." The haircut is absent, so the size of the undercharge is unknown —
+only its direction, and its direction is against the projection.
+
+**4. The fill assumption that generates the reward share is 86% unconfirmed.**
+`confirmed_fill_ratio: 0.136364` — 3 confirmed of 22 opportunities, `simulated_fills_per_day: 0.281946`.
+
+**Therefore:** the projection does not say a profit was available and missed. It says that under a
+model which assumes fills land as simulated and adverse selection is free, one market yields $1.68/day
+against a flat capital curve capping the lane near $50/month. Every term in that sentence is either
+an upper bound, unconfirmed, or uncharged. The registered maker verdict — `insufficient_evidence`
+with M-A and M-B both pending — is the correct description of this lane, and it always was.
+
+**Scoreboard labelling defect, found while checking the above and unrelated to the research
+question.** Of the 3,290 scoreboard observations, **1,068 read `winning_so_far`** on a lane whose
+`net_score_usd` never once exceeded 0.0. The registered scoring rule requires the score "held
+positive across a week"; the classifier evidently treats zero as positive. A dashboard reading
+"winning" for a third of its life, on zero fills and zero rewards, is a live reporting defect that
+survives any decision about the research surface.
+
+### Second pass, same day — the remaining figures, and a correction to the correction
+
+**`$0.68/day adverse selection` was itself over-confident, and is withdrawn as a measurement.**
+`maker_fill_replay.json` publishes `implied_adverse_usd_per_day: 0.682944`, which is where that
+number came from — but the same artifact says what stands behind it:
+
+```
+confirmed_fills:                          3
+last_in_queue_evaluable_opportunities:   22
+no_contemporaneous_state_opportunities: 316
+no_contemporaneous_state_rate:      0.77451
+```
+
+**Three confirmed fills.** 77.5% of opportunities have no contemporaneous book state at all. That is
+not a small adverse-selection charge; it is an ABSENT one, and it is precisely why gate M-B reads
+`pending` with `mb1_tier0_coverage_sufficient: false`. The honest statement is that the maker lane's
+COST side is unmeasured — neither the $63.62 that was asserted nor the $0.68 that replaced it is
+supported evidence. The revenue side rests on a single market. **Capacity remains the only
+load-bearing fact about this lane, because it is the only one derived from a full population rather
+than from a handful of fills.**
+
+**H3 is unmeasured for a specific, findable reason.** `smart_flow_clv.json` reports `fills_seen: 0`,
+`fills_scored: 0`, `wallets: []`, reading `inputs/polymarket/public_wallet_fills.csv` — and it was
+last generated **2026-07-17**, a month before every other artifact in the snapshot. The lane did not
+fail to find an edge; its input was never collected and its job stopped running. This is why PR
+#451's approach — measuring the wallet axis from the 198,555-fill trade-print corpus instead — is
+the right instrument rather than merely a bigger one.
+
+**The "smart wallet" definition verifies exactly, and is worse than the phrase suggests.** The
+latest leaderboard snapshot carries 100 rows and 100 distinct wallets, with
+`leaderboard_probe_params: {orderBy: "PNL", timePeriod: "ALL", requested_limit: 100, complete: true}`.
+"Smart" means **top-100 by lifetime profit**. A new number sharpens the population defect further:
+of 80 holder groups observed in the tracked markets, `holder_leaderboard_overlap_count` is **4**.
+The wallets actually holding positions in the markets under study barely intersect the list the
+study calls smart.
+
+**The resolved-corpus figure was a request size, not a corpus size.** `historical_resolution_summary.json`:
+`requested_closed_markets: 1000`, `fetched_markets: 681`, `clean_settlement_markets: 680`. The
+recorded "0 / 1000" conflated the two. The substance survives on three independent artifacts —
+`clean_settled_joined_rows: 0` against 17,420 rejections, `families_scored: 0`, and a leakage-safe
+substrate still at `status: collecting` with `midpoint_only_rows_accepted: 0` — but the phrasing
+should be "0 usable joins from a 680-market clean-settled corpus", not "0 / 1000".
+
+**The power ladder cannot be verified from this mirror, and is now marked accordingly.** The push
+script tails every CSV to its last 200 rows (`CSV_TAIL_LINES=200`), so full position history is not
+present, and the quantities that ARE present are on a different basis from the `sd 0.226` the ladder
+uses (per-share dollars vs fractional return). What the available tail supports, recorded as its own
+data point rather than as a check on the ladder: the last **200 closed shadow positions** have mean
+`return_pct` **-0.1090** with sd **0.4771**, and mean `realised_pnl_usdc` **-$1.09** with sd **$4.77**.
+A negative mean on the shadow cohort is consistent with the terminal NO; the ladder's own inputs
+remain unverified.
+
+**Standing limitation of this mirror, worth knowing before the next reader trusts a CSV-derived
+number from it:** JSON artifacts are complete; CSV artifacts are the last 200 rows only.
+
+### Verification pass, 2026-08-23 — every figure above checked against `origin/vps-telemetry`
+
+After the H1 error was found, the rest of the board was checked the same way rather than assumed
+sound. Snapshot `2026-08-21T02:00:09Z`. **The H1 error was ISOLATED, not systemic:** every other
+substantive figure either verifies exactly or has moved with time in the expected direction.
+
+| claim as recorded | artifact | result |
+|---|---|---|
+| H1 net **-$60.60/day**, adverse **$63.62/day** | `maker_carry_study.json` | **WRONG** — +$1.68/day, adverse at most $0.68/day. Corrected above. |
+| H2 **0** flagged in **300** events | `implication_scan.json` | **VERIFIED EXACTLY** — `events_scanned: 300`, `flagged_deviations: 0` |
+| H2 max executable basket **$0.00** | `event_group_scan.json` | **VERIFIED EXACTLY** — `max_executable_basket_usd: 0.0`, 67 neg-risk groups |
+| attribution drops ~**49.5%** of closed positions | `edge_attribution.json` | **VERIFIED, slightly worse** — 117 of 226 skipped = **51.8%** |
+| calibration join **0 / 16,910** | `family_calibration_scorecard.json` | **VERIFIED** — now **0 / 17,420**, `families_scored: 0` |
+| directional model, **109** positions | `closing_line_value.json` | **VERIFIED** — `positions_scored: 109` of 227 seen; mean final CLV **+0.008424**; **beat_close_rate 0.3945** |
+| ~**200,000** attributed fills | `flow_toxicity_summary.json` | **VERIFIED** — `trades_seen: 198,555` |
+| decision layer **88** rewarded markets | `maker_carry_study.json` | **MOVED** — now **80**; same order, time-varying |
+| markout coverage **176 -> 259** markets | `flow_toxicity_summary.json` | **MOVED SUBSTANTIALLY** — now **530** markets scored |
+| H4 capacity **$4-10 at touch** | — | **NOT VERIFIABLE HERE.** No telemetry artifact carries it; it came from a live Gamma read in an earlier session and remains unverified. |
+
+**Two things this pass changes beyond H1.**
+
+1. **`beat_close_rate` is 0.3945.** The scored positions beat the closing line under 40% of the time.
+   Note also Gate A's own caveat, recorded in `profit_verdict.json`: `unit_mean_final_clv` and
+   `units_beating_close` are one-release compatibility ALIASES for settlement-return fields and are
+   "not true pre-event CLV". The lane's headline metric is not measuring what its name says.
+2. **Markout coverage is now 530 markets**, not the 176 -> 259 that PR #451's case for the wallet
+   axis is built on. That argument — coverage tripled while smart-fill markets moved 16 -> 17 —
+   should be re-derived at current coverage before the H3 read is interpreted, not carried forward.
+
+**Standing rule this pass establishes:** every quantitative claim in this document names the artifact
+it came from, and any claim that cannot be pointed at a file in `origin/vps-telemetry` is marked
+unverified rather than stated flat. The H1 figure survived four months of repetition because nobody,
+including its authors, could say which file it came from.
+
+### Why the whole board reads this way — one defect, five times
+
+**Every component was scoped to a different population, and none intersected the one being traded:**
+
+- resolved corpus vs traded markets — **0 / 1000** overlap
+- decision layer — **88** rewarded markets
+- markout prices — a **110**-token list against **475** traded
+- "smart" wallets — the **100** on a public PnL leaderboard
+- calibration join — **0 / 16,910**
+
+Five instruments, five universes, no shared sample. That is why every lane read either "no edge" or
+"insufficient evidence": mostly the thing being measured was not the thing being traded. **Any future
+hypothesis must fix this before anything is measured again**; re-running the same instruments on the
+same mismatched populations will reproduce the same answer more slowly.
+
+### What continuing would cost
+
+From measured variance (sd 0.226) and the measured decision rate (2.4-5.0/day):
+
+| edge to detect | decisions needed | calendar time |
+|---|---|---|
+| 4c/share | 250 | 50-103 days |
+| 2c/share | 1,001 | 7-14 months |
+| 1c/share | 4,005 | **2.2-4.5 years** |
+
+Nothing measured clears 4c, so continuing means committing to the 2c or 1c row — months to years —
+on a system whose own pre-registered deadline has already returned NO.
+
+### What this section does and does not decide
+
+**Decided, and not by any agent:** the registered verdict for the tested edge classes is terminal.
+The evidence question was asked properly, with pre-committed gates and a pre-committed deadline, and
+it was answered. No agent may extend the window: the single registered extension is spent, and that
+was the point of registering it.
+
+**NOT decided here — these are the repo owner's calls alone, and no agent-authored text may stand in
+for them:**
+
+1. **STOP** — freeze the research surface, keep the paper system running as a telemetry archive, and
+   stop spending on the edge question; or
+2. **A DATED ALTERNATIVE** — a *new* registered hypothesis with a *new* pre-committed deadline, with
+   the population-scope defect fixed first.
+
+**Close-out state, updated 2026-08-23.** PR #452 landed and is `main`'s tip; `main` is green
+(2155 passed, 3 skipped — one further failure is a git-worktree artifact, not a defect: the restore
+shell requires `.git` to be a directory and it is a file inside a worktree). PR #451 — the H3
+instrument, the only tested class with no measurement at all — remains open after eleven rounds of
+external review (134 threads, 132 resolved) with two deliberately unresolved for the owner: that its
+registration followed rather than preceded its build, and that its ranking sample erodes under the
+rolling 200,000-row ledger. Reading the wallet axis once would complete the board and make the NO
+unanimous rather than 4-of-5.
+
+**RECOMMENDATION — AGENT-AUTHORED ADVICE, NOT A DECISION.** The owner asked for a call on
+2026-08-23 and this records the answer given. It does not substitute for, pre-empt or stand in for
+the owner's choice between (1) and (2) above, and no later reader may treat it as that choice having
+been made.
+
+> Take option (1), STOP, and take it now rather than after H3. The registered verdict is terminal and
+> the single extension is spent, so H3 cannot reopen this question under the protocol — it can only
+> seed a NEW hypothesis with a NEW deadline. Read the wallet axis once anyway, for the completeness
+> of the record and as possible seed evidence, but not as an input to the closed question. Keep the
+> paper system running as a telemetry archive; freeze the research surface; land fail-open and
+> record-integrity fixes only, and no eligibility changes. In particular WO-154 should NOT land under
+> a stop: its own registration states it is not tighten-only, that it changes which markets can hold
+> a portfolio slot, and that the owner must ratify that framing — a ratification that only carries
+> meaning if the lane is being funded.
+
+**What would reopen the maker lane**, stated so the stop is falsifiable rather than a mood: adverse
+selection per unit of gross carry moving by an order of magnitude, measured on one population over
+one period. That is a new registered hypothesis with a new pre-committed deadline, not a resumption
+of this one.
+
+**Unchanged throughout:** paper/dry-run only, no live order path, no gate, threshold or eligibility
+loosened, VPS-only runtime, and every owner-routed merge and deploy left to the owner.
 
 ## What "full quant mode" means here
 
@@ -843,3 +1669,156 @@ without a human digging through code:
 
 Only then does the human-gated promotion path to larger paper stakes (and, far later, any live
 discussion) begin. Until then the correct state is exactly what the audit says: explainable refusal.
+
+**Read this against the terminal verdict at the top of this charter (2026-08-22).** No tested edge
+class ever reached the four conditions above, and the registered evidence clock for those classes has
+expired. This definition still stands as the standard any FUTURE registered hypothesis must meet —
+it is not a live checklist for the classes already answered, and nothing below it authorises
+re-opening one.
+
+---
+
+## 2026-09-03 — Registered result: the maker scaling axis is not observationally identifiable
+
+**This is a measurement result, not a policy change.** No gate, threshold, eligibility rule or
+capital ceiling is altered. Nothing here authorises an order, a rung, or a spend.
+
+The maker business case turns on one unmeasured quantity — **how adverse selection scales with
+resting position size.** Every figure in that case is gross (see the candidate analysis at line 505
+of this charter: $588.11/day aggregate adverse against $10.54/day aggregate gross across the same 41
+rows). If adverse selection is linear in size the case is negative at every rung; if strongly
+sub-linear it stands.
+
+Two designs were drafted to measure it. Each went through the S8 admission checklist by an
+independent gate — never the agent that drafted it. **Both returned NOT ADMISSIBLE and neither was
+registered.** The reasons are the result worth keeping.
+
+### Design 1 — the offline size sweep is a capping meter, not a scaling measurement
+
+The proposal: replay the existing corpus at 1x / 5x / 25x `rewards_min_size_shares` and read
+`adverse_per_dollar(k) = realized_adverse_usd(k) / capital_deployed(k)`.
+
+**Our quote size enters the replay at exactly one computational site.** In
+`src/polymarket_predictive_engine/maker_fill_replay.py`, `quote_size_shares` has six occurrences;
+five are field-name tuples, contract parsing and a CSV column. The single computational use is
+`:1960`, `fill_size = min(float(entry["quote_size_shares"]), fillable)`, and `:1975` scales the
+adverse charge by that capped size. Everything else is size-independent: `per_share` is
+`fill_price - later["midpoint"]`; `_queue_depth_at_quote` (`:395`) takes
+`(state, *, direction, quote)` with **no size argument at all**; `fillable` is
+`trade["size"] - depth_ahead`.
+
+So with per-share markout `p_i` and fillable `F_i` exogenous, minimum size `S`, 1x capital `C_1`:
+
+> `adverse_per_dollar(k) = SUM_i p_i * min(k*S, F_i) / (k * C_1)`
+
+- **Nothing capped:** `k` cancels top and bottom, so the ratio is **constant in k** — verified
+  numerically on a non-degenerate markout vector, where 1x, 5x and 25x all return
+  `0.034042553191`. No data can move it.
+- **Something capped:** the numerator saturates while the denominator grows linearly, so the ratio
+  falls **in proportion to how much capping occurred** — toward the favourable "strongly sub-linear"
+  reading, carrying no adverse-selection information at all.
+
+Recorded so the algebra is not overstated later: `:2045` applies `max(0.0, adverse_5m / span_days)`,
+so on a corpus with negative aggregate markout the numerator is zero at every rung and the ratio is
+`0/0` — undefined rather than constant. The conclusion is unchanged.
+
+**On the corpus that exists the design is inoperable, not merely weak.** From
+`maker_carry/maker_fill_replay.json` (`generated_at_utc: 2026-08-21T01:42:15Z`) the three confirmed
+fills carry 5-minute markouts of `+0.015`, `-0.02`, `+0.005` per share and `fillable` of `3534.35`,
+`471.82`, `340.63` shares. At 1x (200 shares) nothing caps and realised adverse is
+`200 * (0.015 - 0.02 + 0.005) =` **exactly $0.00**, so the pre-registered denominator vanishes.
+Excluding liquidity-capped fills — as any honest version must, since a rung whose size could never
+have filled was never measured at that size — the usable sample is **3 fills at 1x, 1 at 5x, 0 at
+25x**, against the registered fill floor of 10
+(`polymarket_predictive_config.example.yaml:295`).
+
+**There is no repair.** Historical counterparties cannot respond to an order that was never placed,
+so no replay of recorded prints can show size affecting who trades against us.
+
+### Design 2 — the observational size-response regression is confounded, in the favourable direction
+
+The replacement used the market's own liquidity as a natural experiment: treatment = resting depth at
+the trade price, outcome = markout per share signed so positive is adverse to the resting side,
+estimator = slope of markout on `log2(depth / rewards_min_size_shares)` with market fixed effects.
+It fixed the vanishing denominator — a slope is defined when mean markout is zero — and failed for
+four new reasons, **all biasing the answer the same way.**
+
+1. **Endogeneity.** Resting depth is *chosen*. Makers post size when they expect benign flow and
+   pull when they expect toxic flow, so depth is negatively correlated with expected adverse
+   selection by construction. Biases the slope **downward** — toward "scaling is fine."
+2. **Measurement error in the treatment.** Book state may lag the trade by up to
+   `max_book_state_lag_seconds: 1800` (`polymarket_predictive_config.example.yaml:221`); the three
+   delivered fills show entry-state lags of **403, 877 and 638 seconds**, with 512 book states across
+   14 days. Classical error in a regressor attenuates the slope toward zero. Same direction.
+3. **Collider selection.** Observations exist only where a trade occurred, and whether a queue is
+   crossed depends jointly on its depth and on how informed the flow is.
+4. **It measures the wrong intervention.** `_queue_depth_at_quote` returns *total* depth at or better
+   across all participants — a hundred 20-share orders and one 2,000-share order are identical to it,
+   while the business question is the size of a single order. And the ladder projection maps onto
+   multiplying the whole queue by 25: placing our own order moves depth from `D` to `D+q`, so on the
+   delivered market (`depth_ahead: 3802.05`) going from 200 to 5,000 shares moves the regressor by
+   **1.1371 doublings, not `log2(25) = 4.6439`** — a **4.08x** overstatement of the relevant span,
+   and where the slope is negative it overstates the favourable reading.
+
+Two engineering findings from the drafting, kept because both patterns recur:
+
+- **A constraint on reuse, not a defect in current code.** On the `quote_aligned_depth` branch
+  (`maker_fill_replay.py:417-418`) `_queue_depth_at_quote` **ignores its `quote` argument** and
+  returns `resting_bid_depth_at_quote`, a column recorded for *our* quote price. Correct where the
+  replay calls it (at our own quote); silently wrong for any caller evaluating it at another price.
+  Future reuse must exclude rows whose returned source is not `full_book_levels`.
+- **A fail-open class.** A degeneracy guard written on the variance of a regressor does **not**
+  protect a fixed-effects estimator, whose denominator is the *within*-market sum of squares. Five
+  markets each resting at one distinct depth gives raw variance `2.0` — guard silent — and a
+  within-market denominator of **exactly `0.0`**. The slope is `nan`, `nan > 0` is `False`, and a
+  kill condition keyed on a positive slope never fires. Fail-open, again toward keeping the lane
+  open.
+
+### The result
+
+**The maker adverse-selection scaling axis cannot be identified from this system's observational
+data.** The confound is structural, not a matter of craft: resting size is chosen in response to
+expected adverse selection, so no design built on observed sizes separates "large orders are picked
+off worse" from "makers post large when they expect not to be." Two independent designs failed, and
+every failure channel in both biased toward the same favourable conclusion.
+
+**The only design that identifies the effect assigns size rather than observing it** — randomised
+live quoting with rung assigned to trading day at random. That requires capital at risk and is a
+human action outside this system's paper-only governance.
+
+### What this does NOT establish
+
+**The axis is UNMEASURED, not measured-null.** Nothing here licenses a claim that adverse selection
+scales sub-linearly, linearly, or super-linearly. A biased-toward-zero instrument returning zero is
+not evidence of no effect, and **this section must never be cited as a favourable finding.** The
+maker business case remains unresolved in the direction that matters, and its gross figures remain
+gross.
+
+### Governance record
+
+- Three independent admission passes were run across the two drafts; the drafting agent never gated
+  its own work. All returned **NOT ADMISSIBLE**. **Neither design was registered**, and registering a
+  draft with its failures noted was specifically not done — that is the outcome S8 exists to prevent.
+- **No gate, threshold, eligibility rule or capital ceiling was changed**, and no live order path was
+  added or enabled.
+- The proposed 25x rung exceeds two registered ceilings: `capital_cap_usd: 500`
+  (`polymarket_predictive_config.example.yaml:153`) at a peak of `25 * $94 = $2,350`, and
+  `max_size_multiple: 5` (`src/polymarket_predictive_engine/maker_carry_study.py:185`), a registered
+  **maximum** the draft squared to reach 25. **Raising either is an owner decision. No agent may
+  make, imply, or record it, and nothing in this section does.**
+- A drafting error worth naming: the ladder's top rung was described as "anchored on a delivered
+  value" when `size_multiple` appears **zero** times in the registered config and the real constant
+  is a maximum of 5. A registered ceiling squared is not a registered basis.
+- **State of the draft on this branch.** `docs/MAKER_PICKOFF_SCALING_EXPERIMENT.md` is the Design 1
+  text as it stood before the gate ran, and it FAILED that gate on seven of ten rules. Its own header
+  now records this. The corrected Design 1 and the whole of Design 2 were written in an ephemeral
+  container worktree and lost unpushed; this section is the surviving record of both, rebuilt from
+  source lines in this checkout and artifacts on `origin/vps-telemetry`.
+
+### Day-after check
+
+This is a terminal record of a measurement attempt, so its check is documentary: the maker scaling
+axis appears in no artifact as a measured quantity, no gate reads a scaling ratio or slope, and
+`mb1_tier0_coverage_sufficient` remains `false` until a design that identifies the effect is
+registered and run. If any future artifact publishes a scaling figure, it must name which design
+produced it and how that design escapes all four confounds enumerated above.

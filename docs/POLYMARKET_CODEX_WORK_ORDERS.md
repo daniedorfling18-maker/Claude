@@ -2604,6 +2604,46 @@ PRECONDITIONS (all required, in order):
       no withdrawal), stored ONLY in the VPS .env (never repo, never
       chat, never telemetry), rotation procedure documented.
 
+WITHDRAWN AMENDMENT 2026-09-04 - the P1 repoint was proposed and withdrawn.
+
+A change repointing P1 to a lane-scoped "P1'" reading
+`outputs/premium_evidence/premium_support.json` was drafted, gated three times,
+and WITHDRAWN before merge. It is recorded here so the attempt is auditable and
+so the same design is not proposed again without the defect being fixed.
+
+Why withdrawn: it LOOSENED a registered live-order precondition while asserting
+it had not. Verified by executing the proposed evaluator:
+
+  - the original P1 read three registered gate states from
+    `maker_carry_study.json`, an artifact a registered producer writes on the
+    VPS every cycle;
+  - the proposal read five self-declared fields from an artifact NOTHING in this
+    repository writes, with no lane whitelist, no registry cross-check and no
+    freshness bound. An unregistered lane name returned `met`; the string
+    "yes" as `support_gate_passed` returned `met`; `capacity_usd: 0.0000001`
+    returned `met`; a 2019-dated and a 2099-dated artifact both returned `met`.
+
+`AGENTS.md` forbids loosening any gate, threshold or eligibility rule, and this
+is the chain that authorises a live order path. A weaker check here is exactly
+what that prohibition exists to stop.
+
+Also withdrawn with it: the claim that P1 "can never close". WO-149 records that
+`run_book_pulse` never fires on the VPS, so `mb1_tier0_coverage_sufficient`
+stays `false`, and then - "Merging this WO did not move M-B; deploying it is
+what will." M-B is blocked on a PENDING DEPLOY, an operational task, not on an
+impossibility.
+
+What survives the withdrawal: P1's real defect is its SCOPE. It names three
+maker gates, so one lane's precondition sits in the chain for every future
+executor. That is worth fixing, but it cannot be fixed by pointing the gate at a
+self-declared artifact. Repoint it only when a registered producer writes the
+evidence, so the gate reads engine-produced state rather than producer
+assertions - i.e. after some registered lane's support evaluator exists and
+writes its verdict, not before.
+
+P1 through P5 therefore stand exactly as originally registered, and WO-67
+remains BLOCKED.
+
 ARCHITECTURE (registered 2026-07-12):
 1. `maker_executor.py` consumes ONLY signed-off artifacts: the quote
    sheet (what to quote) and decision_policy.json (whether quoting is
@@ -16943,3 +16983,80 @@ changing what the day-after operator should actually go check:
    evidence of a problem with THIS WO's alarm — check reading (b), the
    watchdog's own `observed_disk_used_percent`, independently; it does not
    depend on `corpus_retention` at all (subject to qualification 1, above).
+
+## WO-164 — The clean-settled join compares a RAW prediction timestamp against a NORMALISED label timestamp — `registered` (2026-08-23; diagnosis proven by execution, see below; touches `market_relative_validation.py`, which feeds `promotion_gate` → OWNER MERGE after line-audit; no gate, threshold or eligibility value changes)
+
+**The defect, demonstrated rather than argued.** `family_calibration_scorecard.json` reports
+`clean_settled_joined_rows: 0` against `rejected_join_rows: 17420` and `families_scored: 0`. The
+cause is a formatting asymmetry in one key:
+
+- **Label side** (`labels.py:168`) normalises: `"prediction_timestamp": ts.strftime("%Y-%m-%dT%H:%M:%SZ")`,
+  where `ts = parse_timestamp(row.get(ts_col))`.
+- **Prediction side** (`models/calibrated.py:135`) passes through raw:
+  `"prediction_timestamp": row.get("prediction_timestamp", now_utc())`.
+- **The join** (`market_relative_validation.py:172`) compares them as strings:
+  `key = (str(pred.get("market_id","")), str(pred.get("token_id","")), str(pred.get("prediction_timestamp","")))`,
+  and `_label_index` (:140) builds the label side identically.
+
+Both sides originate from the SAME raw source value. One is normalised and the other is not, so any
+encoding difference fails the whole join rather than part of it — which is the shape of 0 of 17,420.
+
+**Executed against the delivered code, four encodings of one instant:**
+
+```
+pred stamp '2026-08-15T04:00:00+00:00'   -> joined=0 rejected=1 (no clean settled label)
+pred stamp '2026-08-15T04:00:00.000Z'    -> joined=0 rejected=1 (no clean settled label)
+pred stamp '2026-08-15 04:00:00Z'        -> joined=0 rejected=1 (no clean settled label)
+pred stamp '2026-08-15T04:00:00Z'        -> joined=1 rejected=0
+```
+
+The rejection reason is `no clean settled label` in every failing case — the same bucket that holds
+all 17,420. **PR #446, which publishes the rejection histogram, confirms this in one cycle: if that
+reason is ~100% of the total, the diagnosis is closed. #446 should merge first.**
+
+**The change.** Normalise BOTH sides of the key through `parse_timestamp` before comparison, in
+`market_relative_validation.py` only. No threshold, gate, eligibility rule or promotion criterion is
+touched; the join predicate is the entire surface.
+
+**Fail-safe sentence.** A timestamp that does not parse normalises to `""`. On the label side
+`_label_index`'s existing `if all(key)` already excludes empty components, so such a label is still
+never indexed; on the prediction side `""` matches no indexed label and the row is still rejected as
+`no clean settled label`. **Unparseable input therefore remains rejected exactly as today — the
+change can only convert PARSEABLE-but-differently-encoded pairs from rejected to joined, never
+unparseable ones.** No row that is rejected today for any reason other than encoding becomes joined.
+
+**Registered consequence the owner must ratify.** This makes `market_relative_validation` produce
+output where it currently produces none, and that feeds `promotion_gate`. It does NOT loosen the
+gate: every promotion criterion is unchanged, and the gate currently reads
+`market_relative_validation_status: missing` — after this it reads a measured result. Given the
+2026-08-23 finding that the estimator's claimed edge carries no information about outcomes
+(corr +0.0738, CI [-0.1789, +0.3514]), the expected measured result is still a fail. **The change
+converts an absent measurement into a real one; it does not create an approval.**
+
+### Touch ONLY these files (`git diff --stat` must show exactly these two)
+
+- `src/polymarket_predictive_engine/market_relative_validation.py` — the key normalisation only
+- `tests/polymarket_predictive_engine/test_market_relative_validation.py` — the tests below
+
+### Enumerated offline tests (S8/A10)
+
+1. `test_a_plus_offset_encoded_prediction_stamp_joins_its_label` — `2026-08-15T04:00:00+00:00`
+   against a label at `2026-08-15T04:00:00Z` joins.
+2. `test_a_fractional_second_prediction_stamp_joins_its_label` — `...T04:00:00.000Z` joins.
+3. `test_a_space_separated_prediction_stamp_joins_its_label` — `2026-08-15 04:00:00Z` joins.
+4. `test_the_canonical_encoding_still_joins` — the currently-working case is unchanged.
+5. `test_an_unparseable_prediction_stamp_is_still_rejected` — `"not-a-time"` yields
+   `no clean settled label`, proving the fail-safe direction is preserved.
+6. `test_an_unparseable_label_stamp_is_still_never_indexed` — a label with `"not-a-time"` is not
+   indexed, so a prediction at any encoding is rejected.
+7. `test_a_genuinely_different_instant_does_not_join` — `04:00:00Z` against `05:00:00Z` stays
+   rejected, proving normalisation has not become a wildcard.
+8. `test_rows_rejected_for_non_encoding_reasons_are_unchanged` — a pair whose model and market
+   probability share a source still rejects with that reason, not the join reason.
+
+Each test must be confirmed to FAIL with the normalisation reverted.
+
+### Day-after check
+
+`family_calibration_scorecard.json` reports `clean_settled_joined_rows > 0`, and the rejection
+histogram published by #446 no longer shows `no clean settled label` at ~100%.

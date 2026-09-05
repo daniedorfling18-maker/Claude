@@ -1,6 +1,6 @@
 ---
 name: wo-lifecycle
-description: The binding lifecycle for every Polymarket work order — the standing team roster and its limits, the A1-A10 admission checklist that gates registration, the draft→register→review→dispatch gate order, resourcing by WO class F/M/D/X, and the calibration loop. Use when authoring, registering, reviewing, dispatching, building, or closing any WO, and when deciding which agent and tier to spawn.
+description: The binding lifecycle for every Polymarket work order — the standing team roster and its limits, the A1-A11 admission checklist that gates registration, the draft→register→review→dispatch gate order, resourcing by WO class F/M/D/X, and the calibration loop. Use when authoring, registering, reviewing, dispatching, building, or closing any WO, and when deciding which agent and tier to spawn.
 ---
 
 # Work-order lifecycle standard
@@ -38,7 +38,7 @@ and this file is the text that must change.
 | Binding clause | `AGENTS.md`, "Work-order and Git discipline" | binds S8 and the GLOBAL RULE. **This file is the non-binding companion** — agent-configuration space is not register-reviewed and carries no frozen-surface protection |
 | Definition of "registered" | `docs/POLYMARKET_CODEX_WORK_ORDERS.md`, GLOBAL RULE | the ancestry test; not restated here |
 
-A1-A10 appear in this file for operating convenience. **S8 is the canonical
+A1-A11 appear in this file for operating convenience. **S8 is the canonical
 text**; if the two ever differ, S8 governs and this file is corrected. S8 is
 also the copy that reaches the containers — `tests/test_polymarket_vps_docker.py`
 mounts `AGENTS.md`, `CLAUDE.md` and `docs/` read-only, but not `.claude/`.
@@ -92,6 +92,7 @@ from a specific defect a real review found — none is invented.** Canonical tex
 | A8 | A **dismissal on numeric grounds** shows the worst-case derivation including per-item fan-out, and states for each timeout whether it is wall-clock or per-operation. | a pass dismissed at 25 x 20s = 500s when real fan-out is three HTTP calls per item → 1500s, and `urlopen` timeouts are per-socket, not deadlines |
 | A9 | A **"dormant" / "changes nothing in production" claim enumerates every caller** of the changed function, not just the hot path. | a dormancy claim missed `_run_degraded_prediction_cycle`, armed in production |
 | A10 | Every WO carries the house shape already required: exact touched-file list, fail-safe sentence, enumerated offline tests, `Day-after check:`. | pre-existing `docs/ENGINEERING_STANDARDS.md` S1-S7 |
+| A11 | Every estimator names, per identified bias channel, the direction it pushes; a design where all channels push toward the favourable answer is not admissible without an argument that the effect exceeds the aggregate bias. | two successive maker-scaling estimators, each incapable of measuring what it claimed, with every identified bias channel pointing at the favourable conclusion |
 
 The agent that runs the admission check is never the agent that drafted the WO
 (Part 0's structural rule).
@@ -176,8 +177,8 @@ Recalibration, applied every ~10 WOs:
 
 - Spec-review defects per WO trending **down** → the admission checklist is
   working. Trending flat → add the rule that would have caught the recurring
-  one, exactly as A1-A9 were derived. (A10 restates S1-S7 rather than deriving
-  from a review defect, which is why the derivation series stops at A9.)
+  one, exactly as A1-A9 and A11 were derived. (A10 alone restates S1-S7 rather
+  than deriving from a review defect.)
 - A class-M WO whose build review finds **zero** defects across several cycles
   → candidate to drop build review to spot-check. A class-M WO where Sonnet
   escalates repeatedly → the spec was under-specified; fix authoring, not tier.

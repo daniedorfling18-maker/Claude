@@ -106,6 +106,22 @@ fi
 # Whitelisted output directories: decision summaries only, never the heavy
 # collection corpora (training archive, websocket features, trade prints,
 # official book snapshots stay on the VPS).
+# h2_dutch and h3_smart_flow carry the REGISTERED verdict artifacts for two of
+# the three primary hypotheses - docs/EXPERIMENT_REGISTRY.md states that only
+# outputs/h2_dutch/h2_evaluation.json may state the registered H2 verdict. They
+# were absent from this list, so those verdicts were unreadable from any session
+# not on the VPS, which is exactly what this mirror exists to prevent. Both hold
+# small summary JSON of the same class as the entries around them.
+# polymarket_arbitrage joins them because dutch_arb_monitor embeds the live H2
+# evaluation status, independent_episodes and next_unmet_condition into its own
+# summary, so it is the only place the H2 episode count is observable between
+# evaluator runs. Summary JSON plus two capped CSVs, same class as
+# event_group_consistency directly above it.
+# Deliberately NOT added: the corpora (polymarket_training, _websocket,
+# _trade_prints, _training_archive and the rest). 25 output dirs are unmirrored
+# and most are unmirrored on purpose - this mirror carries summaries, not data.
+# Keep comments OUTSIDE the string: it is newline-split by the for loop below,
+# so a "#" line would be consumed as a directory path.
 TELEMETRY_DIRS="
 outputs/ops_scheduler
 outputs/execution
@@ -116,6 +132,9 @@ outputs/implication_consistency
 outputs/calibration_bias
 outputs/drift_scan
 outputs/event_group_consistency
+outputs/polymarket_arbitrage
+outputs/h2_dutch
+outputs/h3_smart_flow
 outputs/reconstructed_signal_clv
 outputs/polymarket_shadow
 outputs/performance

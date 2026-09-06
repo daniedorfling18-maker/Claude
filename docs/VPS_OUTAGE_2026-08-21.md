@@ -70,28 +70,62 @@ it watches.
   campaign carries an implicit asof of 2026-08-20/21**, because all of it was
   read from this snapshot. None of it has moved since.
 
-## Correction proposed, not applied
+## Correction — the obvious fix was drafted, gated, and REJECTED
 
-The fix is to restore an off-box staleness alarm, and it is deliberately left
-for the owner rather than applied here: re-adding a recurring schedule is
-provisioning recurring autonomy, and the 2026-07-09 removal was a deliberate
-registered decision that an agent should not silently reverse.
+The obvious correction is an off-box alarm that reads the age of the last commit
+on `origin/vps-telemetry` from a GitHub-hosted runner. It was drafted as WO-165,
+put through an independent S8 gate, and returned **NOT ADMISSIBLE** on A1, A2,
+A5, A9, A10 and A11. The findings are recorded here because they rule out an
+entire class of fix, and the next person to reach for it should not have to
+rediscover them.
 
-1. **Restore a `schedule:` trigger on
-   `.github/workflows/polymarket-vps-proof-health.yml`.** It already runs on
-   `ubuntu-latest` and already carries the 480-minute staleness threshold. This
-   is the minimal change and would have cut a 15-day silence to under 8 hours.
-2. **Prefer a check that needs no SSH.** The existing workflow authenticates to
-   the host, so it fails when the host is unreachable — which is still a usable
-   alarm, but a check on the age of the last `origin/vps-telemetry` commit needs
-   no credentials and no reachable host, and cannot itself be taken down by the
-   outage it detects.
-3. **Record the general rule.** A liveness check that executes on the subject it
-   monitors is not a liveness check. Any future consolidation of recurring jobs
-   onto the VPS must leave at least one off-box observer.
+**It cannot be installed while the VPS is down.** GitHub fires `schedule:`
+triggers only on the repository's default branch. Reaching `main` requires the
+required PR gate, which runs on the self-hosted runner on the VPS. So the
+detector cannot be deployed during exactly the outage it exists to detect, and
+the claim that it "cannot be taken down by the failure it detects" is false.
 
-Items 1 and 2 need their own registered work order. This document registers
-nothing and authorises nothing.
+**Mirror freshness is not system liveness.** `scripts/push_vps_telemetry.sh`
+skips missing producer directories (`[ -d ... ] || continue`, `:167-168`) and
+missing files (`[ -f ... ] || return 0`, `:148`), then copies the manifest,
+mints a commit and force-pushes regardless (`:187-197`). A fresh mirror commit
+proves the crontab ran. It does not prove any engine is alive. An alarm on that
+signal reads GREEN while every producer on the host is dead.
+
+**The timestamp is written by the subject under test.** `commit-tree` at
+`:194-196` pins no `GIT_COMMITTER_DATE`, so the age is computed from the
+monitored host's own clock. A forward-skewed clock extends the green-after-death
+window and lets a fired alarm silently self-clear.
+
+**A factual error in the draft, recorded rather than quietly fixed.** It claimed
+the telemetry push cadence "is not in the repository". It is:
+`scripts/push_vps_telemetry.sh:19` documents `*/30 * * * *`. The threshold was
+therefore justified on a premise that was false, in the same paragraph that
+claimed to be recording what could not be established.
+
+**Every identified bias channel points at "no alarm"** — content blindness,
+host-controlled clock, a threshold at 16x the true cadence, and GitHub's
+schedule delay or 60-day inactivity auto-disable. Under A11 that is
+inadmissible absent an argument the effect exceeds the aggregate bias, and no
+such argument exists.
+
+**What would actually work, and why it is not a work order.** The detector must
+sit outside both the VPS and this repository's CI, and it must push a
+notification rather than set a check status — the harm here was that nobody
+looked for 15 days, and a red run in a repo nobody opened for 12 days reproduces
+that exactly. That means an external uptime monitor or an owner-side alert, which
+is a tooling decision for the owner, not a change to this codebase. Restoring the
+schedule on `.github/workflows/polymarket-vps-proof-health.yml` remains an option
+but inherits the default-branch and notification problems above, and would
+reverse a registered decision (`docs/POLYMARKET_CODEX_WORK_ORDERS.md` records
+that the orchestrator must not self-provision recurring autonomy), so it stays
+with the owner.
+
+**The general rule still holds and is the durable lesson:** a liveness check that
+executes on the subject it monitors is not a liveness check. Any consolidation of
+recurring jobs onto the VPS must leave at least one observer outside it — and
+that observer must be reachable, must measure something the subject cannot
+forge, and must reach a human.
 
 ## Restart order, when the host returns
 

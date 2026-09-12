@@ -1,7 +1,11 @@
 # DRAFT — variance risk premium and perpetual funding carry
 
 **Status: DRAFT, NOT REGISTERED, NOT ADMISSIBLE.** This is deliberately NOT in
-`docs/EXPERIMENT_REGISTRY.md`. An earlier revision registered both lanes there
+`docs/EXPERIMENT_REGISTRY.md`. **2026-09-12:** the first question these lanes
+raise — does either premium survive costs at all — is being tested offline as
+WO-166 in `docs/POLYMARKET_CODEX_WORK_ORDERS.md`, a historical-class diagnostic
+that registers no hypothesis; WO-166 dispositions each of the eight defects
+below in its own text, and nothing in this document is changed by it. An earlier revision registered both lanes there
 with their A11 failure noted; that was withdrawn, because it is exactly what S8
 forbids: *"A draft that fails any rule returns to its drafter. Registering it
 with the failure noted is the outcome this section exists to prevent."*

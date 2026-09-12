@@ -28,6 +28,8 @@ FUNDING_INTERVAL_MS = FUNDING_INTERVAL_HOURS * 3_600_000
 HOUR_MS = 3_600_000
 GRID_TOLERANCE_MS = 1_000
 MAX_CONSECUTIVE_MISSING_HOURS = 24
+HTTP_TIMEOUT_SECONDS = 60.0  # per socket operation, not a deadline; the single site for both fetchers
+HTTP_RETRIES = 3
 
 FUNDING_COLUMNS = ("calc_time", "funding_interval_hours", "last_funding_rate")
 OUTPUT_FUNDING_COLUMNS = ("calc_time", "calc_time_raw", "funding_interval_hours", "last_funding_rate")
@@ -81,7 +83,7 @@ def checksum_url(zip_url: str) -> str:
 # ------------------------------------------------------------------------ network
 
 
-def fetch_bytes(url: str, *, timeout: float = 60.0, retries: int = 3) -> bytes:
+def fetch_bytes(url: str, *, timeout: float = HTTP_TIMEOUT_SECONDS, retries: int = HTTP_RETRIES) -> bytes:
     """GET ``url`` and return the body. Any status other than 200 raises.
 
     ``timeout`` is a per-socket-operation timeout (connect, then each read), not a

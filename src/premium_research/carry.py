@@ -363,9 +363,12 @@ def iso_week_key(boundary_ms: int) -> tuple[int, int]:
 
 def weekly_returns(frame: pd.DataFrame) -> pd.DataFrame:
     """Sum period returns per ISO week; a week is eligible only when complete (21 periods) and unflagged."""
-    periods = frame.iloc[1:].copy()  # the entry boundary carries no period
+    periods = frame.iloc[1:].copy()  # the entry boundary carries no period; its fees and traded notional belong to the first period
     if periods.empty:
         raise CarryInputError("no periods after the entry boundary")
+    first = periods.index[0]
+    periods.loc[first, "fees_paid"] = float(periods.loc[first, "fees_paid"]) + float(frame["fees_paid"].iloc[0])
+    periods.loc[first, "traded_notional"] = float(periods.loc[first, "traded_notional"]) + float(frame["traded_notional"].iloc[0])
     keys = periods["boundary_ms"].map(iso_week_key)
     periods["iso_year"] = keys.map(lambda key: key[0])
     periods["iso_week"] = keys.map(lambda key: key[1])

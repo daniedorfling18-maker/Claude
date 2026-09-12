@@ -82,10 +82,10 @@ def _pooled_table(pooled: dict[str, Any], *, gated: bool = True, hurdle: float |
         f"| {g1_label} | {_pct(pooled['annualised_lower_bound_after_haircut'])} |",
         *margin_rows,
         f"| Sharpe (weekly, annualised) | {_num(pooled['sharpe_weekly_annualised'], 2)} |",
-        f"| max drawdown, all weeks (peak-to-trough, negative; G3 reads its magnitude) | {_pct(pooled['max_drawdown_all_weeks'])} |",
+        f"| max drawdown, all weeks (peak-to-trough, negative{'; G3 reads its magnitude' if gated else ''}) | {_pct(pooled['max_drawdown_all_weeks'])} |",
         f"| CVaR 95% weekly (mean loss magnitude in the worst 5% of weeks) | {_pct(pooled['cvar_95_weekly'])} |",
         f"| forced liquidations | {pooled['forced_liquidations']} |",
-        f"| open-position periods with missing bars (liquidation unverifiable; G3 requires 0) | {pooled['unverifiable_open_periods']} |",
+        f"| open-position periods with missing bars (liquidation unverifiable{'; G3 requires 0' if gated else ''}) | {pooled['unverifiable_open_periods']} |",
         f"| rebalances | {pooled['rebalances']} |",
         f"| complete ISO years positive (a year needs >= 45 eligible weeks) | {pooled['positive_complete_years']} of {len(pooled['complete_years'])} |",
     ]

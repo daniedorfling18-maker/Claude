@@ -245,7 +245,7 @@ def _cmd_verify_manifest(args: argparse.Namespace) -> int:
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
-    from .runner import run_all  # imported lazily so fetch-only environments do not need the estimators
+    from .runner import run_all
 
     try:
         summary = run_all(Path(args.root), code_revision=git_revision(REPO_ROOT), generated_at=utc_now_iso(), force=args.force)

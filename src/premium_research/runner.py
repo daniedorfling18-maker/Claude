@@ -24,7 +24,7 @@ import pandas as pd
 from quant_lab.risk import conditional_var, max_drawdown_from_returns
 
 from . import carry, vrp
-from .bootstrap import block_length_for, cluster_bootstrap_mean, lower_bound, stationary_block_bootstrap_mean
+from .bootstrap import DEFAULT_DRAWS, DEFAULT_SEED, block_length_for, cluster_bootstrap_mean, lower_bound, stationary_block_bootstrap_mean
 from .manifest import load_manifest, sha256_path, verify_manifest
 from .report import render_report
 
@@ -67,8 +67,8 @@ class Config:
     g5_min_positive_years: int = 3
     gate_quantile: float = 0.025  # lower end of the two-sided 95% interval; one-sided 2.5% per lane, family <= 5%
     report_quantile: float = 0.05
-    n_draws: int = 10_000
-    seed: int = 20260912
+    n_draws: int = DEFAULT_DRAWS
+    seed: int = DEFAULT_SEED
     sma_days: int = 200
 
     @property

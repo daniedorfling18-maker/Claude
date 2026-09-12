@@ -17105,8 +17105,10 @@ WO adds no dependency.
   functions over in-memory frames.
 - **Single implementation site.** The registered spans and universe live in
   `runner.py` and `cli.py` imports them; fee constants live in `carry.py`;
-  variance points in `vrp.py`; the block rule in `bootstrap.py`. No registered
-  literal has a second definition (line-audit finding, 2026-09-12).
+  variance points in `vrp.py`; the block rule, draw count and seed in
+  `bootstrap.py`; the HTTP timeout and attempt count in `binance_vision.py`,
+  imported by `deribit_history.py`. No registered literal has a second
+  definition (line-audit finding, 2026-09-12, residuals closed the same day).
 - **Path anchoring (A3).** The default research root is
   `<repository root>/research/premium_poc`, where the repository root is
   `Path(__file__).resolve().parents[2]` from `src/premium_research/cli.py`
@@ -17156,7 +17158,7 @@ paid data. That is recorded as an open owner decision, not solved here.
   with a digit; a fixed `header=0` would silently drop the first bar of
   headerless months, which is why this is a registered rule and a test.
 - **Timestamps.** Funding files store `calc_time` snapped to the 8h grid and
-  `calc_time_raw` exactly as received (the archive's `calc_time` carries a
+  `calc_time_raw` as received, in milliseconds (the archive's `calc_time` carries a
   jitter of a few milliseconds: 0-3 ms observed in 2024-01, 15 ms in
   2025-01). A raw value within ±1,000 ms of a grid point snaps to it;
   anything further aborts. Klines store `open_time` in milliseconds —
@@ -17311,7 +17313,7 @@ paid data. That is recorded as an open owner decision, not solved here.
   the one-bar-lag convention of `quant_lab/backtest.py:29-47`. V1 exists to
   show whether timing adds or subtracts after costs; it cannot change the
   verdict, and `carry_v1.json` carries no gate booleans at all (`gated:
-  false`); its report table is labelled descriptive.
+  false`); its report table is labelled descriptive and names no gate.
 - **Independent unit.** The ISO week, 21 periods, keyed by the ISO
   (year, week) of the instant just before each period's boundary, so the
   period ending Monday 00:00 belongs to the week it closes. A week is
@@ -17600,7 +17602,7 @@ otherwise.
 
 `test_report_and_verify.py`
 46. `test_verdict_line_is_generated_from_booleans` — all-True gives GO; one False gives NO-GO naming `G2=FAIL`; a missing key raises; a non-boolean raises.
-47. `test_run_writes_results_and_verify_passes_then_fails_on_any_byte_difference` — on a synthetic 100-day tree: exactly the four result files; `evidence_class: historical`; `paper_trading_invoked` and `live_trading_invoked` both `false` in the results and in the manifest; `carry_v1.json` has `gated: false` and no `gates`; the report carries the two margin rows and no gate label in the V1 table; `unverifiable_open_periods = 0`; the stored block length equals the rule applied to the eligible-week count; the stored manifest sha256 equals the file's; verify passes; one flipped byte → `byte difference: vrp.json`; an extra file → `extra file: notes.txt`; a removed file → `missing: carry_v1.json`; a second run without `--force` is refused.
+47. `test_run_writes_results_and_verify_passes_then_fails_on_any_byte_difference` — on a synthetic 100-day tree: exactly the four result files; `evidence_class: historical`; `paper_trading_invoked` and `live_trading_invoked` both `false` in the results and in the manifest; `carry_v1.json` has `gated: false` and no `gates`; the report carries the two margin rows and the V1 table names no gate; `unverifiable_open_periods = 0`; the stored block length equals the rule applied to the eligible-week count; the stored manifest sha256 equals the file's; verify passes; one flipped byte → `byte difference: vrp.json`; an extra file → `extra file: notes.txt`; a removed file → `missing: carry_v1.json`; a second run without `--force` is refused.
 48. `test_gates_read_false_on_non_finite_operands_and_positive_funding_can_pass` — at 0.06% per period G1 and G2 read True and the stored minimum equals `min(cluster, stationary_block)`; with the 45-week floor the 13-week year does not qualify, so G4 and `lane_a_go` read False.
 49. `test_results_directory_is_atomic` — a failure inside report rendering leaves no `results/` and no `.results-tmp-*`.
 50. `test_manifest_mismatch_refuses_to_run` — one appended byte in a committed CSV makes `run` refuse with "manifest verification failed" and write nothing.

@@ -118,6 +118,8 @@ def test_run_writes_results_and_verify_passes_then_fails_on_any_byte_difference(
     assert "margin of the G2 quantity over the 6.0% hurdle" in text and "margin of the G1 quantity over zero" in text
     assert text.count("| G1 quantity: that lower bound") == 1  # the V1 table carries no gate labels
     assert "descriptive; V1 is never gated" in text
+    v1_section = text.split("### V1 (conditional entry")[1].split("### Deribit cross-check")[0]
+    assert "G1" not in v1_section and "G2" not in v1_section and "G3" not in v1_section
     assert ("**Lane A — funding carry (V0, always on): GO**" in text) == bool(v0["gates"]["lane_a_go"])
     assert runner.verify_results(root, config=config) == []
 

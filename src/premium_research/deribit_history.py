@@ -24,6 +24,8 @@ from typing import Any
 
 import pandas as pd
 
+from .binance_vision import HTTP_RETRIES, HTTP_TIMEOUT_SECONDS
+
 BASE_URL = "https://www.deribit.com/api/v2"
 HOUR_MS = 3_600_000
 DAY_MS = 24 * HOUR_MS
@@ -40,7 +42,7 @@ class DeribitError(RuntimeError):
     """Raised on any Deribit defect. The fail-safe direction is always 'no data'."""
 
 
-def fetch_json(url: str, params: Mapping[str, Any], *, timeout: float = 60.0, retries: int = 3) -> dict[str, Any]:
+def fetch_json(url: str, params: Mapping[str, Any], *, timeout: float = HTTP_TIMEOUT_SECONDS, retries: int = HTTP_RETRIES) -> dict[str, Any]:
     """GET a JSON-RPC endpoint and return the decoded envelope. Raises on error envelopes."""
     import requests  # local import: keeps the pure modules import-light
 

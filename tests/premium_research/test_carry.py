@@ -63,6 +63,7 @@ def test_round_trip_costs_thirty_bps_of_notional() -> None:
     assert round(float(frame["period_return_on_capital"].sum()), 4) == -0.0020
     weekly = carry.weekly_returns(_run(_table(1 + 21, rate=0.0)))
     assert round(float(weekly["return_on_capital"].sum()), 4) == -0.0020
+    assert float(weekly["fees_paid"].sum()) == pytest.approx(0.0030)  # entry and exit fees both in the weekly frame
 
 
 def test_basis_change_appears_only_at_entry_and_exit() -> None:

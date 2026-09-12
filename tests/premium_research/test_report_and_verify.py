@@ -1,0 +1,193 @@
+from __future__ import annotations
+
+import json
+import math
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from premium_research import report, runner
+from premium_research.manifest import ManifestEntry, build_manifest, sha256_bytes, write_manifest
+
+HOUR_MS = 3_600_000
+DAY_MS = 24 * HOUR_MS
+START = 1704067200000  # 2024-01-01T00:00Z (Monday)
+DAYS = 100
+
+
+def _write(path: Path, frame: pd.DataFrame) -> ManifestEntry:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = frame.to_csv(index=False, lineterminator="\n").encode("utf-8")
+    path.write_bytes(payload)
+    ts_col = frame.columns[0]
+    return ManifestEntry(
+        path=str(path.relative_to(path.parents[2])).replace("\\", "/"),
+        source_urls=["synthetic"],
+        fetched_at="2026-09-12T00:00:00Z",
+        rows=int(len(frame)),
+        first_timestamp_ms=int(frame[ts_col].iloc[0]),
+        last_timestamp_ms=int(frame[ts_col].iloc[-1]),
+        sha256=sha256_bytes(payload),
+    )
+
+
+def build_synthetic_root(root: Path, *, seed: int = 11, funding_level: float = 0.0002, drop_perp_hour: int | None = None) -> None:
+    """A small but complete research tree: two symbols, 100 days, hourly prices, 8h funding, DVOL, Deribit funding."""
+    rng = np.random.default_rng(seed)
+    hours = DAYS * 24
+    entries: list[ManifestEntry] = []
+    for symbol, currency, level in (("BTCUSDT", "BTC", 40_000.0), ("ETHUSDT", "ETH", 2_000.0)):
+        steps = rng.normal(0.0, 0.004, size=hours)
+        spot = level * np.exp(np.cumsum(steps))
+        basis = 1.0 + rng.normal(0.0, 0.0003, size=hours)
+        perp = spot * basis
+        open_time = np.array([START + i * HOUR_MS for i in range(hours)], dtype=np.int64)
+        spot_frame = pd.DataFrame({"open_time": open_time, "open": spot, "high": spot * 1.002, "low": spot * 0.998, "close": spot})
+        perp_frame = pd.DataFrame({"open_time": open_time, "open": perp, "high": perp * 1.002, "low": perp * 0.998, "close": perp})
+        if drop_perp_hour is not None and symbol == "BTCUSDT":
+            perp_frame = perp_frame.drop(index=drop_perp_hour).reset_index(drop=True)
+        boundaries = np.array([START + i * 8 * HOUR_MS for i in range(1, DAYS * 3)], dtype=np.int64)
+        funding = pd.DataFrame({"calc_time": boundaries, "calc_time_raw": boundaries, "funding_interval_hours": 8, "last_funding_rate": funding_level + rng.normal(0.0, 0.00005, size=len(boundaries))})
+        entries.append(_write(root / "data" / "binance" / f"{symbol}_funding_8h.csv", funding))
+        entries.append(_write(root / "data" / "binance" / f"{symbol}_perp_1h.csv", perp_frame))
+        entries.append(_write(root / "data" / "binance" / f"{symbol}_spot_1h.csv", spot_frame))
+        days = np.array([START + i * DAY_MS for i in range(DAYS)], dtype=np.int64)
+        dvol = pd.DataFrame({"timestamp": days, "open": 60.0, "high": 61.0, "low": 59.0, "close": 60.0})
+        entries.append(_write(root / "data" / "deribit" / f"{currency}_dvol_daily.csv", dvol))
+        stamps = np.array([START + (i + 1) * HOUR_MS for i in range(hours)], dtype=np.int64)
+        deribit = pd.DataFrame({"timestamp": stamps, "index_price": spot, "interest_8h": funding_level, "interest_1h": funding_level / 8.0})
+        entries.append(_write(root / "data" / "deribit" / f"{currency}_funding_1h.csv", deribit))
+    manifest = build_manifest(entries, generated_at="2026-09-12T00:00:00Z", span={"synthetic": "100 days"}, code_revision="synthetic")
+    write_manifest(manifest, root / "manifest.json")
+
+
+def small_config() -> runner.Config:
+    return runner.Config(
+        lane_a_start_ms=START,
+        lane_a_end_ms=START + DAYS * DAY_MS,
+        lane_b_start_ms=START,
+        lane_b_end_ms=START + DAYS * DAY_MS,
+        complete_years_a=(2024,),
+        complete_years_b=(2024,),
+        min_eligible_weeks_per_year=5,
+        min_windows_per_year=2,
+        g4_min_positive_years=1,
+        g5_min_positive_years=1,
+        n_draws=500,
+    )
+
+
+def test_verdict_line_is_generated_from_booleans() -> None:
+    gates = {key: True for key in report.GATE_KEYS_A}
+    assert report.verdict_line(gates, report.GATE_KEYS_A, "Lane A").startswith("**Lane A: GO**")
+    gates[report.GATE_KEYS_A[1]] = False
+    line = report.verdict_line(gates, report.GATE_KEYS_A, "Lane A")
+    assert line.startswith("**Lane A: NO-GO**") and "G2=FAIL" in line
+    with pytest.raises(ValueError, match="missing"):
+        report.verdict_line({report.GATE_KEYS_A[0]: True}, report.GATE_KEYS_A, "Lane A")
+    with pytest.raises(ValueError, match="booleans"):
+        report.verdict_line({**{key: True for key in report.GATE_KEYS_A}, report.GATE_KEYS_A[0]: "yes"}, report.GATE_KEYS_A, "Lane A")
+
+
+def test_run_writes_results_and_verify_passes_then_fails_on_any_byte_difference(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root)
+    config = small_config()
+    summary = runner.run_all(root, code_revision="deadbeef", generated_at="2026-09-12T00:00:00Z", config=config)
+    assert "lane A (V0) GO=" in summary
+    results = root / "results"
+    assert sorted(p.name for p in results.iterdir()) == sorted(runner.RESULT_FILES)
+    v0 = json.loads((results / "carry_v0.json").read_text(encoding="utf-8"))
+    assert v0["work_order"] == "WO-166" and v0["evidence_class"] == "historical"
+    assert set(v0["gates"]) == {"G1_lower_bound_after_haircut_positive", "G2_point_after_haircut_at_least_hurdle", "G3_drawdown_bounded_and_no_forced_liquidation", "G4_positive_in_enough_qualifying_years", "lane_a_go"}
+    assert v0["pooled"]["forced_liquidations"] == 0
+    assert v0["pooled"]["unverifiable_open_periods"] == 0
+    assert v0["pooled"]["lower_bound_gate_level"]["block_length"] == runner.block_length_for(v0["pooled"]["eligible_weeks"])
+    assert v0["manifest_sha256"] == runner.sha256_path(root / "manifest.json")
+    text = (results / "report.md").read_text(encoding="utf-8")
+    assert "declared assumption, not a measurement" in text
+    assert ("**Lane A — funding carry (V0, always on): GO**" in text) == bool(v0["gates"]["lane_a_go"])
+    assert runner.verify_results(root, config=config) == []
+
+    # one flipped byte
+    target = results / "vrp.json"
+    payload = bytearray(target.read_bytes())
+    payload[10] ^= 0x01
+    target.write_bytes(bytes(payload))
+    assert runner.verify_results(root, config=config) == ["byte difference: vrp.json"]
+    payload[10] ^= 0x01
+    target.write_bytes(bytes(payload))
+    assert runner.verify_results(root, config=config) == []
+
+    # an extra file
+    (results / "notes.txt").write_text("x", encoding="utf-8")
+    assert runner.verify_results(root, config=config) == ["extra file: notes.txt"]
+    (results / "notes.txt").unlink()
+
+    # a missing file
+    (results / "carry_v1.json").unlink()
+    assert runner.verify_results(root, config=config) == ["missing: carry_v1.json"]
+
+    # a second run is refused without --force: one analysis pass is registered
+    with pytest.raises(RuntimeError, match="one analysis pass"):
+        runner.run_all(root, code_revision="deadbeef", generated_at="2026-09-12T00:00:00Z", config=config)
+
+
+def test_gates_read_false_on_non_finite_operands_and_positive_funding_can_pass(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, funding_level=0.0006)  # 0.06% per period = 65.7% annualised on notional
+    config = small_config()
+    runner.run_all(root, code_revision="x", generated_at="2026-09-12T00:00:00Z", config=config)
+    v0 = json.loads((root / "results" / "carry_v0.json").read_text(encoding="utf-8"))
+    assert v0["gates"]["G1_lower_bound_after_haircut_positive"] is True
+    assert v0["gates"]["G2_point_after_haircut_at_least_hurdle"] is True
+    lb = v0["pooled"]["lower_bound_gate_level"]
+    assert lb["minimum"] == min(lb["cluster"], lb["stationary_block"])
+    assert math.isfinite(v0["pooled"]["annualised_lower_bound_after_haircut"])
+    # the year check requires enough eligible weeks: 100 days gives ~13, so with the floor at 45 the year does not qualify
+    strict = runner.Config(**{**small_config().__dict__, "min_eligible_weeks_per_year": 45})
+    files = runner.compute_all(root, config=strict, code_revision="x", generated_at="2026-09-12T00:00:00Z")
+    strict_v0 = json.loads(files["carry_v0.json"])
+    assert strict_v0["pooled"]["year_check"]["detail"]["2024"]["qualifies"] is False
+    assert strict_v0["gates"]["G4_positive_in_enough_qualifying_years"] is False
+    assert strict_v0["gates"]["lane_a_go"] is False
+
+
+def test_results_directory_is_atomic(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("render failed")
+
+    monkeypatch.setattr(runner, "render_report", boom)
+    with pytest.raises(RuntimeError, match="render failed"):
+        runner.run_all(root, code_revision="x", generated_at="2026-09-12T00:00:00Z", config=small_config())
+    assert not (root / "results").exists()
+    assert not list(root.glob(".results-tmp-*"))
+
+
+def test_manifest_mismatch_refuses_to_run(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root)
+    target = root / "data" / "binance" / "BTCUSDT_funding_8h.csv"
+    target.write_bytes(target.read_bytes() + b"\n")
+    with pytest.raises(RuntimeError, match="manifest verification failed"):
+        runner.run_all(root, code_revision="x", generated_at="2026-09-12T00:00:00Z", config=small_config())
+    assert not (root / "results").exists()
+
+
+def test_missing_bar_during_an_open_position_fails_g3_and_is_counted(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, funding_level=0.0006, drop_perp_hour=24 * 10 + 2)  # an hour that is not a boundary hour
+    config = small_config()
+    runner.run_all(root, code_revision="x", generated_at="2026-09-12T00:00:00Z", config=config)
+    v0 = json.loads((root / "results" / "carry_v0.json").read_text(encoding="utf-8"))
+    assert v0["pooled"]["unverifiable_open_periods"] == 1
+    assert v0["pooled"]["forced_liquidations"] == 0
+    assert v0["gates"]["G3_drawdown_bounded_and_no_forced_liquidation"] is False
+    assert v0["gates"]["lane_a_go"] is False
+    text = (root / "results" / "report.md").read_text(encoding="utf-8")
+    assert "liquidation unverifiable; G3 requires 0) | 1 |" in text

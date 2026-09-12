@@ -17199,8 +17199,9 @@ paid data. That is recorded as an open owner decision, not solved here.
   of "under ten minutes"; the second fetch aborted on it, correctly, after
   9 of 10 series in 3,600 s, and per-request latency through the sandbox
   proxy was then measured between 0.6 s and about 4 s across the day, so
-  1,128 requests take 15 to 75 minutes. The deadline is now 4 × the worst
-  observed run (14,400 s); the per-request timeout and attempt count are
+  1,128 requests take 11 to 75 minutes. The deadline is now 14,400 s: 4 × the
+  truncated 3,600 s run, and about 3.2 × the projected 75-minute full run at
+  the worst observed latency; the per-request timeout and attempt count are
   unchanged; the fetch reuses one keep-alive session per process and logs
   progress per series so a stall is visible.
 - **The fetch never overwrites committed inputs**: it refuses to run when

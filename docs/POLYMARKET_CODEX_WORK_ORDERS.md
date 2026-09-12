@@ -17218,8 +17218,12 @@ paid data. That is recorded as an open owner decision, not solved here.
   consecutive missing hours; a Deribit page that is empty inside the
   requested span; a Deribit timestamp seen twice with different values; a
   DVOL candle with an empty, non-numeric, or non-finite field; a DVOL
-  continuation that is non-integer or does not move the window earlier, or
-  more than 1,000 DVOL pages; the wall-clock deadline. Nothing is forward-filled, interpolated, or skipped at fetch.
+  continuation that is non-integer or does not move the window earlier; more
+  than 1,000 DVOL pages (a loop guard: the registered span needs 2 pages, and
+  1,000 bounds a pager that never reaches null at 1,000 × 180 s, inside which
+  the 14,400 s wall-clock deadline, checked before every request, binds
+  first); a DVOL walk whose earliest candle is later than the span start
+  (span not covered); the wall-clock deadline. Nothing is forward-filled, interpolated, or skipped at fetch.
 - **Gaps of 24 hours or fewer** are permitted at fetch and are handled at
   estimation by rejection, never by filling: see "Rejected periods" below.
 
@@ -17572,7 +17576,7 @@ otherwise.
 13. `test_deribit_empty_page_inside_span_aborts` — a full first page then an empty second raises "empty funding page" after exactly 2 calls, each window 744 h wide.
 14. `test_funding_windows_cover_the_span_without_gaps_or_overlap` — windows `[s, s+744h], [s+744h, s+1488h], [s+1488h, s+1489h]`; an empty span raises.
 15. `test_non_finite_funding_field_aborts` — `"nan"` raises "non-finite"; `None` raises "empty".
-16. `test_dvol_page_parses_and_continuation_is_followed` — 92 candles split at candle 42: the first page (newest 50) returns that candle's timestamp as `continuation`, the second call uses it as `end_timestamp` with the same `start_timestamp` and no `continuation` parameter, the boundary candle is de-duplicated, first close 66.81; and `test_dvol_continuation_that_does_not_move_earlier_aborts` — a continuation equal to the window end aborts, a non-integer one aborts.
+16. `test_dvol_page_parses_and_continuation_is_followed` — 92 candles split at candle 42: the first page (newest 50) returns that candle's timestamp as `continuation`, the second call uses it as `end_timestamp` with the same `start_timestamp` and no `continuation` parameter, the boundary candle is de-duplicated, first close 66.81; and `test_dvol_continuation_that_does_not_move_earlier_aborts` — a continuation equal to the window end aborts, a non-integer one aborts; and `test_dvol_walk_that_stops_short_of_the_span_start_aborts` — a walk ending one day after the span start aborts with "span not covered".
 17. `test_dvol_empty_page_aborts`.
 
 `test_carry.py`

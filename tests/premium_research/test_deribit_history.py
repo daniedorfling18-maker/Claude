@@ -122,3 +122,10 @@ def test_dvol_continuation_that_does_not_move_earlier_aborts() -> None:
 def test_dvol_empty_page_aborts() -> None:
     with pytest.raises(dh.DeribitError, match="empty DVOL page"):
         dh.fetch_dvol("BTC", 1704067200000, 1711929600000, fetch=lambda url, params: {"result": {"data": [], "continuation": None}})
+
+
+def test_dvol_walk_that_stops_short_of_the_span_start_aborts() -> None:
+    envelope = json.loads(DVOL_PAGE.read_text(encoding="utf-8"))
+    data = envelope["result"]["data"]
+    with pytest.raises(dh.DeribitError, match="span not covered"):
+        dh.fetch_dvol("BTC", 1704067200000 - 86_400_000, 1711929600000, fetch=lambda url, params: {"result": {"data": data, "continuation": None}})

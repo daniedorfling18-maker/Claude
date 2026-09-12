@@ -161,7 +161,7 @@ def parse_dvol_rows(data: list[list[Any]]) -> pd.DataFrame:
     return pd.DataFrame.from_records(records, columns=list(DVOL_FIELDS)).sort_values("timestamp").reset_index(drop=True)
 
 
-MAX_DVOL_PAGES = 1_000
+MAX_DVOL_PAGES = 1_000  # loop guard only: the registered span needs 2 pages; at 180 s per request the 14,400 s wall-clock deadline binds first
 
 
 def fetch_dvol(currency: str, start_ms: int, end_ms: int, *, resolution: int = 86_400, fetch: FetchJsonFn | None = None) -> tuple[pd.DataFrame, list[str]]:
@@ -187,6 +187,9 @@ def fetch_dvol(currency: str, start_ms: int, end_ms: int, *, resolution: int = 8
         continuation = result.get("continuation")
         if continuation is None:
             frame = dedup_concat(pages)
+            earliest = int(frame["timestamp"].iloc[0])
+            if earliest > int(start_ms):
+                raise DeribitError(f"DVOL walk ended at {earliest}, later than the span start {int(start_ms)}: span not covered")
             return frame, calls
         try:
             next_end = int(continuation)

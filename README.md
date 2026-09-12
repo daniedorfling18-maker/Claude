@@ -24,18 +24,39 @@ outputs/performance/operating_state.json
 [`docs/OPERATING_STATE.md`](docs/OPERATING_STATE.md) defines the control, and
 [`AGENTS.md`](AGENTS.md) defines how agents operate the repository.
 
-## Primary economic thesis — sharp-anchor maker carry (H1)
+## Primary economic thesis — sharp-anchor maker carry (H1) — ANSWERED, 2026-08-19
+
+> **Read this first.** The registered evidence clock for the tested edge
+> classes expired on **2026-08-19T23:59:00Z** and the verdict resolved
+> **terminally**: `no_for_tested_edge_classes`. H1 is not an open
+> investigation. It was measured at **$3.02/day gross** across the entire
+> eligible universe against the **$3.33/day** target below, with adverse
+> selection at **$63.62/day** — 21x the gross, for a net of **-$60.60/day**.
+> H2 flagged **0** opportunities in 300 events with a maximum executable
+> basket of **$0.00**. H3 is the one tested class still unmeasured.
+>
+> The full record, its provenance, and what remains the repo owner's decision
+> are in
+> [`docs/POLYMARKET_QUANT_MODE_CHARTER.md`](docs/POLYMARKET_QUANT_MODE_CHARTER.md#terminal-verdict--the-registered-evidence-clock-expired-2026-08-19).
+> Those figures were read from VPS telemetry and are not re-derivable from
+> this repository; the terminal read should be confirmed on the VPS. The
+> single registered extension is spent and no agent may extend the window.
+>
+> The rest of this section describes what was built and tested, and is kept
+> because the mechanism and its risks are still an accurate account of the
+> experiment. It is **not** a statement that the lane is live.
 
 Three research hypotheses are registered in
 [`docs/EXPERIMENT_REGISTRY.md`](docs/EXPERIMENT_REGISTRY.md); the registry
-permits exactly these three and no fourth. H1, sharp-anchor maker carry, is
-the current priority: it is the only lane with an active pre-registered
-profit campaign (the frozen M-A/M-B/M-C gates in `maker_carry_study.py`), a
-registered validation ladder, and a registered — and blocked — path toward
-any future funding decision. H2 (persistent dutch-book consistency) and H3
-(structural-bias/smart-flow cohorts with positive executable CLV) remain
-registered but are secondary research lanes: their own registrations cap a
-pass at a shadow research candidate and cannot invoke paper or live trading.
+permits exactly these three and no fourth. H1, sharp-anchor maker carry, was
+the priority lane: it was the only one with a pre-registered profit campaign
+(the frozen M-A/M-B/M-C gates in `maker_carry_study.py`), a registered
+validation ladder, and a registered — and blocked — path toward any future
+funding decision. That path stayed blocked and the campaign returned a NO.
+H2 (persistent dutch-book consistency) and H3 (structural-bias/smart-flow
+cohorts with positive executable CLV) remain registered but were always
+secondary research lanes: their own registrations cap a pass at a shadow
+research candidate and cannot invoke paper or live trading.
 
 **Mechanism.** Passive maker quotes rest on rewarded Polymarket markets
 around independent sharp external anchors (bookmaker-derived probabilities).
@@ -44,8 +65,9 @@ the sharp anchor identifies quotes whose apparent carry is least likely to be
 erased by adverse selection. Edge is realised reward plus spread minus
 markout, fees, gas, and all investor costs — never the reward headline alone.
 
-**What the target means.** The `$100/month` (= `$3.33/day`) figure is a
-pre-registered target under investigation, not demonstrated performance.
+**What the target means.** The `$100/month` (= `$3.33/day`) figure was a
+pre-registered target, never demonstrated performance — and per the terminal
+verdict above it was not reached.
 M-A requires trusted net carry at or above that target on the registered
 number of distinct UTC days; the study's computed net carry is, by its own
 registration, a simulation upper bound until the three-tier validation

@@ -326,3 +326,19 @@ this study; every verdict rendering carries the settlement-return caveat.
 - Politics, awards, long-dated macro, and every family not named in H1–H3 are
   parked. Passive low-cost collection may continue, but no promotion-oriented
   modelling or agent time is allocated without amendment.
+
+### Offline premium proof-of-concept (2026-09-12; WO-166; historical-class diagnostic; effective only if merged)
+
+WO-166 in `docs/POLYMARKET_CODEX_WORK_ORDERS.md` is a diagnostic under this
+section. It tests two parked families — perpetual funding carry and the
+variance risk premium — on committed public historical data, with its
+estimator, its go/no-go thresholds, and its bias-direction disclosure fixed
+in the WO text before the data-pull commit. It is not a fourth primary; it
+adds no `## H` heading; it confers no evidence class above *historical*
+("Multiple-testing and evidence policy" above); a GO result is the trigger
+for a future pre-observation amendment with a fresh out-of-sample window,
+exactly as that section provides, and is not itself registration; a NO-GO
+result closes the family it tested. The freeze paragraph's "no
+promotion-oriented modelling or agent time without amendment" applies to
+these families; if merged, this paragraph is that amendment for WO-166's
+scope only.

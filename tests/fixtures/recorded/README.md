@@ -27,3 +27,24 @@ credentials, private account data, or request headers are stored.
   showing the former frozen up/down rotation and the adaptive-query ordering that starved the
   registered H1/H2/H3 research lanes. No credentials, account identifiers, or market token IDs
   are present.
+
+## Public archive and Deribit history fixtures (WO-166, captured 2026-09-12)
+
+These are verbatim, keyless, public-history payloads used by `premium_research`'s parser tests. They
+contain no identifiers to sanitise: prices, funding rates and timestamps only. **Capture disclosure:**
+they were fetched from `data.binance.vision` and `www.deribit.com` on 2026-09-12 from an agent sandbox
+before any `AGENTS.md` amendment permitted that contact; WO-166 records the capture and enumerates
+these four files as the only fetched payloads written outside `research/`.
+
+- `binance_vision_fundingRate_BTCUSDT_2024-01.csv`: the CSV member of
+  `data/futures/um/monthly/fundingRate/BTCUSDT/BTCUSDT-fundingRate-2024-01.zip` from
+  `data.binance.vision`, verbatim (header + 93 rows; some `calc_time` values carry a 1 ms jitter).
+- `binance_vision_klines_BTCUSDT_1h_2024-01_head.csv`: the header and first 48 rows of the CSV member
+  of `data/futures/um/monthly/klines/BTCUSDT/1h/BTCUSDT-1h-2024-01.zip`. Older months of the same
+  series ship without a header, which the loader also accepts.
+- `deribit_funding_history_BTC_2026-09-12.json`: one full page (744 hourly rows) of
+  `public/get_funding_rate_history` for `BTC-PERPETUAL`, span 2024-01-01T00:00Z to 2024-02-01T00:00Z,
+  preserving the `interest_8h`, `interest_1h`, `index_price` and `prev_index_price` fields.
+- `deribit_dvol_BTC_2026-09-12.json`: one page (92 daily candles) of
+  `public/get_volatility_index_data` for BTC at `resolution=86400`, span 2024-01-01 to 2024-04-01,
+  preserving the `[timestamp, open, high, low, close]` row shape and the `continuation` field.

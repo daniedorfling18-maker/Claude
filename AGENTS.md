@@ -21,7 +21,7 @@ required PR gate. Run production only through the guarded VPS deployment.
 ### Amendment, 2026-07-27 — the offline suite in an agent sandbox
 
 The prohibition above is unchanged for the owner's workstation and for every
-runtime path. It is narrowed in exactly one respect: an automated agent working in
+runtime path. It is narrowed in exactly two respects — this amendment, and the 2026-09-12 amendment below: an automated agent working in
 an **ephemeral, network-isolated sandbox** MUST run the offline `pytest` suite
 there before pushing, and MUST state the result in its pull request.
 
@@ -34,7 +34,9 @@ neither.
 The following remain prohibited everywhere outside the VPS, with no exception:
 engines, collectors, model training, brokers, watchdogs, schedulers, dashboards,
 Docker/Compose, any run against a real `paths.output_root`, and anything that
-contacts a live venue, wallet, or paid API.
+contacts a live venue, wallet, or paid API. (The 2026-09-12 amendment below
+supersedes the live-venue clause solely for keyless, read-only, historical
+requests to the two sources it names; nothing else in this list is touched.)
 
 **A sandbox run is never verification of record.** The self-hosted ARM64 required
 PR gate remains the sole authority on whether a change passes, and a green sandbox
@@ -45,6 +47,45 @@ not run" stops being a routine, accepted state in delivered work.
 Reason for the amendment: dispatched builds were arriving with every test marked
 "not run locally", correctly citing this rule — so defects that a two-minute local
 run would have caught were reaching review and CI instead.
+
+### Amendment, 2026-09-12 — offline historical research in an agent sandbox (carried by WO-166; effective only if merged)
+
+The prohibition above is unchanged for the owner's workstation and for every
+runtime path. It is narrowed in a second respect, alongside the 2026-07-27
+amendment: an automated agent working in an **ephemeral sandbox** MAY fetch
+**keyless, public, historical** market data and compute on it there, when
+every one of the following holds:
+
+- the sources are exactly the Binance Vision archive (`data.binance.vision`)
+  and Deribit's public `api/v2/public` endpoints; adding a source is an
+  amendment to this list, not a judgement call, and `api.binance.com`,
+  `fapi.binance.com` and every other venue host stay prohibited;
+- no credential, `.env` value, wallet, cookie, or paid API is involved at any
+  point;
+- no fetched data or computed result is written outside `research/` in the
+  repository tree, except the recorded fixtures a registered work order
+  enumerates under `tests/fixtures/recorded/`; nothing under
+  `paths.output_root`, `outputs/`, or any production evidence path is read
+  or written;
+- no collector, scheduler, watchdog, dashboard, broker, engine, or order path
+  is started, and nothing runs on a cadence;
+- every fetched input is committed with a sha256 manifest and every result is
+  recomputable from the committed inputs alone with a fixed seed, so the
+  sandbox is never the evidence — the repository is;
+- the result carries the *historical* evidence class of
+  `docs/EXPERIMENT_REGISTRY.md` and nothing done in the sandbox can relabel it
+  upward.
+
+What this permits is research on the past. It permits nothing prospective:
+every forward observation window, every paper or live evidence path, and every
+gate that reads runtime state remain VPS-only. A sandbox research result is
+never verification of record and licenses no merge, no registration, and no
+capital.
+
+Reason for the amendment: the VPS has been offline since 2026-08-21 with every
+collector, evaluator, and the required PR gate on it, and the question "does
+this premium exist at all" is answerable from checksummed public history
+without any host that could be a single point of failure.
 
 ## Authoritative operating state
 

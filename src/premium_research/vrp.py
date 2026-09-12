@@ -26,7 +26,6 @@ MIN_VALID_HOURS = 700
 HOURS_PER_YEAR = 8_760
 STEP_DAYS = 30
 VARIANCE_POINTS = 10_000.0
-MIN_WINDOWS_PER_YEAR = 10
 
 
 def window_starts(start_ms: int, end_ms: int, *, step_days: int = STEP_DAYS, window_hours: int = WINDOW_HOURS) -> list[int]:

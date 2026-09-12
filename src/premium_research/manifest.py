@@ -49,6 +49,8 @@ def build_manifest(entries: list[ManifestEntry], *, generated_at: str, span: dic
         "generated_at": generated_at,
         "code_revision": code_revision,
         "span": dict(span),
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
         "entries": [asdict(entry) for entry in sorted(entries, key=lambda item: item.path)],
     }
 
@@ -86,7 +88,10 @@ def verify_manifest(manifest_path: Path, root: Path) -> list[str]:
         actual = sha256_path(target)
         if actual != expected:
             failures.append(f"sha256 mismatch: {rel} expected {expected} got {actual}")
-        if entry.get("upstream_checksums") and not entry.get("checksum_verified"):
+        if rel.startswith("data/binance/"):
+            if not entry.get("upstream_checksums") or entry.get("checksum_verified") is not True:
+                failures.append(f"binance entry without verified upstream checksums: {rel}")
+        elif entry.get("upstream_checksums") and not entry.get("checksum_verified"):
             failures.append(f"upstream checksums recorded but not verified: {rel}")
     data_root = root / "data"
     if data_root.is_dir():

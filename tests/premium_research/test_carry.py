@@ -58,6 +58,11 @@ def test_round_trip_costs_thirty_bps_of_notional() -> None:
     assert round(net_on_notional, 4) == -0.0030
     assert round(net_on_notional / 1.5, 4) == -0.0020
     assert float(frame["fees_paid"].sum()) == pytest.approx(0.0030)
+    # the inception fee is inside the return series, not only in the wealth column
+    assert float(frame["wealth"].iloc[0]) == 1.5
+    assert round(float(frame["period_return_on_capital"].sum()), 4) == -0.0020
+    weekly = carry.weekly_returns(_run(_table(1 + 21, rate=0.0)))
+    assert round(float(weekly["return_on_capital"].sum()), 4) == -0.0020
 
 
 def test_basis_change_appears_only_at_entry_and_exit() -> None:
@@ -221,3 +226,15 @@ def test_v1_non_finite_signal_neither_enters_nor_stays_in() -> None:
     flat = np.full(6, 0.00001)
     flat[3] = float("nan")
     assert not carry.v1_targets(flat).any()
+
+
+def test_entry_helper_never_returns_a_boundary_before_its_argument_and_simulate_refuses_to_shift() -> None:
+    assert carry.first_monday_boundary_on_or_after(MONDAY) == MONDAY
+    assert carry.first_monday_boundary_on_or_after(MONDAY + PERIOD_MS) == MONDAY + 7 * 24 * HOUR_MS  # Monday 08:00 -> next Monday
+    assert carry.first_monday_boundary_on_or_after(WEDNESDAY) == MONDAY + 7 * 24 * HOUR_MS
+    assert carry.last_monday_boundary_on_or_before(MONDAY + PERIOD_MS) == MONDAY
+    table = _table(4)
+    with pytest.raises(carry.CarryInputError, match="refuse to shift"):
+        carry.simulate(table, variant="V0", start_ms=MONDAY - HOUR_MS, end_ms=int(table["boundary_ms"].iloc[-1]))
+    with pytest.raises(carry.CarryInputError, match="refuse to shift"):
+        carry.simulate(table, variant="V0", start_ms=MONDAY, end_ms=int(table["boundary_ms"].iloc[-1]) + HOUR_MS)

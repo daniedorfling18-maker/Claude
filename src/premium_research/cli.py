@@ -1,7 +1,8 @@
 """Command line for the WO-166 proof of concept.
 
-This is the only module in the package that touches the filesystem, the
-clock, or git. The HTTP calls live in ``binance_vision.fetch_bytes`` and
+This is the only module that runs the fetch loop, reads the clock, or calls
+git; ``manifest.py`` and ``runner.py`` read and write only beneath the research
+root they are handed. The HTTP calls live in ``binance_vision.fetch_bytes`` and
 ``deribit_history.fetch_json``; every caller takes them as injectable
 callables, so tests never reach the network. Sub-commands:
 
@@ -33,22 +34,17 @@ import pandas as pd
 
 from . import binance_vision, deribit_history
 from .manifest import ManifestEntry, build_manifest, sha256_bytes, verify_manifest, write_manifest
+from .runner import BINANCE_END_MONTH, BINANCE_START_MONTH, DERIBIT_FUNDING_START_MS, DERIBIT_INSTRUMENTS, LANE_B_START_MS, SPAN_END_MS, SYMBOLS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]  # src/premium_research/cli.py -> repository root (holds pyproject.toml)
 DEFAULT_ROOT = REPO_ROOT / "research" / "premium_poc"
 GZIP_THRESHOLD_BYTES = 5_000_000
-REQUEST_TIMEOUT_SECONDS = 60.0  # per socket operation, not a deadline
-REQUEST_RETRIES = 3
+# Per-request timeouts (60 s per socket operation, 3 attempts) live with the HTTP calls in binance_vision.fetch_bytes and deribit_history.fetch_json.
 FETCH_DEADLINE_SECONDS = 3_600.0  # wall clock for the whole fetch; expiry aborts
 
-# Registered spans (WO-166). Changing any of these after results exist is a new work order.
-BINANCE_SYMBOLS = ("BTCUSDT", "ETHUSDT")
-BINANCE_START_MONTH = "2020-01"
-BINANCE_END_MONTH = "2026-08"
-DERIBIT_INSTRUMENTS = {"BTC": "BTC-PERPETUAL", "ETH": "ETH-PERPETUAL"}
-DERIBIT_FUNDING_START_MS = 1_569_888_000_000  # 2019-10-01T00:00:00Z
-DVOL_START_MS = 1_616_544_000_000  # 2021-03-24T00:00:00Z
-SPAN_END_MS = 1_788_220_800_000  # 2026-09-01T00:00:00Z (exclusive end of 2026-08-31)
+# Registered spans and universe (WO-166) have one implementation site: runner.py. Changing any after results exist is a new work order.
+BINANCE_SYMBOLS = SYMBOLS
+DVOL_START_MS = LANE_B_START_MS
 
 
 def utc_now_iso() -> str:
@@ -99,7 +95,6 @@ def run_fetch(
     deribit_funding_start_ms: int = DERIBIT_FUNDING_START_MS,
     dvol_start_ms: int = DVOL_START_MS,
     span_end_ms: int = SPAN_END_MS,
-    force: bool = False,
     deadline_seconds: float = FETCH_DEADLINE_SECONDS,
     clock: Callable[[], float] = time.monotonic,
 ) -> dict[str, object]:
@@ -123,9 +118,10 @@ def run_fetch(
         return (fetch_json or deribit_history.fetch_json)(url, params)
 
     data_dir = root / "data"
-    if data_dir.exists() and not force:
-        raise RuntimeError(f"{data_dir} already exists; refuse to overwrite committed inputs without --force")
-    tmp_root = root.parent / f".{root.name}.fetch-tmp-{os.getpid()}"
+    if data_dir.exists() or (root / "manifest.json").exists():
+        raise RuntimeError(f"{root} already holds committed inputs; the fetch never overwrites them")
+    root.mkdir(parents=True, exist_ok=True)
+    tmp_root = root / f".fetch-tmp-{os.getpid()}"
     if tmp_root.exists():
         shutil.rmtree(tmp_root)
     tmp_data = tmp_root / "data"
@@ -220,9 +216,6 @@ def run_fetch(
     except BaseException:
         shutil.rmtree(tmp_root, ignore_errors=True)
         raise
-    root.mkdir(parents=True, exist_ok=True)
-    if data_dir.exists():
-        shutil.rmtree(data_dir)
     os.replace(tmp_data, data_dir)
     os.replace(tmp_root / "manifest.json", root / "manifest.json")
     shutil.rmtree(tmp_root, ignore_errors=True)
@@ -232,7 +225,7 @@ def run_fetch(
 def _cmd_fetch(args: argparse.Namespace) -> int:
     root = Path(args.root)
     try:
-        manifest = run_fetch(root, force=args.force)
+        manifest = run_fetch(root)
     except (binance_vision.VisionError, deribit_history.DeribitError, RuntimeError) as exc:
         print(f"FETCH ABORTED: {exc}", file=sys.stderr)
         return 2
@@ -280,7 +273,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", default=str(DEFAULT_ROOT), help="research tree root (default: research/premium_poc under the repository root, anchored off this file)")
     sub = parser.add_subparsers(dest="command", required=True)
     fetch = sub.add_parser("fetch", help="download the registered series and write the manifest")
-    fetch.add_argument("--force", action="store_true", help="replace an existing data directory")
     fetch.set_defaults(func=_cmd_fetch)
     verify = sub.add_parser("verify-manifest", help="recompute every sha256 in the manifest")
     verify.set_defaults(func=_cmd_verify_manifest)

@@ -17103,6 +17103,10 @@ WO adds no dependency.
   caller takes them as injectable callables, so the offline tests never reach
   the network; `carry.py`, `vrp.py`, `bootstrap.py` and `report.py` are pure
   functions over in-memory frames.
+- **Single implementation site.** The registered spans and universe live in
+  `runner.py` and `cli.py` imports them; fee constants live in `carry.py`;
+  variance points in `vrp.py`; the block rule in `bootstrap.py`. No registered
+  literal has a second definition (line-audit finding, 2026-09-12).
 - **Path anchoring (A3).** The default research root is
   `<repository root>/research/premium_poc`, where the repository root is
   `Path(__file__).resolve().parents[2]` from `src/premium_research/cli.py`
@@ -17153,9 +17157,20 @@ paid data. That is recorded as an open owner decision, not solved here.
   headerless months, which is why this is a registered rule and a test.
 - **Timestamps.** Funding files store `calc_time` snapped to the 8h grid and
   `calc_time_raw` exactly as received (the archive's `calc_time` carries a
-  jitter of a few milliseconds: 0-3 ms observed in 2024-01). A raw value
-  within ±1,000 ms of a grid point snaps to it; anything further aborts.
-  Klines store `open_time` as received (hour-aligned) plus an ISO column.
+  jitter of a few milliseconds: 0-3 ms observed in 2024-01, 15 ms in
+  2025-01). A raw value within ±1,000 ms of a grid point snaps to it;
+  anything further aborts. Klines store `open_time` in milliseconds as
+  received plus an ISO column; a value off the hour aborts rather than
+  snapping (the archive's klines carry no jitter). Funding files also carry a
+  `calc_time_iso` column. **Amendment 2026-09-12 (before the
+  data-pull commit; found by the first fetch failing closed with a
+  481,653,864-hour "gap"):** the spot klines archive switched `open_time`
+  to **microseconds** (16 digits) from 2025-01 while the USDT-M futures
+  archive stayed in milliseconds (13 digits). The loader accepts exactly
+  those two widths: 16-digit values are divided by 1,000 and must divide
+  exactly; any other width, or a remainder, aborts. Applied to klines
+  `open_time` and, defensively, to funding `calc_time`. Test 52 covers it.
+  No threshold, estimator, span, or cut changes.
 - **Zips are not retained.** `*.zip` is gitignored (`.gitignore:31`); the
   manifest hashes the committed CSV bytes and records the upstream
   `.CHECKSUM` digest of the zip that produced them.
@@ -17165,7 +17180,10 @@ paid data. That is recorded as an open owner decision, not solved here.
   upstream `.CHECKSUM` value with `checksum_verified: true`. Any single
   committed CSV over 5 MB is stored gzipped with a zero mtime and empty
   filename in the gzip header (deterministic bytes); the manifest hash is of
-  the stored bytes.
+  the stored bytes. The manifest and every results JSON state
+  `paper_trading_invoked: false` and `live_trading_invoked: false`, as
+  `AGENTS.md` requires of every artifact (added 2026-09-12 from the build
+  line-audit).
 - **Timeouts (A8).** Every HTTP request carries a per-socket-operation
   timeout of 60 s (connect, then each read — not a deadline) and up to 3
   attempts, so one request is bounded at 180 s. Fan-out: Binance 2 symbols ×
@@ -17175,11 +17193,16 @@ paid data. That is recorded as an open owner decision, not solved here.
   fetch therefore carries a **wall-clock deadline of 3,600 s**, checked before
   every request; expiry aborts. Expected duration at observed latency is
   under ten minutes.
+- **The fetch never overwrites committed inputs**: it refuses to run when
+  `research/premium_poc/data` or `manifest.json` exists, and it has no
+  `--force`. Its temporary directory is `research/premium_poc/.fetch-tmp-<pid>`,
+  inside the research root, renamed into place only on success.
 - **Fetch aborts, with a non-zero exit and no partial CSV left in place,
   on any of:** an HTTP status other than 200 for a month inside the span; a
   `.CHECKSUM` mismatch; a `.CHECKSUM` sidecar that is missing or
   unparseable; a missing or duplicated 8h grid point after snapping; a
-  funding interval other than 8 hours; a funding value that is empty,
+  funding interval that is not the integer 8 (`8.5` aborts, it is not
+  truncated); a funding value that is empty,
   non-numeric, or non-finite; a 1h series with a run of more than 24
   consecutive missing hours; a Deribit page that is empty inside the
   requested span; a Deribit timestamp seen twice with different values; a
@@ -17250,7 +17273,9 @@ paid data. That is recorded as an open owner decision, not solved here.
   hour ending at its boundary is absent for either leg, or when any of the
   8 hourly highs inside it is absent. A period with an absent boundary close
   is merged into the next period that has one: no mark, no trade, and its
-  funding is applied at that next boundary. **A flagged period during which a
+  funding is applied at that next boundary (if a forced liquidation is
+  recorded at that boundary, the merged funding is forfeited with the margin —
+  the conservative direction). **A flagged period during which a
   position is open has unverifiable liquidation status:** the check can only
   run on present bars, so the period is counted in
   `unverifiable_open_periods`, reported beside `forced_liquidations`, and **G3
@@ -17264,7 +17289,15 @@ paid data. That is recorded as an open owner decision, not solved here.
   00:00 UTC boundary on or after 2020-01-01 that carries a close
   (2020-01-06); exit at the last Monday 00:00 UTC boundary on or before the
   last usable boundary (2026-08-31 is a Monday, so the last complete ISO
-  week ends at 2026-08-31 00:00). Costs: 15 bps at entry, 15 bps at exit.
+  week ends at 2026-08-31 00:00). Both boundaries must be rows of the
+  boundary table; the simulator refuses to shift either (test 58). Costs: 15
+  bps at entry, 15 bps at exit,
+  both inside the return series: the ledger's first row is the pre-trade
+  capital, so the entry fee falls in the first period. **Amendment
+  2026-09-12 (before the data-pull commit; red-team):** the first build
+  recorded the post-fee wealth at the entry boundary, which left V0's
+  15 bps entry fee outside every weekly return (about +0.015 pp per year,
+  favourable); corrected, and test 19 now asserts on the series.
 - **Variant V1 (descriptive only, never gated).** At boundary `t` the
   decision uses only settled rates: `s_t = mean(f_{t−2}, f_{t−1}, f_t)`
   (`f_t` is settled at `t`, so this is not look-ahead). Enter when
@@ -17275,7 +17308,8 @@ paid data. That is recorded as an open owner decision, not solved here.
   executes at boundary `t` and the position takes effect from period `t+1`,
   the one-bar-lag convention of `quant_lab/backtest.py:29-47`. V1 exists to
   show whether timing adds or subtracts after costs; it cannot change the
-  verdict.
+  verdict, and `carry_v1.json` carries no gate booleans at all (`gated:
+  false`); its report table is labelled descriptive.
 - **Independent unit.** The ISO week, 21 periods, keyed by the ISO
   (year, week) of the instant just before each period's boundary, so the
   period ending Monday 00:00 belongs to the week it closes. A week is
@@ -17284,7 +17318,11 @@ paid data. That is recorded as an open owner decision, not solved here.
 - **Year assignment.** A week belongs to its ISO year. G4's "complete
   years" are the ISO years 2020-2025. An ISO year **qualifies** only if it
   has at least 45 eligible weeks; a year that does not qualify counts as
-  **not positive** (fail-closed).
+  **not positive** (fail-closed). Per-year sums, like every quantity except
+  the drawdown, use eligible weeks only. **Amendment 2026-09-12 (before the
+  data-pull commit; red-team):** the first build summed all weeks into G4's
+  per-year figures, so one flagged week could flip a year; corrected and
+  tested (test 54).
 - **Primary metric.** `μ̂` = mean eligible weekly net return on capital of
   the pooled portfolio (equal inception notional BTC and ETH, `C = 3.0`;
   the pooled weekly return is the mean of the two assets' weekly returns on
@@ -17309,7 +17347,12 @@ paid data. That is recorded as an open owner decision, not solved here.
 - **Drawdown.** `quant_lab.risk.max_drawdown_from_returns` on the pooled
   weekly series over **all** weeks, eligible or not, because the wealth path
   is real even where a week is not an admissible unit; it compounds
-  `(1 + r).cumprod()`.
+  `(1 + r).cumprod()` and returns the most negative peak-to-trough ratio, a
+  number in `[−1, 0]`; **G3 reads its magnitude.** **Amendment 2026-09-12
+  (before the data-pull commit; found by the build red-team):** the first
+  build compared the signed value against `+0.20`, a comparison that could
+  never fail; the sign convention is now stated here, applied with `abs`,
+  labelled in the report, and tested (test 53).
 - **Descriptive cuts, fixed here and not extended:** per underlying; per ISO
   year; weeks with BTC spot at the week's start above versus below its
   200-day simple moving average of daily 00:00 UTC closes (weeks without 200
@@ -17367,7 +17410,13 @@ Channels pushing the apparent premium **up** (favourable):
 8. percentile-bootstrap lower-bound coverage, which sits slightly above
    nominal at these cluster counts;
 9. Lane B same-date correlation between BTC and ETH — answered structurally
-   by one cluster per window.
+   by one cluster per window;
+10. outage-week exclusion — weeks with missing bars are ineligible for `μ̂`,
+    the bootstrap, G1, G2 and G4 but remain in the drawdown; exchange
+    outages cluster in stress, so the excluded weeks are more likely to be
+    adverse than average (favourable; no haircut; the ineligible-week count
+    is reported so a reader can size it; added 2026-09-12 from the build
+    red-team).
 
 Channels pushing it **down** (unfavourable): VIP0 taker fees on every leg
 with no rebate; zero yield on collateral and on spot; capital charged at
@@ -17429,7 +17478,12 @@ unparseable, non-finite, duplicated, or gap-bearing input aborts the fetch
 or the run with a non-zero exit and leaves no partial results file; a rejected
 period makes its week ineligible rather than filling it; a results directory
 is written to a temporary sibling and renamed into place, or not at all; a
-manifest that does not verify refuses to run; `verify-results` reports FAIL on
+manifest that does not verify refuses to run; committed inputs are
+re-validated at run time — unique and strictly increasing timestamps, the
+8h funding grid gap-free, every value finite — so a duplicated or disordered
+committed row aborts the run before any estimator sees it (test 55); a
+Binance manifest entry without verified upstream checksums fails
+`verify-manifest` (test 56); `verify-results` reports FAIL on
 an absent, extra, or byte-different file; a second `run` is refused unless
 `--force` is passed to redo a failed write; and the report's verdict lines
 are generated from the gate booleans, never typed.
@@ -17476,8 +17530,9 @@ No workflow is added, so `tests/test_required_pr_gate.py:259-293` and `ci.yml:49
 
 ### Enumerated offline tests (S8/A10), with hand-computed expectations; each confirmed to FAIL with its guard reverted before the build is reported
 
-**Mutation evidence (2026-09-12, delivered code).** 24 single-site guard
-reverts across the ten modules were each detected by the named test, with
+**Mutation evidence (2026-09-12, delivered code).** 37 single-site guard
+reverts across the ten modules (24 before the build review, 13 on the guards
+it added) were each detected by the named test, with
 `__pycache__` purged and `PYTHONDONTWRITEBYTECODE=1` for every run. The purge
 is required: a same-size edit restored within the same second is otherwise
 served from stale bytecode, which produced two false "not detected" results
@@ -17489,13 +17544,13 @@ otherwise.
 `test_binance_vision.py`
 1. `test_binance_funding_fixture_month_loads_exactly` — 93 rows (31 × 3), first `calc_time` 1704067200000, last **1706716800000** (2024-01-31T16:00Z = first + 92 × 8h), every interval 8, grid gap-free after snapping.
 2. `test_one_millisecond_jitter_snaps_to_grid` — 1704412800001 → 1704412800000 and 1704412799000 → 1704412800000; 1704412801001 (1,001 ms off) raises.
-3. `test_missing_month_aborts_without_partial_file` — a 404 for 2024-02 inside a 2024-01..2024-02 span raises; afterwards no `data/`, no `manifest.json`, no `.premium_poc.fetch-tmp-*`.
+3. `test_missing_month_aborts_without_partial_file` — a 404 for 2024-02 inside a 2024-01..2024-02 span raises; afterwards no `data/`, no `manifest.json`, no `.fetch-tmp-*` under the root.
 4. `test_checksum_mismatch_aborts` — a sidecar differing in one hex digit raises "sha256 mismatch".
-5. `test_non_finite_funding_aborts` — `nan` raises "non-finite"; an empty rate raises "empty"; interval 4 raises "not 8h".
-6. `test_klines_projection_keeps_only_ohlc` — the head fixture projects to `open_time, open, high, low, close`, 48 rows, first 1704067200000, last first + 47 h; the same body without its header parses identically (header rule).
+5. `test_non_finite_funding_aborts` — `nan` raises "non-finite"; an empty rate raises "empty"; interval 4 raises "not 8h"; interval `8.5` raises "not an integer".
+6. `test_klines_projection_keeps_only_ohlc` — the head fixture projects to `open_time, open, high, low, close`, 48 rows, first 1704067200000, last first + 47 h; the same body without its header parses identically (header rule); an `open_time` of `1704067200999` raises "not hour-aligned".
 7. `test_hourly_gap_longer_than_24_hours_aborts` — the fixture reports `{missing_hours: 0, longest_missing_run: 0, rows: 48}`; moving the last bar 26 h out raises "run of 25 missing hours".
 8. `test_funding_grid_gap_aborts` — dropping one grid point raises "missing points"; duplicating one raises "duplicated".
-9. `test_fetch_wall_clock_deadline_aborts_without_partial_file` — an injected clock that reads 4,000 s at the third request raises "wall-clock deadline" with the 3,600 s budget; no `data/`, no temp dir.
+9. `test_fetch_wall_clock_deadline_aborts_without_partial_file` — an injected clock that reads 4,000 s at the third request raises "wall-clock deadline" with the 3,600 s budget; no `data/`, no `.fetch-tmp-*` under the root.
 
 `test_deribit_history.py`
 10. `test_recorded_funding_page_has_744_hourly_rows` — 744 rows, first 1704070800000 (01:00Z; rows sit at hour ends), last 1706745600000, every spacing 1 h.
@@ -17509,7 +17564,7 @@ otherwise.
 
 `test_carry.py`
 18. `test_constant_funding_flat_basis_annualises_exactly` — `f = 0.0001` every period, flat prices, 1,095 periods: funding received 0.1095; wealth change plus fees 0.1095 on notional, 0.0730 on capital, both to four decimals.
-19. `test_round_trip_costs_thirty_bps_of_notional` — enter and exit with zero funding and flat prices: −0.0030 on notional, −0.0020 on capital; fees 0.0030.
+19. `test_round_trip_costs_thirty_bps_of_notional` — enter and exit with zero funding and flat prices: −0.0030 on notional, −0.0020 on capital; fees 0.0030; the ledger's first wealth is 1.5 and the period and weekly return series each sum to −0.0020, so the entry fee is inside the series.
 20. `test_basis_change_appears_only_at_entry_and_exit` — perpetual 100 → 101 → 100 with spot flat: hedge P&L 0.0000; perpetual ending at 101: hedge P&L −0.0100.
 21. `test_forced_liquidation_threshold_is_0_4925` — `liquidation_move(0.5) = 0.4925`; an intra-period high at `x = 0.50` records one forced liquidation and wealth `0.9985 − (0.9985 / 1.5) × 0.0015` at the boundary; at `x = 0.49` none and wealth `1.5 − 0.0015`.
 22. `test_rebalance_triggers_above_twenty_percent_and_restores_half` — from `m0 = 0.5`, `x = 0.21`: sells 0.21 N spot, traded notional 0.42, fee 3.15 bps of N, ratio 0.5000, notional 1.0000; through the simulator `x = 0.21` records one resize and `x = 0.19` none with zero traded notional.
@@ -17543,11 +17598,18 @@ otherwise.
 
 `test_report_and_verify.py`
 46. `test_verdict_line_is_generated_from_booleans` — all-True gives GO; one False gives NO-GO naming `G2=FAIL`; a missing key raises; a non-boolean raises.
-47. `test_run_writes_results_and_verify_passes_then_fails_on_any_byte_difference` — on a synthetic 100-day tree: exactly the four result files; `evidence_class: historical`; `unverifiable_open_periods = 0`; the stored block length equals the rule applied to the eligible-week count; the stored manifest sha256 equals the file's; verify passes; one flipped byte → `byte difference: vrp.json`; an extra file → `extra file: notes.txt`; a removed file → `missing: carry_v1.json`; a second run without `--force` is refused.
+47. `test_run_writes_results_and_verify_passes_then_fails_on_any_byte_difference` — on a synthetic 100-day tree: exactly the four result files; `evidence_class: historical`; `paper_trading_invoked` and `live_trading_invoked` both `false` in the results and in the manifest; `carry_v1.json` has `gated: false` and no `gates`; the report carries the two margin rows and no gate label in the V1 table; `unverifiable_open_periods = 0`; the stored block length equals the rule applied to the eligible-week count; the stored manifest sha256 equals the file's; verify passes; one flipped byte → `byte difference: vrp.json`; an extra file → `extra file: notes.txt`; a removed file → `missing: carry_v1.json`; a second run without `--force` is refused.
 48. `test_gates_read_false_on_non_finite_operands_and_positive_funding_can_pass` — at 0.06% per period G1 and G2 read True and the stored minimum equals `min(cluster, stationary_block)`; with the 45-week floor the 13-week year does not qualify, so G4 and `lane_a_go` read False.
 49. `test_results_directory_is_atomic` — a failure inside report rendering leaves no `results/` and no `.results-tmp-*`.
 50. `test_manifest_mismatch_refuses_to_run` — one appended byte in a committed CSV makes `run` refuse with "manifest verification failed" and write nothing.
 51. `test_missing_bar_during_an_open_position_fails_g3_and_is_counted` — one non-boundary perpetual hour removed while the position is open: `unverifiable_open_periods = 1`, forced liquidations 0, G3 False, `lane_a_go` False, and the report row reads `| 1 |`.
+52. `test_sixteen_digit_microsecond_timestamps_normalise_to_milliseconds` — `1735689600000000` → `1735689600000`; a klines body with every `open_time` suffixed by `000` parses identically to the millisecond body; `…000001` aborts ("not a whole millisecond"); a 15-digit value aborts; a date string aborts.
+53. `test_g3_reads_the_drawdown_magnitude_and_fails_above_twenty_percent` — funding −0.4% per period on the synthetic tree: the helper reports a drawdown below −0.20, forced liquidations 0, unverifiable 0, and G3 reads False with `G3=FAIL` in the report.
+54. `test_yearly_sums_use_eligible_weeks_only` — weeks `[+0.01 eligible, +0.50 ineligible, −0.02 eligible]` sum to `−0.01` for the year.
+55. `test_run_re_validates_committed_inputs` — a duplicated perpetual hour with a different high, manifest re-hashed to match, makes `run` abort with "duplicated open_time" and write nothing.
+56. `test_binance_manifest_entries_must_carry_verified_upstream_checksums` — the synthetic tree verifies; blanking the six Binance entries' checksums yields exactly six failures naming them.
+57. `test_fetch_refuses_to_overwrite_committed_inputs` — an existing `data/` under the root makes `run_fetch` refuse with "never overwrites".
+58. `test_entry_helper_never_returns_a_boundary_before_its_argument_and_simulate_refuses_to_shift` — Monday 00:00 → itself; Monday 08:00 and Wednesday → the following Monday; a start or end that is not a row of the table raises "refuse to shift".
 
 ### Day-after check
 
@@ -17573,7 +17635,7 @@ unchanged. `tests/test_experiment_registry.py` — unchanged and still passes.
 3. Concentration criterion — not used; the portfolio is equal inception notional and per-asset results are descriptive.
 4. Unreachable 120-unit stop — no stopping rule exists: the sample is fixed history and there is one pass.
 5. Bias bound with no floor — replaced by a literal 2.0 pp haircut, declared as a floor with the one derivable component shown.
-6. A2 absent — the fail-safe sentence, the rejected-period rule, the unverifiable-open rule, the non-finite rule on every gate, and tests 3, 4, 5, 8, 9, 13, 15, 27, 30, 31, 37, 47, 48, 49, 50, 51.
+6. A2 absent — the fail-safe sentence, the rejected-period rule, the unverifiable-open rule, the non-finite rule on every gate, the run-time re-validation, and tests 3, 4, 5, 6, 8, 9, 13, 15, 27, 30, 31, 37, 47, 48, 49, 50, 51, 52, 55, 56, 57, 58.
 7. Omitted channels — the capital denominator is fixed at `1.5 N`; venue risk is listed for both lanes; Lane B has no strike, hedge or window degrees of freedom because it is existence-only; serial dependence, coverage, sample composition and same-date correlation are listed.
 8. Consumers — enumerated above.
 

@@ -15,7 +15,6 @@ import numpy as np
 DEFAULT_DRAWS = 10_000
 DEFAULT_SEED = 20260912
 DEFAULT_LEVELS = (0.90, 0.95)
-DEFAULT_EXPECTED_BLOCK = 4
 
 
 def block_length_for(n_clusters: int) -> int:
@@ -89,15 +88,17 @@ def cluster_bootstrap_mean(
 def stationary_block_bootstrap_mean(
     values: Iterable[float],
     *,
-    expected_block: int = DEFAULT_EXPECTED_BLOCK,
+    expected_block: int | None = None,
     n_draws: int = DEFAULT_DRAWS,
     seed: int = DEFAULT_SEED,
     levels: tuple[float, ...] = DEFAULT_LEVELS,
 ) -> dict[str, object]:
-    """Politis-Romano stationary bootstrap of the mean with geometric block lengths (mean ``expected_block``)."""
+    """Politis-Romano stationary bootstrap of the mean with geometric block lengths (mean ``expected_block``, default ``block_length_for(n)``)."""
     array = _clean(values)
     n = int(array.size)
     point = float(array.mean()) if n else float("nan")
+    if expected_block is None:
+        expected_block = block_length_for(n)
     if n < 2 or not np.isfinite(array).all() or expected_block < 1:
         return _nan_result(point, n, method="stationary_block", n_draws=n_draws, seed=seed, levels=levels)
     rng = np.random.default_rng(seed)

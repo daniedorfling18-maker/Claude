@@ -74,7 +74,7 @@ def test_missing_month_aborts_without_partial_file(tmp_path: Path) -> None:
         )
     assert not (root / "data").exists()
     assert not (root / "manifest.json").exists()
-    assert not list(tmp_path.glob(".premium_poc.fetch-tmp-*"))
+    assert not list(root.glob(".fetch-tmp-*"))
 
 
 def test_checksum_mismatch_aborts() -> None:
@@ -101,6 +101,8 @@ def test_non_finite_funding_aborts() -> None:
         bv.parse_funding_csv(header + "1704067200000,8,\n")
     with pytest.raises(bv.VisionError, match="not 8h"):
         bv.parse_funding_csv(header + "1704067200000,4,0.0001\n")
+    with pytest.raises(bv.VisionError, match="not an integer"):
+        bv.parse_funding_csv(header + "1704067200000,8.5,0.0001\n")
 
 
 def test_klines_projection_keeps_only_ohlc() -> None:
@@ -112,6 +114,9 @@ def test_klines_projection_keeps_only_ohlc() -> None:
     # a header-less file (the archive's older months) parses identically
     body = "\n".join(KLINES_FIXTURE.read_text(encoding="utf-8").splitlines()[1:]) + "\n"
     assert bv.parse_klines_csv(body).equals(frame)
+    # open_time is stored as received; a value off the hour aborts rather than snapping
+    with pytest.raises(bv.VisionError, match="not hour-aligned"):
+        bv.parse_klines_csv("1704067200999,1,2,0.5,1.5,0,0,0,0,0,0,0\n")
 
 
 def test_hourly_gap_longer_than_24_hours_aborts() -> None:
@@ -151,4 +156,26 @@ def test_fetch_wall_clock_deadline_aborts_without_partial_file(tmp_path: Path) -
             clock=lambda: next(ticks),
         )
     assert not (root / "data").exists()
-    assert not list(tmp_path.glob(".premium_poc.fetch-tmp-*"))
+    assert not list(root.glob(".fetch-tmp-*"))
+
+
+def test_sixteen_digit_microsecond_timestamps_normalise_to_milliseconds() -> None:
+    # The spot archive switched open_time to microseconds from 2025-01 (16 digits); futures stayed in ms.
+    assert bv.timestamp_to_ms("1735689600000000", label="open_time") == 1735689600000
+    assert bv.timestamp_to_ms("1735689600000", label="open_time") == 1735689600000
+    body = KLINES_FIXTURE.read_text(encoding="utf-8").splitlines()[1:]
+    micro = "\n".join(",".join([parts[0] + "000"] + parts[1:]) for parts in (line.split(",") for line in body)) + "\n"
+    assert bv.parse_klines_csv(micro).equals(bv.parse_klines_csv("\n".join(body) + "\n"))
+    with pytest.raises(bv.VisionError, match="not a whole millisecond"):
+        bv.timestamp_to_ms("1735689600000001", label="open_time")
+    with pytest.raises(bv.VisionError, match="15 digits"):
+        bv.timestamp_to_ms("173568960000000", label="open_time")
+    with pytest.raises(bv.VisionError, match="non-integer"):
+        bv.timestamp_to_ms("2025-01-01", label="open_time")
+
+
+def test_fetch_refuses_to_overwrite_committed_inputs(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    (root / "data").mkdir(parents=True)
+    with pytest.raises(RuntimeError, match="never overwrites"):
+        cli.run_fetch(root, fetch_bytes=lambda url: b"", fetch_json=lambda url, params: {"result": []}, now_iso=lambda: "x", code_revision="t", start_month="2024-01", end_month="2024-01", symbols=("BTCUSDT",))

@@ -31,6 +31,17 @@ from .report import render_report
 RESULT_FILES = ("carry_v0.json", "carry_v1.json", "vrp.json", "report.md")
 WORK_ORDER = "WO-166"
 
+# Registered spans and universe (WO-166): the single implementation site; cli.py imports them.
+SYMBOLS = ("BTCUSDT", "ETHUSDT")
+CURRENCIES = ("BTC", "ETH")
+DERIBIT_INSTRUMENTS = {"BTC": "BTC-PERPETUAL", "ETH": "ETH-PERPETUAL"}
+BINANCE_START_MONTH = "2020-01"
+BINANCE_END_MONTH = "2026-08"
+LANE_A_START_MS = 1_577_836_800_000  # 2020-01-01T00:00:00Z
+DERIBIT_FUNDING_START_MS = 1_569_888_000_000  # 2019-10-01T00:00:00Z
+LANE_B_START_MS = 1_616_544_000_000  # 2021-03-24T00:00:00Z, the first DVOL candle
+SPAN_END_MS = 1_788_220_800_000  # 2026-09-01T00:00:00Z, exclusive end of 2026-08-31
+
 HOUR_MS = 3_600_000
 DAY_MS = 24 * HOUR_MS
 
@@ -39,12 +50,12 @@ DAY_MS = 24 * HOUR_MS
 class Config:
     """Registered spans and thresholds. Defaults are WO-166's literals; tests pass smaller spans."""
 
-    symbols: tuple[str, ...] = ("BTCUSDT", "ETHUSDT")
-    currencies: tuple[str, ...] = ("BTC", "ETH")
-    lane_a_start_ms: int = 1_577_836_800_000  # 2020-01-01T00:00Z; entry at the first Monday boundary on/after
-    lane_a_end_ms: int = 1_788_220_800_000  # 2026-09-01T00:00Z; exit at the last Monday boundary on/before the last usable boundary
-    lane_b_start_ms: int = 1_616_544_000_000  # 2021-03-24T00:00Z
-    lane_b_end_ms: int = 1_788_220_800_000
+    symbols: tuple[str, ...] = SYMBOLS
+    currencies: tuple[str, ...] = CURRENCIES
+    lane_a_start_ms: int = LANE_A_START_MS  # entry at the first Monday boundary on/after
+    lane_a_end_ms: int = SPAN_END_MS  # exit at the last Monday boundary on/before the last usable boundary
+    lane_b_start_ms: int = LANE_B_START_MS
+    lane_b_end_ms: int = SPAN_END_MS
     complete_years_a: tuple[int, ...] = (2020, 2021, 2022, 2023, 2024, 2025)  # ISO years
     complete_years_b: tuple[int, ...] = (2022, 2023, 2024, 2025)  # calendar years of the window start
     min_eligible_weeks_per_year: int = 45  # an ISO year with fewer eligible weeks does not count as positive
@@ -89,6 +100,29 @@ def _find(root: Path, relative: str) -> Path:
     raise FileNotFoundError(f"committed input missing: {relative}")
 
 
+def _validate_series(frame: pd.DataFrame, column: str, *, label: str, grid_ms: int | None = None) -> None:
+    """Committed inputs are re-checked at run time: unique, sorted timestamps; a gap-free grid when one is registered."""
+    if frame.empty or column not in frame.columns:
+        raise RuntimeError(f"{label}: empty or missing column {column}")
+    values = frame[column].to_numpy(dtype=np.int64)
+    if len(set(values.tolist())) != len(values):
+        raise RuntimeError(f"{label}: duplicated {column} values")
+    if not np.all(np.diff(values) > 0):
+        raise RuntimeError(f"{label}: {column} is not strictly increasing")
+    if grid_ms is not None:
+        if np.any(values % grid_ms != 0):
+            raise RuntimeError(f"{label}: {column} off the {grid_ms} ms grid")
+        expected = (int(values[-1]) - int(values[0])) // grid_ms + 1
+        if expected != len(values):
+            raise RuntimeError(f"{label}: {expected - len(values)} missing grid points")
+    for name in frame.columns:
+        if name.endswith("_iso") or name == column or name == "calc_time_raw":
+            continue
+        numeric = pd.to_numeric(frame[name], errors="coerce")
+        if not np.isfinite(numeric.to_numpy(dtype=float)).all():
+            raise RuntimeError(f"{label}: non-finite or non-numeric value in {name}")
+
+
 def load_inputs(root: Path, config: Config) -> dict[str, Any]:
     failures = verify_manifest(root / "manifest.json", root)
     if failures:
@@ -104,6 +138,13 @@ def load_inputs(root: Path, config: Config) -> dict[str, Any]:
     for currency in config.currencies:
         inputs[f"{currency}_deribit_funding"] = _read_csv(_find(root, f"data/deribit/{currency}_funding_1h.csv"))
         inputs[f"{currency}_dvol"] = _read_csv(_find(root, f"data/deribit/{currency}_dvol_daily.csv"))
+    for symbol in config.symbols:
+        _validate_series(inputs[f"{symbol}_funding"], "calc_time", label=f"{symbol} funding", grid_ms=carry.PERIOD_MS)
+        _validate_series(inputs[f"{symbol}_perp"], "open_time", label=f"{symbol} perp 1h")
+        _validate_series(inputs[f"{symbol}_spot"], "open_time", label=f"{symbol} spot 1h")
+    for currency in config.currencies:
+        _validate_series(inputs[f"{currency}_deribit_funding"], "timestamp", label=f"{currency} deribit funding")
+        _validate_series(inputs[f"{currency}_dvol"], "timestamp", label=f"{currency} dvol")
     return inputs
 
 
@@ -124,7 +165,9 @@ def _sharpe(weekly: pd.Series) -> float:
 
 
 def _yearly_sums(weekly: pd.DataFrame, value: str) -> dict[str, float]:
-    return {str(int(year)): float(total) for year, total in weekly.groupby("iso_year")[value].sum().items()}
+    """Per-ISO-year sums over ELIGIBLE weeks only; ineligible weeks feed nothing but the drawdown."""
+    eligible = weekly[weekly["eligible"]]
+    return {str(int(year)): float(total) for year, total in eligible.groupby("iso_year")[value].sum().items()}
 
 
 def _yearly_eligible_counts(weekly: pd.DataFrame) -> dict[str, int]:
@@ -267,11 +310,12 @@ def lane_a(inputs: dict[str, Any], config: Config, *, variant: str, fee_mult: fl
     gates = {
         "G1_lower_bound_after_haircut_positive": bool(_finite(lower_bound_after_haircut) and lower_bound_after_haircut > 0.0),
         "G2_point_after_haircut_at_least_hurdle": bool(_finite(point_after_haircut) and point_after_haircut >= config.g2_hurdle),
-        "G3_drawdown_bounded_and_no_forced_liquidation": bool(_finite(max_dd) and max_dd <= config.g3_max_drawdown and forced == 0 and unverifiable == 0),
+        # quant_lab.risk.max_drawdown_from_returns returns the most negative peak-to-trough ratio, in [-1, 0]; the gate reads its magnitude.
+        "G3_drawdown_bounded_and_no_forced_liquidation": bool(_finite(max_dd) and abs(max_dd) <= config.g3_max_drawdown and forced == 0 and unverifiable == 0),
         "G4_positive_in_enough_qualifying_years": bool(year_check["positive_years"] >= config.g4_min_positive_years),
     }
-    gates["lane_a_go"] = bool(variant == "V0" and all(gates[k] for k in gates if k != "lane_a_go"))
-    return {
+    gates["lane_a_go"] = bool(all(gates.values()))
+    result = {
         "variant": variant,
         "gated": variant == "V0",
         "fee_multiplier": fee_mult,
@@ -301,8 +345,10 @@ def lane_a(inputs: dict[str, Any], config: Config, *, variant: str, fee_mult: fl
             "complete_years": list(config.complete_years_a),
             "regime_btc_sma200": regime_cut,
         },
-        "gates": gates,
     }
+    if variant == "V0":
+        result["gates"] = gates  # V1 is descriptive and never gated: it carries no gate booleans
+    return result
 
 
 def deribit_cross_check(inputs: dict[str, Any], config: Config) -> dict[str, Any]:
@@ -324,7 +370,7 @@ def deribit_cross_check(inputs: dict[str, Any], config: Config) -> dict[str, Any
         out[currency] = {
             "eligible_weeks": int(len(values)),
             "gross_funding_on_notional_annualised": gross,
-            "net_of_one_round_trip_annualised": gross - (0.0030 / years) if years > 0 and _finite(gross) else float("nan"),
+            "net_of_one_round_trip_annualised": gross - (2.0 * (carry.SPOT_TAKER_FEE + carry.PERP_TAKER_FEE) / years) if years > 0 and _finite(gross) else float("nan"),
             "yearly_gross_on_notional": {str(int(y)): float(v) for y, v in weekly.groupby("iso_year")["rate"].sum().items()},
         }
     return out
@@ -428,6 +474,8 @@ def compute_all(root: Path, *, config: Config, code_revision: str, generated_at:
     common = {
         "work_order": WORK_ORDER,
         "evidence_class": "historical",
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
         "generated_at": generated_at,
         "code_revision": code_revision,
         "manifest_sha256": inputs["manifest_sha256"],

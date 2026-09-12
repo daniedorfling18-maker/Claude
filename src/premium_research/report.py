@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from .vrp import VARIANCE_POINTS
+
 GATE_KEYS_A = (
     "G1_lower_bound_after_haircut_positive",
     "G2_point_after_haircut_at_least_hurdle",
@@ -51,8 +53,20 @@ def _iso(ms: Any) -> str:
         return "n/a"
 
 
-def _pooled_table(pooled: dict[str, Any]) -> list[str]:
+def _pooled_table(pooled: dict[str, Any], *, gated: bool = True, hurdle: float | None = None) -> list[str]:
     lb = pooled["lower_bound_gate_level"]
+    g1_label = "G1 quantity: that lower bound annualised minus the haircut" if gated else "lower bound annualised minus the haircut (descriptive; V1 is never gated)"
+    g2_label = "G2 quantity: point estimate minus the declared" if gated else "point estimate minus the declared"
+    margin_rows: list[str] = []
+    if gated and hurdle is not None:
+        g2 = pooled["annualised_after_haircut"]
+        g1 = pooled["annualised_lower_bound_after_haircut"]
+        g2_margin = (float(g2) - hurdle) * 100.0 if isinstance(g2, (int, float)) and math.isfinite(float(g2)) else float("nan")
+        g1_margin = float(g1) * 100.0 if isinstance(g1, (int, float)) and math.isfinite(float(g1)) else float("nan")
+        margin_rows = [
+            f"| margin of the G2 quantity over the {hurdle * 100:.1f}% hurdle | {_num(g2_margin, 2)} pp |",
+            f"| margin of the G1 quantity over zero | {_num(g1_margin, 2)} pp |",
+        ]
     b90 = pooled["bootstrap"]["cluster"]["intervals"].get("0.90", [float("nan"), float("nan")])
     s90 = pooled["bootstrap"]["stationary_block"]["intervals"].get("0.90", [float("nan"), float("nan")])
     return [
@@ -61,14 +75,15 @@ def _pooled_table(pooled: dict[str, Any]) -> list[str]:
         f"| eligible weeks | {pooled['eligible_weeks']} of {pooled['weeks_total']} |",
         f"| mean weekly net return on capital | {_pct(pooled['mean_weekly_return_on_capital'], 4)} |",
         f"| annualised net return on capital (mean weekly x 52) | {_pct(pooled['annualised_return_on_capital'])} |",
-        f"| G2 quantity: point estimate minus the declared {_pct(pooled['haircut_per_year'], 1)} haircut | {_pct(pooled['annualised_after_haircut'])} |",
+        f"| {g2_label} {_pct(pooled['haircut_per_year'], 1)} haircut | {_pct(pooled['annualised_after_haircut'])} |",
         f"| 90% interval, week-cluster | [{_pct(b90[0], 4)}, {_pct(b90[1], 4)}] weekly |",
         f"| 90% interval, stationary block (L = {lb.get('block_length', 'n/a')}) | [{_pct(s90[0], 4)}, {_pct(s90[1], 4)}] weekly |",
         f"| 0.025-quantile lower bound, minimum of the two | {_pct(lb['minimum'], 4)} weekly = {_pct(pooled['annualised_lower_bound'])} annualised |",
-        f"| G1 quantity: that lower bound annualised minus the haircut | {_pct(pooled['annualised_lower_bound_after_haircut'])} |",
+        f"| {g1_label} | {_pct(pooled['annualised_lower_bound_after_haircut'])} |",
+        *margin_rows,
         f"| Sharpe (weekly, annualised) | {_num(pooled['sharpe_weekly_annualised'], 2)} |",
-        f"| max drawdown, all weeks | {_pct(pooled['max_drawdown_all_weeks'])} |",
-        f"| CVaR 95% weekly | {_pct(pooled['cvar_95_weekly'])} |",
+        f"| max drawdown, all weeks (peak-to-trough, negative; G3 reads its magnitude) | {_pct(pooled['max_drawdown_all_weeks'])} |",
+        f"| CVaR 95% weekly (mean loss magnitude in the worst 5% of weeks) | {_pct(pooled['cvar_95_weekly'])} |",
         f"| forced liquidations | {pooled['forced_liquidations']} |",
         f"| open-position periods with missing bars (liquidation unverifiable; G3 requires 0) | {pooled['unverifiable_open_periods']} |",
         f"| rebalances | {pooled['rebalances']} |",
@@ -112,9 +127,9 @@ def render_report(v0: dict[str, Any], v1: dict[str, Any], b: dict[str, Any]) -> 
     lines.append("")
     lines.append(f"Entry boundary {_iso(v0['span']['entry_boundary_ms'])}, exit boundary {_iso(v0['span']['exit_boundary_ms'])} ({_num(v0['span']['years'], 2)} years).")
     lines.append("")
-    lines.extend(_pooled_table(v0["pooled"]))
+    lines.extend(_pooled_table(v0["pooled"], gated=True, hurdle=float(v0["parameters"]["g2_hurdle"])))
     lines.append("")
-    lines.extend(_yearly_table(v0["pooled"]["yearly_return_on_capital"], label="pooled net return on capital"))
+    lines.extend(_yearly_table(v0["pooled"]["yearly_return_on_capital"], label="pooled net return on capital (eligible weeks only)"))
     lines.append("")
     lines.append("### Per asset (V0)")
     lines.append("")
@@ -140,7 +155,7 @@ def render_report(v0: dict[str, Any], v1: dict[str, Any], b: dict[str, Any]) -> 
     lines.append("")
     lines.append("### V1 (conditional entry; descriptive, never gated)")
     lines.append("")
-    lines.extend(_pooled_table(v1["pooled"]))
+    lines.extend(_pooled_table(v1["pooled"], gated=False))
     lines.append("")
     lines.append("### Deribit cross-check (coin-margined, funding only; descriptive)")
     lines.append("")
@@ -159,10 +174,10 @@ def render_report(v0: dict[str, Any], v1: dict[str, Any], b: dict[str, Any]) -> 
     lines.append("|---|---|")
     lines.append(f"| windows accepted (pooled, one cluster per window) | {pooled_b['windows_accepted']} of {pooled_b['windows_total']} |")
     lines.append(f"| mean VRP (variance points) | {_num(pooled_b['mean_vrp_points'], 1)} |")
-    lines.append(f"| 0.025-quantile lower bound, minimum of the two | {_num(lb['minimum'] * 10_000 if isinstance(lb['minimum'], (int, float)) and math.isfinite(lb['minimum']) else float('nan'), 1)} points |")
+    lines.append(f"| 0.025-quantile lower bound, minimum of the two | {_num(lb['minimum'] * VARIANCE_POINTS if isinstance(lb['minimum'], (int, float)) and math.isfinite(lb['minimum']) else float('nan'), 1)} points |")
     lines.append(f"| complete years positive (a year needs >= 10 accepted windows) | {pooled_b['positive_complete_years']} of {len(pooled_b['complete_years'])} |")
     lines.append("")
-    lines.extend(_yearly_table({k: v * 10_000 for k, v in pooled_b["yearly_mean_vrp"].items()}, label="mean VRP (variance points)", fmt=lambda v: _num(v, 1)))
+    lines.extend(_yearly_table({k: v * VARIANCE_POINTS for k, v in pooled_b["yearly_mean_vrp"].items()}, label="mean VRP (variance points)", fmt=lambda v: _num(v, 1)))
     lines.append("")
     lines.append("| currency | windows accepted / total | mean VRP (points) | share positive | rejections |")
     lines.append("|---|---|---|---|---|")

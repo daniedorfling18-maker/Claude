@@ -244,6 +244,8 @@ def simulate(table: pd.DataFrame, *, variant: str, start_ms: int, end_ms: int, c
     rows = table[(table["boundary_ms"] >= start_ms) & (table["boundary_ms"] <= end_ms)].reset_index(drop=True)
     if len(rows) < 2:
         raise CarryInputError("fewer than two boundaries inside the requested span")
+    if int(rows.iloc[0]["boundary_ms"]) != int(start_ms) or int(rows.iloc[-1]["boundary_ms"]) != int(end_ms):
+        raise CarryInputError("the entry or exit boundary is not a row of the boundary table; refuse to shift it")
     if bool(rows.iloc[0]["close_missing"]) or bool(rows.iloc[-1]["close_missing"]):
         raise CarryInputError("the entry or exit boundary has no close; refuse to guess")
     targets = v1_targets(rows["rate"].to_numpy(dtype=float)) if variant == "V1" else np.ones(len(rows), dtype=bool)
@@ -267,10 +269,11 @@ def simulate(table: pd.DataFrame, *, variant: str, start_ms: int, end_ms: int, c
         liquidated = 0
 
         if index == 0:
+            starting_wealth = position.cash  # the pre-trade capital: the entry fee is then inside the first period's return
             if variant == "V0" or bool(targets[0]):
                 position, trade = open_position(position.cash, spot_close, perp_close, notional=min(1.0, position.cash / CAPITAL_PER_NOTIONAL), fee_mult=fee_mult)
                 fees, traded = trade.fees, trade.traded_notional
-            ledger.append(boundary, position.wealth(spot_close), fees=fees, traded=traded, open=position.open)
+            ledger.append(boundary, starting_wealth, fees=fees, traded=traded, open=position.open)
             continue
 
         row_high = float(row["perp_high"])
@@ -389,7 +392,10 @@ def weekly_returns(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def first_monday_boundary_on_or_after(ts_ms: int) -> int:
+    """The first Monday 00:00 UTC at or after ``ts_ms`` (a Monday 08:00 input yields the following Monday)."""
     stamp = pd.Timestamp(int(ts_ms), unit="ms", tz="UTC").normalize()
+    if int(stamp.value // 1_000_000) < int(ts_ms):
+        stamp += pd.Timedelta(days=1)
     while stamp.weekday() != 0:
         stamp += pd.Timedelta(days=1)
     return int(stamp.value // 1_000_000)

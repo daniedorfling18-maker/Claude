@@ -30,6 +30,8 @@ def _write(path: Path, frame: pd.DataFrame) -> ManifestEntry:
         first_timestamp_ms=int(frame[ts_col].iloc[0]),
         last_timestamp_ms=int(frame[ts_col].iloc[-1]),
         sha256=sha256_bytes(payload),
+        upstream_checksums={"synthetic": "00" * 32} if "/binance/" in str(path) else {},
+        checksum_verified="/binance/" in str(path),
     )
 
 
@@ -101,6 +103,11 @@ def test_run_writes_results_and_verify_passes_then_fails_on_any_byte_difference(
     assert sorted(p.name for p in results.iterdir()) == sorted(runner.RESULT_FILES)
     v0 = json.loads((results / "carry_v0.json").read_text(encoding="utf-8"))
     assert v0["work_order"] == "WO-166" and v0["evidence_class"] == "historical"
+    assert v0["paper_trading_invoked"] is False and v0["live_trading_invoked"] is False
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["paper_trading_invoked"] is False and manifest["live_trading_invoked"] is False
+    v1 = json.loads((results / "carry_v1.json").read_text(encoding="utf-8"))
+    assert v1["gated"] is False and "gates" not in v1
     assert set(v0["gates"]) == {"G1_lower_bound_after_haircut_positive", "G2_point_after_haircut_at_least_hurdle", "G3_drawdown_bounded_and_no_forced_liquidation", "G4_positive_in_enough_qualifying_years", "lane_a_go"}
     assert v0["pooled"]["forced_liquidations"] == 0
     assert v0["pooled"]["unverifiable_open_periods"] == 0
@@ -108,6 +115,9 @@ def test_run_writes_results_and_verify_passes_then_fails_on_any_byte_difference(
     assert v0["manifest_sha256"] == runner.sha256_path(root / "manifest.json")
     text = (results / "report.md").read_text(encoding="utf-8")
     assert "declared assumption, not a measurement" in text
+    assert "margin of the G2 quantity over the 6.0% hurdle" in text and "margin of the G1 quantity over zero" in text
+    assert text.count("| G1 quantity: that lower bound") == 1  # the V1 table carries no gate labels
+    assert "descriptive; V1 is never gated" in text
     assert ("**Lane A — funding carry (V0, always on): GO**" in text) == bool(v0["gates"]["lane_a_go"])
     assert runner.verify_results(root, config=config) == []
 
@@ -191,3 +201,61 @@ def test_missing_bar_during_an_open_position_fails_g3_and_is_counted(tmp_path: P
     assert v0["gates"]["lane_a_go"] is False
     text = (root / "results" / "report.md").read_text(encoding="utf-8")
     assert "liquidation unverifiable; G3 requires 0) | 1 |" in text
+
+
+def test_g3_reads_the_drawdown_magnitude_and_fails_above_twenty_percent(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, funding_level=-0.004)  # -0.4% per period bleeds ~40% of capital over 100 days
+    config = small_config()
+    runner.run_all(root, code_revision="x", generated_at="2026-09-12T00:00:00Z", config=config)
+    v0 = json.loads((root / "results" / "carry_v0.json").read_text(encoding="utf-8"))
+    assert v0["pooled"]["max_drawdown_all_weeks"] < -0.20  # the helper reports a negative peak-to-trough ratio
+    assert v0["pooled"]["forced_liquidations"] == 0 and v0["pooled"]["unverifiable_open_periods"] == 0
+    assert v0["gates"]["G3_drawdown_bounded_and_no_forced_liquidation"] is False
+    assert "G3=FAIL" in (root / "results" / "report.md").read_text(encoding="utf-8")
+
+
+def test_yearly_sums_use_eligible_weeks_only() -> None:
+    weekly = pd.DataFrame(
+        {
+            "iso_year": [2024, 2024, 2024],
+            "iso_week": [2, 3, 4],
+            "return_on_capital": [0.01, 0.50, -0.02],
+            "eligible": [True, False, True],
+        }
+    )
+    assert runner._yearly_sums(weekly, "return_on_capital") == {"2024": pytest.approx(-0.01)}
+
+
+def test_run_re_validates_committed_inputs(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root)
+    target = root / "data" / "binance" / "BTCUSDT_perp_1h.csv"
+    frame = pd.read_csv(target)
+    dup = pd.concat([frame, frame.iloc[[100]].assign(high=frame["high"].iloc[100] * 3)], ignore_index=True).sort_values("open_time", kind="stable")
+    payload = dup.to_csv(index=False, lineterminator="\n").encode("utf-8")
+    target.write_bytes(payload)
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    for entry in manifest["entries"]:
+        if entry["path"].endswith("BTCUSDT_perp_1h.csv"):
+            entry["sha256"] = sha256_bytes(payload)
+    (root / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="duplicated open_time"):
+        runner.run_all(root, code_revision="x", generated_at="2026-09-12T00:00:00Z", config=small_config())
+    assert not (root / "results").exists()
+
+
+def test_binance_manifest_entries_must_carry_verified_upstream_checksums(tmp_path: Path) -> None:
+    from premium_research.manifest import verify_manifest
+
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root)
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    assert verify_manifest(root / "manifest.json", root) == []
+    for entry in manifest["entries"]:
+        if entry["path"].startswith("data/binance/"):
+            entry["upstream_checksums"] = {}
+            entry["checksum_verified"] = False
+    (root / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    failures = verify_manifest(root / "manifest.json", root)
+    assert len(failures) == 6 and all("binance entry without verified upstream checksums" in f for f in failures)

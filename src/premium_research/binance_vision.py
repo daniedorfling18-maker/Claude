@@ -7,8 +7,8 @@ point off by more than the tolerance, a duplicated or missing grid point, a
 non-finite value, or a funding interval other than 8 hours raises
 :class:`VisionError`. Nothing is forward-filled, interpolated, or skipped.
 
-Only :func:`fetch_bytes` and :func:`fetch_checksum` touch the network, and
-both accept an injected ``fetch`` callable so tests never do.
+Only :func:`fetch_bytes` touches the network; every caller takes an injected
+``fetch`` callable so tests never do.
 """
 
 from __future__ import annotations
@@ -152,6 +152,26 @@ def snap_to_grid(ts_ms: int, *, interval_ms: int = FUNDING_INTERVAL_MS, toleranc
     return nearest
 
 
+def timestamp_to_ms(raw: str, *, label: str) -> int:
+    """Accept a 13-digit millisecond or a 16-digit microsecond timestamp; anything else aborts.
+
+    The spot klines archive switched ``open_time`` to microseconds from 2025-01 while the
+    USDT-M futures archive stayed in milliseconds; a 16-digit value is divided by 1,000 and
+    must divide exactly.
+    """
+    text = raw.strip()
+    if not text.isdigit():
+        raise VisionError(f"non-integer {label}: {raw!r}")
+    if len(text) == 13:
+        return int(text)
+    if len(text) == 16:
+        value = int(text)
+        if value % 1000:
+            raise VisionError(f"microsecond {label} {text} is not a whole millisecond")
+        return value // 1000
+    raise VisionError(f"{label} {text!r} has {len(text)} digits; 13 (ms) or 16 (us) expected")
+
+
 def _has_header(first_line: str) -> bool:
     stripped = first_line.strip()
     return bool(stripped) and not stripped[0].isdigit()
@@ -195,11 +215,11 @@ def parse_funding_csv(text: str) -> pd.DataFrame:
         parts = line.split(",")
         if len(parts) != 3:
             raise VisionError(f"funding row does not have 3 fields: {line!r}")
-        try:
-            raw_ts = int(parts[0].strip())
-        except ValueError as exc:
-            raise VisionError(f"non-integer calc_time: {parts[0]!r}") from exc
-        interval = int(_finite_float(parts[1], label="funding_interval_hours"))
+        raw_ts = timestamp_to_ms(parts[0], label="calc_time")
+        interval_text = parts[1].strip()
+        if not interval_text.isdigit():
+            raise VisionError(f"funding_interval_hours is not an integer: {interval_text!r}")
+        interval = int(interval_text)
         if interval != FUNDING_INTERVAL_HOURS:
             raise VisionError(f"funding interval {interval}h at {raw_ts} is not {FUNDING_INTERVAL_HOURS}h")
         calc_times.append(snap_to_grid(raw_ts))
@@ -225,11 +245,10 @@ def parse_klines_csv(text: str) -> pd.DataFrame:
         parts = line.split(",")
         if len(parts) < 5:
             raise VisionError(f"klines row has fewer than 5 fields: {line!r}")
-        try:
-            raw_ts = int(parts[0].strip())
-        except ValueError as exc:
-            raise VisionError(f"non-integer open_time: {parts[0]!r}") from exc
-        open_times.append(snap_to_grid(raw_ts, interval_ms=HOUR_MS))
+        raw_ts = timestamp_to_ms(parts[0], label="open_time")
+        if raw_ts % HOUR_MS:
+            raise VisionError(f"open_time {raw_ts} is not hour-aligned")
+        open_times.append(raw_ts)  # stored as received; the archive's klines carry no jitter
         for index, name in enumerate(("open", "high", "low", "close"), start=1):
             cols[name].append(_finite_float(parts[index], label=name))
     frame = pd.DataFrame({"open_time": open_times, **cols})

@@ -1,0 +1,324 @@
+{
+  "code_revision": "58e996f2b2b895a28ba8fc64e0bb46e7b0ae38d7",
+  "deribit_cross_check": {
+    "BTC": {
+      "eligible_weeks": 359,
+      "gross_funding_on_notional_annualised": 0.0698075185779968,
+      "net_of_one_round_trip_annualised": 0.06937297818802465,
+      "yearly_gross_on_notional": {
+        "2019": 0.010436991253510422,
+        "2020": 0.09502317721328014,
+        "2021": 0.16213404072944088,
+        "2022": -0.023049696862293245,
+        "2023": 0.06881911302992204,
+        "2024": 0.10190026986694725,
+        "2025": 0.054065098932817135,
+        "2026": 0.012611374480622604
+      }
+    },
+    "ETH": {
+      "eligible_weeks": 359,
+      "gross_funding_on_notional_annualised": 0.050115434850510496,
+      "net_of_one_round_trip_annualised": 0.049680894460538354,
+      "yearly_gross_on_notional": {
+        "2019": -0.009429519816076062,
+        "2020": 0.07130916031229245,
+        "2021": 0.16546262415284388,
+        "2022": -0.060811054171310906,
+        "2023": 0.07916788695343022,
+        "2024": 0.08330310909863492,
+        "2025": 0.010105582283128613,
+        "2026": 0.006881463328081242
+      }
+    },
+    "note": "coin-margined perpetual; funding only; no basis, no liquidation model; never pooled with Binance"
+  },
+  "evidence_class": "historical",
+  "fee_multiplier": 1.0,
+  "fee_sensitivity_2x": {
+    "annualised_after_haircut": 0.07912939985289694,
+    "annualised_lower_bound_after_haircut": 0.038990438577728354,
+    "annualised_return_on_capital": 0.09912939985289694,
+    "max_drawdown_all_weeks": -0.0032169244673276864
+  },
+  "gated": true,
+  "gates": {
+    "G1_lower_bound_after_haircut_positive": true,
+    "G2_point_after_haircut_at_least_hurdle": true,
+    "G3_drawdown_bounded_and_no_forced_liquidation": false,
+    "G4_positive_in_enough_qualifying_years": true,
+    "lane_a_go": false
+  },
+  "generated_at": "2026-09-12T14:48:28Z",
+  "inputs": {
+    "data/binance/BTCUSDT_funding_8h.csv": "9f1ad4b47a9cd52590431ed1c4e0b5247f11b9b8e8316a7979855d76ebc8e315",
+    "data/binance/BTCUSDT_perp_1h.csv": "41dbc2128896b0022782b0a3afe2f802338c4f8970da06c2c3e6adfb3fa55abc",
+    "data/binance/BTCUSDT_spot_1h.csv": "d8650027f030bdaee5caa73f726354031d6eaf15940646eb46238a4b08232207",
+    "data/binance/ETHUSDT_funding_8h.csv": "e6c4b297625e21ac5809ee0d5313403b6d4dd7b3447feea8ae37e355247d8e05",
+    "data/binance/ETHUSDT_perp_1h.csv": "e0416dd1e33b6a64f8941a40e9669554bbea1d5aa623247ac3783e5510a82a3e",
+    "data/binance/ETHUSDT_spot_1h.csv": "127030985161895133cd78bad8d1aa3c41b07d821ee0e4730dd947e67fc016f0",
+    "data/deribit/BTC_dvol_daily.csv": "735053848119e08d32ec0973a284c60bdb478a8c5e3bbacecbe8963e16ce0bd6",
+    "data/deribit/BTC_funding_1h.csv.gz": "3afdb1d432f76bf853b145567f31569cb184875283648ccbcf5e03a8258a8fe8",
+    "data/deribit/ETH_dvol_daily.csv": "dbae392ca528730f0a38c03e001bc7cb5729a9439880d9bf92ca9f7c0e1fcee9",
+    "data/deribit/ETH_funding_1h.csv.gz": "3bb1c7ed21440a5000e34f201627cc69d904bcf0a9201add397e54389a7ea9b8"
+  },
+  "live_trading_invoked": false,
+  "manifest_sha256": "2152b1b4e3fd1a6ffc8f9881c1a7663d33a24e27b8205824d98438c95df2ea50",
+  "paper_trading_invoked": false,
+  "parameters": {
+    "block_length_rule": "round(n_clusters ** (1/3)), minimum 2",
+    "g2_hurdle": 0.06,
+    "g3_max_drawdown": 0.2,
+    "g4_min_positive_years": 4,
+    "g5_min_positive_years": 3,
+    "gate_quantile": 0.025,
+    "haircut_per_year": 0.02,
+    "liquidation_move_at_half_margin": 0.49253731343283585,
+    "maintenance_margin": 0.005,
+    "margin_fraction": 0.5,
+    "min_eligible_weeks_per_year": 45,
+    "min_windows_per_year": 10,
+    "n_draws": 10000,
+    "periods_per_year": 1095,
+    "perp_taker_fee": 0.0005,
+    "rebalance_margin_ratio": 0.25,
+    "report_quantile": 0.05,
+    "seed": 20260912,
+    "sma_days": 200,
+    "spot_taker_fee": 0.001,
+    "v1_entry_annualised": 0.08,
+    "v1_exit_level": 0.0,
+    "v1_lookback": 3,
+    "vrp_min_valid_hours": 700,
+    "vrp_step_days": 30,
+    "vrp_window_hours": 720,
+    "weeks_per_year": 52
+  },
+  "per_asset": {
+    "BTCUSDT": {
+      "annualised_return_on_capital": 0.0908627428980054,
+      "cvar_95_weekly": 0.0007033919453610197,
+      "dropped_flagged_weeks": 4,
+      "dropped_incomplete_weeks": 0,
+      "eligible_weeks": 343,
+      "fees_paid_total": 0.007600260414708367,
+      "final_wealth_per_1_5_capital": 2.4149012058733,
+      "forced_liquidations": 0,
+      "funding_received_total": 0.9246567096329725,
+      "max_drawdown_all_weeks": -0.004848993016451919,
+      "mean_weekly_return_on_capital": 0.0017473604403462578,
+      "rebalances": 11,
+      "share_of_weeks_with_mostly_negative_funding": 0.09221902017291066,
+      "sharpe_weekly_annualised": 4.159641430306082,
+      "turnover_notional_per_year": 1.0152080302032207,
+      "unverifiable_open_periods": 8,
+      "weeks_total": 347,
+      "yearly_eligible_weeks": {
+        "2020": 50,
+        "2021": 50,
+        "2022": 52,
+        "2023": 52,
+        "2024": 52,
+        "2025": 52,
+        "2026": 35
+      },
+      "yearly_return_on_capital": {
+        "2020": 0.12410370881818875,
+        "2021": 0.24371735510035597,
+        "2022": 0.018335884448265578,
+        "2023": 0.035692021302861754,
+        "2024": 0.11176910289714155,
+        "2025": 0.053726404837212506,
+        "2026": 0.012000153634740348
+      }
+    },
+    "ETHUSDT": {
+      "annualised_return_on_capital": 0.10902242497480161,
+      "cvar_95_weekly": 0.0007050202665809288,
+      "dropped_flagged_weeks": 4,
+      "dropped_incomplete_weeks": 0,
+      "eligible_weeks": 343,
+      "fees_paid_total": 0.008866325834867983,
+      "final_wealth_per_1_5_capital": 2.5988105755918056,
+      "forced_liquidations": 0,
+      "funding_received_total": 1.1139537292135477,
+      "max_drawdown_all_weeks": -0.007064456959843368,
+      "mean_weekly_return_on_capital": 0.0020965850956692618,
+      "rebalances": 15,
+      "share_of_weeks_with_mostly_negative_funding": 0.08357348703170028,
+      "sharpe_weekly_annualised": 3.7182062709213177,
+      "turnover_notional_per_year": 1.1844756466716928,
+      "unverifiable_open_periods": 8,
+      "weeks_total": 347,
+      "yearly_eligible_weeks": {
+        "2020": 50,
+        "2021": 50,
+        "2022": 52,
+        "2023": 52,
+        "2024": 52,
+        "2025": 52,
+        "2026": 35
+      },
+      "yearly_return_on_capital": {
+        "2020": 0.1934987648527445,
+        "2021": 0.32976735738498464,
+        "2022": 0.007662914158967916,
+        "2023": 0.03801905563811392,
+        "2024": 0.10476016212513233,
+        "2025": 0.03971478431710255,
+        "2026": 0.005705649337511017
+      }
+    }
+  },
+  "pooled": {
+    "annualised_after_haircut": 0.07994258393640351,
+    "annualised_lower_bound": 0.059305738026392975,
+    "annualised_lower_bound_after_haircut": 0.03930573802639298,
+    "annualised_return_on_capital": 0.09994258393640351,
+    "bootstrap": {
+      "cluster": {
+        "finite": true,
+        "intervals": {
+          "0.90": [
+            0.0016257530220908005,
+            0.0022545620823295836
+          ],
+          "0.95": [
+            0.0015721788523834152,
+            0.0023156226165495235
+          ]
+        },
+        "method": "cluster",
+        "n_clusters": 343,
+        "n_draws": 10000,
+        "point": 0.00192197276800776,
+        "seed": 20260912
+      },
+      "stationary_block": {
+        "finite": true,
+        "intervals": {
+          "0.90": [
+            0.0012278029522406763,
+            0.002740387786447824
+          ],
+          "0.95": [
+            0.0011404949620460187,
+            0.002927429004231044
+          ]
+        },
+        "method": "stationary_block",
+        "n_clusters": 343,
+        "n_draws": 10000,
+        "point": 0.00192197276800776,
+        "seed": 20260912
+      }
+    },
+    "complete_years": [
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025
+    ],
+    "cvar_95_weekly": 0.0004819176730479243,
+    "eligible_weeks": 343,
+    "forced_liquidations": 0,
+    "haircut_per_year": 0.02,
+    "lower_bound_gate_level": {
+      "block_length": 7,
+      "cluster": 0.0015721788523834152,
+      "level": 0.95,
+      "minimum": 0.0011404949620460187,
+      "quantile": 0.025,
+      "stationary_block": 0.0011404949620460187
+    },
+    "max_drawdown_all_weeks": -0.0032169244673275754,
+    "mean_weekly_return_on_capital": 0.00192197276800776,
+    "positive_complete_years": 6,
+    "rebalances": 26,
+    "regime_btc_sma200": {
+      "above": {
+        "mean_weekly_return_on_capital": 0.0029918228106396295,
+        "weeks": 183
+      },
+      "below": {
+        "mean_weekly_return_on_capital": 0.0003476771804257988,
+        "weeks": 133
+      },
+      "unknown": {
+        "mean_weekly_return_on_capital": 0.002425630373443637,
+        "weeks": 27
+      }
+    },
+    "sharpe_weekly_annualised": 3.9549811967482076,
+    "unverifiable_open_periods": 16,
+    "weeks_total": 347,
+    "year_check": {
+      "detail": {
+        "2020": {
+          "positive": true,
+          "qualifies": true,
+          "units": 50,
+          "value": 0.15880123683546662
+        },
+        "2021": {
+          "positive": true,
+          "qualifies": true,
+          "units": 50,
+          "value": 0.2867423562426703
+        },
+        "2022": {
+          "positive": true,
+          "qualifies": true,
+          "units": 52,
+          "value": 0.012999399303616746
+        },
+        "2023": {
+          "positive": true,
+          "qualifies": true,
+          "units": 52,
+          "value": 0.036855538470487836
+        },
+        "2024": {
+          "positive": true,
+          "qualifies": true,
+          "units": 52,
+          "value": 0.10826463251113694
+        },
+        "2025": {
+          "positive": true,
+          "qualifies": true,
+          "units": 52,
+          "value": 0.04672059457715753
+        }
+      },
+      "positive_years": 6
+    },
+    "yearly_eligible_weeks": {
+      "2020": 50,
+      "2021": 50,
+      "2022": 52,
+      "2023": 52,
+      "2024": 52,
+      "2025": 52,
+      "2026": 35
+    },
+    "yearly_return_on_capital": {
+      "2020": 0.15880123683546662,
+      "2021": 0.2867423562426703,
+      "2022": 0.012999399303616746,
+      "2023": 0.036855538470487836,
+      "2024": 0.10826463251113694,
+      "2025": 0.04672059457715753,
+      "2026": 0.008852901486125683
+    }
+  },
+  "span": {
+    "entry_boundary_ms": 1578268800000,
+    "exit_boundary_ms": 1788134400000,
+    "years": 6.654794520547945
+  },
+  "variant": "V0",
+  "work_order": "WO-166"
+}

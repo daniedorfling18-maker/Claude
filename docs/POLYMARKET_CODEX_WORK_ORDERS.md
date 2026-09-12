@@ -17150,7 +17150,7 @@ paid data. That is recorded as an open owner decision, not solved here.
 | BTCUSDT, ETHUSDT perpetual 1h OHLC | Binance Vision `data/futures/um/monthly/klines/<sym>/1h/` (columns open, high, low, close only) | 2020-01 → 2026-08 | `<sym>_perp_1h.csv` |
 | BTCUSDT, ETHUSDT spot 1h OHLC | Binance Vision `data/spot/monthly/klines/<sym>/1h/` | 2020-01 → 2026-08 | `<sym>_spot_1h.csv` |
 | BTC, ETH perpetual funding, 1h | Deribit `public/get_funding_rate_history`, 744-row pages, overlap-deduplicated | 2019-10-01 → 2026-08-31 | `research/premium_poc/data/deribit/<ccy>_funding_1h.csv` |
-| BTC, ETH DVOL, daily candles | Deribit `public/get_volatility_index_data`, `resolution=86400` | 2021-03-24 → 2026-08-31 | `<ccy>_dvol_daily.csv` |
+| BTC, ETH DVOL, daily candles | Deribit `public/get_volatility_index_data`, `resolution=86400`; the server returns the newest 1,000 candles of the window and a `continuation` timestamp that becomes the next `end_timestamp`, walked until null, boundary candle de-duplicated (**amendment 2026-09-12, before the data-pull commit**: the third fetch aborted, correctly, on the pager's own guard after 9 of 10 series because the first build passed `continuation` as a request parameter this endpoint does not take) | 2021-03-24 → 2026-08-31 | `<ccy>_dvol_daily.csv` |
 
 - **Header rule.** Archive CSVs carry a header row for `fundingRate` files
   and for some klines months (2024-01 does) but not others (2020-01 does
@@ -17191,7 +17191,7 @@ paid data. That is recorded as an open owner decision, not solved here.
   timeout of 60 s (connect, then each read — not a deadline) and up to 3
   attempts, so one request is bounded at 180 s. Fan-out: Binance 2 symbols ×
   80 months × 3 series × 2 objects (zip + `.CHECKSUM`) = 960 requests;
-  Deribit 2 instruments × 82 funding pages + 2 × about 2 DVOL pages ≈ 168;
+  Deribit 2 instruments × 82 funding pages + 2 × 2 DVOL pages = 168;
   total ≈ 1,128 requests, worst case 203,040 s without a deadline. The whole
   fetch therefore carries a **wall-clock deadline of 14,400 s**, checked
   before every request; expiry aborts. **Amendment 2026-09-12 (before the
@@ -17217,8 +17217,9 @@ paid data. That is recorded as an open owner decision, not solved here.
   non-numeric, or non-finite; a 1h series with a run of more than 24
   consecutive missing hours; a Deribit page that is empty inside the
   requested span; a Deribit timestamp seen twice with different values; a
-  DVOL candle with an empty, non-numeric, or non-finite field; the wall-clock
-  deadline. Nothing is forward-filled, interpolated, or skipped at fetch.
+  DVOL candle with an empty, non-numeric, or non-finite field; a DVOL
+  continuation that is non-integer or does not move the window earlier, or
+  more than 1,000 DVOL pages; the wall-clock deadline. Nothing is forward-filled, interpolated, or skipped at fetch.
 - **Gaps of 24 hours or fewer** are permitted at fetch and are handled at
   estimation by rejection, never by filling: see "Rejected periods" below.
 
@@ -17571,7 +17572,7 @@ otherwise.
 13. `test_deribit_empty_page_inside_span_aborts` — a full first page then an empty second raises "empty funding page" after exactly 2 calls, each window 744 h wide.
 14. `test_funding_windows_cover_the_span_without_gaps_or_overlap` — windows `[s, s+744h], [s+744h, s+1488h], [s+1488h, s+1489h]`; an empty span raises.
 15. `test_non_finite_funding_field_aborts` — `"nan"` raises "non-finite"; `None` raises "empty".
-16. `test_dvol_page_parses_and_continuation_is_followed` — 92 candles; a first page carrying `continuation: "abc"` makes the second call pass it; first close 66.81.
+16. `test_dvol_page_parses_and_continuation_is_followed` — 92 candles split at candle 42: the first page (newest 50) returns that candle's timestamp as `continuation`, the second call uses it as `end_timestamp` with the same `start_timestamp` and no `continuation` parameter, the boundary candle is de-duplicated, first close 66.81; and `test_dvol_continuation_that_does_not_move_earlier_aborts` — a continuation equal to the window end aborts, a non-integer one aborts.
 17. `test_dvol_empty_page_aborts`.
 
 `test_carry.py`

@@ -86,23 +86,37 @@ def test_non_finite_funding_field_aborts() -> None:
 
 
 def test_dvol_page_parses_and_continuation_is_followed() -> None:
+    # Deribit returns the newest candles of the window and a continuation timestamp that becomes the
+    # next end_timestamp; the boundary candle appears in both pages and is de-duplicated.
     envelope = json.loads(DVOL_PAGE.read_text(encoding="utf-8"))
     data = envelope["result"]["data"]
     assert len(data) == 92
+    boundary = int(data[42][0])
     calls: list[dict] = []
 
     def fetch(url: str, params: dict) -> dict:
         calls.append(dict(params))
-        if "continuation" not in params:
-            return {"result": {"data": data[:50], "continuation": "abc"}}
-        return {"result": {"data": data[50:], "continuation": None}}
+        if params["end_timestamp"] == 1711929600000:
+            return {"result": {"data": data[42:], "continuation": boundary}}
+        assert params["end_timestamp"] == boundary
+        return {"result": {"data": data[:43], "continuation": None}}
 
     frame, urls = dh.fetch_dvol("BTC", 1704067200000, 1711929600000, fetch=fetch)
     assert len(frame) == 92
     assert list(frame.columns) == ["timestamp", "open", "high", "low", "close"]
     assert float(frame["close"].iloc[0]) == 66.81
-    assert calls[1]["continuation"] == "abc"
-    assert len(urls) == 2
+    assert "continuation" not in calls[0] and "continuation" not in calls[1]
+    assert calls[1]["end_timestamp"] == boundary and calls[1]["start_timestamp"] == 1704067200000
+    assert len(urls) == 2 and urls[1].endswith(f"end_timestamp={boundary}")
+
+
+def test_dvol_continuation_that_does_not_move_earlier_aborts() -> None:
+    envelope = json.loads(DVOL_PAGE.read_text(encoding="utf-8"))
+    data = envelope["result"]["data"]
+    with pytest.raises(dh.DeribitError, match="does not move the window earlier"):
+        dh.fetch_dvol("BTC", 1704067200000, 1711929600000, fetch=lambda url, params: {"result": {"data": data, "continuation": params["end_timestamp"]}})
+    with pytest.raises(dh.DeribitError, match="non-integer DVOL continuation"):
+        dh.fetch_dvol("BTC", 1704067200000, 1711929600000, fetch=lambda url, params: {"result": {"data": data, "continuation": "abc"}})
 
 
 def test_dvol_empty_page_aborts() -> None:

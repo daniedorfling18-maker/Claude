@@ -6,8 +6,11 @@ Two endpoints, both keyless and read-only:
   ``interest_1h`` and ``index_price``; the server returns at most 744 rows
   (31 days) per call, so the span is walked in 744-hour windows and the
   pages are de-duplicated on ``timestamp``.
-* ``public/get_volatility_index_data`` — DVOL candles; paged through the
-  ``continuation`` token.
+* ``public/get_volatility_index_data`` — DVOL candles. The server returns the
+  newest 1,000 candles of the requested window and, when truncated, a
+  ``continuation`` timestamp to use as the next ``end_timestamp``; the walk
+  continues until it returns null, and the boundary candle that appears in
+  two pages is de-duplicated.
 
 Fail-closed: a JSON-RPC error, an empty page inside the requested span, a
 duplicated timestamp with a different value, or a non-finite field raises
@@ -158,30 +161,38 @@ def parse_dvol_rows(data: list[list[Any]]) -> pd.DataFrame:
     return pd.DataFrame.from_records(records, columns=list(DVOL_FIELDS)).sort_values("timestamp").reset_index(drop=True)
 
 
+MAX_DVOL_PAGES = 1_000
+
+
 def fetch_dvol(currency: str, start_ms: int, end_ms: int, *, resolution: int = 86_400, fetch: FetchJsonFn | None = None) -> tuple[pd.DataFrame, list[str]]:
-    """Page through DVOL candles via the ``continuation`` token."""
+    """Walk DVOL candles newest-first: each truncated page returns the ``end_timestamp`` for the next call.
+
+    A continuation that does not move the window earlier, or more than
+    ``MAX_DVOL_PAGES`` pages, aborts; an empty page inside the span aborts.
+    """
     fetch_fn = fetch or (lambda url, params: fetch_json(url, params))
     url = f"{BASE_URL}/public/get_volatility_index_data"
     pages: list[pd.DataFrame] = []
     calls: list[str] = []
-    continuation: Any = None
-    guard = 0
-    while True:
-        params: dict[str, Any] = {"currency": currency, "resolution": resolution, "start_timestamp": start_ms, "end_timestamp": end_ms}
-        if continuation is not None:
-            params["continuation"] = continuation
-        calls.append(f"{url}?currency={currency}&resolution={resolution}&start_timestamp={start_ms}&end_timestamp={end_ms}" + (f"&continuation={continuation}" if continuation is not None else ""))
+    window_end = int(end_ms)
+    for _ in range(MAX_DVOL_PAGES):
+        params: dict[str, Any] = {"currency": currency, "resolution": resolution, "start_timestamp": int(start_ms), "end_timestamp": window_end}
+        calls.append(f"{url}?currency={currency}&resolution={resolution}&start_timestamp={int(start_ms)}&end_timestamp={window_end}")
         envelope = fetch_fn(url, params)
         result = envelope.get("result") or {}
         data = result.get("data")
         if not isinstance(data, list) or not data:
-            raise DeribitError(f"empty DVOL page for {currency} {start_ms}..{end_ms}")
+            raise DeribitError(f"empty DVOL page for {currency} {int(start_ms)}..{window_end}")
         pages.append(parse_dvol_rows(data))
         continuation = result.get("continuation")
-        guard += 1
         if continuation is None:
-            break
-        if guard > 10_000:  # pragma: no cover - defensive
-            raise DeribitError("DVOL paging did not terminate")
-    frame = dedup_concat(pages)
-    return frame, calls
+            frame = dedup_concat(pages)
+            return frame, calls
+        try:
+            next_end = int(continuation)
+        except (TypeError, ValueError) as exc:
+            raise DeribitError(f"non-integer DVOL continuation: {continuation!r}") from exc
+        if next_end >= window_end or next_end < int(start_ms):
+            raise DeribitError(f"DVOL continuation {next_end} does not move the window earlier from {window_end}")
+        window_end = next_end
+    raise DeribitError(f"DVOL paging exceeded {MAX_DVOL_PAGES} pages")

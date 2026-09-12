@@ -83,19 +83,30 @@ def checksum_url(zip_url: str) -> str:
 # ------------------------------------------------------------------------ network
 
 
+_SESSION = None
+
+
+def _session():
+    """One keep-alive session per process, so the proxy handshake is not repeated per request."""
+    global _SESSION
+    if _SESSION is None:
+        import requests  # local import: keeps the pure modules import-light
+
+        _SESSION = requests.Session()
+    return _SESSION
+
+
 def fetch_bytes(url: str, *, timeout: float = HTTP_TIMEOUT_SECONDS, retries: int = HTTP_RETRIES) -> bytes:
     """GET ``url`` and return the body. Any status other than 200 raises.
 
     ``timeout`` is a per-socket-operation timeout (connect, then each read), not a
     deadline; the caller owns the wall-clock budget.
     """
-    import requests  # local import: keeps the pure modules import-light
-
     last_error: Exception | None = None
     for attempt in range(max(1, retries)):
         try:
-            response = requests.get(url, timeout=timeout)
-        except requests.RequestException as exc:  # pragma: no cover - network path
+            response = _session().get(url, timeout=timeout)
+        except Exception as exc:  # pragma: no cover - network path (requests.RequestException and socket errors)
             last_error = exc
             continue
         if response.status_code == 200:

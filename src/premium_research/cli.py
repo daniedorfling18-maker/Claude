@@ -40,7 +40,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]  # src/premium_research/cli.py -
 DEFAULT_ROOT = REPO_ROOT / "research" / "premium_poc"
 GZIP_THRESHOLD_BYTES = 5_000_000
 # Per-request timeouts (60 s per socket operation, 3 attempts) live with the HTTP calls in binance_vision.fetch_bytes and deribit_history.fetch_json.
-FETCH_DEADLINE_SECONDS = 3_600.0  # wall clock for the whole fetch; expiry aborts
+FETCH_DEADLINE_SECONDS = 14_400.0  # wall clock for the whole fetch; expiry aborts. Basis: WO-166 Timeouts bullet (amended 2026-09-12)
 
 # Registered spans and universe (WO-166) have one implementation site: runner.py. Changing any after results exist is a new work order.
 BINANCE_SYMBOLS = SYMBOLS
@@ -107,6 +107,9 @@ def run_fetch(
     root = Path(root)
     started = clock()
 
+    def progress(message: str) -> None:
+        print(f"[fetch +{clock() - started:.0f}s] {message}", file=sys.stderr, flush=True)
+
     def guarded_bytes(url: str) -> bytes:
         if clock() - started > deadline_seconds:
             raise RuntimeError(f"fetch exceeded its wall-clock deadline of {deadline_seconds:.0f} s")
@@ -132,6 +135,7 @@ def run_fetch(
     try:
         for symbol in symbols:
             fetched_at = now_iso()
+            progress(f"{symbol} funding: {len(months)} months")
             funding, digests = binance_vision.download_funding(symbol, months, fetch=guarded_bytes)
             funding.insert(1, "calc_time_iso", funding["calc_time"].map(binance_vision.iso_utc))
             funding = funding[["calc_time", "calc_time_iso", "calc_time_raw", "funding_interval_hours", "last_funding_rate"]]
@@ -152,6 +156,7 @@ def run_fetch(
             )
             for market, label in (("um", "perp"), ("spot", "spot")):
                 fetched_at = now_iso()
+                progress(f"{symbol} {label} 1h klines: {len(months)} months")
                 klines, kdigests, gaps = binance_vision.download_klines(market, symbol, "1h", months, fetch=guarded_bytes)
                 klines.insert(1, "open_time_iso", klines["open_time"].map(binance_vision.iso_utc))
                 path, payload = _store(klines, tmp_data / "binance" / f"{symbol}_{label}_1h.csv")
@@ -171,6 +176,7 @@ def run_fetch(
                 )
         for currency, instrument in instruments.items():
             fetched_at = now_iso()
+            progress(f"{instrument} funding history")
             funding, calls = deribit_history.fetch_funding_history(instrument, deribit_funding_start_ms, span_end_ms, fetch=guarded_json)
             funding.insert(1, "timestamp_iso", funding["timestamp"].map(binance_vision.iso_utc))
             path, payload = _store(funding, tmp_data / "deribit" / f"{currency}_funding_1h.csv")
@@ -187,6 +193,7 @@ def run_fetch(
                 )
             )
             fetched_at = now_iso()
+            progress(f"{currency} DVOL daily")
             dvol, dcalls = deribit_history.fetch_dvol(currency, dvol_start_ms, span_end_ms, fetch=guarded_json)
             dvol.insert(1, "timestamp_iso", dvol["timestamp"].map(binance_vision.iso_utc))
             path, payload = _store(dvol, tmp_data / "deribit" / f"{currency}_dvol_daily.csv")

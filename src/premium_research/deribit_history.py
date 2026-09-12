@@ -24,7 +24,7 @@ from typing import Any
 
 import pandas as pd
 
-from .binance_vision import HTTP_RETRIES, HTTP_TIMEOUT_SECONDS
+from .binance_vision import HTTP_RETRIES, HTTP_TIMEOUT_SECONDS, _session
 
 BASE_URL = "https://www.deribit.com/api/v2"
 HOUR_MS = 3_600_000
@@ -44,13 +44,11 @@ class DeribitError(RuntimeError):
 
 def fetch_json(url: str, params: Mapping[str, Any], *, timeout: float = HTTP_TIMEOUT_SECONDS, retries: int = HTTP_RETRIES) -> dict[str, Any]:
     """GET a JSON-RPC endpoint and return the decoded envelope. Raises on error envelopes."""
-    import requests  # local import: keeps the pure modules import-light
-
     last_error: Exception | None = None
     for _ in range(max(1, retries)):
         try:
-            response = requests.get(url, params=dict(params), timeout=timeout)
-        except requests.RequestException as exc:  # pragma: no cover - network path
+            response = _session().get(url, params=dict(params), timeout=timeout)
+        except Exception as exc:  # pragma: no cover - network path (requests.RequestException and socket errors)
             last_error = exc
             continue
         if response.status_code != 200:

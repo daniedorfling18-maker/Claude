@@ -17193,9 +17193,16 @@ paid data. That is recorded as an open owner decision, not solved here.
   80 months × 3 series × 2 objects (zip + `.CHECKSUM`) = 960 requests;
   Deribit 2 instruments × 82 funding pages + 2 × about 2 DVOL pages ≈ 168;
   total ≈ 1,128 requests, worst case 203,040 s without a deadline. The whole
-  fetch therefore carries a **wall-clock deadline of 3,600 s**, checked before
-  every request; expiry aborts. Expected duration at observed latency is
-  under ten minutes.
+  fetch therefore carries a **wall-clock deadline of 14,400 s**, checked
+  before every request; expiry aborts. **Amendment 2026-09-12 (before the
+  data-pull commit):** the deadline was registered as 3,600 s on an estimate
+  of "under ten minutes"; the second fetch aborted on it, correctly, after
+  9 of 10 series in 3,600 s, and per-request latency through the sandbox
+  proxy was then measured between 0.6 s and about 4 s across the day, so
+  1,128 requests take 15 to 75 minutes. The deadline is now 4 × the worst
+  observed run (14,400 s); the per-request timeout and attempt count are
+  unchanged; the fetch reuses one keep-alive session per process and logs
+  progress per series so a stall is visible.
 - **The fetch never overwrites committed inputs**: it refuses to run when
   `research/premium_poc/data` or `manifest.json` exists, and it has no
   `--force`. Its temporary directory is `research/premium_poc/.fetch-tmp-<pid>`,
@@ -17554,7 +17561,7 @@ otherwise.
 6. `test_klines_projection_keeps_only_ohlc` — the head fixture projects to `open_time, open, high, low, close`, 48 rows, first 1704067200000, last first + 47 h; the same body without its header parses identically (header rule); an `open_time` of `1704067200999` raises "not hour-aligned".
 7. `test_hourly_gap_longer_than_24_hours_aborts` — the fixture reports `{missing_hours: 0, longest_missing_run: 0, rows: 48}`; moving the last bar 26 h out raises "run of 25 missing hours".
 8. `test_funding_grid_gap_aborts` — dropping one grid point raises "missing points"; duplicating one raises "duplicated".
-9. `test_fetch_wall_clock_deadline_aborts_without_partial_file` — an injected clock that reads 4,000 s at the third request raises "wall-clock deadline" with the 3,600 s budget; no `data/`, no `.fetch-tmp-*` under the root.
+9. `test_fetch_wall_clock_deadline_aborts_without_partial_file` — an injected clock that reads 4,000 s at the third request raises "wall-clock deadline" with a 3,600 s budget passed explicitly (the registered default is 14,400 s); no `data/`, no `.fetch-tmp-*` under the root.
 
 `test_deribit_history.py`
 10. `test_recorded_funding_page_has_744_hourly_rows` — 744 rows, first 1704070800000 (01:00Z; rows sit at hour ends), last 1706745600000, every spacing 1 h.

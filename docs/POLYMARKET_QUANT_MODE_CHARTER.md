@@ -1822,3 +1822,70 @@ axis appears in no artifact as a measured quantity, no gate reads a scaling rati
 `mb1_tier0_coverage_sufficient` remains `false` until a design that identifies the effect is
 registered and run. If any future artifact publishes a scaling figure, it must name which design
 produced it and how that design escapes all four confounds enumerated above.
+
+## 2026-09-12 — Registered result (historical class): funding carry NO-GO on G3, variance premium existence GO
+
+**This is a measurement result, not a policy change.** No gate, threshold, eligibility rule or
+capital ceiling is altered. Nothing here authorises an order, a rung, a spend, or a registration.
+The evidence class is *historical* (`docs/EXPERIMENT_REGISTRY.md`, "Multiple-testing and evidence
+policy") and nothing done in the sandbox can relabel it upward.
+
+**What was run.** WO-166, a pre-registered proof of concept computed in an agent sandbox from
+committed, checksummed public history — no VPS, no credential, no order path. Its estimator, gates
+and bias disclosure were fixed in the register (four independent S8 passes to ADMISSIBLE, then
+delta checks on every later amendment) before the data-pull commit, and the build passed an
+independent line audit and red-team review whose findings — including a drawdown gate that could
+never fail — were fixed before the single analysis pass. Commit order on the branch:
+register text → build fixes and amendments → data pull (`58e996f`) → results (`5c26ee6`). The
+results verify byte-for-byte from a fresh clone (`verify-manifest`, `verify-results`).
+
+**Lane A — funding carry (Binance USDT-M, long spot / short perpetual, BTC and ETH, always on,
+2020-01-06 to 2026-08-31, 343 eligible weeks of 347): NO-GO.** The verdict is generated from
+the gate booleans in `research/premium_poc/results/carry_v0.json`:
+
+| gate | registered criterion | measured | result |
+|---|---|---|---|
+| G1 | annualised 0.025-quantile lower bound (minimum of week-cluster and stationary-block bootstraps) minus the 2.0 pp haircut > 0 | 5.93% − 2.00 = **3.93%** | pass |
+| G2 | annualised point estimate minus the haircut ≥ 6.0% | 9.99% − 2.00 = **7.99%** | pass |
+| G3 | max drawdown ≤ 20%, forced liquidations = 0, and no open position inside a period with a missing bar | drawdown **0.32%**, forced liquidations **0**, unverifiable open periods **16** | **FAIL** |
+| G4 | positive in ≥ 4 of the 6 ISO years 2020-2025, each with ≥ 45 eligible weeks | **6 of 6** (2020 15.9%, 2021 28.7%, 2022 1.3%, 2023 3.7%, 2024 10.8%, 2025 4.7%) | pass |
+
+The premium is measured and it clears every economic gate with margin: 1.99 pp over the hurdle
+on the point estimate, 3.93 pp over zero on the haircut lower bound, Sharpe 3.95 on weekly
+returns, and the 2x-fee sensitivity moves the point estimate by 0.08 pp. **G3 fails on the
+registered completeness rule alone.** The two spot 1h series each carry 31 missing hours (the
+manifest records them); both perpetual series are complete. The registered rule marks a period
+with an absent bar on *either* leg as having unverifiable liquidation status, and 16 such
+periods (8 per underlying) fell while the position was open. The liquidation check itself reads
+only the perpetual's highs, which are complete for every one of those periods; the rule was
+registered broader than the check, and the result stands as registered. **A rule refined after
+seeing this data is a loosening informed by the outcome, so it is not applied here; it is a new
+work order with a fresh pass, for the owner to decide.** Descriptive: the conditional variant V1
+earns less (7.96%) with a deeper drawdown (5.56%), so timing subtracts after costs; the carry is
+0.30% per week with BTC above its 200-day average and 0.03% below it; Deribit's coin-margined
+perpetuals show 6.98% (BTC) and 5.01% (ETH) gross funding on notional, never pooled.
+
+**Lane B — variance risk premium existence (Deribit DVOL against realised 30-day variance,
+2021-03-24 to 2026-08-31, 66 of 66 windows): GO, recorded as *existence observed, selection bias
+unaddressed*.** Mean premium 1,120.7 variance points, 0.025-quantile lower bound 258.6 points,
+positive in 3 of the 4 complete years 2022-2025 (2025 was −168.5 points). This answers only
+whether a premium exists; whether a defined-risk option structure captures it net of option
+spreads needs historical option quotes, which exist only as paid data. That is an open owner
+decision and this result triggers nothing beyond the pre-observation amendment path the registry
+already provides.
+
+**What this does and does not say.** The funding-carry premium on the two largest perpetuals is
+real, persistent across one full cycle including 2022, and large relative to its costs, under the
+most unfavourable fee tier and with no yield credited on collateral. It failed its own admission
+gate on a data-completeness rule, and that failure is recorded as the result. Every favourable
+bias channel is named in the WO's A11 disclosure; the 2.0 pp haircut is declared, not measured.
+No forward window has been observed; no paper or live evidence exists; WO-67's P1-P5 are
+untouched and funding remains closed.
+
+### Day-after check
+
+`python -m premium_research.cli verify-manifest` and `verify-results` pass in a fresh checkout of
+the branch; `carry_v0.json`'s `manifest_sha256` equals the sha256 of `manifest.json`; the report's
+verdict lines match the gate booleans; every hash cited above resolves on the branch. If any
+future artifact cites a Lane A GO, it must name the work order that registered the refined rule
+and the fresh pass that produced it.

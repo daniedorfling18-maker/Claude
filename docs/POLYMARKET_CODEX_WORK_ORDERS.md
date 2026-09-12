@@ -17159,9 +17159,10 @@ paid data. That is recorded as an open owner decision, not solved here.
   `calc_time_raw` exactly as received (the archive's `calc_time` carries a
   jitter of a few milliseconds: 0-3 ms observed in 2024-01, 15 ms in
   2025-01). A raw value within ±1,000 ms of a grid point snaps to it;
-  anything further aborts. Klines store `open_time` in milliseconds as
-  received plus an ISO column; a value off the hour aborts rather than
-  snapping (the archive's klines carry no jitter). Funding files also carry a
+  anything further aborts. Klines store `open_time` in milliseconds —
+  normalised from microseconds where the archive uses them, per the
+  amendment below — plus an ISO column; a value off the hour aborts rather
+  than snapping (the archive's klines carry no jitter). Funding files also carry a
   `calc_time_iso` column. **Amendment 2026-09-12 (before the
   data-pull commit; found by the first fetch failing closed with a
   481,653,864-hour "gap"):** the spot klines archive switched `open_time`
@@ -17274,8 +17275,9 @@ paid data. That is recorded as an open owner decision, not solved here.
   8 hourly highs inside it is absent. A period with an absent boundary close
   is merged into the next period that has one: no mark, no trade, and its
   funding is applied at that next boundary (if a forced liquidation is
-  recorded at that boundary, the merged funding is forfeited with the margin —
-  the conservative direction). **A flagged period during which a
+  recorded at that boundary, the merged funding is forfeited with the margin,
+  whatever its sign; a liquidation already fails G3, so this affects
+  descriptive figures only). **A flagged period during which a
   position is open has unverifiable liquidation status:** the check can only
   run on present bars, so the period is counted in
   `unverifiable_open_periods`, reported beside `forced_liquidations`, and **G3

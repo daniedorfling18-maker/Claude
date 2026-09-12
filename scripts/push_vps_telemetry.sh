@@ -117,8 +117,8 @@ fi
 # summary, so it is the only place the H2 episode count is observable between
 # evaluator runs. Summary JSON plus two capped CSVs, same class as
 # event_group_consistency directly above it.
-# Deliberately NOT added: the corpora (polymarket_training, _websocket,
-# _trade_prints, _training_archive and the rest). 25 output dirs are unmirrored
+# Deliberately NOT added: the heavy capture corpora (training, websocket,
+# trade-print and training-archive dirs, and the rest). 25 output dirs are unmirrored
 # and most are unmirrored on purpose - this mirror carries summaries, not data.
 # Keep comments OUTSIDE the string: it is newline-split by the for loop below,
 # so a "#" line would be consumed as a directory path.

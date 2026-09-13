@@ -783,3 +783,53 @@ def test_two_tier_accounting_on_non_finite_inputs(tmp_path, monkeypatch):
     assert block["by_line_basis"]["line_price_unparseable"] == 1
     assert block["would_bind"]["gate_a"] == "pending"
     assert block["inference"]["interval_90"] is None
+
+
+def test_measurement_v2_shape_is_uniform_and_the_fee_matches_its_population(tmp_path, monkeypatch):
+    """WO-169 delta 2, from the build line audit.
+
+    Two defects: an absent ledger returned a block missing six keys, so a consumer indexing
+    them raised instead of reading a null; and `mean_taker_fee_per_dollar` was averaged over
+    every Gate A unit while the mean it is subtracted from covers only per-dollar-eligible
+    units, so a final at `entry_price == 1.0` contributed a zero fee to the average without
+    contributing to the mean — raising `net_after_costs` above what its population supports."""
+    import polymarket_predictive_engine.profit_verdict as pv
+
+    cfg = _config(tmp_path)
+    write_csv(cfg.governance_root / "closing_line_final_history.csv", [], fieldnames=["shadow_position_id", "line_kind", "clv"])
+    monkeypatch.setattr("polymarket_predictive_engine.profit_verdict.now_utc", lambda: "2026-07-01T00:00:00Z")
+    empty = build_profit_verdict(cfg)["measurement_v2"]
+    assert empty["state"] == "unavailable"
+    for key in ("population", "by_line_basis", "per_share", "per_dollar", "inference"):
+        assert key in empty and empty[key] is None
+    assert empty["would_bind"]["gate_a"] == "pending"
+    assert empty["would_bind"]["gate_b"] == "not_evaluated"
+
+    # A final at entry_price == 1.0 is charged a zero fee by Gate B's tuple and is excluded
+    # from the per-dollar basis by tier two. The two averages must now differ.
+    (tmp_path / "priced").mkdir()
+    priced = _config(tmp_path / "priced")
+    write_csv(
+        priced.governance_root / "closing_line_final_history.csv",
+        [
+            {"shadow_position_id": "p0", "signal_cohort": "sharp_anchor_wc", "market_id": "m0", "line_kind": "closing", "clv": 0.05, "entry_price": 0.5, "line_price": 0.55},
+            {"shadow_position_id": "p1", "signal_cohort": "sharp_anchor_wc", "market_id": "m1", "line_kind": "closing", "clv": 0.0, "entry_price": 1.0, "line_price": 1.0},
+        ],
+        fieldnames=["shadow_position_id", "signal_cohort", "market_id", "line_kind", "clv", "entry_price", "line_price"],
+    )
+    block = build_profit_verdict(priced)["measurement_v2"]
+    assert block["population"]["per_dollar_excluded_by_reason"]["invalid_entry_price"] == 1
+    assert block["population"]["per_dollar_units"] == 1
+    # Gate B's own figure averages 0.025 and 0.0; the per-dollar figure reads only the unit
+    # that is actually in the mean, so the charge is the larger, honest one.
+    assert block["per_dollar"]["gate_b_mean_taker_fee_per_dollar"] == 0.0125
+    assert block["per_dollar"]["mean_taker_fee_per_dollar"] == 0.025
+    assert block["per_dollar"]["net_after_costs"] == round(0.1 - 0.005 - 0.005 - 0.025, 6)
+
+    # The register's literal path `by_line_basis[<value>]` resolves, and the nested alias too.
+    (tmp_path / "fixture").mkdir()
+    fixture = _config(tmp_path / "fixture")
+    _install_recorded_fixture(fixture)
+    recorded = build_profit_verdict(fixture)["measurement_v2"]
+    assert recorded["by_line_basis"][""] == 70
+    assert recorded["by_line_basis"]["counts"] == {"": 70}

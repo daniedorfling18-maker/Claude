@@ -111,3 +111,32 @@ def test_recorded_fixture_provenance_and_no_credentials():
     assert "tests/fixtures/recorded/closing_line_final_history_2026-08-21.csv -text" in attributes
 
     assert _scan_csv(FIXTURE, REPO_ROOT, tail_rows=None) == []
+
+
+def test_force_replace_never_destroys_the_previous_run_first(tmp_path):
+    """WO-169 delta 2, from the build line audit: the old code removed the destination
+    before the rename, so a crash in that window left no output directory at all, and it
+    rmtree'd a sibling `.NAME.tmp` path outside `--output-dir`."""
+    out_dir = tmp_path / "recon"
+    assert cli.main([
+        "profit-verdict-reconcile", "--config", "/nonexistent/config.yaml",
+        "--final-history", str(FIXTURE), "--output-dir", str(out_dir),
+    ]) == 0
+    first = (out_dir / "reconciliation.json").read_bytes()
+
+    # A bystander at the sibling staging path the old code would have deleted.
+    bystander = tmp_path / ".recon.tmp"
+    bystander.mkdir()
+    (bystander / "keep.txt").write_text("not this command's to delete", encoding="utf-8")
+
+    assert cli.main([
+        "profit-verdict-reconcile", "--config", "/nonexistent/config.yaml",
+        "--final-history", str(FIXTURE), "--output-dir", str(out_dir), "--force",
+    ]) == 0
+    assert (bystander / "keep.txt").read_text(encoding="utf-8") == "not this command's to delete"
+    assert (out_dir / "reconciliation.json").exists() and (out_dir / "report.md").exists()
+    payload = json.loads((out_dir / "reconciliation.json").read_text(encoding="utf-8"))
+    assert payload["corrected"]["per_dollar_unit_mean"] == -0.086501
+    assert json.loads(first)["input"]["sha256"] == payload["input"]["sha256"]
+    # No staging directory is left behind beside the destination.
+    assert sorted(entry.name for entry in tmp_path.iterdir()) == [".recon.tmp", "recon"]

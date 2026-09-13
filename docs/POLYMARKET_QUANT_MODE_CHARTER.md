@@ -2088,3 +2088,90 @@ VPS paper deploy on `main` both queued since 2026-09-12. Under the GLOBAL RULE, 
 registered only when that gate runs and its squash-merge lands; until then this is a sandbox
 result and not verification of record. Nothing here authorises paper trading, live trading, or
 capital. `paper_trading_invoked=false`, `live_trading_invoked=false`.
+
+## 2026-09-13 — Corrected measurement (diagnostic; not verification of record): the legacy verdict engine's binding metric is a per-share price difference labelled per dollar
+
+WO-169 was registered because an external review found three things about the closing-line and
+verdict chain at once: `clv = line_price − entry_price` is a per-share probability-point
+difference that `profit_verdict.py` consumes as "net settlement return per dollar", subtracting
+per-dollar fees and haircuts from it; a last observed quote is graded as if it were a settlement
+payout, with no field saying which it is; and the sign test tests win frequency, not expectancy.
+A two-cent gain on a ten-cent purchase is a 20% return, not 2%.
+
+**The binding metric was not changed.** The owner's WO-87 decision of 2026-07-14 is that the
+binding Gate A metric is not swapped mid-study, and it stands. WO-169 adds, beside it, explicit
+per-share and per-dollar fields, a `line_basis` saying which path produced each line, a
+best-effort settlement join from the WO-101 resolution corpus, and a non-binding `measurement_v2`
+block. Whether the binding metric should be replaced is an owner decision this record does not
+make and this work order does not authorise.
+
+**The figures below were computed by the drafting agent in an agent sandbox on 2026-09-13** from
+`tests/fixtures/recorded/closing_line_final_history_2026-08-21.csv`, a committed snapshot taken
+byte-identically from `origin/vps-telemetry:telemetry/outputs/polymarket_model_governance/closing_line_final_history.csv`
+at `fcebaa2` (2026-08-21T02:00:09Z, sha256 `4b66d07f1050125dbe01d39220fafc1261929291090b9e565abba4d6b4b17b33`,
+90 rows). That is a repository path, not a VPS or `paths.output_root` path; no amendment in force
+permits computing on production telemetry in a sandbox. **Diagnostic; not verification of record.**
+The run of record is on the VPS, against the governance ledger, after deployment.
+
+| quantity | legacy, per share (binding) | corrected, per dollar (non-binding) |
+|---|---|---|
+| unit mean | **−0.013943** | **−0.086501** |
+| independent market units | 55 | 55 |
+| units positive | 22 | 22 |
+| sign-test p | 0.947605 | unchanged by the unit correction |
+| 90% market-cluster bootstrap interval | not computed on the binding path | [−0.281562, 0.114739] |
+| cluster standard error | — | 0.118009 |
+| mean taker fee per dollar | — | 0.026809 |
+| net of the registered exit and adverse-selection haircuts and the fee | — | **−0.12331** |
+| Gate A read on this basis | `fail` (unit mean ≤ 0) | `would_bind.gate_a = fail` |
+
+Population, in two tiers, both identities asserted: 90 ledger rows, all closing; 20 excluded as a
+frozen diagnostic cohort; 70 eligible finals, matching Gate A's own `settled_finals_total`; 55
+units, matching Gate A's clustering; 70 per-dollar-eligible finals with no exclusion. Of the 70
+eligible finals, **21 carry a `line_price` strictly inside (0.01, 0.99)** — a last observed quote,
+not a settlement payout — and **0 are settlement-verified**, because the three resolution
+collectors do not select the shadow cohort's tokens. That coverage gap is a named prerequisite
+work order, not yet drafted, and every unverified row now carries its reason instead of passing
+silently.
+
+**The correction is unfavourable to the tested strategy and cannot produce a YES.** The sign test
+is unchanged because dividing by a positive entry price changes no sign; it tests whether more
+than half the units won, which is not a test of expected profit, and the block says so in a
+literal sentence. The engine's terminal verdict on the registered clock remains
+`no_for_tested_edge_classes`.
+
+**Recorded for the owner, not touched.** On the binding path `utils.safe_float("nan")` returns
+NaN; a `clv = "nan"` row passes the Gate A filter; a NaN unit mean makes `mean <= 0` read False;
+and Gate A can then reach `pass` on the sign test alone. That is a fail-open of the A2 class on a
+frozen surface. The mirrored ledger contains no such row, and WO-169 does not repair it: repairing
+a frozen gate is an owner decision. A test asserts the behaviour as it stands so the finding
+cannot be lost.
+
+**Build deltas.** Delta 1: the recorded fixture terminates its lines with CRLF while the
+repository normalises `*.csv` to LF, so the first staged blob hashed `1098f71d…` instead of the
+recorded `4b66d07f…`; `.gitattributes` exempts that one path and a test asserts the exemption, the
+terminator count and the hash together. Delta 2, from the independent line audit: an unreadable
+corpus raised `UnicodeDecodeError` past the `(OSError, csv.Error)` catch and would have aborted
+the entire closing-line build, so the join now reads with `errors="replace"` and catches the wider
+set; an absent corpus with no graded token read as available and now reads unavailable; two corpus
+shapes borrowed a neighbouring row's reason and now carry their own,
+`clean_settlement_without_winning_token_id` and `blank_resolution_quality`, which extend the
+registered closed set by exactly two literals; a non-finite `clv` serialised as the string `nan`
+and now serialises blank; the per-dollar fee was averaged over a wider population than the mean it
+is subtracted from and is now averaged over the same units, with Gate B's own figure kept beside
+it; the block's shape is uniform across `state`; the register's literal `by_line_basis[<value>]`
+path resolves; and the reconcile command no longer removes its destination before the replacement
+is in place. All are non-binding or fail-closed; none changes a gate, a threshold or the verdict.
+
+### Day-after check
+
+On the VPS, after the first dashboard payload render following deployment:
+`outputs/polymarket_model_governance/profit_verdict.json` carries `measurement_v2` with
+`binding = false`, `state = "ok"`, both population identities holding, and `settlement_join`
+reported with `positions_checked` equal to `closing_line_value.final_line_positions`;
+`gates.A_edge_exists` still reads 55 units, 70 finals, −0.013943, 22 profitable and p = 0.947605,
+the ledger being unchanged since 2026-08-21; `closing_line_final_history.csv` gains exactly
+`line_basis` with `""` on every pre-deployment row and an unchanged row count of 90. As of
+2026-09-13 the self-hosted runner is offline, so this is a sandbox result and not verification of
+record. Nothing here authorises paper trading, live trading, or capital.
+`paper_trading_invoked=false`, `live_trading_invoked=false`.

@@ -584,10 +584,6 @@ def _build_pre_event_clv_diagnostic(
     }
 
 
-def _finite(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
-
-
 def _unit_key(row: dict[str, Any]) -> str:
     return str(row.get("market_id") or row.get("market_slug") or "").strip() or str(row.get("shadow_position_id") or "").strip()
 
@@ -608,7 +604,15 @@ def _build_measurement_v2(
     block: dict[str, Any] = {"binding": False, "note": MEASUREMENT_V2_NOTE, "registered_on": "2026-09-13", "same_clustering_as_gate_a": True}
     rows = read_csv_rows(final_history_path)
     if not rows:
+        # Build-review finding: an absent ledger used to return a block missing six keys, so a
+        # consumer indexing them raised instead of reading a null. The shape is now uniform.
         block["state"] = "unavailable"
+        block["population"] = None
+        block["by_line_basis"] = None
+        block["per_share"] = None
+        block["per_dollar"] = None
+        block["inference"] = None
+        block["would_bind"] = {"gate_a": "pending", "gate_b": "not_evaluated", "binding": False, "basis": "per_dollar", "units_read": 0}
         return block
     closing = [row for row in rows if str(row.get("line_kind") or "") == "closing"]
     # tier one: Gate A's four filters, in Gate A's order
@@ -629,9 +633,11 @@ def _build_measurement_v2(
     # tier two: the per-dollar basis needs a finite return and an entry price inside (0, 1)
     tier_two = {"invalid_entry_price": 0, "non_finite_return": 0}
     per_dollar_units: list[float] = []
+    per_dollar_unit_fees: list[float] = []
     per_dollar_eligible = 0
     for unit_id in sorted(cluster_rows):
         values: list[float] = []
+        fees: list[float] = []
         for row in cluster_rows[unit_id]:
             entry_price = safe_float(row.get("entry_price"))
             clv = safe_float(row.get("clv"))
@@ -642,9 +648,11 @@ def _build_measurement_v2(
                 tier_two["non_finite_return"] += 1
                 continue
             values.append(clv / entry_price)
+            fees.append(float(settings["taker_fee_rate"]) * (1.0 - entry_price))
         if values:
             per_dollar_eligible += len(values)
             per_dollar_units.append(sum(values) / len(values))
+            per_dollar_unit_fees.append(sum(fees) / len(fees))
     population = {
         "final_history_rows": len(rows),
         "closing_rows": len(closing),
@@ -681,7 +689,8 @@ def _build_measurement_v2(
     eligible_ids = {str(row.get("shadow_position_id") or "").strip() for row in eligible}
     verified_ids = {pid for pid in settlement_by_position if pid in eligible_ids}
     block["by_line_basis"] = {
-        "counts": dict(sorted(by_basis.items())),
+        **dict(sorted(by_basis.items())),
+        "counts": dict(sorted(by_basis.items())),  # one-release alias for a reader pinned to the nested shape
         "line_price_strictly_inside_0_01_0_99": inside_001,
         "line_price_strictly_inside_0_10_0_90": inside_010,
         "line_price_unparseable": unparseable,
@@ -702,7 +711,13 @@ def _build_measurement_v2(
         per_share.update({"unit_mean": round(per_share_mean, 6), "units_positive": positive, "sign_test_p": round(_sign_test_p(positive, len(unit_means)), 6)})
     block["per_share"] = per_share
     # per dollar
-    mean_fee = round(sum(unit_fee_means) / len(unit_fee_means), 6) if unit_fee_means else None
+    # Build-review finding: the fee must be averaged over the SAME units as the mean it is
+    # subtracted from. Gate B's tuple covers every Gate A unit, including finals tier two
+    # excluded, and a final at entry_price == 1.0 contributes a zero fee to that average while
+    # contributing nothing to the mean — raising net_after_costs above what its population
+    # supports. `gate_b_mean_taker_fee_per_dollar` keeps Gate B's own figure for comparison.
+    gate_b_mean_fee = round(sum(unit_fee_means) / len(unit_fee_means), 6) if unit_fee_means else None
+    mean_fee = round(sum(per_dollar_unit_fees) / len(per_dollar_unit_fees), 6) if per_dollar_unit_fees else None
     pd_mean = sum(per_dollar_units) / len(per_dollar_units) if per_dollar_units else None
     pd_positive = sum(1 for v in per_dollar_units if v > 0)
     settlement_values: dict[str, list[float]] = {}
@@ -719,6 +734,7 @@ def _build_measurement_v2(
         "settlement_unit_mean": round(sum(settlement_unit_means) / len(settlement_unit_means), 6) if settlement_unit_means else None,
         "units_positive": pd_positive,
         "mean_taker_fee_per_dollar": mean_fee,
+        "gate_b_mean_taker_fee_per_dollar": gate_b_mean_fee,
         "net_after_costs": round(pd_mean - haircut - mean_fee, 6) if pd_mean is not None and mean_fee is not None else None,
     }
     block["per_dollar"] = per_dollar
@@ -815,15 +831,27 @@ def run_verdict_reconcile(final_history: str | Path, output_dir: str | Path, *, 
         "Differences: " + "; ".join(f"{d['name']} — {d['detail']}" for d in payload["differences"]) + ".",
         "",
     ]
-    tmp = out_dir.with_name(f".{out_dir.name}.tmp")
-    if tmp.exists():
-        shutil.rmtree(tmp)
-    tmp.mkdir(parents=True)
-    write_json(tmp / "reconciliation.json", payload)
-    (tmp / "report.md").write_text("\n".join(lines), encoding="utf-8")
+    # Build-review finding: the previous form removed the destination before the rename, so a
+    # crash in that window left no output directory at all, and it rmtree'd a sibling path
+    # outside --output-dir. The staging directory is now created by mkdtemp beside the
+    # destination (same filesystem, so rename is atomic) and the old directory is moved aside
+    # first, so a replacement never destroys the previous run before the new one is in place.
+    out_dir.parent.mkdir(parents=True, exist_ok=True)
+    staged_out = Path(tempfile.mkdtemp(prefix=f".{out_dir.name}.", dir=out_dir.parent))
+    write_json(staged_out / "reconciliation.json", payload)
+    (staged_out / "report.md").write_text("\n".join(lines), encoding="utf-8")
+    previous = None
     if out_dir.exists():
-        shutil.rmtree(out_dir)
-    tmp.rename(out_dir)
+        previous = Path(tempfile.mkdtemp(prefix=f".{out_dir.name}.old.", dir=out_dir.parent)) / "previous"
+        out_dir.rename(previous)
+    try:
+        staged_out.rename(out_dir)
+    except OSError:
+        if previous is not None:
+            previous.rename(out_dir)
+        raise
+    if previous is not None:
+        shutil.rmtree(previous.parent, ignore_errors=True)
     return payload
 
 

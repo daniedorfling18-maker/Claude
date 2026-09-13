@@ -87,6 +87,10 @@ SETTLEMENT_REASON_UNAVAILABLE = "resolution_corpus_unavailable"
 
 def _unit_fields(clv: float, entry_price: float | None) -> dict[str, Any]:
     """WO-169: the per-share difference and the per-dollar return, named by their units."""
+    if not (isinstance(clv, (int, float)) and math.isfinite(float(clv))):
+        # Build-review finding: `round(nan, 6)` serialises as the string "nan", which every
+        # safe_float reader takes as a number. A quantity that is not a number is blank.
+        return {"clv_per_share": "", "return_per_dollar": ""}
     per_dollar = round(clv / entry_price, 6) if entry_price is not None and 0 < entry_price < 1 else ""
     return {"clv_per_share": round(clv, 6), "return_per_dollar": per_dollar}
 
@@ -481,16 +485,23 @@ def _aggregate(rows: list[dict[str, Any]], key_field: str, *, minimum_final_samp
 def _read_resolution_observations(path: Path, tokens: set[str]) -> tuple[str, dict[str, list[tuple[str, str]]]]:
     """One streaming pass over the WO-101 corpus, keeping only the graded tokens: token -> [(resolution_quality, winning_token_id)]."""
     observations: dict[str, list[tuple[str, str]]] = {}
+    if not path.exists():
+        # Build-review finding: with no graded token the old code returned "ok" without ever
+        # looking, so an absent corpus could read as available. Availability is a fact about
+        # the file, not about how many tokens happen to need it.
+        return SETTLEMENT_REASON_UNAVAILABLE, {}
     if not tokens:
         return "ok", observations
     try:
-        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        # errors="replace", as utils.read_csv_rows uses: one corrupt byte appended by a
+        # collector must leave this join best-effort, not abort every downstream artifact.
+        with path.open("r", encoding="utf-8-sig", newline="", errors="replace") as handle:
             for row in csv.DictReader(handle):
                 token_id = str(row.get("token_id") or "").strip()
                 if token_id not in tokens:
                     continue
                 observations.setdefault(token_id, []).append((str(row.get("resolution_quality") or "").strip(), str(row.get("winning_token_id") or "").strip()))
-    except (OSError, csv.Error):
+    except (OSError, csv.Error, UnicodeDecodeError, ValueError):
         return SETTLEMENT_REASON_UNAVAILABLE, {}
     return "ok", observations
 
@@ -528,7 +539,17 @@ def _join_settlement(cfg: EngineConfig, rows: list[dict[str, Any]]) -> dict[str,
                 elif len(winners) == 1:
                     payout = 1 if next(iter(winners)) == token_id else 0
                 else:
-                    reason = seen[-1][0] or "token_not_in_corpus"
+                    # Build-review finding: the old code took the LAST observation's quality,
+                    # so a lone clean_settlement with no winner reported "clean_settlement" (a
+                    # reason that reads as verified) and a blank quality reported
+                    # "token_not_in_corpus" (factually false: the token IS in the corpus).
+                    qualities = [quality for quality, _ in seen if quality and quality != SETTLEMENT_CLEAN_QUALITY]
+                    if qualities:
+                        reason = qualities[-1]
+                    elif any(quality == SETTLEMENT_CLEAN_QUALITY for quality, _ in seen):
+                        reason = "clean_settlement_without_winning_token_id"
+                    else:
+                        reason = "blank_resolution_quality"
         if payout is None:
             row["settlement_reason"] = reason
             unverified[reason] = unverified.get(reason, 0) + 1

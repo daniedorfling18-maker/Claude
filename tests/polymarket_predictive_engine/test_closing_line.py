@@ -562,3 +562,70 @@ def test_settlement_join_from_the_resolution_corpus(tmp_path: Path):
     again = build_closing_line_value(cfg, as_of=AS_OF)
     assert again["settlement_join"]["state"] == "resolution_corpus_unavailable"
     assert again["settlement_join"]["unverified_by_reason"] == {"resolution_corpus_unavailable": 5}
+
+
+def test_an_unreadable_corpus_leaves_the_build_standing(tmp_path: Path):
+    """WO-169 delta 2, from the build line audit: the join is best-effort, so one corrupt
+    byte appended by a collector must not abort the whole closing-line build.
+
+    The old code opened the corpus without `errors=`, so a `UnicodeDecodeError` escaped the
+    `(OSError, csv.Error)` catch and every downstream reader silently consumed a stale
+    artifact. It also returned "ok" without looking at the file whenever no token needed
+    grading, so an absent corpus could read as available."""
+    import polymarket_predictive_engine.closing_line as cl
+
+    cfg = _cfg(tmp_path)
+    corpus = cfg.output_root / "polymarket_training" / "resolution_corpus_v1.csv"
+    corpus.parent.mkdir(parents=True, exist_ok=True)
+    corpus.write_bytes(b"token_id,winning_token_id,resolution_quality\ntokA,\xff\xfe,clean_settlement\n")
+    state, observations = cl._read_resolution_observations(corpus, {"tokA"})
+    assert state == "ok"
+    assert "tokA" in observations
+
+    corpus.unlink()
+    # Availability is a fact about the file, not about how many tokens happen to need it.
+    assert cl._read_resolution_observations(corpus, set())[0] == "resolution_corpus_unavailable"
+    assert cl._read_resolution_observations(corpus, {"tokA"})[0] == "resolution_corpus_unavailable"
+
+
+def test_corpus_shapes_that_verify_nothing_are_named_honestly(tmp_path: Path):
+    """WO-169 delta 2: a reason must say what is actually true of the row.
+
+    The old code took the LAST observation's quality, so a lone `clean_settlement` carrying no
+    winner reported `clean_settlement` — a reason that reads as if the row were verified — and
+    a blank quality reported `token_not_in_corpus`, which is false: the token IS in the corpus."""
+    import polymarket_predictive_engine.closing_line as cl
+
+    cfg = _cfg(tmp_path)
+    _corpus(
+        cfg,
+        [
+            {"resolution_observation_id": "r1", "token_id": "tokNoWinner", "winning_token_id": "", "resolution_quality": "clean_settlement"},
+            {"resolution_observation_id": "r2", "token_id": "tokBlank", "winning_token_id": "", "resolution_quality": ""},
+            {"resolution_observation_id": "r3", "token_id": "tokMixed", "winning_token_id": "", "resolution_quality": "unresolved_active"},
+            {"resolution_observation_id": "r4", "token_id": "tokMixed", "winning_token_id": "", "resolution_quality": "clean_settlement"},
+        ],
+    )
+    rows = [{"line_kind": "closing", "token_id": token, "entry_price": 0.4} for token in ("tokNoWinner", "tokBlank", "tokMixed")]
+    join = cl._join_settlement(cfg, rows)
+    assert join["verified"] == 0
+    assert rows[0]["settlement_reason"] == "clean_settlement_without_winning_token_id"
+    assert rows[1]["settlement_reason"] == "blank_resolution_quality"
+    # A real non-clean quality still wins over the clean-without-winner case.
+    assert rows[2]["settlement_reason"] == "unresolved_active"
+    assert join["unverified_by_reason"] == {
+        "blank_resolution_quality": 1,
+        "clean_settlement_without_winning_token_id": 1,
+        "unresolved_active": 1,
+    }
+
+
+def test_a_non_finite_clv_serialises_blank_not_the_string_nan(tmp_path: Path):
+    """WO-169 delta 2: `round(nan, 6)` writes the token `nan`, which every `safe_float`
+    reader takes as a number. A quantity that is not a number is written blank."""
+    import polymarket_predictive_engine.closing_line as cl
+
+    assert cl._unit_fields(float("nan"), 0.5) == {"clv_per_share": "", "return_per_dollar": ""}
+    assert cl._unit_fields(float("inf"), 0.5) == {"clv_per_share": "", "return_per_dollar": ""}
+    assert cl._unit_fields(0.02, 0.1) == {"clv_per_share": 0.02, "return_per_dollar": 0.2}
+    assert cl._unit_fields(0.02, 0.0) == {"clv_per_share": 0.02, "return_per_dollar": ""}

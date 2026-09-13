@@ -239,3 +239,68 @@ def test_entry_helper_never_returns_a_boundary_before_its_argument_and_simulate_
         carry.simulate(table, variant="V0", start_ms=MONDAY - HOUR_MS, end_ms=int(table["boundary_ms"].iloc[-1]))
     with pytest.raises(carry.CarryInputError, match="refuse to shift"):
         carry.simulate(table, variant="V0", start_ms=MONDAY, end_ms=int(table["boundary_ms"].iloc[-1]) + HOUR_MS)
+
+
+def test_boundary_table_flags_each_leg_separately() -> None:
+    funding = pd.DataFrame({"calc_time": [MONDAY, MONDAY + PERIOD_MS, MONDAY + 2 * PERIOD_MS], "last_funding_rate": [0.0001] * 3})
+    hours = [MONDAY - HOUR_MS + i * HOUR_MS for i in range(17)]
+    perp = pd.DataFrame({"open_time": hours, "open": 1.0, "high": 1.0, "low": 1.0, "close": 100.0})
+    spot = pd.DataFrame({"open_time": hours, "open": 1.0, "high": 1.0, "low": 1.0, "close": 99.0})
+    spot_gap = spot[spot["open_time"] != MONDAY + PERIOD_MS - HOUR_MS]  # the hour ending at boundary 1, spot only
+    table = carry.boundary_table(funding, perp, spot_gap)
+    assert table["spot_close_missing"].tolist() == [False, True, False]
+    assert table["perp_close_missing"].tolist() == [False, False, False]
+    assert table["close_missing"].tolist() == [False, True, False]
+    perp_gap = perp[perp["open_time"] != MONDAY + PERIOD_MS - HOUR_MS]
+    table = carry.boundary_table(funding, perp_gap, spot)
+    assert table["perp_close_missing"].tolist() == [False, True, False]
+    assert table["spot_close_missing"].tolist() == [False, False, False]
+    assert table["high_partial"].tolist() == [True, True, False]  # row 0 has one hour; row 1 lost one of its eight
+
+
+def _with_gap(table: pd.DataFrame, row: int, *, spot: bool = False, perp: bool = False) -> pd.DataFrame:
+    table = table.copy()
+    if spot:
+        table.loc[row, "spot_close"] = float("nan")
+    if perp:
+        table.loc[row, "perp_close"] = float("nan")
+    table.loc[row, "close_missing"] = True
+    table["perp_close_missing"] = table["perp_close"].isna()
+    table["spot_close_missing"] = table["spot_close"].isna()
+    return table
+
+
+def test_spot_only_gap_is_rejected_but_verifiable_under_perp_scope() -> None:
+    table = _with_gap(_table(1 + 21, rate=0.0001), 5, spot=True)
+    either = _run(table)
+    perp = _run(table, unverifiable_scope="perp")
+    assert either["unverifiable_open"].tolist()[5:7] == [1, 1] and int(either["unverifiable_open"].sum()) == 2
+    assert int(perp["unverifiable_open"].sum()) == 0
+    assert not carry.weekly_returns(either)["eligible"].any() and not carry.weekly_returns(perp)["eligible"].any()
+    assert either["wealth"].tolist() == perp["wealth"].tolist() and either["funding_received"].tolist() == perp["funding_received"].tolist()
+
+
+def test_perp_gap_is_unverifiable_under_both_scopes() -> None:
+    partial = _table(1 + 21, rate=0.0001)
+    partial.loc[9, "high_hours"] = 6
+    partial.loc[9, "high_partial"] = True
+    partial["perp_close_missing"] = False
+    partial["spot_close_missing"] = False
+    assert int(_run(partial)["unverifiable_open"].sum()) == 1
+    assert int(_run(partial, unverifiable_scope="perp")["unverifiable_open"].sum()) == 1
+    # a whole absent perpetual bar at boundary 5: it is row 5's 8th high and row 6's start close
+    whole = _with_gap(_table(1 + 21, rate=0.0001), 5, perp=True)
+    whole.loc[5, "high_hours"] = 7
+    whole.loc[5, "high_partial"] = True
+    assert int(_run(whole)["unverifiable_open"].sum()) == 2
+    assert _run(whole, unverifiable_scope="perp")["unverifiable_open"].tolist()[5:7] == [1, 1]
+    # a NaN perpetual close with the high left present (unreachable from fetched data)
+    closed = _with_gap(_table(1 + 21, rate=0.0001), 5, perp=True)
+    assert int(_run(closed)["unverifiable_open"].sum()) == 2
+    assert _run(closed, unverifiable_scope="perp")["unverifiable_open"].tolist()[5:7] == [0, 1]
+
+
+def test_unknown_scope_aborts() -> None:
+    table = _table(3)
+    with pytest.raises(carry.CarryInputError, match="unknown unverifiable_scope"):
+        carry.simulate(table, variant="V0", start_ms=int(table["boundary_ms"].iloc[0]), end_ms=int(table["boundary_ms"].iloc[-1]), unverifiable_scope="spot")

@@ -35,7 +35,7 @@ def _write(path: Path, frame: pd.DataFrame) -> ManifestEntry:
     )
 
 
-def build_synthetic_root(root: Path, *, seed: int = 11, funding_level: float = 0.0002, drop_perp_hour: int | None = None) -> None:
+def build_synthetic_root(root: Path, *, seed: int = 11, funding_level: float = 0.0002, drop_perp_hour: int | None = None, drop_spot_hour: int | None = None) -> None:
     """A small but complete research tree: two symbols, 100 days, hourly prices, 8h funding, DVOL, Deribit funding."""
     rng = np.random.default_rng(seed)
     hours = DAYS * 24
@@ -50,6 +50,8 @@ def build_synthetic_root(root: Path, *, seed: int = 11, funding_level: float = 0
         perp_frame = pd.DataFrame({"open_time": open_time, "open": perp, "high": perp * 1.002, "low": perp * 0.998, "close": perp})
         if drop_perp_hour is not None and symbol == "BTCUSDT":
             perp_frame = perp_frame.drop(index=drop_perp_hour).reset_index(drop=True)
+        if drop_spot_hour is not None and symbol == "BTCUSDT":
+            spot_frame = spot_frame.drop(index=drop_spot_hour).reset_index(drop=True)
         boundaries = np.array([START + i * 8 * HOUR_MS for i in range(1, DAYS * 3)], dtype=np.int64)
         funding = pd.DataFrame({"calc_time": boundaries, "calc_time_raw": boundaries, "funding_interval_hours": 8, "last_funding_rate": funding_level + rng.normal(0.0, 0.00005, size=len(boundaries))})
         entries.append(_write(root / "data" / "binance" / f"{symbol}_funding_8h.csv", funding))
@@ -261,3 +263,61 @@ def test_binance_manifest_entries_must_carry_verified_upstream_checksums(tmp_pat
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     failures = verify_manifest(root / "manifest.json", root)
     assert len(failures) == 6 and all("binance entry without verified upstream checksums" in f for f in failures)
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_wo166_results_still_verify_under_the_default_scope() -> None:
+    root = REPO_ROOT / "research" / "premium_poc"
+    assert (root / "results" / "carry_v0.json").is_file()
+    assert runner.verify_results(root) == []
+
+
+def _scope_config(base: runner.Config, **overrides) -> runner.Config:
+    return runner.Config(**{**base.__dict__, **overrides})
+
+
+def test_wo167_config_writes_its_own_results_directory_and_records_the_scope(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, funding_level=0.0006, drop_spot_hour=24 * 10 + 7)  # the hour ending at a boundary, spot only
+    wo166 = _scope_config(small_config())
+    wo167 = _scope_config(small_config(), unverifiable_scope="perp", work_order="WO-167", results_dir="results_wo167")
+    runner.run_all(root, code_revision="x", generated_at="2026-09-13T00:00:00Z", config=wo166)
+    runner.run_all(root, code_revision="x", generated_at="2026-09-13T00:00:00Z", config=wo167)
+    a = json.loads((root / "results" / "carry_v0.json").read_text(encoding="utf-8"))
+    b = json.loads((root / "results_wo167" / "carry_v0.json").read_text(encoding="utf-8"))
+    assert a["work_order"] == "WO-166" and "unverifiable_scope" not in a  # WO-166's JSON gains no key
+    assert b["work_order"] == "WO-167" and b["unverifiable_scope"] == "perp"
+    assert a["pooled"]["unverifiable_open_periods"] == 2 and a["gates"]["G3_drawdown_bounded_and_no_forced_liquidation"] is False
+    assert b["pooled"]["unverifiable_open_periods"] == 0 and b["gates"]["G3_drawdown_bounded_and_no_forced_liquidation"] is True
+    for key in ("mean_weekly_return_on_capital", "annualised_return_on_capital", "annualised_lower_bound_after_haircut", "yearly_return_on_capital", "eligible_weeks", "max_drawdown_all_weeks"):
+        assert a["pooled"][key] == b["pooled"][key], key
+    assert sorted(p.name for p in (root / "results").iterdir()) == sorted(runner.RESULT_FILES)
+    text = (root / "results_wo167" / "report.md").read_text(encoding="utf-8")
+    assert text.startswith("# WO-167 proof-of-concept results") and "**perp**" in text
+    assert "Completeness scope" not in (root / "results" / "report.md").read_text(encoding="utf-8")
+    assert runner.verify_results(root, config=wo166) == []
+    assert runner.verify_results(root, config=wo167) == []
+
+
+def test_run_refuses_a_second_wo167_pass(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root)
+    wo167 = _scope_config(small_config(), unverifiable_scope="perp", work_order="WO-167", results_dir="results_wo167")
+    runner.run_all(root, code_revision="x", generated_at="2026-09-13T00:00:00Z", config=wo167)
+    with pytest.raises(RuntimeError, match="one analysis pass"):
+        runner.run_all(root, code_revision="x", generated_at="2026-09-13T00:00:00Z", config=wo167)
+
+
+def test_verify_results_selector_recomputes_under_the_right_scope(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, funding_level=0.0006, drop_spot_hour=24 * 10 + 7)
+    wo167 = _scope_config(small_config(), unverifiable_scope="perp", work_order="WO-167", results_dir="results_wo167")
+    runner.run_all(root, code_revision="x", generated_at="2026-09-13T00:00:00Z", config=wo167)
+    assert runner.verify_results(root, config=wo167) == []
+    wrong_scope = _scope_config(small_config(), unverifiable_scope="either", work_order="WO-167", results_dir="results_wo167")
+    failures = runner.verify_results(root, config=wrong_scope)
+    assert failures and all(f.startswith("byte difference") for f in failures)
+    with pytest.raises(ValueError, match="unknown unverifiable_scope"):
+        runner.Config(unverifiable_scope="spot")

@@ -70,10 +70,19 @@ class Config:
     n_draws: int = DEFAULT_DRAWS
     seed: int = DEFAULT_SEED
     sma_days: int = 200
+    # WO-167: which absent bars make an open period's liquidation status unverifiable.
+    # "either" is WO-166's registered rule (any leg) and stays the default so its committed results verify.
+    unverifiable_scope: str = "either"
+    work_order: str = WORK_ORDER
+    results_dir: str = "results"
 
     @property
     def gate_level(self) -> float:
         return 1.0 - 2.0 * self.gate_quantile
+
+    def __post_init__(self) -> None:
+        if self.unverifiable_scope not in carry.UNVERIFIABLE_SCOPES:
+            raise ValueError(f"unknown unverifiable_scope {self.unverifiable_scope!r}")
 
     @property
     def report_level(self) -> float:
@@ -270,7 +279,7 @@ def lane_a(inputs: dict[str, Any], config: Config, *, variant: str, fee_mult: fl
     per_asset: dict[str, Any] = {}
     weekly_by_asset: dict[str, pd.DataFrame] = {}
     for symbol, table in tables.items():
-        ledger = carry.simulate(table, variant=variant, start_ms=entry_ms, end_ms=exit_ms, fee_mult=fee_mult)
+        ledger = carry.simulate(table, variant=variant, start_ms=entry_ms, end_ms=exit_ms, fee_mult=fee_mult, unverifiable_scope=config.unverifiable_scope)
         frame = carry.ledger_frame(ledger)
         weekly = carry.weekly_returns(frame)
         weekly_by_asset[symbol] = weekly
@@ -472,7 +481,7 @@ def _parameters(config: Config) -> dict[str, Any]:
 def compute_all(root: Path, *, config: Config, code_revision: str, generated_at: str) -> dict[str, bytes]:
     inputs = load_inputs(root, config)
     common = {
-        "work_order": WORK_ORDER,
+        "work_order": config.work_order,
         "evidence_class": "historical",
         "paper_trading_invoked": False,
         "live_trading_invoked": False,
@@ -482,6 +491,9 @@ def compute_all(root: Path, *, config: Config, code_revision: str, generated_at:
         "inputs": inputs["files"],
         "parameters": _parameters(config),
     }
+    if config.work_order != WORK_ORDER:
+        # WO-167 and later name the scope in every results JSON; WO-166's committed files must not gain a byte.
+        common["unverifiable_scope"] = config.unverifiable_scope
     v0 = {**common, **lane_a(inputs, config, variant="V0")}
     sensitivity = lane_a(inputs, config, variant="V0", fee_mult=2.0)["pooled"]
     v0["fee_sensitivity_2x"] = {k: sensitivity[k] for k in ("annualised_return_on_capital", "annualised_after_haircut", "annualised_lower_bound_after_haircut", "max_drawdown_all_weeks")}
@@ -496,11 +508,11 @@ def compute_all(root: Path, *, config: Config, code_revision: str, generated_at:
 def run_all(root: Path, *, code_revision: str, generated_at: str, force: bool = False, config: Config | None = None) -> str:
     root = Path(root)
     config = config or Config()
-    results_dir = root / "results"
+    results_dir = root / config.results_dir
     if results_dir.exists() and not force:
         raise RuntimeError(f"{results_dir} already exists; one analysis pass is registered — pass --force only to redo a failed write")
     files = compute_all(root, config=config, code_revision=code_revision, generated_at=generated_at)
-    tmp_dir = root / f".results-tmp-{os.getpid()}"
+    tmp_dir = root / f".{config.results_dir}-tmp-{os.getpid()}"
     if tmp_dir.exists():
         shutil.rmtree(tmp_dir)
     tmp_dir.mkdir(parents=True)
@@ -521,15 +533,16 @@ def run_all(root: Path, *, code_revision: str, generated_at: str, force: bool = 
 def verify_results(root: Path, *, config: Config | None = None) -> list[str]:
     """Recompute with the stored clock and revision and byte-compare every committed results file."""
     root = Path(root)
-    results_dir = root / "results"
+    config = config or Config()
+    results_dir = root / config.results_dir
     if not results_dir.is_dir():
-        return ["results directory missing"]
+        return [f"results directory missing: {config.results_dir}"]
     try:
         stored = json.loads((results_dir / "carry_v0.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return [f"carry_v0.json unreadable: {exc}"]
     try:
-        files = compute_all(root, config=config or Config(), code_revision=str(stored.get("code_revision", "")), generated_at=str(stored.get("generated_at", "")))
+        files = compute_all(root, config=config, code_revision=str(stored.get("code_revision", "")), generated_at=str(stored.get("generated_at", "")))
     except Exception as exc:  # noqa: BLE001 - any recompute failure is a verification failure
         return [f"recompute failed: {exc}"]
     failures: list[str] = []
@@ -545,3 +558,8 @@ def verify_results(root: Path, *, config: Config | None = None) -> list[str]:
     if not failures and stored.get("manifest_sha256") != sha256_path(root / "manifest.json"):
         failures.append("manifest_sha256 in results does not match the committed manifest")
     return failures
+
+
+# WO-167: the refined completeness scope, its own work-order label and results directory. Every other literal is WO-166's.
+WO167_CONFIG = Config(unverifiable_scope="perp", work_order="WO-167", results_dir="results_wo167")
+CONFIGS: dict[str, Config] = {"WO-166": Config(), "WO-167": WO167_CONFIG}

@@ -100,8 +100,14 @@ def _yearly_table(yearly: dict[str, float], *, label: str, fmt=_pct) -> list[str
 
 def render_report(v0: dict[str, Any], v1: dict[str, Any], b: dict[str, Any]) -> str:
     lines: list[str] = []
-    lines.append("# WO-166 proof-of-concept results (historical-class diagnostic)")
+    work_order = str(v0.get("work_order", "WO-166"))
+    lines.append(f"# {work_order} proof-of-concept results (historical-class diagnostic)")
     lines.append("")
+    if "unverifiable_scope" in v0:  # WO-167 and later only; WO-166's rendered report must not gain a byte
+        scope = str(v0["unverifiable_scope"])
+        scope_text = "any absent bar on either leg (WO-166's registered rule)" if scope == "either" else "absent perpetual-side data only, the leg the liquidation check reads (WO-167's registered rule)"
+        lines.append(f"Completeness scope for unverifiable liquidation status: **{scope}** — {scope_text}.")
+        lines.append("")
     lines.append(
         "This is a historical-class result computed from the committed inputs listed in `manifest.json`. "
         "The gate in Lane A is applied to the lower bound of a bootstrap interval minus a haircut of "

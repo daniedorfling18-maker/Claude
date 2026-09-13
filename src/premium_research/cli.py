@@ -252,10 +252,10 @@ def _cmd_verify_manifest(args: argparse.Namespace) -> int:
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
-    from .runner import run_all
+    from .runner import CONFIGS, run_all
 
     try:
-        summary = run_all(Path(args.root), code_revision=git_revision(REPO_ROOT), generated_at=utc_now_iso(), force=args.force)
+        summary = run_all(Path(args.root), code_revision=git_revision(REPO_ROOT), generated_at=utc_now_iso(), force=args.force, config=CONFIGS[args.work_order])
     except (ValueError, RuntimeError, FileNotFoundError) as exc:
         print(f"RUN ABORTED: {exc}", file=sys.stderr)
         return 2
@@ -264,9 +264,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
 
 def _cmd_verify_results(args: argparse.Namespace) -> int:
-    from .runner import verify_results
+    from .runner import CONFIGS, verify_results
 
-    failures = verify_results(Path(args.root))
+    failures = verify_results(Path(args.root), config=CONFIGS[args.work_order])
     if failures:
         for failure in failures:
             print(f"FAIL: {failure}", file=sys.stderr)
@@ -285,8 +285,10 @@ def build_parser() -> argparse.ArgumentParser:
     verify.set_defaults(func=_cmd_verify_manifest)
     run = sub.add_parser("run", help="compute Lane A and Lane B from the committed inputs")
     run.add_argument("--force", action="store_true", help="replace an existing results directory")
+    run.add_argument("--work-order", choices=("WO-166", "WO-167"), default="WO-166", help="registered configuration to run (WO-167: perpetual-side completeness scope, results_wo167/)")
     run.set_defaults(func=_cmd_run)
     verify_results_cmd = sub.add_parser("verify-results", help="recompute and byte-compare the committed results")
+    verify_results_cmd.add_argument("--work-order", choices=("WO-166", "WO-167"), default="WO-166", help="which committed results to verify, under that work order's registered configuration")
     verify_results_cmd.set_defaults(func=_cmd_verify_results)
     return parser
 

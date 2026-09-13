@@ -105,6 +105,8 @@ def boundary_table(funding: pd.DataFrame, perp_1h: pd.DataFrame, spot_1h: pd.Dat
                 "perp_high": float(max(highs)) if highs else float("nan"),
                 "high_hours": int(len(highs)),
                 "close_missing": bool(not (math.isfinite(pc) and math.isfinite(sc))),
+                "perp_close_missing": bool(not math.isfinite(pc)),
+                "spot_close_missing": bool(not math.isfinite(sc)),
                 "high_partial": bool(len(highs) < 8),
             }
         )
@@ -233,7 +235,10 @@ def v1_targets(rates: np.ndarray) -> np.ndarray:
     return target
 
 
-def simulate(table: pd.DataFrame, *, variant: str, start_ms: int, end_ms: int, capital: float = CAPITAL_PER_NOTIONAL, fee_mult: float = 1.0) -> Ledger:
+UNVERIFIABLE_SCOPES = ("either", "perp")  # "either": WO-166 (any absent bar); "perp": WO-167 (perpetual-side data the liquidation check reads)
+
+
+def simulate(table: pd.DataFrame, *, variant: str, start_ms: int, end_ms: int, capital: float = CAPITAL_PER_NOTIONAL, fee_mult: float = 1.0, unverifiable_scope: str = "either") -> Ledger:
     """Run V0 (always on between ``start_ms`` and ``end_ms``) or V1 (signal-driven) over the boundary table.
 
     ``start_ms`` is the boundary at which V0 enters; ``end_ms`` is the boundary
@@ -241,6 +246,9 @@ def simulate(table: pd.DataFrame, *, variant: str, start_ms: int, end_ms: int, c
     """
     if variant not in {"V0", "V1"}:
         raise CarryInputError(f"unknown variant {variant!r}")
+    if unverifiable_scope not in UNVERIFIABLE_SCOPES:
+        raise CarryInputError(f"unknown unverifiable_scope {unverifiable_scope!r}; registered values are {UNVERIFIABLE_SCOPES}")
+    perp_only = unverifiable_scope == "perp"
     rows = table[(table["boundary_ms"] >= start_ms) & (table["boundary_ms"] <= end_ms)].reset_index(drop=True)
     if len(rows) < 2:
         raise CarryInputError("fewer than two boundaries inside the requested span")
@@ -254,6 +262,7 @@ def simulate(table: pd.DataFrame, *, variant: str, start_ms: int, end_ms: int, c
     pending_rates: list[float] = []
     pending_high = float("nan")
     pending_flag = False
+    prev_perp_close_missing = False  # the entry boundary carries a close (asserted above)
 
     for index, row in rows.iterrows():
         boundary = int(row["boundary_ms"])
@@ -280,15 +289,20 @@ def simulate(table: pd.DataFrame, *, variant: str, start_ms: int, end_ms: int, c
         if math.isfinite(row_high):
             pending_high = row_high if not math.isfinite(pending_high) else max(pending_high, row_high)
         pending_flag = pending_flag or bool(row["high_partial"])
+        # WO-167 scope: this period's liquidation check is unverifiable only if one of its perpetual
+        # highs is absent or the perpetual close at its start boundary (the previous row) is absent.
+        perp_incomplete = bool(row["high_partial"]) or prev_perp_close_missing
+        prev_perp_close_missing = bool(row.get("perp_close_missing", row["close_missing"]))
 
         if bool(row["close_missing"]):
             pending_rates.append(rate)
             # An open position inside a period with missing bars has unverifiable liquidation status.
-            ledger.append(boundary, position.wealth(position.last_spot) if position.open else position.cash, open=position.open, flagged=True, unverifiable=int(open_at_start))
+            merged_unverifiable = int(open_at_start and (perp_incomplete if perp_only else True))
+            ledger.append(boundary, position.wealth(position.last_spot) if position.open else position.cash, open=position.open, flagged=True, unverifiable=merged_unverifiable)
             continue
 
         flagged = pending_flag or bool(pending_rates)
-        unverifiable = int(flagged and open_at_start)
+        unverifiable = int(open_at_start and (perp_incomplete if perp_only else flagged))
 
         if position.open:
             m0 = position.margin_ratio(position.last_perp)

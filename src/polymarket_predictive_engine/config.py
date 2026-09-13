@@ -103,10 +103,55 @@ def validate_config(cfg: EngineConfig) -> None:
         raise ValueError("risk.minimum_edge must be positive")
     if float(risk.get("maximum_spread", 0.08)) <= 0:
         raise ValueError("risk.maximum_spread must be positive")
+    # WO-143b.1 F1's registered timing ordering is validated HERE, at LOAD time,
+    # which is what `shadow_cohort_timings` has always claimed to be (Codex P2
+    # wave-42). Its only call site was inside `update_shadow_cohort_evidence`,
+    # so a config violating the ordering started normally and raised on the
+    # first shadow-maintenance tick -- where the live loop's per-iteration
+    # exception handler keeps the broken service running. `config-check` alone
+    # was not enough: `docker-compose.vps-paper.yml` starts the loop through
+    # `load_config`, which never reaches it.
+    #
+    # Imported inside the function because `shadow_cohort` imports
+    # `EngineConfig` from this module; a top-level import would be circular.
+    from .shadow_cohort import shadow_cohort_timings
+
+    shadow_cohort_timings(cfg)
+
+
+def _shadow_timing_error() -> type[Exception]:
+    """The timing-config exception type, imported lazily to avoid the cycle."""
+    from .shadow_cohort import ShadowCohortTimingConfigError
+
+    return ShadowCohortTimingConfigError
 
 
 def config_check(path: str | Path) -> dict[str, Any]:
-    cfg = load_config(path)
+    try:
+        cfg = load_config(path)
+    except _shadow_timing_error() as exc:
+        # REPORTED IN THE ARTIFACT AND RE-RAISED (Codex P1 wave-42). An earlier
+        # version reported the violation in the JSON only, and `cli.py` returns
+        # 0 for a payload it printed -- so `.github/workflows/required-pr-gate.yml`
+        # stayed GREEN for a configuration guaranteed to fail its first shadow
+        # update. Reporting without propagating is the shape of gate that does
+        # not gate. The raise reaches `main`'s handler, which exits non-zero.
+        #
+        # The config is loaded again WITHOUT validation purely to resolve
+        # `governance_root`, so the operator still gets the artifact naming the
+        # fault rather than only a stderr line.
+        raw = _normalise_config_keys(load_yaml(Path(path)))
+        cfg = EngineConfig(raw=raw, path=Path(path))
+        ensure_dir(cfg.governance_root)
+        write_json(
+            cfg.governance_root / "config_check.json",
+            {
+                "status": "invalid",
+                "config_path": str(Path(path)),
+                "shadow_cohort_timings": f"invalid: {exc}",
+            },
+        )
+        raise
     ensure_dir(cfg.governance_root)
     status = {
         "status": "ok",
@@ -118,6 +163,9 @@ def config_check(path: str | Path) -> dict[str, Any]:
         "live_env_opt_in": os.getenv("POLYMARKET_LIVE_TRADING") == "1",
         "kill_switch_active": kill_switch_active(),
     }
+    # `load_config` above validated the WO-143b.1 F1 timing ordering, so
+    # reaching here means it holds.
+    status["shadow_cohort_timings"] = "ok"
     write_json(cfg.governance_root / "config_check.json", status)
     return status
 

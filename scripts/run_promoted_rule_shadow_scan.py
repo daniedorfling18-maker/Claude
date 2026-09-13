@@ -791,6 +791,16 @@ def run_promoted_rule_shadow_scan(cfg: EngineConfig) -> dict[str, Any]:
         "candidates": len(candidates),
         "rejected": len(rejected),
         "shadow": shadow,
+        # WO-143b.1 F4: status surfacing only. This call site reports no
+        # forwarded-candidate count -- `candidates`/`rejected` above are
+        # rule-scan output written to their own CSVs regardless of the shadow
+        # outcome, not a claim about what reached the shadow ledger -- so no
+        # count changes here. The skip is lifted to a top-level field so it is
+        # greppable in the artifact for the day-after check rather than only
+        # reachable by walking into the nested `shadow` payload.
+        "shadow_update_status": (
+            shadow.get("status") if isinstance(shadow, dict) and shadow.get("status") else "not_run"
+        ),
         "cohort_pnl": cohort,
         "candidate_file": str(out / "promoted_rule_shadow_candidates.csv"),
         "rejected_file": str(out / "promoted_rule_shadow_rejected.csv"),

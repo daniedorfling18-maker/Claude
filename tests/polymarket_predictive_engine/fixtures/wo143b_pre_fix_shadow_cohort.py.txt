@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
-import math
-import os
 import re
-import shutil
-import time
 import urllib.parse
 import urllib.request
 from collections import defaultdict
@@ -24,7 +19,6 @@ from .crypto_updown_settlement import (
 )
 from .execution_costs import estimate_execution_cost
 from .resolution_collector import fetch_gamma_market, infer_market_resolution_rows
-from .runtime_lock import runtime_lock_with_heartbeat
 from .utils import (
     append_csv_rows_matching_existing_header,
     boolish,
@@ -218,30 +212,6 @@ def _is_long_horizon(row: dict[str, Any], settings: dict[str, Any]) -> bool:
 def _is_fast_crypto_updown_position(position: dict[str, Any]) -> bool:
     window = _crypto_updown_slug_window(position.get("market_slug"))
     return bool(window and window[1] in {5, 15})
-
-
-_SETTLEMENT_DEFERRED_POLICY = "deferred_to_next_settlement_pass"
-
-
-def _restored_settlement_policy(position: dict[str, Any], settings: dict[str, Any]) -> dict[str, str]:
-    """`{"settlement_policy": ...}` when the row still carries the per-pass marker, else `{}`.
-
-    `deferred_to_next_settlement_pass` is a PER-PASS scheduling fact written
-    into a PERSISTENT column, and nothing took it back off (Codex P2 wave-42).
-    Restoration uses the same predicate the ordinary policy branches use, so it
-    cannot downgrade a genuine `final_settlement_only` position to mark exits;
-    and it returns empty for a row that is not carrying the marker, so it can
-    never rewrite a policy it was not asked about.
-    """
-    if str(position.get("settlement_policy") or "") != _SETTLEMENT_DEFERRED_POLICY:
-        return {}
-    return {
-        "settlement_policy": (
-            "final_settlement_only"
-            if _settlement_only_shadow_position(position, settings)
-            else "mark_exit_allowed"
-        )
-    }
 
 
 def _settlement_only_shadow_position(position: dict[str, Any], settings: dict[str, Any]) -> bool:
@@ -552,90 +522,12 @@ def _settlement_price_for_position(
     return None, "token_not_in_settlement"
 
 
-def _settlement_checkpoints_path(cfg: EngineConfig) -> Path:
-    return cfg.governance_root / "shadow_settlement_checkpoints.json"
-
-
-def _read_settlement_checkpoints(cfg: EngineConfig, *, run_clock_utc: str) -> dict[str, str]:
-    """Per-position last-settlement-check times (WO-143b.1 F1 anti-starvation).
-
-    Held in a governance SIDECAR rather than as a `last_settlement_check_utc`
-    column on ``shadow_positions.csv``. The register permits "a per-position
-    ``last_settlement_check_utc`` with oldest-first ordering (or an equivalent
-    rotating offset)"; this is that equivalent. A new ledger column would
-    change ``shadow_positions.csv``'s bytes on every settling pass and so
-    break the byte-identity regression this same amendment requires (tests 1
-    and 11), and it would widen an enrolled ledger's schema for pure
-    scheduling bookkeeping. The sidecar carries no evidence, only ordering
-    state, and can be deleted without loss -- a missing file just means
-    "nothing checked yet", which fails safe to today's file order.
-    """
-    payload = read_json(_settlement_checkpoints_path(cfg), default={}) or {}
-    if not isinstance(payload, dict):
-        return {}
-    checkpoints = payload.get("last_settlement_check_utc")
-    if not isinstance(checkpoints, dict):
-        return {}
-    # EACH TIMESTAMP IS PARSED, AND AN UNPARSEABLE ONE IS DROPPED (Codex P2
-    # wave-42). `_settlement_check_sort_key` orders by the raw STRING, so a
-    # nonempty value that is not a timestamp -- `"garbage"` -- was accepted as a
-    # completed check and sorted after every ISO stamp beginning with a digit.
-    # With more due positions than the per-cycle limit, the valid entries were
-    # then rotated and re-stamped forever while that one position was never
-    # reached again: exactly the permanent starvation this sidecar exists to
-    # prevent, manufactured by the sidecar itself, and ending in the stale-mark
-    # time exit the rotation was added to avoid.
-    #
-    # Dropping is the fail-safe direction: an absent checkpoint means NEVER
-    # CHECKED, which sorts FIRST, so a corrupt entry costs one early re-check
-    # rather than indefinite starvation.
-    # A FUTURE stamp is not a completed check either (Codex P2 wave-42c). The
-    # wave-42 fix dropped values that would not PARSE and stopped there, but a
-    # perfectly parseable timestamp after the run clock -- a wall-clock
-    # correction, a corrupted sidecar -- sorts after every current stamp and
-    # reproduces the identical starvation: the other entries keep rotating on
-    # earlier stamps while that position stays last until the future arrives.
-    # Unparseable and out-of-range are the same fault wearing different clothes,
-    # and fixing only the first is how the second survives a fix round.
-    now = parse_timestamp(run_clock_utc)
-    resolved: dict[str, str] = {}
-    for key, value in checkpoints.items():
-        text = str(value or "").strip()
-        if not text:
-            continue
-        parsed = parse_timestamp(text)
-        if parsed is None:
-            continue
-        if now is not None and parsed > now:
-            continue
-        resolved[str(key)] = text
-    return resolved
-
-
-def _settlement_check_sort_key(position: dict[str, Any], checkpoints: dict[str, str]) -> tuple[int, str, str]:
-    """Oldest-checked-first ordering for settlement (WO-143b.1 F1).
-
-    Never-checked positions sort first, then by ascending last-checked time.
-    Without this, `_settle_due_positions` iterated in file order every pass, so
-    on a degraded day a budget that reaches only the first N due positions
-    would never reach the tail at all -- those positions age past
-    ``maximum_holding_hours`` and close as ``shadow_time_exit`` at a stale mark
-    instead of ``shadow_clean_settlement`` at the true 0/1 outcome. That is a
-    systematic distortion of shadow P&L, not merely deferred work.
-    """
-    position_id = str(position.get("shadow_position_id") or "")
-    checked_at = checkpoints.get(position_id, "")
-    return (1, checked_at, position_id) if checked_at else (0, "", position_id)
-
-
 def _settle_due_positions(
     cfg: EngineConfig,
     positions: list[dict[str, Any]],
     fills: list[dict[str, Any]],
     *,
     timestamp: str,
-    budget_seconds: float | None = None,
-    heartbeat: Any = None,
 ) -> dict[str, Any]:
     settings = _settings(cfg)
     if not boolish(settings.get("settle_resolved_markets", True)):
@@ -644,83 +536,23 @@ def _settle_due_positions(
             "settlement_checks": 0,
             "settled_positions": 0,
             "settlement_errors": 0,
-            "settlement_positions_abandoned": 0,
-            "settlement_abandoned_ids": [],
-            "settlement_budget_expired": False,
         }
     max_checks = int(settings.get("settlement_max_positions_per_cycle", 25))
     grace_minutes = float(settings.get("settlement_grace_minutes", 1.0))
     timeout_seconds = int(settings.get("settlement_request_timeout_seconds", 20))
-    if budget_seconds is None:
-        budget_seconds = float(
-            settings.get("settlement_budget_seconds", _DEFAULT_SETTLEMENT_BUDGET_SECONDS)
-        )
-    started_monotonic = time.monotonic()
     checks = 0
     settled = 0
     unresolved = 0
     errors = 0
-    abandoned = 0
-    budget_expired = False
-    # STAGED settlements, applied only if the pass completes (Codex P1 wave-35
-    # on #416). The registered contract for this budget is "abandons remaining
-    # positions with a partial, fail-closed status and NO partial write", and
-    # mutating the position plus appending its SELL_SHADOW fill inline IS the
-    # partial write: a later lookup pushes the pass over budget and the caller
-    # publishes both ledgers carrying settlements from a pass recorded as
-    # incomplete. The existing test missed it because every stubbed lookup
-    # returned unresolved, so nothing was ever staged to leak.
-    staged: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
-    # Checkpoints are staged alongside, because a DISCARDED settlement whose
-    # checkpoint had been persisted would sort LAST next pass -- permanently
-    # starving the position it just resolved, the exact failure F1's
-    # oldest-first rotation exists to prevent.
-    checked_now: dict[str, str] = {}
     reasons: dict[str, int] = defaultdict(int)
-    # WO-143b.1 F1: oldest-checked-first, so a budget that cannot reach every
-    # due position rotates through them across passes instead of starving the
-    # tail forever.
-    checkpoints = _read_settlement_checkpoints(cfg, run_clock_utc=timestamp)
-    due = [
-        position
-        for position in sorted(positions, key=lambda row: _settlement_check_sort_key(row, checkpoints))
-        if str(position.get("status") or "").lower() == "open"
-        and _should_check_settlement(position, grace_minutes=grace_minutes)
-    ]
-    abandoned_ids: list[str] = []
-    for index, position in enumerate(due):
-        # THE BUDGET IS CHECKED FIRST, before the position cap (Codex P1
-        # wave-36). With more due positions than max_checks, a final permitted
-        # lookup that pushed elapsed time past the budget was met on the next
-        # iteration by the CAP branch instead: budget_expired stayed false, the
-        # staged settlements were published, and the pass reported "complete"
-        # while leaving positions unprocessed after exceeding its own
-        # fail-closed budget. The cap ordering bypassed the staging rollback
-        # entirely -- the rollback was correct and simply never ran.
-        #
-        # It cannot bound a single unbounded urlopen read -- that is precisely
-        # why the progress-derived heartbeat, not this budget, is the primary
-        # defence -- but it does stop a pass of individually-completing-but-slow
-        # lookups from running past the stale window.
-        if budget_seconds > 0 and (time.monotonic() - started_monotonic) >= budget_seconds:
-            budget_expired = True
-            abandoned = len(due) - index
-            abandoned_ids = [
-                str(row.get("shadow_position_id") or "") for row in due[index:]
-            ]
-            break
+    for position in positions:
         if checks >= max_checks:
-            abandoned = len(due) - index
-            abandoned_ids = [
-                str(row.get("shadow_position_id") or "") for row in due[index:]
-            ]
             break
         if str(position.get("status") or "").lower() != "open":
             continue
+        if not _should_check_settlement(position, grace_minutes=grace_minutes):
+            continue
         checks += 1
-        checked_now[str(position.get("shadow_position_id") or "")] = timestamp
-        if heartbeat is not None:
-            heartbeat.note_progress("settlement_position")
         try:
             settlement_price, reason = _settlement_price_for_position(
                 cfg,
@@ -739,126 +571,27 @@ def _settle_due_positions(
         cost = safe_float(position.get("cost_basis_usdc")) or 0.0
         proceeds = quantity * settlement_price
         pnl = proceeds - cost
-        staged.append(
-            (
-                position,
-                {
-                    "latest_mark_price": settlement_price,
-                    "status": "closed",
-                    "closed_at": timestamp,
-                    "updated_at": timestamp,
-                    "close_reason": "shadow_clean_settlement",
-                    # The deferral, if any, is over (Codex P2 wave-42). The
-                    # mark-update loop skips non-open rows, so without this a
-                    # position deferred in one pass and settled in the next
-                    # stayed labelled `deferred_to_next_settlement_pass` on a
-                    # CLOSED row, reading "still waiting" forever.
-                    #
-                    # Conditional, and empty for every row not carrying the
-                    # marker: this function's registered contract is that the
-                    # budget/heartbeat/staging work changed only WHEN it writes,
-                    # never WHAT it writes, and an unconditional field here
-                    # rewrote the policy of every settled position that was
-                    # never deferred at all.
-                    **_restored_settlement_policy(position, settings),
-                    "exit_price": settlement_price,
-                    "realised_pnl_usdc": pnl,
-                    "unrealised_pnl_usdc": 0.0,
-                    "return_pct": pnl / cost if cost > 0 else 0.0,
-                },
-                {
-                    "position_id": str(position.get("shadow_position_id")),
-                    "side": "SELL_SHADOW",
-                    "timestamp": timestamp,
-                    "price": settlement_price,
-                    "quantity": quantity,
-                    "notional": proceeds,
-                    "reason": "shadow_clean_settlement",
-                },
-            )
+        position["latest_mark_price"] = settlement_price
+        position["status"] = "closed"
+        position["closed_at"] = timestamp
+        position["updated_at"] = timestamp
+        position["close_reason"] = "shadow_clean_settlement"
+        position["exit_price"] = settlement_price
+        position["realised_pnl_usdc"] = pnl
+        position["unrealised_pnl_usdc"] = 0.0
+        position["return_pct"] = pnl / cost if cost > 0 else 0.0
+        _append_fill(
+            fills,
+            position_id=str(position.get("shadow_position_id")),
+            side="SELL_SHADOW",
+            timestamp=timestamp,
+            price=settlement_price,
+            quantity=quantity,
+            notional=proceeds,
+            row=position,
+            reason="shadow_clean_settlement",
         )
-    else:
-        # THE LOOP CAN END WITHOUT A NEXT ITERATION TO CHECK (Codex P1 wave-42).
-        # The budget test above runs at the TOP of each pass through the loop,
-        # so an overrun is noticed by the FOLLOWING iteration -- and the last or
-        # only due position has no following iteration. A lookup that started
-        # inside the budget and returned outside it therefore left
-        # `budget_expired` false, and the staged batch was applied and published
-        # despite the registered no-partial-write contract. Structurally the
-        # same defect as the wave-36 cap ordering, reached through loop
-        # EXHAUSTION rather than through a competing break: the rollback was
-        # correct both times and simply never ran.
-        #
-        # Nothing is left unattempted on this path, so no position is added to
-        # `abandoned_ids` here. The discard branch below fills it from the
-        # staged set, which is exactly the right membership: every position this
-        # pass resolved and is about to throw away is deferred to the next one.
-        if budget_seconds > 0 and (time.monotonic() - started_monotonic) >= budget_seconds:
-            budget_expired = True
-    staged_ids = {str(row.get("shadow_position_id") or "") for row, _, _ in staged}
-    discarded = 0
-    if budget_expired:
-        discarded = len(staged)
-        # A position whose settlement was RESOLVED and then discarded is
-        # abandoned for this pass too: its true exit price is the settlement,
-        # and it must not be closed on a stale mark before the next pass can
-        # write it.
-        abandoned_ids.extend(sorted(staged_ids))
-        # The COUNT must agree with the LIST (Codex P2 wave-38). Extending the
-        # ids without recomputing the count let the artifact report, say, two
-        # abandoned positions while carrying five abandoned ids -- and the
-        # registered day-after check reads the COUNT, so it understated the
-        # deferred workload by exactly the settlements this pass resolved and
-        # then correctly refused to write.
-        abandoned = len(abandoned_ids)
-        staged = []
-        # EVERY position checked this pass advances in the rotation, including
-        # the discarded ones (Codex P1 wave-40). Holding their checkpoints back
-        # was meant to keep them first in line, but it created a NEW starvation:
-        # if the same lookup repeatedly runs past the budget, it is repeatedly
-        # resolved and discarded while later due positions are never attempted
-        # at all -- exactly the permanent starvation F1's oldest-first rotation
-        # exists to prevent, reintroduced by the rollback that fixed the partial
-        # write.
-        #
-        # The wave-35 worry was wrong. Advancing the checkpoint does not starve
-        # the discarded position; it defers it by ONE rotation, which is what
-        # rotation means. Settlement is idempotent, the position stays open, and
-        # it is re-resolved when its turn comes round -- while everyone else
-        # gets a turn in the meantime. A checkpoint is a SCHEDULING record, not
-        # a publication record.
-        checkpoints.update(checked_now)
-    else:
-        for position, updates, fill_kwargs in staged:
-            position.update(updates)
-            _append_fill(fills, row=position, **fill_kwargs)
-            settled += 1
-        checkpoints.update(checked_now)
-    # Persist the rotation state even when the budget expired -- especially
-    # then, since that is exactly the pass whose unreached tail must be first
-    # in line next time.
-    # FENCED LIKE EVERY OTHER PUBLICATION (Codex P2 wave-42c). This sidecar was
-    # written unconditionally, and before the ledger ownership check that would
-    # have raised -- so a writer whose lookup stalled past the stale window
-    # could replace a replacement writer's newer rotation state from its own
-    # pre-stall snapshot. The lost timestamps repeatedly reprioritise
-    # already-checked positions and delay the due tail: the starvation this
-    # sidecar exists to prevent, caused by the sidecar's own write.
-    if checks and (heartbeat is None or heartbeat.confirm_ownership() is not False):
-        write_json(
-            _settlement_checkpoints_path(cfg),
-            {
-                "generated_at_utc": timestamp,
-                # AGENTS.md artifact-level provenance (Codex P1 wave-42): this
-                # is a persistent governance artifact of its own, so an auditor
-                # must be able to establish from THE ARTIFACT that the path
-                # which wrote it invoked no trading. It is pure scheduling
-                # bookkeeping and both flags are false by construction.
-                "paper_trading_invoked": False,
-                "live_trading_invoked": False,
-                "last_settlement_check_utc": checkpoints,
-            },
-        )
+        settled += 1
     return {
         "settlement_enabled": True,
         "settlement_checks": checks,
@@ -866,25 +599,6 @@ def _settle_due_positions(
         "unresolved_positions_checked": unresolved,
         "settlement_errors": errors,
         "settlement_reason_counts": dict(reasons),
-        # WO-143b.1 F1: a budget-expired pass is a PARTIAL pass. It is recorded
-        # as such rather than looking like a complete one that simply found
-        # less to do, and the abandoned count is named in the day-after check.
-        "settlement_positions_abandoned": abandoned,
-        # NAMED, not just counted (Codex P1 wave-35 on #416). The oldest-first
-        # rotation only helps across PASSES; within this one an abandoned
-        # position already past maximum_holding_hours was closed as
-        # shadow_time_exit at a stale mark immediately below, before the
-        # rotation could ever prioritise it -- recreating precisely the P&L
-        # distortion _settlement_check_sort_key's docstring says it exists to
-        # prevent. The rotation test hid it by setting the holding limit to ten
-        # million hours.
-        "settlement_abandoned_ids": abandoned_ids,
-        # Settlements this pass RESOLVED and then threw away on expiry. Named
-        # so a reader can tell a pass that found nothing from one that found
-        # something and correctly refused to write it.
-        "settlement_resolved_discarded_on_expiry": discarded,
-        "settlement_budget_expired": budget_expired,
-        "settlement_status": "partial_budget_expired" if budget_expired else "complete",
     }
 
 
@@ -1146,139 +860,12 @@ def read_shadow_signal_cohort_pnl(cfg: EngineConfig) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-# --- WO-143b.1 F1: wall-clock budgets, heartbeat and stale window ----------
-#
-# Registered literals with stated bases (see the config file and §143b.1).
-# `remainder_budget_seconds` is ADVISORY: it only sizes `heartbeat_cap_seconds`
-# and is never enforced at runtime, unlike `settlement_budget_seconds` which
-# abandons remaining work.
-_DEFAULT_SETTLEMENT_BUDGET_SECONDS = 900.0
-_DEFAULT_REMAINDER_BUDGET_SECONDS = 300.0  # sizing only, never enforced
-_DEFAULT_HEARTBEAT_MARGIN_SECONDS = 120.0
-_DEFAULT_HEARTBEAT_CAP_SECONDS = 1800.0
-_DEFAULT_CRITICAL_SECTION_MAX_SECONDS = 120.0
-_DEFAULT_SHADOW_COHORT_STALE_AFTER_SECONDS = 2400.0
-
-
-class ShadowCohortTimingConfigError(ValueError):
-    """Raised when the registered timing ordering is violated."""
-
-
-def shadow_cohort_timings(cfg: EngineConfig) -> dict[str, float]:
-    """Resolve and VALIDATE the F1 timing constants at load time.
-
-    The four registered relations are checked together and a violation raises
-    rather than silently inverting. Relation 3 in particular is the one a later
-    edit would break unnoticed: the effective maximum hold is
-    ``heartbeat_cap + critical_section_max`` because the cap does not fire
-    inside the critical section, so a raised ``critical_section_max_seconds``
-    re-opens the reclaim-mid-critical-section hole that the section exists to
-    close -- while a three-relation check would still pass.
-    """
-    settings = _settings(cfg)
-
-    def _read(key: str, default: float) -> float:
-        raw = settings.get(key, default)
-        try:
-            value = float(raw)
-        except (TypeError, ValueError) as exc:
-            raise ShadowCohortTimingConfigError(f"{key} is not a number: {raw!r}") from exc
-        return value
-
-    timings = {
-        "settlement_budget_seconds": _read("settlement_budget_seconds", _DEFAULT_SETTLEMENT_BUDGET_SECONDS),
-        "remainder_budget_seconds": _read("remainder_budget_seconds", _DEFAULT_REMAINDER_BUDGET_SECONDS),
-        "heartbeat_margin_seconds": _read("heartbeat_margin_seconds", _DEFAULT_HEARTBEAT_MARGIN_SECONDS),
-        "heartbeat_cap_seconds": _read("heartbeat_cap_seconds", _DEFAULT_HEARTBEAT_CAP_SECONDS),
-        "critical_section_max_seconds": _read(
-            "critical_section_max_seconds", _DEFAULT_CRITICAL_SECTION_MAX_SECONDS
-        ),
-        "shadow_cohort_stale_after_seconds": _read(
-            "shadow_cohort_stale_after_seconds", _DEFAULT_SHADOW_COHORT_STALE_AFTER_SECONDS
-        ),
-    }
-
-    # Relation 4: every constant positive and finite.
-    for key, value in timings.items():
-        if not math.isfinite(value) or value <= 0:
-            raise ShadowCohortTimingConfigError(f"{key} must be positive and finite, got {value!r}")
-
-    phases = (
-        timings["settlement_budget_seconds"]
-        + timings["remainder_budget_seconds"]
-        + timings["heartbeat_margin_seconds"]
-    )
-    # Relation 1: a legitimately slow pass is never cut off by the cap.
-    if not phases < timings["heartbeat_cap_seconds"]:
-        raise ShadowCohortTimingConfigError(
-            "settlement_budget_seconds + remainder_budget_seconds + heartbeat_margin_seconds "
-            f"({phases:g}) must be < heartbeat_cap_seconds ({timings['heartbeat_cap_seconds']:g})"
-        )
-    # Relation 2: the beat always stops before the lock could be reclaimed.
-    if not timings["heartbeat_cap_seconds"] < timings["shadow_cohort_stale_after_seconds"]:
-        raise ShadowCohortTimingConfigError(
-            f"heartbeat_cap_seconds ({timings['heartbeat_cap_seconds']:g}) must be < "
-            f"shadow_cohort_stale_after_seconds ({timings['shadow_cohort_stale_after_seconds']:g})"
-        )
-    # Relation 3: the effective maximum hold still fits inside the window.
-    effective_max_hold = timings["heartbeat_cap_seconds"] + timings["critical_section_max_seconds"]
-    if not effective_max_hold < timings["shadow_cohort_stale_after_seconds"]:
-        raise ShadowCohortTimingConfigError(
-            "heartbeat_cap_seconds + critical_section_max_seconds "
-            f"({effective_max_hold:g}) must be < shadow_cohort_stale_after_seconds "
-            f"({timings['shadow_cohort_stale_after_seconds']:g})"
-        )
-    return timings
-
-
 def update_shadow_cohort_evidence(cfg: EngineConfig, predictions: list[dict[str, Any]]) -> dict[str, Any]:
-    """Update shadow ledgers, serialized by this function's own runtime lock.
+    """Update shadow ledgers while relying on the caller's serialization.
 
-    This function acquires an internal ``shadow_cohort`` runtime lock at
-    entry and releases it at exit -- including when the body raises -- so
-    any two concurrent callers (for example the full paper cycle, which
-    calls this while holding ``prediction_cycle``, and the live loop's
-    per-tick shadow maintenance, which does not) are serialized against each
-    other instead of racing the append-only ``shadow_fills.csv``.
-
-    ``shadow_cohort`` is a distinct, independent lock from
-    ``prediction_cycle``: holding ``prediction_cycle`` neither satisfies nor
-    blocks it, so a caller already holding ``prediction_cycle`` can still
-    call this function without deadlocking, and callers no longer need to
-    hold ``prediction_cycle`` for this function's own serialization.
-
-    When a foreign writer already holds ``shadow_cohort``, this call
-    performs NO writes and returns
-    ``{"status": "skipped_shadow_lock_held", ...}`` instead of racing it.
+    Callers MUST hold the ``prediction_cycle`` runtime lock; this function does
+    not acquire it because that lock is intentionally non-reentrant.
     """
-
-    timings = shadow_cohort_timings(cfg)
-    with runtime_lock_with_heartbeat(
-        cfg,
-        "shadow_cohort",
-        stale_after_seconds=timings["shadow_cohort_stale_after_seconds"],
-        heartbeat_cap_seconds=timings["heartbeat_cap_seconds"],
-        critical_section_max_seconds=timings["critical_section_max_seconds"],
-    ) as (lock, heartbeat):
-        if not lock.acquired:
-            return {
-                "status": "skipped_shadow_lock_held",
-                "generated_at_utc": now_utc(),
-                "runtime_lock": lock.as_dict(),
-            }
-        return _update_shadow_cohort_evidence_locked(
-            cfg, predictions, heartbeat=heartbeat, timings=timings
-        )
-
-
-def _update_shadow_cohort_evidence_locked(
-    cfg: EngineConfig,
-    predictions: list[dict[str, Any]],
-    *,
-    heartbeat: Any = None,
-    timings: dict[str, float] | None = None,
-) -> dict[str, Any]:
-    """Compute and write shadow ledgers. Caller must hold the ``shadow_cohort`` lock."""
 
     settings = _settings(cfg)
     if not boolish(settings.get("enabled", True)):
@@ -1286,26 +873,10 @@ def _update_shadow_cohort_evidence_locked(
         write_json(cfg.governance_root / str(settings.get("summary_file", "shadow_signal_cohort_pnl.json")), payload)
         return payload
 
-    if timings is None:
-        timings = shadow_cohort_timings(cfg)
-
-    def _progress(label: str) -> None:
-        # WO-143b.1 F1 requirement 1: the progress counter must advance at
-        # every PHASE BOUNDARY and every ledger-write step, not only inside
-        # settlement. The settlement position counter stops advancing once
-        # `_settle_due_positions` returns, which would silence the heartbeat
-        # for exactly the remainder phase that performs the ledger writes --
-        # and a reclaim there is the lost-update corruption F1 exists to
-        # prevent.
-        if heartbeat is not None:
-            heartbeat.note_progress(label)
-
-    _progress("read_positions")
     positions = read_csv_rows(_positions_path(cfg))
     for position in positions:
         _normalise_position_row(position)
     fills = read_csv_rows(_fills_path(cfg))
-    _progress("read_fills")
     # WO-119: everything before this index is already on disk; only rows
     # appended in this cycle may be written, and only by appending.
     preexisting_fill_count = len(fills)
@@ -1316,23 +887,8 @@ def _update_shadow_cohort_evidence_locked(
     max_holding_hours = float(settings.get("maximum_holding_hours", 72.0))
 
     closed_this_cycle = 0
-    settlement = _settle_due_positions(
-        cfg,
-        positions,
-        fills,
-        timestamp=now,
-        budget_seconds=timings["settlement_budget_seconds"],
-        heartbeat=heartbeat,
-    )
+    settlement = _settle_due_positions(cfg, positions, fills, timestamp=now)
     closed_this_cycle += int(settlement.get("settled_positions") or 0)
-    _progress("settlement_complete")
-    # Positions this pass could not settle are held OPEN for the next one. They
-    # are still marked to market below -- that is reporting -- but no mark-based
-    # rule may CLOSE them, because their true exit is the settlement price and
-    # closing at a stale mark is the distortion the rotation exists to prevent.
-    settlement_deferred = {
-        str(identifier) for identifier in (settlement.get("settlement_abandoned_ids") or []) if identifier
-    }
     for position in positions:
         if str(position.get("status") or "").lower() != "open":
             continue
@@ -1349,21 +905,8 @@ def _update_shadow_cohort_evidence_locked(
         position["unrealised_pnl_usdc"] = pnl
         position["return_pct"] = return_pct
         position["updated_at"] = now
-        position_id = str(position.get("shadow_position_id") or "")
-        if position_id not in settlement_deferred:
-            # THE DEFERRAL IS PER-PASS, THE FIELD IS PERSISTENT (Codex P2
-            # wave-42). The marker is written into shadow_positions.csv and no
-            # later branch ever took it back off, so a position abandoned once
-            # by a budget-expired pass carried the label for the rest of its
-            # life, through every subsequent pass that checked it normally. The
-            # row then reads "still waiting on settlement" when it is not --
-            # the opposite of the disclosure the label was added to provide.
-            position.update(_restored_settlement_policy(position, settings))
         close_reason = ""
-        if position_id in settlement_deferred:
-            # Marked, disclosed, and deliberately not closed this pass.
-            position["settlement_policy"] = _SETTLEMENT_DEFERRED_POLICY
-        elif _settlement_only_shadow_position(position, settings):
+        if _settlement_only_shadow_position(position, settings):
             position["settlement_policy"] = "final_settlement_only"
         elif return_pct >= take_profit:
             close_reason = "shadow_take_profit"
@@ -1558,157 +1101,23 @@ def _update_shadow_cohort_evidence_locked(
             ),
         }
     )
-    # --- WO-143b.1 F1: bounded, SHRUNK ledger-write critical section --------
-    #
-    # The content of both ledgers is rendered into sibling temp files OUTSIDE
-    # the critical section, reusing the same tested writers (so the resulting
-    # bytes are identical to a direct write). The section itself then contains
-    # only the atomic `os.replace` publishes, which makes it
-    # near-instantaneous by construction -- dissolving the "hung write_csv
-    # wedges the lane forever" problem rather than capping it. `./outputs` is
-    # a shared bind mount, so an unconditional never-abandon carve-out would
-    # have moved the wedge from a hung urlopen to a hung write.
-    _progress("render_ledgers")
-    positions_path = _positions_path(cfg)
-    fills_path = _fills_path(cfg)
-    staged_positions = positions_path.with_name(
-        f".{positions_path.name}.{os.getpid()}.{time.time_ns()}.staged"
+    write_csv(_positions_path(cfg), positions)
+    # WO-119: shadow_positions.csv is snapshot-enrolled (rewrite is fine);
+    # shadow_fills.csv is append_only-enrolled, and the old full rewrite here
+    # re-serialised history whenever the fill schema widened - the exact
+    # WO-115 chain-break class.
+    fill_append = append_csv_rows_matching_existing_header(
+        _fills_path(cfg),
+        fills[preexisting_fill_count:],
+        fieldnames=SHADOW_FILL_FIELDS,
     )
-    staged_fills = fills_path.with_name(f".{fills_path.name}.{os.getpid()}.{time.time_ns()}.staged")
-    new_fill_rows = fills[preexisting_fill_count:]
-    try:
-        write_csv(staged_positions, positions)
-        # WO-119: shadow_positions.csv is snapshot-enrolled (rewrite is fine);
-        # shadow_fills.csv is append_only-enrolled, and a full rewrite here
-        # re-serialises history whenever the fill schema widens - the exact
-        # WO-115 chain-break class. Copy the existing bytes VERBATIM and append
-        # under the header already on disk, so every previously anchored byte
-        # survives the staged rewrite unchanged. With nothing to append the
-        # ledger is not staged or republished at all: the file keeps its exact
-        # existing bytes and inode, which is strictly safer for an append_only
-        # ledger than a no-op rewrite.
-        if new_fill_rows:
-            if fills_path.exists():
-                shutil.copyfile(fills_path, staged_fills)
-            fill_append = append_csv_rows_matching_existing_header(
-                staged_fills,
-                new_fill_rows,
-                fieldnames=SHADOW_FILL_FIELDS,
-            )
-        else:
-            fill_append = None
-        _progress("ledgers_staged")
-        critical_section = (
-            heartbeat.critical_section() if heartbeat is not None else contextlib.nullcontext()
-        )
-        # NOTHING BUT THE REPLACES INSIDE (Codex P1 wave-38). `_progress` reaches
-        # `heartbeat.note_progress`, which creates a temp file, writes it,
-        # FSYNCS it and replaces the lock payload. Beating between the two
-        # ledger replaces put all of that I/O inside the one section that is
-        # supposed to be two atomic renames: a slow or stuck filesystem there
-        # leaves the positions snapshot published WITHOUT its matching
-        # append-only fill -- the torn pair this lock exists to prevent -- and
-        # makes the "replace-only" section unbounded, which is exactly what its
-        # own critical_section_max_seconds bound assumes it is not.
-        #
-        # The beats move to either side. Progress is still recorded for both
-        # phases; it is simply not recorded from inside the window where the
-        # ledgers are momentarily inconsistent with each other.
-        with critical_section:
-            os.replace(staged_positions, positions_path)
-            if new_fill_rows:
-                os.replace(staged_fills, fills_path)
-        _progress("positions_published")
-        if new_fill_rows:
-            _progress("fills_published")
-    finally:
-        for staged in (staged_positions, staged_fills):
-            try:
-                os.unlink(staged)
-            except FileNotFoundError:
-                pass
-    def _refresh_lock_diagnostics() -> None:
-        """Re-snapshot the heartbeat state into `summary`.
-
-        THE SNAPSHOT MUST BE TAKEN AFTER THE TRAILING WRITES, NOT BEFORE
-        (Codex P2 wave-42). The wave-36 fix continued the heartbeat through the
-        three trailing writes; the diagnostics were still captured once, before
-        any of them. So every persisted and returned summary omitted those
-        beats -- and with them any `heartbeat_write_failures` or
-        `heartbeat_cap_stopped` state they produced. The lock is deleted on
-        return, so that snapshot is the ONLY durable record: a heartbeat failure
-        while publishing the summary or the history was reported as never having
-        happened, by the very artifact added to report it.
-
-        Called again after each trailing beat rather than once, because a beat
-        cannot appear in the file it is beating for. `update_summary_published`
-        is by construction the one beat no artifact can carry.
-        """
-        if heartbeat is None:
-            return
-        summary["shadow_lock_heartbeat"] = heartbeat.as_dict()
-        if heartbeat.critical_section_overran:
-            # A bounded wedge, recorded loudly rather than looking like a normal
-            # long hold.
-            summary["shadow_ledger_critical_section_overran"] = True
-
-    if fill_append is not None and fill_append.dropped_fields:
+    if fill_append.dropped_fields:
         # WO-128.3: the legacy-header tolerance (WO-119) is kept, but a field
         # it could not persist is recorded in the reported result rather than
         # vanishing - the visible trace that a versioned ledger path is due.
         summary["shadow_fill_fields_dropped_by_legacy_header"] = list(fill_append.dropped_fields)
-    _refresh_lock_diagnostics()
-    # THE HEARTBEAT CONTINUES THROUGH THE TRAILING WRITES (Codex P2 wave-36).
-    # `fills_published` was the last progress notification in the function, but
-    # three writes follow it. Individually progressing yet cumulatively past the
-    # stale window, they let the lock age out while this writer was still
-    # advancing -- a contender could then reclaim, write a NEWER summary and
-    # history, and be overwritten moments later when this writer finished with
-    # its older snapshot. That is two writers on the same artifacts, which is
-    # the failure this lock exists to prevent, reached through the one phase the
-    # whole-function heartbeat did not cover.
-    def _publication_still_permitted() -> bool:
-        """Stop publishing once the lock is provably gone (Codex P2 wave-42).
-
-        The trailing beats DETECT a foreign owner and latch
-        `heartbeat_ownership_lost`; nothing acted on it, so a writer whose
-        history write stalled long enough to be reclaimed still went on to
-        overwrite the newer holder's summary and update summary from its own
-        older snapshot -- leaving the governance artifacts describing a
-        different pass than the ledgers beside them. Recording a fact and
-        enforcing it are not the same thing.
-
-        Only the TRAILING writes are gated. The ledgers themselves are already
-        protected by `critical_section`, which refuses to open at all; here the
-        pass is over and the honest action is to leave the newer writer's
-        artifacts alone.
-        """
-        return heartbeat is None or not heartbeat.ownership_lost
-
-    # The history is written FIRST so both published summaries can carry the
-    # beats it produced; the ordering is otherwise immaterial, since `summary`
-    # is unchanged by the history writer.
-    #
-    # GATED BEFORE ENTRY, not only after (Codex P2 wave-42c). The wave-42 gate
-    # sat after this call, so a loss already latched by the ledger phase still
-    # let the history be rewritten from the older snapshot. KNOWN LIMITATION,
-    # registered rather than papered over: a loss occurring DURING this call
-    # cannot be undone -- the write has happened by the time the next beat
-    # detects it. That residue is the same unclosable check-then-write window
-    # as the reclaim thread, and the gate narrows it to the duration of one
-    # write instead of the whole trailing phase.
-    if _publication_still_permitted():
-        _write_shadow_pnl_history(cfg, summary)
-        _progress("pnl_history_published")
-    _refresh_lock_diagnostics()
     summary_file = str(settings.get("summary_file", "shadow_signal_cohort_pnl.json"))
-    if _publication_still_permitted():
-        write_json(cfg.governance_root / summary_file, summary)
-        _progress("summary_published")
-        _refresh_lock_diagnostics()
-    if _publication_still_permitted():
-        write_json(cfg.governance_root / "shadow_cohort_update_summary.json", summary)
-        _progress("update_summary_published")
-    else:
-        summary["shadow_summary_publication_abandoned_on_lost_lock"] = True
+    write_json(cfg.governance_root / summary_file, summary)
+    _write_shadow_pnl_history(cfg, summary)
+    write_json(cfg.governance_root / "shadow_cohort_update_summary.json", summary)
     return summary

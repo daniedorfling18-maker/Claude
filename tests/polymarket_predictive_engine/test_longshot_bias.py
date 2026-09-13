@@ -187,6 +187,30 @@ def test_wo119_longshot_shadow_emit_skips_when_prediction_cycle_lock_held(tmp_pa
     assert not (cfg.output_root / "polymarket_shadow" / "shadow_fills.csv").exists()
 
 
+def test_wo143b1_longshot_shadow_emit_reports_zero_when_shadow_cohort_lock_held(tmp_path):
+    # WO-143b.1 F4 (test 2): `update_shadow_cohort_evidence` now also returns
+    # `skipped_shadow_lock_held` when its own internal `shadow_cohort` lock
+    # (WO-143b) is held, distinct from the `prediction_cycle` skip covered by
+    # the test above. That skip writes nothing, so `opened_this_cycle` must be
+    # 0 and the status surfaced verbatim. Non-empty candidate list, so the 0
+    # is not incidental.
+    from polymarket_predictive_engine import runtime_lock
+
+    cfg = _cfg(tmp_path, emit_shadow=True)
+    _write_watchlist(cfg, _yes_no_market("macro-longshot", yes_ask=0.08, no_ask=0.85, liquidity=1200))
+    held = runtime_lock.acquire_runtime_lock(cfg, "shadow_cohort", stale_after_seconds=999999)
+    try:
+        payload = build_longshot_bias_scan(cfg)
+    finally:
+        runtime_lock.release_runtime_lock(held)
+
+    assert payload["candidates"] == 1  # scan output unaffected, list is non-empty
+    assert payload["shadow_update"]["status"] == "skipped_shadow_lock_held"
+    assert payload["shadow_update"]["opened_this_cycle"] == 0
+    assert not (cfg.output_root / "polymarket_shadow" / "shadow_positions.csv").exists()
+    assert not (cfg.output_root / "polymarket_shadow" / "shadow_fills.csv").exists()
+
+
 def test_longshot_bias_shadow_emit_refuses_no_side_outside_entry_band(tmp_path):
     cfg = _cfg(tmp_path, emit_shadow=True)
     _write_watchlist(cfg, _yes_no_market("expensive-no", yes_ask=0.08, no_ask=0.94, liquidity=1200))

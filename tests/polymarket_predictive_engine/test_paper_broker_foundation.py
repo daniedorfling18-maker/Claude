@@ -12,6 +12,7 @@ from polymarket_predictive_engine.models.calibrated import prediction_confidence
 from polymarket_predictive_engine.paper_broker import run_paper_broker
 from polymarket_predictive_engine.paper_cycle import run_paper_cycle
 from polymarket_predictive_engine.paper_round_trip import build_paper_round_trip_evidence
+import polymarket_predictive_engine.runtime_lock as runtime_lock
 from polymarket_predictive_engine.storage import connect_db, init_db
 from polymarket_predictive_engine.utils import read_csv_rows, write_csv, write_json
 
@@ -366,6 +367,23 @@ def test_forward_paper_cycle_is_persistent_idempotent_and_settles(tmp_path):
 def test_forward_paper_cycle_forwards_longshot_bias_only_to_shadow(tmp_path):
     cfg = _config(tmp_path)
     _seed_forward_fixture(cfg)
+    _seed_longshot_watchlist(cfg)
+
+    result = run_paper_cycle(cfg, source="raw_snapshot")
+
+    assert result["signals_approved"] == 1
+    assert result["longshot_bias"]["candidates"] == 1
+    # WO-143b.1 F4 (test 3): the uncontended path still reports the FULL count,
+    # so the honesty fix cannot be satisfied by simply zeroing everything.
+    assert result["longshot_bias"]["shadow_candidates_forwarded"] == 1
+    assert result["longshot_bias"]["shadow_update_status"] == "computed"
+    shadow_positions = read_csv_rows(cfg.output_root / "polymarket_shadow" / "shadow_positions.csv")
+    assert len(shadow_positions) == 1
+    assert shadow_positions[0]["token_id"] == "longshot-no"
+    assert shadow_positions[0]["shadow_source"] == "longshot_bias"
+
+
+def _seed_longshot_watchlist(cfg) -> None:
     write_csv(
         cfg.output_root / "polymarket_liquidity_discovery" / "liquidity_watchlist.csv",
         [
@@ -378,17 +396,17 @@ def test_forward_paper_cycle_forwards_longshot_bias_only_to_shadow(tmp_path):
                 "token_id": "longshot-yes",
                 "close_time": "2026-12-31T00:00:00Z",
                 "time_to_close_hours": 4000,
-                    "best_bid": 0.07,
-                    "best_ask": 0.08,
-                    "top_bid_size": 1000,
-                    "top_ask_size": 1000,
-                    "bid_depth_1pct": 1000,
-                    "ask_depth_1pct": 1000,
-                    "bid_depth_5pct": 1000,
-                    "ask_depth_5pct": 1000,
-                    "websocket_quote_age_seconds": 30,
-                    "midpoint": 0.075,
-                    "spread": 0.01,
+                "best_bid": 0.07,
+                "best_ask": 0.08,
+                "top_bid_size": 1000,
+                "top_ask_size": 1000,
+                "bid_depth_1pct": 1000,
+                "ask_depth_1pct": 1000,
+                "bid_depth_5pct": 1000,
+                "ask_depth_5pct": 1000,
+                "websocket_quote_age_seconds": 30,
+                "midpoint": 0.075,
+                "spread": 0.01,
                 "liquidity": 1200,
             },
             {
@@ -400,31 +418,48 @@ def test_forward_paper_cycle_forwards_longshot_bias_only_to_shadow(tmp_path):
                 "token_id": "longshot-no",
                 "close_time": "2026-12-31T00:00:00Z",
                 "time_to_close_hours": 4000,
-                    "best_bid": 0.88,
-                    "best_ask": 0.89,
-                    "top_bid_size": 1000,
-                    "top_ask_size": 1000,
-                    "bid_depth_1pct": 1000,
-                    "ask_depth_1pct": 1000,
-                    "bid_depth_5pct": 1000,
-                    "ask_depth_5pct": 1000,
-                    "websocket_quote_age_seconds": 30,
-                    "midpoint": 0.885,
+                "best_bid": 0.88,
+                "best_ask": 0.89,
+                "top_bid_size": 1000,
+                "top_ask_size": 1000,
+                "bid_depth_1pct": 1000,
+                "ask_depth_1pct": 1000,
+                "bid_depth_5pct": 1000,
+                "ask_depth_5pct": 1000,
+                "websocket_quote_age_seconds": 30,
+                "midpoint": 0.885,
                 "spread": 0.01,
                 "liquidity": 1200,
             },
         ],
     )
 
-    result = run_paper_cycle(cfg, source="raw_snapshot")
 
-    assert result["signals_approved"] == 1
+def test_forward_paper_cycle_reports_zero_shadow_forwarded_when_shadow_lock_held(tmp_path):
+    # WO-143b.1 F4 (test 1): with the internal `shadow_cohort` lock held by a
+    # foreign writer, `update_shadow_cohort_evidence` writes nothing and
+    # returns `skipped_shadow_lock_held`. A caller reporting the input list's
+    # length would be claiming a forward that never happened. Asserted with a
+    # NON-EMPTY candidate list -- the sibling test above proves this same
+    # fixture forwards 1 when uncontended -- so the 0 proves the fix rather
+    # than being incidental.
+    cfg = _config(tmp_path)
+    _seed_forward_fixture(cfg)
+    _seed_longshot_watchlist(cfg)
+
+    foreign_lock = runtime_lock.acquire_runtime_lock(cfg, "shadow_cohort")
+    assert foreign_lock.acquired is True
+    try:
+        result = run_paper_cycle(cfg, source="raw_snapshot")
+    finally:
+        runtime_lock.release_runtime_lock(foreign_lock)
+
     assert result["longshot_bias"]["candidates"] == 1
-    assert result["longshot_bias"]["shadow_candidates_forwarded"] == 1
-    shadow_positions = read_csv_rows(cfg.output_root / "polymarket_shadow" / "shadow_positions.csv")
-    assert len(shadow_positions) == 1
-    assert shadow_positions[0]["token_id"] == "longshot-no"
-    assert shadow_positions[0]["shadow_source"] == "longshot_bias"
+    assert result["longshot_bias"]["shadow_candidates_forwarded"] == 0
+    assert result["longshot_bias"]["shadow_update_status"] == "skipped_shadow_lock_held"
+    assert result["shadow_cohort"]["status"] == "skipped_shadow_lock_held"
+    positions_path = cfg.output_root / "polymarket_shadow" / "shadow_positions.csv"
+    assert not positions_path.exists() or read_csv_rows(positions_path) == []
 
 
 def test_paper_broker_proxy_settles_fast_crypto_updown_position(tmp_path, monkeypatch):

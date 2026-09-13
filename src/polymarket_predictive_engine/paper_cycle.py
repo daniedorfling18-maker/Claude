@@ -22,6 +22,38 @@ from .strategy import generate_signals
 from .utils import now_utc, safe_float, write_json
 
 
+def _shadow_update_status(shadow_update: Any) -> str:
+    """The shadow update's status, or ``not_run`` when it produced none.
+
+    WO-143b.1 F4: callers must surface the skip verbatim so a zero forwarded
+    count reads as a recorded skip rather than being inferred from the zero.
+    """
+    if isinstance(shadow_update, dict):
+        status = shadow_update.get("status")
+        if isinstance(status, str) and status:
+            return status
+    return "not_run"
+
+
+def _is_skipped_shadow_update(shadow_update: Any) -> bool:
+    """True when the shadow update did not write, so nothing was forwarded.
+
+    WO-143b.1 F4: covers a `skipped_*` status returned by
+    ``update_shadow_cohort_evidence``, the `disabled` status it returns when
+    `shadow_cohort_validation.enabled` is false, and any status synthesised
+    locally by a caller that elected not to call it at all.
+
+    ALLOW-LISTED ON THE WRITING SIDE (Codex P2 wave-42). The predicate was
+    `startswith("skipped_")`, which does not match `disabled` -- so a disabled
+    deployment produced receipts claiming delivery of evidence that was never
+    recorded. Deny-listing the non-writing outcomes is the wrong shape: a
+    status added later defaults to "claim delivery" and the failure is silent.
+    `computed` is the only outcome that writes either ledger, so it is the only
+    one that may claim to have.
+    """
+    return _shadow_update_status(shadow_update) != "computed"
+
+
 def _persist_predictions(cfg: EngineConfig, predictions: list[dict[str, Any]]) -> None:
     con = connect_db(cfg.database_path)
     try:
@@ -137,6 +169,17 @@ def _run_paper_cycle_unlocked(
         row for row in longshot_scan.get("candidate_rows", []) if isinstance(row, dict)
     ]
     shadow_cohort = update_shadow_cohort_evidence(cfg, predictions + longshot_candidates)
+    # WO-143b.1 F4 (caller-honesty contract): the forwarded count must be
+    # derived from the update's OUTCOME, never from the size of the list that
+    # was merely offered. Any `skipped_*` status means nothing was written, so
+    # the count is 0. The antecedent deliberately covers a locally synthesised
+    # skip as well as a returned one (WO-143's `scoring_only` path never calls
+    # the updater at all), which is why this reads the status rather than
+    # testing whether a call happened. The status itself is surfaced verbatim
+    # via report["shadow_cohort"] below.
+    shadow_candidates_forwarded = (
+        0 if _is_skipped_shadow_update(shadow_cohort) else len(longshot_candidates)
+    )
     con = connect_db(cfg.database_path)
     try:
         cohort_pnl = write_signal_cohort_pnl(con, cfg)
@@ -180,7 +223,8 @@ def _run_paper_cycle_unlocked(
                 "candidate_cohorts": longshot_scan.get("candidate_cohorts", {}),
                 "decision_use": longshot_scan.get("decision_use"),
                 "emit_shadow_positions": False,
-                "shadow_candidates_forwarded": len(longshot_candidates),
+                "shadow_candidates_forwarded": shadow_candidates_forwarded,
+                "shadow_update_status": _shadow_update_status(shadow_cohort),
             },
             "cohort_pnl": cohort_pnl,
             "readiness": gate,

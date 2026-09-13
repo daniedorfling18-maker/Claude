@@ -430,13 +430,34 @@ def build_longshot_bias_scan(
                     "opened_this_cycle": 0,
                     "runtime_lock": lock.as_dict(),
                 }
+    # WO-143b.1 F4 (caller-honesty contract): `update_shadow_cohort_evidence`
+    # now also returns `skipped_shadow_lock_held` (its own internal
+    # `shadow_cohort` lock, WO-143b) alongside the `skipped_prediction_cycle_lock_held`
+    # this module synthesises locally when it elects not to call at all. Both
+    # mean nothing was written, so the reported count must be 0 -- not
+    # whatever `.get` resolves to on a truncated skip payload, which was
+    # `None`, not `0`. The status is surfaced verbatim on every path.
+    shadow_update_status = (
+        shadow_summary.get("status") if isinstance(shadow_summary, dict) else None
+    )
+    if not isinstance(shadow_update_status, str) or not shadow_update_status:
+        shadow_update_status = "not_run"
+    # ALLOW-LISTED ON THE WRITING SIDE (Codex P2 wave-42): `disabled` is also a
+    # non-writing outcome and the `skipped_*`/`not_run` deny-list did not cover
+    # it, so a disabled deployment reported rows as opened that never reached a
+    # ledger. `computed` is the only status under which anything is written.
+    shadow_update_skipped = shadow_update_status != "computed"
     summary = {
         **summary,
         "candidate_file": str(root / "longshot_bias_candidates.csv"),
         "emit_shadow_positions": bool(should_emit_shadow),
         "shadow_update": {
-            "status": shadow_summary.get("status") if isinstance(shadow_summary, dict) else "not_run",
-            "opened_this_cycle": shadow_summary.get("opened_this_cycle") if isinstance(shadow_summary, dict) else 0,
+            "status": shadow_update_status,
+            "opened_this_cycle": (
+                0
+                if shadow_update_skipped
+                else (shadow_summary.get("opened_this_cycle") if isinstance(shadow_summary, dict) else 0)
+            ),
             "open_positions": shadow_summary.get("open_positions") if isinstance(shadow_summary, dict) else None,
             "closed_this_cycle": shadow_summary.get("closed_this_cycle") if isinstance(shadow_summary, dict) else None,
         },

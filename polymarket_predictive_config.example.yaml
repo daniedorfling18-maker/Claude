@@ -1362,6 +1362,31 @@ shadow_cohort_validation:
   settlement_grace_minutes: 1
   settlement_request_timeout_seconds: 20
   settlement_max_positions_per_cycle: 25
+  # WO-143b.1 F1 -- wall-clock budgets and the shadow_cohort lock's stale
+  # window. Registered together so the relationship between them is auditable;
+  # none is derived from another at runtime, and the load-time validator in
+  # shadow_cohort.py rejects any set that violates the registered ordering.
+  #
+  # settlement_budget_seconds ABANDONS remaining positions when exceeded.
+  # remainder_budget_seconds is ADVISORY (sizing only, never enforced at
+  # runtime) -- two constants named "budget" with opposite enforcement is a
+  # trap, so the advisory one says so here.
+  #
+  # Basis: 25 positions x up to 3 HTTP calls x 20s = 1500s measured worst
+  # case, so a 900s budget abandons well before the stale window. 300s covers
+  # a ~17 MB rewrite plus appends on a loaded 2-core VPS with headroom.
+  # heartbeat_cap_seconds is strictly greater than 900+300+120 = 1320 so a
+  # legitimately slow pass is never cut off, and strictly less than the 2400s
+  # stale window so the beat always stops before the lock could be reclaimed
+  # under it. critical_section_max_seconds is pure headroom for a stalled
+  # filesystem: with the temp-file discipline the section is os.replace calls
+  # only, i.e. milliseconds.
+  settlement_budget_seconds: 900
+  remainder_budget_seconds: 300  # sizing only, never enforced at runtime
+  heartbeat_margin_seconds: 120
+  heartbeat_cap_seconds: 1800
+  critical_section_max_seconds: 120
+  shadow_cohort_stale_after_seconds: 2400
   minimum_price: 0.005
   minimum_edge_lower_bound: -0.01
   minimum_fundamental_edge_after_haircut: 0.008

@@ -18402,3 +18402,132 @@ Not touched: the whitelist, `MAX_FILE_KB`, `CSV_TAIL_LINES`, the credential guar
 After deployment, `origin/vps-telemetry` carries `telemetry/export_manifest.json` with one entry per mirrored file (its own excluded), `shadow_positions.csv` marked `truncated = true` with both line counts; `outputs/performance/telemetry_push_status.json` reads `ok` and `outputs/ops_scheduler/degraded_state_watchdog.json` reads `evaluations[registration_id="publication_bridge_unhealthy"].bridges[bridge="telemetry"].status = "ok"` (on a writer failure: `"manifest_failed"` and `state = "incident"`). The coverage report is not production-checkable until it is scheduled: the owner runs `data-coverage-report` once and reads `outputs/polymarket_model_governance/data_coverage_report.json` with the five classifications and `pnl_attribution_check.ledger_completeness_basis = "vps"`; scheduling it with a ceiling is a deployment decision.
 
 **Not authorised by this text:** any change to what the mirror publishes, any collector change, any export of the training corpora, any gate, any paper or live evidence, any merge.
+
+## WO-173 — Maker evidence summary: modelled versus realized, hypothetical fills and book coverage, adverse-selection status against the registered Tier-0 floor, and the size cap and reward-share model named as assumptions — `admitted` (2026-09-13; S8 ADMISSIBLE after three delta passes (16 → 5 → 1 → 0 defects); `registered-ancestry: a790e51 ancestor-of <build-sha> PASS` to be recorded at dispatch; class M; a new read-only reporting module beside the frozen study; `maker_carry_study.py`, `maker_fill_replay.py`, `maker_live_test.py`, M-A/M-B/M-C and every registered threshold are untouched; touches `src/`, the CLI, tests, recorded fixtures, the charter and this register → orchestrator-mergeable after line-audit unless the owner routes it; `registered-ancestry:` to be recorded at dispatch against the `origin/main` tip, `a790e51` at drafting. **Disclosure.** This work order exists because an external review received on 2026-09-13 and the owner's same-day instruction to the drafting agent (relayed in session, not recorded in the repository; it authorises neither build nor merge — authorization lives at the merge) found that maker profitability and capacity were stated in both directions — a retracted $63.62/day adverse-selection figure still printed in the README, a $1.68/day modelled carry that rests on three replay-confirmed hypothetical fills with 77.45% of opportunities lacking contemporaneous book state, a wallet scoreboard at zero rewards, and a flat capital curve that the sizing code's `max_size_multiple` partly imposes. The study's own `honesty_clause` already says simulated fills are unverifiable and net carry is an upper bound; what is missing is one artifact that places every such figure under its registered evidence class with its uncertainty. The README correction itself is a separate draft (WO-168, not yet registered).)
+
+### The changes, exactly
+
+1. **`src/polymarket_predictive_engine/maker_evidence_summary.py` (new; `run_maker_evidence_summary(cfg, *, now: datetime | None = None)`, `None` → wall-clock UTC, the house form of `crypto_updown_model.py:185`;
+   CLI `maker-evidence-summary` — `COMMANDS` gains the name and `main()` gains
+   `elif args.command == "maker-evidence-summary": run_maker_evidence_summary(cfg)`).** Reads,
+   read-only, three artifacts, each with its producer and its absent display: `outputs/maker_carry/
+   maker_carry_study.json` (producer: the intraday study, WO-36), `maker_fill_replay.json` (producer:
+   the Tier-0 replay, WO-83), `maker_live_test.json` (producer: the read-only wallet scoreboard,
+   WO-88/89); each section carries `state ∈ {"present", "source_absent"}`; an absent, unparseable or unreadable file → that section `state = "source_absent"`,
+   every figure in it `null`, summary `status = "partial"`. No history CSV is read. Writes
+   `outputs/maker_carry/maker_evidence_summary.json` with `utils.write_json` (atomic) — `status ∈
+   {"ok", "partial"}`, `"ok"` iff every `sources.*.state = "present"`, no section has `state =
+   "source_absent"`, and `capacity.curve_state != "curve_unreadable"`; a `null` that is the honest reading
+   (an unmeasured haircut, a non-flattening curve, an absent `target_net_usd_per_day`) does not make
+   the summary partial:
+   - `modelled`: `net_carry_usd_per_day` (study `portfolio_net_carry_usd_per_day`),
+     `target_usd_per_day` (study `target_net_usd_per_day`; absent → `null`),
+     `evidence_class = "modeled"` (the registry's vocabulary) with `evidence_note = "simulated maker
+     fills; an upper bound per the study's honesty_clause"`, `honesty_clause` copied as a string,
+     `share_model` (study `share_model`) with `share_model_note = "assumed reward-sharing model, not
+     observed receipts"`, `portfolio_markets`, `portfolio_capital_usd`;
+   - `hypothetical_fills`: replay `simulated_fills`, `confirmed_fills`, `confirmed_fill_ratio`,
+     `last_in_queue_evaluable_opportunities`, `no_contemporaneous_state_opportunities`,
+     `no_contemporaneous_state_rate`, `contemporaneous_book_coverage_rate = round(1 − rate, 6)`
+     (`null` when the rate is absent, non-finite, or outside [0, 1]) with the literal note "share of
+     simulated fill opportunities with contemporaneous book state; distinct from the registered
+     markout-window `coverage`", `replay_days`, `quoting_basis`;
+   - `adverse_selection`: `status` ∈ {`"unmeasured"` (confirmed fills absent, non-finite, non-integral, or < 1),
+     `"below_tier0_minimum_<n>_of_<min>_fills"` (1 ≤ n < min), `"measured_on_<n>_fills"` (n ≥ min)}
+     with `<min>` = `max(MB_TIER0_MIN_CONFIRMED_FILLS, v)` where `v` is
+     `cfg.raw["maker_carry_study"]["mb_tier0_min_confirmed_fills"]` when finite and ≥ 0 (mirroring the
+     study's tighten-only `_mb_tighter_min` at `:2041-2047`; the registered constant is 10 at `:177`),
+     recorded as `adverse_selection.tier0_min_confirmed_fills = <min>` with `tier0_floor_source =
+     "config_tightened"` iff `<min> > MB_TIER0_MIN_CONFIRMED_FILLS`, else `"registered"`, `implied_usd_per_day` (replay `implied_adverse_usd_per_day`),
+     `markout_per_fill` by horizon with the replay's `realized_markout_distribution` min/max/count per
+     horizon as the uncertainty statement, `simulation_to_reality_haircut` (numeric or `null`) and
+     `simulation_to_reality_haircut_status ∈ {"reported", "unmeasured"}`, and the literal sentence
+     "fills below the Tier-0 floor do not bound adverse selection; the figure is a point on a
+     distribution whose width is the min/max shown";
+   - `realized`: scoreboard `rewards_usd_total`, `fills` (= `fill_attribution.maker_test_fills`),
+     `fills_last_24h` (= `maker_test_fills_last_24h`), `inventory_pnl_usd`, `scoreboard`,
+     `read_only`, `evidence_class = "live-real-money"` with `evidence_note = "read-only observation of a
+     human-run wallet; no order path; zero to date"`; any absent key → `null`;
+   - `capacity`: `max_size_multiple` = `maker_carry_study.maker_policy_settings(cfg)["max_size_multiple"]`
+     (registered default 5, `MAKER_POLICY_DEFAULTS`, `:185`), with `max_size_multiple_source ∈
+     {"policy_settings", "unknown"}` — absent, non-finite, non-integral or < 1 → `null` and `"unknown"` (the study itself coerces with `int()` at `:1871`, so `5.0` reads as 5);
+     `cap_binding` = every entry of the study's `portfolio` list has `size_multiple ==
+     max_size_multiple` (`null` when the list is empty or the cap is `null`); `capital_curve` copied
+     from the study; `curve_flat_beyond_usd` = after sorting by `capital_cap_usd` ascending, the
+     smallest cap `c` such that `capital_used_usd` at `c` equals `capital_used_usd` at every larger
+     cap, with at least one larger cap; `null` if the last two entries differ (a readable curve that
+     does not flatten keeps `capacity.curve_state = "readable"`), or when the curve is unreadable —
+     `capacity.curve_state ∈ {"readable", "curve_unreadable"}`, `curve_unreadable` iff fewer than two
+     entries or any entry has an absent or non-finite `capital_cap_usd`, `capital_used_usd` or
+     `portfolio_markets`; `capacity.state` is the section's `{"present", "source_absent"}` like every
+     other section (the study file absent → every capacity figure `null`); the flat segment = entries
+     with `capital_cap_usd ≥ curve_flat_beyond_usd`; `flat_curve_is_model_bounded = true` iff every
+     flat-segment entry has `portfolio_markets ≤ 1` or `cap_binding` is `true`, `false` otherwise,
+     `null` when `curve_flat_beyond_usd` is `null`; the literal note "a flat curve bounded by
+     `max_size_multiple` and by the number of portfolio markets is a modelling constraint, not a
+     measured market capacity; a curve that never flattens says nothing about capacity";
+   - `gates_reference`: the study's `maker_gates` copied as a parsed object without modification
+     (frozen; never recomputed);
+   - `generated_at_utc`: the run clock, the single anchor every `age_seconds` is computed from;
+   - `sources`: per input, path, `generated_at_utc`, `state ∈ {"present", "source_absent",
+     "timestamp_unreadable"}`, and `age_seconds` = run clock − `generated_at_utc` (`null`, state
+     `timestamp_unreadable`, when absent, unparseable, or later than the run clock); no staleness
+     threshold is applied — `age_seconds` is reported only;
+   - `paper_trading_invoked = false`, `live_trading_invoked = false`.
+2. **Recorded fixtures.** The three JSONs from the committed telemetry snapshot `origin/vps-telemetry`
+   `fcebaa2` (2026-08-21T02:00:09Z; study `generated_at_utc` 2026-08-20T10:46:56Z, replay
+   2026-08-21T01:42:15Z, live 2026-08-21T01:41:31Z), **sanitised per the README convention** —
+   wallet addresses, token, condition, market, asset identifiers, slugs and URLs replaced with
+   deterministic inert values of the same shape, type and length; no test asserts an identifier
+   value — under `tests/fixtures/recorded/maker_2026-08-21/`, each with the sha256 of the committed
+   (sanitised) file in the README entry, which records the source commit and the three timestamps.
+
+### A11 — bias-direction disclosure
+
+Labelling moves no number. Copying the study's figures beside the realized zeros can only make
+the modelled carry look less supported. Two channels are named: a `measured_on_<n>_fills` label
+on fewer fills than the registered Tier-0 floor would read as measured what the registry calls
+insufficient (favourable) — removed by the three-state status; and a `false` capacity flag on a
+curve that never flattens would assert a measured capacity about a segment that does not exist
+(favourable) — removed by the `null` rule. The gates block is copied, never recomputed, so this
+artifact can neither pass nor fail M-A/M-B/M-C.
+
+### Fail-safe sentence (S5)
+
+An absent, unparseable, or unreadable source yields `source_absent` for its section with every
+figure `null` and `status = "partial"`; a non-finite or out-of-range numeric field yields `null`;
+`adverse_selection.status` reads `unmeasured` unless the confirmed-fill count is a finite number
+with an integral value ≥ 1 (`<n>` printed as that integer); the capacity flag is `null` whenever the curve is unreadable or does not flatten and `true`
+only on the stated rule; an unreadable timestamp yields a `null` age and `timestamp_unreadable`;
+writes are atomic; nothing is written to any producer's artifact.
+
+### Touch ONLY these files (9 paths)
+
+1. `src/polymarket_predictive_engine/maker_evidence_summary.py` (new).
+2. `src/polymarket_predictive_engine/cli.py` — the `COMMANDS` entry and the dispatch branch.
+3. `tests/polymarket_predictive_engine/test_maker_evidence_summary.py` (new) — tests 1-10.
+4. `tests/fixtures/recorded/maker_2026-08-21/maker_carry_study.json` (new, sanitised).
+5. `tests/fixtures/recorded/maker_2026-08-21/maker_fill_replay.json` (new, sanitised).
+6. `tests/fixtures/recorded/maker_2026-08-21/maker_live_test.json` (new, sanitised).
+7. `tests/fixtures/recorded/README.md` — the provenance entry.
+8. `docs/POLYMARKET_CODEX_WORK_ORDERS.md` — this entry and its calibration row.
+9. `docs/POLYMARKET_QUANT_MODE_CHARTER.md` — one dated sentence under the 2026-08-23 verification pass pointing to the artifact as the place where the maker figures carry their evidence class.
+
+### Enumerated offline tests (S8/A10); each confirmed to FAIL with its guard reverted, caches purged
+
+1. `test_modelled_block_on_the_recorded_fixtures` — with the run clock later than every `generated_at_utc`, `status = "ok"`; `net_carry_usd_per_day = 1.68`, `target_usd_per_day = 3.33`, `evidence_class = "modeled"`, `share_model = "published_v2"`, `portfolio_markets = 1`, `portfolio_capital_usd = 470.0`, the honesty clause equal to the fixture's string.
+2. `test_hypothetical_fills_and_coverage` — `simulated_fills = 3`, `confirmed_fills = 3`, `confirmed_fill_ratio = 0.136364`, `no_contemporaneous_state_rate = 0.77451`, `contemporaneous_book_coverage_rate = 0.22549` (rounded to 6 places), `replay_days = 14.0`.
+3. `test_adverse_selection_status_reads_the_tier0_floor` — on the fixture `status = "below_tier0_minimum_3_of_10_fills"`, `implied_usd_per_day = 0.682944`, the 15m horizon shows `min = −0.02`, `max = 0.01`, `count = 3`, `simulation_to_reality_haircut = null` with `simulation_to_reality_haircut_status = "unmeasured"`; with `confirmed_fills = 0` the status reads `unmeasured`; with `confirmed_fills = 10` it reads `measured_on_10_fills` and `tier0_floor_source = "registered"`; with the config tightened to 12 and `confirmed_fills = 10` it reads `below_tier0_minimum_10_of_12_fills` and `config_tightened`; with the config set to 5 the floor stays 10; with `confirmed_fills = "nan"` or `2.5` it reads `unmeasured`; `10.0` reads as 10.
+4. `test_realized_block_reads_the_scoreboard` — `rewards_usd_total = 0`, `fills = 0` (from `fill_attribution.maker_test_fills`), `fills_last_24h = 0`, `scoreboard = "flat_no_net_evidence"`, `read_only = true`, `evidence_class = "live-real-money"`.
+5. `test_capacity_flag_is_model_bounded_on_a_one_market_portfolio` — on the fixture (caps 250, 500, 1000, 2000, 5000 with used 0, 470, 470, 470, 470 and markets 0, 1, 1, 1, 1; `portfolio[0].size_multiple = 5`): `max_size_multiple = 5`, `max_size_multiple_source = "policy_settings"`, `cap_binding = true`, `curve_flat_beyond_usd = 500.0`, `flat_curve_is_model_bounded = true`; on a synthetic curve whose used capital keeps rising through the last two entries with 4 markets: `curve_flat_beyond_usd = null` and the flag `null`; on a synthetic flat curve with 4 markets and `size_multiple = 2` against a cap of 5: the flag `false`.
+6. `test_gates_block_is_copied_never_recomputed` — `summary["gates_reference"] == study["maker_gates"]` as parsed objects and their `json.dumps(..., sort_keys=True)` strings are equal; altering a study threshold in the fixture changes the copy and nothing else.
+7. `test_missing_sources_fail_closed` — with `maker_live_test.json` absent: `realized.state = "source_absent"`, every realized figure `null`, `status = "partial"`; a non-finite `portfolio_net_carry_usd_per_day` reads `null`; an empty `capital_curve` reads `curve_flat_beyond_usd = null`, the flag `null`, `capacity.curve_state = "curve_unreadable"`, `status = "partial"`; with the study file absent `capacity.state = "source_absent"` and every capacity figure `null`; a rate of 1.5 reads `contemporaneous_book_coverage_rate = null`; a `generated_at_utc` later than the run clock reads `status = "partial"`.
+8. `test_source_age_advances_with_the_run_clock` — with an injected run clock, `sources.maker_carry_study.age_seconds` equals the clock minus 2026-08-20T10:46:56Z in seconds; advancing the clock by 3600 s adds exactly 3600; a `generated_at_utc` absent, unparseable, or later than the clock → `age_seconds = null`, `state = "timestamp_unreadable"`.
+9. `test_cli_registers_maker_evidence_summary` — `"maker-evidence-summary" in COMMANDS`.
+10. `test_capacity_flag_is_never_false_on_an_unreadable_curve` (property test, `hypothesis`) — over random lists of `(capital_cap_usd, capital_used_usd, portfolio_markets)` in which at least one entry has an absent or non-finite field, the flag is never `false`.
+
+### Day-after check
+
+On the VPS after one run of `maker-evidence-summary`: `outputs/maker_carry/maker_evidence_summary.json` exists with `status = "ok"`, `sources.*.state = "present"` and `age_seconds` non-null for all three, `modelled.evidence_class = "modeled"`, `realized.rewards_usd_total` equal to the scoreboard's value, `adverse_selection.status` naming the confirmed-fill count against the floor, and `capacity.flat_curve_is_model_bounded` present; readable off-box at `origin/vps-telemetry:telemetry/outputs/maker_carry/maker_evidence_summary.json` (the directory is whitelisted). Scheduling it beside the study is a deployment step named here, not built.
+
+**Not authorised by this text:** any change to M-A/M-B/M-C, the study, the replay, the scoreboard, any gate, any paper or live evidence, any merge.

@@ -2078,11 +2078,26 @@ so the claim is decay and intermittency, not disappearance.)
 
 Also unestablished: capacity (the study is unit-normalised and bounds no size), survivorship
 (BTC and ETH are the only symbols in the tree, so the asset-selection channel cannot be sized
-from it), and the simulated structure's fidelity — retained margin profit re-levers the notional
-from 1.0 to as much as 1.88, so capital per notional sits below the registered 1.5 on 20.5% of
+from it), and the simulated structure's fidelity — the notional drifts from 1.020 at inception
+to as much as 1.881, so capital per notional sits below the registered 1.5 on 20.5% of
 BTC boundaries and the median margin ratio is 0.88 rather than 0.50. The zero-forced-liquidation
 result is therefore a statement about a heavily over-collateralised account. No paper or live
 evidence exists. WO-67's P1-P5 are untouched and funding remains closed.
+
+**Correction, 2026-09-13.** An earlier version of this paragraph gave the mechanism as "retained
+margin profit re-levers the notional from 1.0 to as much as 1.88". The mechanism is wrong and the
+committed ledger is why: in `ledger_BTCUSDT_V0.csv` and `ledger_ETHUSDT_V0.csv` the spot quantity
+rises exactly once, at inception, and is non-increasing across all 7,286 later boundaries — BTC
+goes from 1.3589e-04 to 1.5048e-05, and the peak-notional boundary holds about a ninth of the
+inception quantity. Retained profit never buys notional. The notional rises because the mark
+appreciates faster than the rebalancer cuts quantity, which is price drift outrunning a rebalance,
+not re-levering. The figures the paragraph rests on are unchanged and re-derived from the same
+ledgers: peak notional 1.881061, capital per notional below 1.5 on 20.50% of BTC boundaries,
+median margin ratio 0.877. The direction of the finding is unchanged and remains adverse to the
+carry: leverage ran **above** the registered 1.5 for a fifth of the sample, which is the opposite
+of the "no re-leveraging after price falls" channel WO-166 registered as pushing the premium down.
+The error was found by the S8 gate on the follow-up work order, which read the ledgers rather than
+the prose.
 
 ### Build delta 1, applied after the independent reviews
 
@@ -2101,7 +2116,7 @@ drawdown magnitudes so the gate must flip with the basis, an asserted self-finan
 with the phantom-yield mutation as its test, and a strict-positivity check on price columns with
 signed columns exempt. All three committed result sets still verify byte-for-byte, so no number
 in this record moved. The remaining findings — the return denominator, the era decay, the
-inherited completeness rule and the re-levering — are conclusion findings, not defects; changing
+inherited completeness rule and the notional drift — are conclusion findings, not defects; changing
 a registered estimator after results exist would be snooping, so they are recorded here and are
 the subject of a separate work order, not of an edit to this one.
 

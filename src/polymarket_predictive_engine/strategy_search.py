@@ -208,18 +208,29 @@ def _availability_index(cfg: EngineConfig) -> dict[str, datetime] | None:
     path = cfg.output_root / "polymarket_training" / "labels.csv"
     if not Path(path).exists():
         return None
-    index: dict[str, datetime] = {}
+    resolutions: dict[str, datetime] = {}
+    closes: dict[str, datetime] = {}
     for label in read_csv_rows(path):
-        if str(label.get("horizon") or "all_valid") != "all_valid":
+        # Build-review finding: `or "all_valid"` mapped a BLANK horizon to all_valid, so a market
+        # whose labels carry no horizon gained an availability time it had not earned and survived
+        # the fail-closed drop. A missing key defaults; a present blank does not.
+        if str(label.get("horizon", "all_valid")) != "all_valid":
             continue
         market = str(label.get("market_id") or label.get("market_slug") or "")
         if not market:
             continue
-        when = parse_timestamp(label.get("resolution_time")) or parse_timestamp(label.get("close_time"))
-        if when is None:
-            continue
-        current = index.get(market)
-        index[market] = when if current is None or when > current else current
+        resolved = parse_timestamp(label.get("resolution_time"))
+        closed = parse_timestamp(label.get("close_time"))
+        if resolved is not None:
+            resolutions[market] = max(resolutions.get(market, resolved), resolved)
+        if closed is not None:
+            closes[market] = max(closes.get(market, closed), closed)
+    # Build-review finding: the fallback is per MARKET, not per label row. Taking
+    # `resolution_time or close_time` row by row let one row's close_time outvote another row's
+    # resolution_time on the same market, producing an availability time the registered rule
+    # never names. The maximum resolution_time wins for a market that has any.
+    index = dict(closes)
+    index.update(resolutions)
     return index
 
 
@@ -436,14 +447,17 @@ def _evaluate_rule(
     roi_bootstrap_samples: int = 2000,
     hurdle: float = 0.02,
 ) -> dict[str, Any]:
-    """WO-171: train and validation are measured for selection; the final segment is measured
-    but its keys never enter `promotable`, `promotion_reason` or the ranking key."""
+    """WO-171: train and validation are measured for selection; the final segment is NOT read here.
+
+    Build-review finding: evaluating the final segment for every variant published its ROI and
+    clustered interval for every rule in both CSVs, which hands a downstream reader exactly the
+    selection channel this work order exists to close, and it made the read ledger count only the
+    promotable rules while every variant had in fact been read. `attach_final_segment` reads it,
+    and only for a rule that is already promotable."""
     train_rows = [row for row in rule_rows if str(row["_market_key"]) in train_markets]
     validation_rows = [row for row in rule_rows if str(row["_market_key"]) in validation_markets]
-    final_rows = [row for row in rule_rows if str(row["_market_key"]) in final_markets]
     train = _metrics(train_rows, stake_usdc)
     validation = _metrics(validation_rows, stake_usdc)
-    final = _metrics(final_rows, stake_usdc)
     all_metrics = _metrics(rule_rows, stake_usdc)
 
     validation_rois = _bootstrap_rois(validation_rows, n_boot=roi_bootstrap_samples, seed=20260625)
@@ -452,8 +466,6 @@ def _evaluate_rule(
         high = validation_rois[int(0.975 * (len(validation_rois) - 1))]
     else:
         low = high = float("nan")
-    _, final_ci_low, final_ci_high = _market_clustered_roi_ci(final_rows, n_boot=roi_bootstrap_samples)
-
     return {
         # Selection quantities.
         "holdout_roi_ci_low": low,
@@ -498,15 +510,44 @@ def _evaluate_rule(
         "turnover_rows_per_market_day": _turnover_rows_per_market_day(validation_rows),
         "max_drawdown_net_per_stake": _max_drawdown_net_per_stake(validation_rows),
         "cost_sensitivity_2x_validation_roi": _roi_at_fee_multiple(validation_rows, 2.0),
-        # Confirmation only.
-        "final_rows": final["rows"],
-        "final_markets": final["markets"],
-        "final_roi": final["roi"],
-        "final_roi_ci_low": final_ci_low,
-        "final_roi_ci_high": final_ci_high,
-        "final_evidence_class": FINAL_EVIDENCE_CLASS,
+        # Confirmation only, and empty unless `attach_final_segment` fills them.
+        "final_rows": "",
+        "final_markets": "",
+        "final_roi": "",
+        "final_roi_ci_low": "",
+        "final_roi_ci_high": "",
+        "final_evidence_class": "",
         "final_segment_note": FINAL_SEGMENT_NOTE,
     }
+
+
+def attach_final_segment(
+    result: dict[str, Any],
+    rule_rows: list[dict[str, Any]],
+    final_markets: set[str],
+    *,
+    stake_usdc: float,
+    roi_bootstrap_samples: int = 2000,
+) -> None:
+    """Read the untouched final segment for ONE already-selected rule, in place.
+
+    Every call is a read of the final period, so every call is a row in the ledger. That is why
+    this is separate from `_evaluate_rule`: the count in the artifact must be the number of reads
+    that actually happened."""
+    final_rows = [row for row in rule_rows if str(row["_market_key"]) in final_markets]
+    final = _metrics(final_rows, stake_usdc)
+    _, ci_low, ci_high = _market_clustered_roi_ci(final_rows, n_boot=roi_bootstrap_samples)
+    result.update(
+        {
+            "final_rows": final["rows"],
+            "final_markets": final["markets"],
+            "final_roi": final["roi"],
+            "final_roi_ci_low": ci_low,
+            "final_roi_ci_high": ci_high,
+            "final_evidence_class": FINAL_EVIDENCE_CLASS,
+            "final_segment_note": FINAL_SEGMENT_NOTE,
+        }
+    )
 
 
 def _setting(settings: dict[str, Any], new_key: str, old_key: str, default: Any) -> Any:
@@ -528,6 +569,11 @@ def _empty_payload(cfg: EngineConfig, status: str, **extra: Any) -> dict[str, An
 
 
 def run_edge_strategy_search(cfg: EngineConfig) -> dict[str, Any]:
+    """WO-171: a data-relative replay of recorded rows, clocked by `prediction_timestamp`.
+
+    Nothing here reads a wall clock for ordering: every segment boundary, purge, turnover figure
+    and drawdown ordering comes from the rows' own recorded timestamps, so the same corpus gives
+    the same split on any day it is run (S1)."""
     settings = _settings(cfg)
     if not settings.get("enabled", True):
         return _empty_payload(cfg, "disabled")
@@ -573,7 +619,9 @@ def run_edge_strategy_search(cfg: EngineConfig) -> dict[str, Any]:
     ignored_keys = [key for key in ("holdout_fraction",) if key in settings]
 
     evaluated: list[dict[str, Any]] = []
+    rows_by_rule: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for (rule_family, rule_value), rule_rows in by_rule.items():
+        rows_by_rule[(rule_family, rule_value)] = rule_rows
         result = _evaluate_rule(
             rule_family=rule_family,
             rule_value=rule_value,
@@ -655,15 +703,29 @@ def run_edge_strategy_search(cfg: EngineConfig) -> dict[str, Any]:
         ),
         reverse=True,
     )
-    # The complete tested-variant registry is written BEFORE any truncation, so
-    # `max_ranked_rules` can never hide a variant that was evaluated.
-    write_csv(cfg.governance_root / "edge_strategy_search_family.csv", ranked)
-    family_size = len(ranked)
+    family = list(ranked)
+    family_size = len(family)
     family_tested_size = len(tested)
 
     max_ranked = int(settings.get("max_ranked_rules", 100))
     ranked = ranked[:max_ranked]
     promoted = [row for row in ranked if row.get("promotable")]
+
+    # The final period is read here and nowhere else: once per promotable rule, after selection is
+    # complete. Every read is a ledger row, so `final_period_reads` is the number that happened.
+    for result in promoted:
+        attach_final_segment(
+            result,
+            rows_by_rule[(result["rule_family"], result["rule_value"])],
+            final_markets,
+            stake_usdc=stake_usdc,
+            roi_bootstrap_samples=roi_bootstrap_samples,
+        )
+
+    # The complete tested-variant registry is written BEFORE any truncation, so
+    # `max_ranked_rules` can never hide a variant that was evaluated. It is written after the
+    # final reads so a promotable row carries them; a non-promotable row's final columns are "".
+    write_csv(cfg.governance_root / "edge_strategy_search_family.csv", family)
 
     generated_at = now_utc()
     ledger_path = cfg.governance_root / "edge_strategy_search_final_period_ledger.csv"

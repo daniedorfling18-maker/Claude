@@ -65,3 +65,40 @@ these four files as the only fetched payloads written outside `research/`.
   headers or `.env` values are present, and `credential_guard._scan_csv` (which exempts
   public-identifier keys) returns no finding — asserted by
   `tests/polymarket_predictive_engine/test_verdict_reconcile.py`.
+
+## Telemetry coverage snapshot (WO-172, committed 2026-09-13)
+
+`coverage_2026-08-21/` holds five governance JSONs taken verbatim from the committed telemetry
+mirror `origin/vps-telemetry` at commit `fcebaa2`, snapshot `2026-08-21T02:00:09Z`, under
+`telemetry/outputs/`. They are the artifacts whose empty readings WO-172 classifies, and they are
+the reason the classification set exists: three of the five are not measurements at all.
+No sanitisation was needed — the payloads carry counts, timestamps and empty lists, no identifiers
+— and `credential_guard._scan_json` finds nothing in any of them.
+
+| file | source directory | sha256 |
+|---|---|---|
+| `smart_flow_clv.json` | `polymarket_model_governance/` | `dc059014f5062a61ce2a34acf8901be093f589b814471f7d72e4f447105ed80a` |
+| `sharp_anchor_coverage.json` | `polymarket_model_governance/` | `413940d80dfb2ad6a5e3e7ff897eccd176c28e7449d14a38816e27aad90d3044` |
+| `family_calibration_scorecard.json` | `polymarket_model_governance/` | `24373620040ea33407c5f4d392e0a84d47571d9ed90ff2bd63533783e13167d8` |
+| `implication_scan.json` | `implication_consistency/` | `f8b45ee56c71a466ec910fb0c5909d0f9ca9dd822d5b6303fd2ac6caf288f134` |
+| `event_group_scan.json` | `event_group_consistency/` | `c3b98dfed2ce9bdc432bb3d5d1287ee5125a5b07b82cd8fd8656dd930feeb34b` |
+
+## Maker-lane evidence snapshot (WO-173, committed 2026-09-13)
+
+`maker_2026-08-21/` holds the three artifacts that describe the maker lane, taken from the
+committed telemetry mirror `origin/vps-telemetry` at commit `fcebaa2`, snapshot
+`2026-08-21T02:00:09Z`, under `telemetry/outputs/maker_carry/`. They are the inputs to
+`maker-evidence-summary`, which exists because these three are not the same kind of evidence: a
+simulation, a replay of three hypothetical fills, and a read-only observation of real money.
+
+**Sanitised** per the convention above: wallet addresses, token, condition, market and asset
+identifiers, slugs, questions and URLs are replaced with deterministic inert values of the same
+shape, type and length. Every numeric figure, timestamp, status string and label is preserved, and
+no test asserts an identifier value. `credential_guard._scan_json` returns no finding on any of the
+three. The hashes below are of the committed (sanitised) files, not of the originals.
+
+| file | source `generated_at_utc` | sha256 (sanitised) |
+|---|---|---|
+| `maker_carry_study.json` | `2026-08-20T10:46:56Z` | `8dd78772a835ae8aa2fbd4415eacc05124cc5b3fbde416859d4b1c71323abc9f` |
+| `maker_fill_replay.json` | `2026-08-21T01:42:15Z` | `7a6f4fa878177288b570178d863a30a4f49d0da85e60d763341141be89df1622` |
+| `maker_live_test.json` | `2026-08-21T01:41:31Z` | `f2d22696d9913d69b648ffee8a404474114d6e4c068850607464ce2637cdd18d` |

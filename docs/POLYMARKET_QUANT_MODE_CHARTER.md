@@ -278,6 +278,21 @@ money on its own measurement; it is earning a little and falling short of its ta
 - The study's own honesty clause: net carry is an **UPPER BOUND** on the reward-share side and an
   approximation on the pick-off side.
 
+**Amendment 2026-09-13 (WO-173; effective only if merged).** These figures are now carried by an
+artifact that states each one's evidence class rather than printing them side by side as if they
+were the same kind of fact: `outputs/maker_carry/maker_evidence_summary.json`, written by
+`maker-evidence-summary`. The modelled carry is labelled `modeled` with the honesty clause
+attached; the adverse-selection charge carries `below_tier0_minimum_3_of_10_fills`, because three
+replay-confirmed hypothetical fills against a registered floor of ten do not bound adverse
+selection, with the markout min and max shown as the width of the distribution the point sits on;
+the 77.5% of opportunities lacking contemporaneous book state is restated as a 22.5% coverage rate
+and distinguished from the registered markout-window coverage; the scoreboard's zero is labelled
+`live-real-money`; and the capital curve's flattening at $470 is flagged
+`flat_curve_is_model_bounded = true`, because it flattens on a one-market portfolio at the
+registered `max_size_multiple` of 5, which is a modelling constraint and not a measured market
+capacity. The gate block is copied verbatim and never recomputed, so the artifact can neither pass
+nor fail M-A, M-B or M-C.
+
 **THE ARGUMENT THAT SURVIVES IS CAPACITY, NOT LOSS.** The registered capital curve is flat:
 
 | capital cap | capital used | markets | net/day |

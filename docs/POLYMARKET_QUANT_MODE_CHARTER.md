@@ -278,6 +278,21 @@ money on its own measurement; it is earning a little and falling short of its ta
 - The study's own honesty clause: net carry is an **UPPER BOUND** on the reward-share side and an
   approximation on the pick-off side.
 
+**Amendment 2026-09-13 (WO-173; effective only if merged).** These figures are now carried by an
+artifact that states each one's evidence class rather than printing them side by side as if they
+were the same kind of fact: `outputs/maker_carry/maker_evidence_summary.json`, written by
+`maker-evidence-summary`. The modelled carry is labelled `modeled` with the honesty clause
+attached; the adverse-selection charge carries `below_tier0_minimum_3_of_10_fills`, because three
+replay-confirmed hypothetical fills against a registered floor of ten do not bound adverse
+selection, with the markout min and max shown as the width of the distribution the point sits on;
+the 77.5% of opportunities lacking contemporaneous book state is restated as a 22.5% coverage rate
+and distinguished from the registered markout-window coverage; the scoreboard's zero is labelled
+`live-real-money`; and the capital curve's flattening at $470 is flagged
+`flat_curve_is_model_bounded = true`, because it flattens on a one-market portfolio at the
+registered `max_size_multiple` of 5, which is a modelling constraint and not a measured market
+capacity. The gate block is copied verbatim and never recomputed, so the artifact can neither pass
+nor fail M-A, M-B or M-C.
+
 **THE ARGUMENT THAT SURVIVES IS CAPACITY, NOT LOSS.** The registered capital curve is flat:
 
 | capital cap | capital used | markets | net/day |
@@ -1889,3 +1904,319 @@ the branch; `carry_v0.json`'s `manifest_sha256` equals the sha256 of `manifest.j
 verdict lines match the gate booleans; every hash cited above resolves on the branch. If any
 future artifact cites a Lane A GO, it must name the work order that registered the refined rule
 and the fresh pass that produced it.
+
+## 2026-09-13 — Registered result (historical class): funding carry GO under WO-167's perpetual-leg completeness rule
+
+**This is a measurement result, not a policy change.** No threshold, span, estimator, cut or
+capital ceiling is altered. Nothing here authorises an order, a rung, a spend, a collector, a
+prospective window, or a registration. The evidence class is *historical* and nothing done in
+the sandbox can relabel it upward. **This GO exists because one input of gate G3 was redefined
+after WO-166's outcome was known; the redefinition is favourable by construction and is recorded
+as such (WO-167, A11 channel 11).** WO-166's NO-GO stays on record unchanged beside it.
+
+**What was run.** WO-167, one fresh pass of WO-166's registered estimator on WO-166's committed
+inputs (same `manifest.json`, sha256 `2152b1b4…2ea50`, no new data), with a single change: a
+rejected period counts as having unverifiable liquidation status only when the perpetual-side
+data the liquidation check reads is incomplete (any of its 8 hourly perpetual highs, or the
+perpetual close at its start boundary). A period with an absent spot bar is still rejected and
+its ISO week still ineligible for every estimator and gate, exactly as WO-166 registered; only
+the G3 count changes. The rule was registered as a scope switch (`unverifiable_scope = "perp"`)
+beside WO-166's `"either"` default, so WO-166's committed results still verify byte-for-byte.
+Commit order on the branch: register text (`3ea7811`, S8 ADMISSIBLE after one delta pass) →
+build (`6f6634d`; 68 tests, 11 of 11 guard mutations detected) → results (`bf14aa3`) →
+build-review delta (`2131825`; line audit CONFORMS with four low findings, red team sound with two findings, every finding applied as a disclosure or a tightening, and the pass regenerated for the added disclosure keys with every figure unchanged; delta re-verify CONFORMS, its one low finding — a `code_revision` recorded from a dirty tree — closed by a run-time refusal and a clean-tree regeneration at `acc5f76`). `verify-manifest`, `verify-results` (WO-166) and
+`verify-results --work-order WO-167` pass in a fresh clone of the branch at `bf14aa3` and again at `2131825`.
+
+**Lane A — funding carry (same structure, span and eligible weeks as WO-166: 343 of 347): GO.**
+The verdict is generated from the gate booleans in `research/premium_poc/results_wo167/carry_v0.json`:
+
+| gate | registered criterion | measured | result |
+|---|---|---|---|
+| G1 | annualised 0.025-quantile lower bound minus the 2.0 pp haircut > 0 | **3.93%** (unchanged from WO-166) | pass |
+| G2 | annualised point estimate minus the haircut ≥ 6.0% | **7.99%** (unchanged) | pass |
+| G3 | max drawdown ≤ 20%, forced liquidations = 0, and no open position inside a period whose *perpetual-side* data is incomplete (WO-167 scope) | drawdown **0.32%**, forced liquidations **0**, unverifiable open periods **0** (WO-166 scope: 16) | pass |
+| G4 | positive in ≥ 4 of the 6 ISO years 2020-2025, each with ≥ 45 eligible weeks | **6 of 6** (unchanged) | pass |
+
+The expected outcome stated in the register so that it could fail was met exactly: every leaf
+of the three results files other than the unverifiable counts, G3, the lane verdict, the scope
+and work-order labels, the code revision and the timestamp is identical to WO-166's to the last
+digit, in V0, V1 and Lane B alike. Lane B is unchanged (GO, existence observed, selection bias
+unaddressed) and stays parked by decision.
+
+**What this does and does not say.** Under the rule that matches the check it protects, the
+funding-carry premium on BTC and ETH clears all four registered gates on 2020-01 to 2026-08
+history, under VIP0 taker fees, no collateral yield, capital at 1.5x notional and the declared
+2.0 pp haircut. What it does not say: that the rule would have been chosen this way before the
+outcome was known (it was not; that is the disclosed bias), that any forward window has been
+observed (none has), or that paper or live evidence exists (none does). The 16 reclassified
+periods stay excluded from every return figure; the GO rests on the structural argument that an
+absent spot bar carries no information about a perpetual-side liquidation, plus WO-166's NO-GO
+standing on record. WO-67's P1-P5 are untouched and funding remains closed.
+
+**What it triggers.** Only what the registry's evidence policy and its WO-166 paragraph already
+provide: a future pre-observation amendment registering the carry as a lane with a fresh
+out-of-sample window, drafted for the owner's merge and gated by S8 before it is proposed. That
+amendment, the live collectors and the paper loop are separate work orders; none is authorised
+by this record. As of 2026-09-13 the required gate's self-hosted runner is still offline: the branch's last gate run and an owner-dispatched VPS paper deploy on `main` have both sat queued since 2026-09-12. Under the GLOBAL RULE, WO-167 counts as registered only when that gate runs and its squash-merge lands; until then this is a sandbox result, verified from a fresh clone, and not verification of record.
+
+**Recorded from the red team, for the next reader.** The report's earlier row "open-position periods
+with missing bars: 0" was true only under the old scope and is replaced by two rows: 0 with
+perpetual-side data absent, and 16 rejected for an absent bar on either leg (all spot-side). Only 4
+of each spot series' 31 missing hours fall at a boundary hour; the other 27 are mid-period and are
+flagged by no path, because spot is read only at boundary closes. For each of the 8 rejected spans
+the observed maximum perpetual move (0.27% to 6.38%) sat 35 to 116 percentage points below the
+liquidation move, so the reclassification hides no near-liquidation. The `code_revision` a results
+file records is a branch-side commit; after a squash-merge it is no longer an ancestor of `main`,
+and `verify-results` passes because it recomputes with the stored string, not by resolving it.
+
+### Day-after check
+
+In a fresh clone of the branch: `verify-manifest`, `verify-results` and
+`verify-results --work-order WO-167` pass; `results_wo167/carry_v0.json` records
+`work_order = "WO-167"`, `unverifiable_scope = "perp"` and the same `manifest_sha256` as
+`results/carry_v0.json`; its G1, G2 and G4 quantities equal WO-166's to the last digit; the
+report's verdict lines match the gate booleans; every hash cited above resolves on the branch.
+Any future artifact citing this GO must name WO-167 and the results directory as regenerated at `acc5f76` (first pass `bf14aa3`; disclosure regeneration `2131825`), whose recorded `code_revision` `bd560fb` reproduces the files.
+
+## 2026-09-13 — Registered result (historical class): WO-170's corrected funding-carry pass — Lane A GO on the registered basis, and why that GO is weaker than it reads
+
+WO-170 was registered to correct how the funding-carry research measures itself, not to re-run
+the experiment. It exported the ledger's own cash, collateral, inventory and NAV path at every
+8-hour boundary; moved G3's drawdown onto that path; stated the price and return bases in the
+artifact instead of leaving them implicit; added fixed recent-period cuts; fixed the realised-
+variance window (721 closes give 720 return intervals, not 719); and reconciled every leaf of
+the new results against WO-167's committed files, aborting on any difference no registered rule
+explains. One pass was run. `research/premium_poc/results_wo170/` holds nine files.
+
+### The result
+
+**Lane A (V0, always on): GO** — G1 3.93%, G2 7.99%, G3 pass, G4 6 of 6. Every gate quantity is
+identical to WO-167's to the last digit; the reconciliation matched 49, 49 and 1,112 differing
+leaves across the three files to a registered reason and found nothing unexplained.
+**Lane B: GO** (existence only), with 66 of 66 windows accepted per currency and every window
+gaining exactly the one return interval the realignment predicted.
+
+The correction changed the risk reading, not the return reading:
+
+| quantity | WO-166/167 basis | WO-170 NAV basis |
+|---|---|---|
+| max drawdown, pooled | 0.322% (weekly increments on inception capital) | **0.488%** (the ledger's own NAV path) |
+| max drawdown, BTCUSDT | 0.48% | 0.85% |
+| max drawdown, ETHUSDT | 0.71% | 0.52% |
+
+The NAV-path figure is **larger**, not smaller, and it reverses the per-asset ordering. The
+correction made G3 stricter. The A11 disclosure said the direction was not known before the run;
+it is now recorded, and it ran against the drafting intuition.
+
+### What the corrected artifact says about the headline return
+
+The return basis is `simple_on_inception_capital`: weekly P&L divided by the fixed 1.5 units of
+capital committed at inception, annualised by multiplying the mean weekly figure by 52. WO-170
+registered that basis explicitly and computed two others beside it. They do not agree, and the
+disagreement is the size of the margin:
+
+| basis | annualised | after the declared 2.0 pp haircut | against the 6.0% hurdle |
+|---|---|---|---|
+| 52 x mean weekly return on inception capital (the gated basis) | 9.99% | 7.99% | clears by 1.99 pp |
+| CAGR of the ledger's NAV path | 8.02% | 6.02% | clears by 2.3 basis points |
+| 52 x mean weekly return on NAV | 7.65% | 5.65% | **fails** |
+
+Pooled NAV runs from 3.0 to 5.014 over the span, a time-average of 4.374 against the 3.0 the
+gate divides by. The gated basis is the registered one and it was not changed after the fact —
+but the 1.99 pp margin is a property of the denominator, and on the only basis commensurable
+with the hurdle's own construction (a compounding riskless yield plus a spread) the margin is
+2.3 basis points.
+
+The premium has also decayed. From the committed ledgers, by era, on the gated basis:
+
+| window | eligible weeks | annualised | after haircut | clears the 6.0% hurdle before the haircut? |
+|---|---|---|---|---|
+| 2020-2021 | 100 | 23.17% | 21.17% | yes |
+| 2022-2026 | 243 | 4.57% | 2.57% | no |
+| 2023-2026 | 191 | 5.46% | 3.46% | no |
+| 2024-2026 | 139 | 6.13% | 4.13% | **yes** |
+| calendar 2024 alone | 52 | 10.83% | 8.83% | **yes** |
+| last 104 eligible weeks | 104 | 4.37% | 2.37% | no |
+| last 52 eligible weeks (2025-W36 to 2026-W35) | 52 | 2.29% | 0.29% | no |
+
+**Correction, same day.** An earlier version of this record said "every post-2021 subsample fails
+G2 before the haircut". That is false and the table above is why: calendar 2024 reads 10.83% and
+the trailing 2024-2026 cut reads 6.13%, both above the 6.0% hurdle. The true statement is narrower
+and is the one this record now makes: **every multi-year cut the artifact publishes that reaches
+2026 fails the hurdle before the haircut except 2024-2026, and the two most recent cuts, the last
+104 and last 52 eligible weeks, fail it by wide margins.** The decay is real and the direction of
+the finding is unchanged; the universal quantifier was not earned. The error was found by the S8
+gate on the follow-up work order, which recomputed the yearly figures from this same artifact.
+
+The rolling 52-week series the artifact publishes runs from 1.14% to 32.40% and ends at 2.29%,
+which is the shape that matters: the premium is not absent after 2021, it is intermittent.
+The regime cut in the same file reads 15.6% annualised in weeks with BTC above its 200-day SMA
+against 1.81% below it, with 39% of eligible weeks below. Lane B has decayed on the same shape:
+pooled mean variance risk premium by window-start year runs +3272, +2462, +581, +549, **-168**,
++9 for 2021 through 2026, and G5 passes at exactly its 3-of-4 minimum.
+
+### What this record establishes, and what it does not
+
+It establishes that a funding-carry premium existed on Binance BTC and ETH perpetuals over
+2020-01 to 2026-08, that the ledger accounting is sound (every change in NAV is explained by
+mark-to-market, funding received and fees paid, to 3e-15 over 7,288 boundaries per ledger), that
+the committed results reproduce byte-for-byte from a fresh clone, and that the four registered
+gates pass on the registered basis.
+
+It does not establish that the premium is present now. The defensible reading of this artifact
+is: **a funding-carry premium existed on these two symbols in 2020-2021 and in bull regimes, and
+has decayed towards cash-like levels by 2025-2026.** "9.99% a year, GO" is the full-span number
+and is not, on its own, a forward claim. Three choices all point the same way and are recorded
+here together: the GO survives G3 only under WO-167's completeness rule, which was narrowed
+after that same gate failed (running WO-170's exact configuration with WO-166's `"either"` scope
+gives 16 unverifiable periods, G3 False and Lane A NO-GO, with every other leaf identical); it
+clears G2 by 1.99 pp only on the inception-capital denominator; and the point estimate blends
+100 weeks at 23.17% with 243 weeks at 4.57%, a composition effect of 5.4 pp a year against a
+declared haircut of 2.0 pp that names sample composition as one of the six channels it covers.
+(2024 is the exception that keeps the reading honest: at 10.83% it clears the hurdle on its own,
+so the claim is decay and intermittency, not disappearance.)
+
+Also unestablished: capacity (the study is unit-normalised and bounds no size), survivorship
+(BTC and ETH are the only symbols in the tree, so the asset-selection channel cannot be sized
+from it), and the simulated structure's fidelity — the notional drifts from 1.020 at inception
+to as much as 1.881, so capital per notional sits below the registered 1.5 on 20.5% of
+BTC boundaries and the median margin ratio is 0.88 rather than 0.50. The zero-forced-liquidation
+result is therefore a statement about a heavily over-collateralised account. No paper or live
+evidence exists. WO-67's P1-P5 are untouched and funding remains closed.
+
+**Correction, 2026-09-13.** An earlier version of this paragraph gave the mechanism as "retained
+margin profit re-levers the notional from 1.0 to as much as 1.88". The mechanism is wrong and the
+committed ledger is why: in `ledger_BTCUSDT_V0.csv` and `ledger_ETHUSDT_V0.csv` the spot quantity
+rises exactly once, at inception, and is non-increasing across all 7,286 later boundaries — BTC
+goes from 1.3589e-04 to 1.5048e-05, and the peak-notional boundary holds about a ninth of the
+inception quantity. Retained profit never buys notional. The notional rises because the mark
+appreciates faster than the rebalancer cuts quantity, which is price drift outrunning a rebalance,
+not re-levering. The figures the paragraph rests on are unchanged and re-derived from the same
+ledgers: peak notional 1.881061, capital per notional below 1.5 on 20.50% of BTC boundaries,
+median margin ratio 0.877. The direction of the finding is unchanged and remains adverse to the
+carry: leverage ran **above** the registered 1.5 for a fifth of the sample, which is the opposite
+of the "no re-leveraging after price falls" channel WO-166 registered as pushing the premium down.
+The error was found by the S8 gate on the follow-up work order, which read the ledgers rather than
+the prose.
+
+### Build delta 1, applied after the independent reviews
+
+The line audit found that replacing G3's basis selector with a constant left all 91 tests and
+`verify-results` green, because both bases pass on this data: the WO's one behavioural change was
+pinned by nothing. The red team found that the registered NAV identity is an algebraic tautology
+(`nav = cash + margin + spot_value` and `wealth = q x spot + margin + cash` are the same three
+terms reassociated) and demonstrated a single-site credit of phantom collateral yield inside the
+state machine that raised the annualised return from 7.10% to 11.46% with the check silent; and
+that a spot close of 0.0 or -1.0 passed every input guard, fabricated a 14.1-point NAV drawdown
+that G3 absorbed, and left the annualised return bit-identical, because weekly return on capital
+is a telescoping sum and any corruption that reverses inside the week is invisible to G1, G2 and
+G4. Four guards were added, all fail-closed and none able to admit data or raise a gate reading:
+the registered test 4 that was missing, a test that puts the G3 threshold between the two
+drawdown magnitudes so the gate must flip with the basis, an asserted self-financing identity
+with the phantom-yield mutation as its test, and a strict-positivity check on price columns with
+signed columns exempt. All three committed result sets still verify byte-for-byte, so no number
+in this record moved. The remaining findings — the return denominator, the era decay, the
+inherited completeness rule and the notional drift — are conclusion findings, not defects; changing
+a registered estimator after results exist would be snooping, so they are recorded here and are
+the subject of a separate work order, not of an edit to this one.
+
+### Day-after check
+
+In a fresh clone of the branch: `verify-manifest`, `verify-results`, `verify-results --work-order
+WO-167` and `verify-results --work-order WO-170` all pass; `results_wo170/carry_v0.json` records
+`work_order = "WO-170"`, `drawdown_basis = "nav"`, `rv_alignment = "return_intervals"`, the six
+`bases` strings and the same `manifest_sha256` as `results/carry_v0.json`; `reconciliation.json`
+lists every differing leaf with a registered reason and no unexplained leaf; the four ledger CSVs
+satisfy both the NAV identity and the self-financing identity. As of 2026-09-13 the required
+gate's self-hosted runner is still offline, with the branch's last gate run and an owner-dispatched
+VPS paper deploy on `main` both queued since 2026-09-12. Under the GLOBAL RULE, WO-170 counts as
+registered only when that gate runs and its squash-merge lands; until then this is a sandbox
+result and not verification of record. Nothing here authorises paper trading, live trading, or
+capital. `paper_trading_invoked=false`, `live_trading_invoked=false`.
+
+## 2026-09-13 — Corrected measurement (diagnostic; not verification of record): the legacy verdict engine's binding metric is a per-share price difference labelled per dollar
+
+WO-169 was registered because an external review found three things about the closing-line and
+verdict chain at once: `clv = line_price − entry_price` is a per-share probability-point
+difference that `profit_verdict.py` consumes as "net settlement return per dollar", subtracting
+per-dollar fees and haircuts from it; a last observed quote is graded as if it were a settlement
+payout, with no field saying which it is; and the sign test tests win frequency, not expectancy.
+A two-cent gain on a ten-cent purchase is a 20% return, not 2%.
+
+**The binding metric was not changed.** The owner's WO-87 decision of 2026-07-14 is that the
+binding Gate A metric is not swapped mid-study, and it stands. WO-169 adds, beside it, explicit
+per-share and per-dollar fields, a `line_basis` saying which path produced each line, a
+best-effort settlement join from the WO-101 resolution corpus, and a non-binding `measurement_v2`
+block. Whether the binding metric should be replaced is an owner decision this record does not
+make and this work order does not authorise.
+
+**The figures below were computed by the drafting agent in an agent sandbox on 2026-09-13** from
+`tests/fixtures/recorded/closing_line_final_history_2026-08-21.csv`, a committed snapshot taken
+byte-identically from `origin/vps-telemetry:telemetry/outputs/polymarket_model_governance/closing_line_final_history.csv`
+at `fcebaa2` (2026-08-21T02:00:09Z, sha256 `4b66d07f1050125dbe01d39220fafc1261929291090b9e565abba4d6b4b17b33`,
+90 rows). That is a repository path, not a VPS or `paths.output_root` path; no amendment in force
+permits computing on production telemetry in a sandbox. **Diagnostic; not verification of record.**
+The run of record is on the VPS, against the governance ledger, after deployment.
+
+| quantity | legacy, per share (binding) | corrected, per dollar (non-binding) |
+|---|---|---|
+| unit mean | **−0.013943** | **−0.086501** |
+| independent market units | 55 | 55 |
+| units positive | 22 | 22 |
+| sign-test p | 0.947605 | unchanged by the unit correction |
+| 90% market-cluster bootstrap interval | not computed on the binding path | [−0.281562, 0.114739] |
+| cluster standard error | — | 0.118009 |
+| mean taker fee per dollar | — | 0.026809 |
+| net of the registered exit and adverse-selection haircuts and the fee | — | **−0.12331** |
+| Gate A read on this basis | `fail` (unit mean ≤ 0) | `would_bind.gate_a = fail` |
+
+Population, in two tiers, both identities asserted: 90 ledger rows, all closing; 20 excluded as a
+frozen diagnostic cohort; 70 eligible finals, matching Gate A's own `settled_finals_total`; 55
+units, matching Gate A's clustering; 70 per-dollar-eligible finals with no exclusion. Of the 70
+eligible finals, **21 carry a `line_price` strictly inside (0.01, 0.99)** — a last observed quote,
+not a settlement payout — and **0 are settlement-verified**, because the three resolution
+collectors do not select the shadow cohort's tokens. That coverage gap is a named prerequisite
+work order, not yet drafted, and every unverified row now carries its reason instead of passing
+silently.
+
+**The correction is unfavourable to the tested strategy and cannot produce a YES.** The sign test
+is unchanged because dividing by a positive entry price changes no sign; it tests whether more
+than half the units won, which is not a test of expected profit, and the block says so in a
+literal sentence. The engine's terminal verdict on the registered clock remains
+`no_for_tested_edge_classes`.
+
+**Recorded for the owner, not touched.** On the binding path `utils.safe_float("nan")` returns
+NaN; a `clv = "nan"` row passes the Gate A filter; a NaN unit mean makes `mean <= 0` read False;
+and Gate A can then reach `pass` on the sign test alone. That is a fail-open of the A2 class on a
+frozen surface. The mirrored ledger contains no such row, and WO-169 does not repair it: repairing
+a frozen gate is an owner decision. A test asserts the behaviour as it stands so the finding
+cannot be lost.
+
+**Build deltas.** Delta 1: the recorded fixture terminates its lines with CRLF while the
+repository normalises `*.csv` to LF, so the first staged blob hashed `1098f71d…` instead of the
+recorded `4b66d07f…`; `.gitattributes` exempts that one path and a test asserts the exemption, the
+terminator count and the hash together. Delta 2, from the independent line audit: an unreadable
+corpus raised `UnicodeDecodeError` past the `(OSError, csv.Error)` catch and would have aborted
+the entire closing-line build, so the join now reads with `errors="replace"` and catches the wider
+set; an absent corpus with no graded token read as available and now reads unavailable; two corpus
+shapes borrowed a neighbouring row's reason and now carry their own,
+`clean_settlement_without_winning_token_id` and `blank_resolution_quality`, which extend the
+registered closed set by exactly two literals; a non-finite `clv` serialised as the string `nan`
+and now serialises blank; the per-dollar fee was averaged over a wider population than the mean it
+is subtracted from and is now averaged over the same units, with Gate B's own figure kept beside
+it; the block's shape is uniform across `state`; the register's literal `by_line_basis[<value>]`
+path resolves; and the reconcile command no longer removes its destination before the replacement
+is in place. All are non-binding or fail-closed; none changes a gate, a threshold or the verdict.
+
+### Day-after check
+
+On the VPS, after the first dashboard payload render following deployment:
+`outputs/polymarket_model_governance/profit_verdict.json` carries `measurement_v2` with
+`binding = false`, `state = "ok"`, both population identities holding, and `settlement_join`
+reported with `positions_checked` equal to `closing_line_value.final_line_positions`;
+`gates.A_edge_exists` still reads 55 units, 70 finals, −0.013943, 22 profitable and p = 0.947605,
+the ledger being unchanged since 2026-08-21; `closing_line_final_history.csv` gains exactly
+`line_basis` with `""` on every pre-deployment row and an unchanged row count of 90. As of
+2026-09-13 the self-hosted runner is offline, so this is a sandbox result and not verification of
+record. Nothing here authorises paper trading, live trading, or capital.
+`paper_trading_invoked=false`, `live_trading_invoked=false`.

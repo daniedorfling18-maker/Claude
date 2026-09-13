@@ -1,0 +1,29 @@
+{
+  "evidence_semantics": {
+    "clv": "later market midpoint minus observed public wallet entry price",
+    "positive_wallet": "wallet has enough final-line fills and bootstrap lower CI above the configured floor",
+    "use": "research watchlist only; shadow-follow ideas still require normal governance and paper proof"
+  },
+  "features_input": "outputs/polymarket_training/websocket_market_features.csv",
+  "fills_input": "inputs/polymarket/public_wallet_fills.csv",
+  "fills_scored": 0,
+  "fills_seen": 0,
+  "final_line_fills": 0,
+  "generated_at_utc": "2026-07-17T00:39:36Z",
+  "git_commit": "unknown",
+  "governance_note": "Smart-flow CLV is diagnostic edge discovery. It never authorises paper/live trading by itself.",
+  "live_trading_invoked": false,
+  "minimum_final_samples_per_wallet": 20,
+  "paper_trading_invoked": false,
+  "positions_skipped": {
+    "no_usable_quote_after_fill": 0,
+    "not_buy_or_missing_required_fields": 0
+  },
+  "positive_ci_floor": 0.0,
+  "positive_wallets": [],
+  "provisional_line_fills": 0,
+  "status": "ok",
+  "wallet_cohorts": [],
+  "wallets": [],
+  "watchlist": []
+}

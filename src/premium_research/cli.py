@@ -34,7 +34,7 @@ import pandas as pd
 
 from . import binance_vision, deribit_history
 from .manifest import ManifestEntry, build_manifest, sha256_bytes, verify_manifest, write_manifest
-from .runner import BINANCE_END_MONTH, BINANCE_START_MONTH, DERIBIT_FUNDING_START_MS, DERIBIT_INSTRUMENTS, LANE_B_START_MS, SPAN_END_MS, SYMBOLS
+from .runner import BINANCE_END_MONTH, BINANCE_START_MONTH, CONFIGS, DERIBIT_FUNDING_START_MS, DERIBIT_INSTRUMENTS, LANE_B_START_MS, SPAN_END_MS, SYMBOLS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]  # src/premium_research/cli.py -> repository root (holds pyproject.toml)
 DEFAULT_ROOT = REPO_ROOT / "research" / "premium_poc"
@@ -57,6 +57,17 @@ def git_revision(cwd: Path) -> str:
     except (OSError, subprocess.SubprocessError):
         return "unknown"
     return out.stdout.strip() if out.returncode == 0 and out.stdout.strip() else "unknown"
+
+
+def uncommitted_paths(cwd: Path, subtree: str) -> list[str] | None:
+    """Paths under ``subtree`` with uncommitted changes (staged, unstaged, or untracked); ``None`` when git cannot answer."""
+    try:
+        out = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all", "--", subtree], cwd=str(cwd), capture_output=True, text=True, check=False, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return [line[3:] for line in out.stdout.splitlines() if line.strip()]
 
 
 def _csv_bytes(frame: pd.DataFrame) -> bytes:
@@ -252,10 +263,18 @@ def _cmd_verify_manifest(args: argparse.Namespace) -> int:
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
-    from .runner import run_all
+    from .runner import CONFIGS, run_all
 
+    # The results record code_revision = HEAD and verify-results recomputes with the stored string, so a
+    # pass from a tree whose estimator code differs from HEAD would record a revision that cannot reproduce
+    # it (WO-167 delta 2). Fail closed: no result from a dirty estimator tree.
+    dirty = uncommitted_paths(REPO_ROOT, "src/premium_research")
+    if dirty is None or dirty:
+        detail = "git status unavailable" if dirty is None else ", ".join(dirty[:5])
+        print(f"RUN ABORTED: src/premium_research has uncommitted changes ({detail}); the recorded code_revision would not reproduce the results", file=sys.stderr)
+        return 2
     try:
-        summary = run_all(Path(args.root), code_revision=git_revision(REPO_ROOT), generated_at=utc_now_iso(), force=args.force)
+        summary = run_all(Path(args.root), code_revision=git_revision(REPO_ROOT), generated_at=utc_now_iso(), force=args.force, config=CONFIGS[args.work_order])
     except (ValueError, RuntimeError, FileNotFoundError) as exc:
         print(f"RUN ABORTED: {exc}", file=sys.stderr)
         return 2
@@ -264,9 +283,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
 
 def _cmd_verify_results(args: argparse.Namespace) -> int:
-    from .runner import verify_results
+    from .runner import CONFIGS, verify_results
 
-    failures = verify_results(Path(args.root))
+    failures = verify_results(Path(args.root), config=CONFIGS[args.work_order])
     if failures:
         for failure in failures:
             print(f"FAIL: {failure}", file=sys.stderr)
@@ -285,8 +304,10 @@ def build_parser() -> argparse.ArgumentParser:
     verify.set_defaults(func=_cmd_verify_manifest)
     run = sub.add_parser("run", help="compute Lane A and Lane B from the committed inputs")
     run.add_argument("--force", action="store_true", help="replace an existing results directory")
+    run.add_argument("--work-order", choices=tuple(CONFIGS), default="WO-166", help="registered configuration to run (WO-167: perpetual-side completeness scope, results_wo167/; WO-170: NAV-path drawdown, 720-interval realised variance, ledger export, results_wo170/)")
     run.set_defaults(func=_cmd_run)
     verify_results_cmd = sub.add_parser("verify-results", help="recompute and byte-compare the committed results")
+    verify_results_cmd.add_argument("--work-order", choices=tuple(CONFIGS), default="WO-166", help="which committed results to verify, under that work order's registered configuration")
     verify_results_cmd.set_defaults(func=_cmd_verify_results)
     return parser
 

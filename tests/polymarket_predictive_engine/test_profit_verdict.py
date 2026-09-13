@@ -4,6 +4,7 @@ Amendments registered 2026-07-09 pre-data: market-clustered Gate A units,
 adverse-selection haircut in Gate B, regime-stamped Gate C."""
 from __future__ import annotations
 
+import copy
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -590,3 +591,245 @@ def test_amendment_7_extension_protocol_is_registered_and_terminal(tmp_path):
     amendment_8 = next(row for row in REGISTERED_AMENDMENTS if row["number"] == 8)
     assert amendment_8["direction"] == "tighten_only"
     assert amendment_8["registered_at_utc"] < "2026-07-19T00:00:00Z"
+
+
+# --- WO-169: the non-binding corrected measurement beside the frozen Gate A ---
+
+RECORDED_FIXTURE = Path("tests/fixtures/recorded/closing_line_final_history_2026-08-21.csv")
+
+
+def _install_recorded_fixture(cfg) -> None:
+    """The 2026-08-21 telemetry snapshot, byte-identical, as the ledger under test."""
+    target = cfg.governance_root / "closing_line_final_history.csv"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(RECORDED_FIXTURE.read_bytes())
+
+
+def test_measurement_v2_population_accounting_on_the_recorded_fixture(tmp_path, monkeypatch):
+    """WO-169 item 3: every final is accounted for in two tiers, and the corrected
+    per-dollar mean is six times the per-share figure the binding gate reads.
+
+    Diagnostic, not verification of record: the fixture is a committed repository
+    snapshot, not a VPS path."""
+    cfg = _config(tmp_path)
+    _install_recorded_fixture(cfg)
+    monkeypatch.setattr("polymarket_predictive_engine.profit_verdict.now_utc", lambda: "2026-07-01T00:00:00Z")
+
+    block = build_profit_verdict(cfg)["measurement_v2"]
+
+    assert block["binding"] is False
+    assert block["state"] == "ok"
+    population = block["population"]
+    assert population["final_history_rows"] == 90
+    assert population["closing_rows"] == 90
+    assert population["excluded_by_reason"] == {"diagnostic_cohort": 20, "missing_return": 0, "missing_unit_key": 0}
+    assert population["eligible_finals"] == 70
+    assert population["units"] == 55
+    assert population["per_dollar_eligible_finals"] == 70
+    assert population["per_dollar_units"] == 55
+    # Tier one is exhaustive; tier two subtracts only what it names.
+    assert population["closing_rows"] == population["eligible_finals"] + sum(population["excluded_by_reason"].values())
+    assert population["per_dollar_eligible_finals"] == population["eligible_finals"] - sum(population["per_dollar_excluded_by_reason"].values())
+
+    assert block["per_share"]["unit_mean"] == -0.013943
+    assert block["per_dollar"]["unit_mean"] == -0.086501
+    assert block["per_dollar"]["units_positive"] == 22
+    assert block["per_dollar"]["mean_taker_fee_per_dollar"] == 0.026809
+    assert block["per_dollar"]["net_after_costs"] == -0.12331
+    assert round(-0.086501 - 0.005 - 0.005 - 0.026809, 6) == -0.12331
+
+    basis = block["by_line_basis"]
+    assert basis["counts"] == {"": 70}
+    assert basis["line_price_strictly_inside_0_01_0_99"] == 21
+    assert basis["line_price_unparseable"] == 0
+    assert basis["settlement_verified_finals"] == 0
+    assert block["inference"]["cluster_standard_error"] == 0.118009
+    assert block["would_bind"]["gate_a"] == "fail"
+    assert block["would_bind"]["gate_b"] == "not_evaluated"
+
+
+def test_legacy_gate_a_values_unchanged_on_the_recorded_fixture(tmp_path, monkeypatch):
+    """WO-169: the binding metric is untouched. The frozen Gate A reads exactly what
+    it read at the snapshot, and the verdict is the same with and without the block."""
+    import polymarket_predictive_engine.profit_verdict as pv
+
+    cfg = _config(tmp_path)
+    _install_recorded_fixture(cfg)
+    monkeypatch.setattr("polymarket_predictive_engine.profit_verdict.now_utc", lambda: "2026-07-01T00:00:00Z")
+
+    verdict = build_profit_verdict(cfg)
+    gate_a = verdict["gates"]["A_edge_exists"]
+    assert gate_a["independent_market_units"] == 55
+    assert gate_a["settled_finals_total"] == 70
+    assert gate_a["unit_mean_net_settlement_return_per_dollar"] == -0.013943
+    assert gate_a["units_settled_profitable"] == 22
+    assert gate_a["sign_test_p"] == 0.947605
+    assert gate_a["registered_rule"] == VERDICT_GATE_DEFINITIONS[0]["rule"]
+    assert verdict["gates"]["B_edge_survives_costs"]["registered_rule"] == VERDICT_GATE_DEFINITIONS[1]["rule"]
+    assert verdict["gates"]["C_scale_feasible"]["registered_rule"] == VERDICT_GATE_DEFINITIONS[2]["rule"]
+
+    # The block is a reader. It must not mutate the clustering the binding gates read,
+    # and removing it entirely must change neither a gate nor the verdict.
+    clusters, coverage, cluster_rows = pv._clustered_focus_finals(cfg, [], DEFAULT_SETTINGS["taker_fee_rate"])
+    before = (copy.deepcopy(clusters), copy.deepcopy(cluster_rows), copy.deepcopy(coverage))
+    pv._build_measurement_v2(
+        cfg.governance_root / "closing_line_final_history.csv", None, clusters, cluster_rows, coverage, DEFAULT_SETTINGS, []
+    )
+    assert (clusters, cluster_rows, coverage) == before
+
+    monkeypatch.setattr(pv, "_build_measurement_v2", lambda *a, **k: {"state": "skipped"})
+    without = build_profit_verdict(cfg)
+    assert without["verdict"] == verdict["verdict"]
+    assert without["gates"] == verdict["gates"]
+
+
+def test_per_dollar_bootstrap_is_seeded_and_reproducible(tmp_path, monkeypatch):
+    """WO-169 item 3: the cluster bootstrap is seeded, so two runs give one interval;
+    below the registered unit floor it reports nothing rather than a collapsed bound."""
+    cfg = _config(tmp_path)
+    _install_recorded_fixture(cfg)
+    monkeypatch.setattr("polymarket_predictive_engine.profit_verdict.now_utc", lambda: "2026-07-01T00:00:00Z")
+
+    first = build_profit_verdict(cfg)["measurement_v2"]["inference"]
+    second = build_profit_verdict(cfg)["measurement_v2"]["inference"]
+    assert first["interval_90"] == second["interval_90"] == [-0.281562, 0.114739]
+    assert first["draws"] == 1000 and first["seed"] == 20260913
+    lower, upper = first["interval_90"]
+    assert lower < -0.086501 < upper
+
+    thin_root = tmp_path / "thin"
+    thin_root.mkdir()
+    thin = _config(thin_root)
+    _write_finals(thin, {"m0": [0.05], "m1": [-0.05]})
+    block = build_profit_verdict(thin)["measurement_v2"]
+    assert block["population"]["per_dollar_units"] == 2
+    assert block["inference"]["interval_90"] is None
+    assert block["inference"]["cluster_standard_error"] is not None
+
+
+def test_would_bind_mirrors_gate_a_in_order(tmp_path, monkeypatch):
+    """WO-169 item 3: the informational read applies Gate A's own branches, in Gate A's
+    order, on the corrected basis. It never writes a gate or the verdict."""
+    import polymarket_predictive_engine.profit_verdict as pv
+
+    cfg = _config(tmp_path)
+    _write_finals(cfg, {f"m{m}": [0.05] for m in range(12)})
+    monkeypatch.setattr("polymarket_predictive_engine.profit_verdict.now_utc", lambda: "2026-07-01T00:00:00Z")
+
+    verdict = build_profit_verdict(cfg)
+    block = verdict["measurement_v2"]
+    assert block["population"]["per_dollar_units"] == 12
+    assert block["per_dollar"]["units_positive"] == 12
+    assert block["per_dollar"]["unit_mean"] == 0.0625
+    assert block["would_bind"]["gate_a"] == "pass"
+    assert block["would_bind"]["gate_b"] == "pass"
+    assert round(_sign_test_p(12, 12), 6) == 0.000244
+    assert block["binding"] is False
+    assert block["would_bind"]["binding"] is False
+    assert "not a test of expected profit" in block["inference"]["sign_test_sentence"]
+    assert "binding Gate A metric is the per-share figure" in block["note"]
+
+    # The coverage branch is read before any mean: insufficient clustering is pending,
+    # whatever the corrected mean would have said.
+    clusters, coverage, cluster_rows = pv._clustered_focus_finals(cfg, [], 0.05)
+    forced = pv._build_measurement_v2(
+        cfg.governance_root / "closing_line_final_history.csv",
+        None,
+        clusters,
+        cluster_rows,
+        dict(coverage, state="insufficient_clustering_coverage"),
+        DEFAULT_SETTINGS,
+        [],
+    )
+    assert forced["would_bind"]["gate_a"] == "pending"
+    assert forced["would_bind"]["gate_b"] == "not_evaluated"
+    assert forced["state"] == "ok"
+
+
+def test_two_tier_accounting_on_non_finite_inputs(tmp_path, monkeypatch):
+    """WO-169 fail-safe: an unusable entry price and a non-finite return are counted,
+    never divided. Tier one keeps Gate A's population; tier two states its own.
+
+    The frozen Gate A mean is left exactly as the binding path emits it, non-finite
+    and all: the A2-class fail-open that follows is recorded for the owner in the
+    WO-169 register entry and is not repaired here."""
+    cfg = _config(tmp_path)
+    write_csv(
+        cfg.governance_root / "closing_line_final_history.csv",
+        [
+            {"shadow_position_id": "p0", "signal_cohort": "sharp_anchor_wc", "market_id": "m0", "line_kind": "closing", "clv": 0.05, "entry_price": 0.0, "line_price": 0.05},
+            {"shadow_position_id": "p1", "signal_cohort": "sharp_anchor_wc", "market_id": "m1", "line_kind": "closing", "clv": "nan", "entry_price": 0.5, "line_price": ""},
+        ],
+        fieldnames=["shadow_position_id", "signal_cohort", "market_id", "line_kind", "clv", "entry_price", "line_price"],
+    )
+    monkeypatch.setattr("polymarket_predictive_engine.profit_verdict.now_utc", lambda: "2026-07-01T00:00:00Z")
+
+    verdict = build_profit_verdict(cfg)
+    gate_a = verdict["gates"]["A_edge_exists"]
+    assert gate_a["state"] == "pending"
+    assert gate_a["settled_finals_total"] == 2
+    assert gate_a["unit_mean_net_settlement_return_per_dollar"] != gate_a["unit_mean_net_settlement_return_per_dollar"]  # NaN, as the binding path emits it
+
+    block = verdict["measurement_v2"]
+    assert block["state"] == "ok"
+    assert block["population"]["eligible_finals"] == 2
+    assert block["population"]["per_dollar_excluded_by_reason"] == {"invalid_entry_price": 1, "non_finite_return": 1}
+    assert block["population"]["per_dollar_eligible_finals"] == 0
+    assert block["population"]["per_dollar_units"] == 0
+    assert block["per_dollar"]["unit_mean"] is None
+    assert block["per_dollar"]["net_after_costs"] is None
+    assert block["per_share"]["unit_mean"] is None
+    assert block["per_share"]["reason"] == "non_finite_unit_mean"
+    assert block["by_line_basis"]["line_price_unparseable"] == 1
+    assert block["would_bind"]["gate_a"] == "pending"
+    assert block["inference"]["interval_90"] is None
+
+
+def test_measurement_v2_shape_is_uniform_and_the_fee_matches_its_population(tmp_path, monkeypatch):
+    """WO-169 delta 2, from the build line audit.
+
+    Two defects: an absent ledger returned a block missing six keys, so a consumer indexing
+    them raised instead of reading a null; and `mean_taker_fee_per_dollar` was averaged over
+    every Gate A unit while the mean it is subtracted from covers only per-dollar-eligible
+    units, so a final at `entry_price == 1.0` contributed a zero fee to the average without
+    contributing to the mean — raising `net_after_costs` above what its population supports."""
+    import polymarket_predictive_engine.profit_verdict as pv
+
+    cfg = _config(tmp_path)
+    write_csv(cfg.governance_root / "closing_line_final_history.csv", [], fieldnames=["shadow_position_id", "line_kind", "clv"])
+    monkeypatch.setattr("polymarket_predictive_engine.profit_verdict.now_utc", lambda: "2026-07-01T00:00:00Z")
+    empty = build_profit_verdict(cfg)["measurement_v2"]
+    assert empty["state"] == "unavailable"
+    for key in ("population", "by_line_basis", "per_share", "per_dollar", "inference"):
+        assert key in empty and empty[key] is None
+    assert empty["would_bind"]["gate_a"] == "pending"
+    assert empty["would_bind"]["gate_b"] == "not_evaluated"
+
+    # A final at entry_price == 1.0 is charged a zero fee by Gate B's tuple and is excluded
+    # from the per-dollar basis by tier two. The two averages must now differ.
+    (tmp_path / "priced").mkdir()
+    priced = _config(tmp_path / "priced")
+    write_csv(
+        priced.governance_root / "closing_line_final_history.csv",
+        [
+            {"shadow_position_id": "p0", "signal_cohort": "sharp_anchor_wc", "market_id": "m0", "line_kind": "closing", "clv": 0.05, "entry_price": 0.5, "line_price": 0.55},
+            {"shadow_position_id": "p1", "signal_cohort": "sharp_anchor_wc", "market_id": "m1", "line_kind": "closing", "clv": 0.0, "entry_price": 1.0, "line_price": 1.0},
+        ],
+        fieldnames=["shadow_position_id", "signal_cohort", "market_id", "line_kind", "clv", "entry_price", "line_price"],
+    )
+    block = build_profit_verdict(priced)["measurement_v2"]
+    assert block["population"]["per_dollar_excluded_by_reason"]["invalid_entry_price"] == 1
+    assert block["population"]["per_dollar_units"] == 1
+    # Gate B's own figure averages 0.025 and 0.0; the per-dollar figure reads only the unit
+    # that is actually in the mean, so the charge is the larger, honest one.
+    assert block["per_dollar"]["gate_b_mean_taker_fee_per_dollar"] == 0.0125
+    assert block["per_dollar"]["mean_taker_fee_per_dollar"] == 0.025
+    assert block["per_dollar"]["net_after_costs"] == round(0.1 - 0.005 - 0.005 - 0.025, 6)
+
+    # The register's literal path `by_line_basis[<value>]` resolves, and the nested alias too.
+    (tmp_path / "fixture").mkdir()
+    fixture = _config(tmp_path / "fixture")
+    _install_recorded_fixture(fixture)
+    recorded = build_profit_verdict(fixture)["measurement_v2"]
+    assert recorded["by_line_basis"][""] == 70
+    assert recorded["by_line_basis"]["counts"] == {"": 70}

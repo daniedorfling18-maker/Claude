@@ -1,0 +1,1535 @@
+{
+  "bases": {
+    "collateral": "margin 0.5 \u00d7 notional in USDT; cash and spot earn zero; no cross-margin netting \u2014 an unfavourable channel",
+    "execution_price": "the same close plus taker fees (spot 10 bps, perpetual 5 bps); no spread, no slippage, no market impact \u2014 a favourable channel, covered only by the declared haircut",
+    "funding_notional": "position size \u00d7 that close; the venue settles on mark-price notional (WO-166 A8 bound: \u2264 1 \u00d7 10\u207b\u2075 of notional per period, direction indeterminate)",
+    "haircut": "2.0 pp per year, a declared assumption; it is not a measured bound on venue, stablecoin-depeg or liquidation risk and this WO measures none of them",
+    "liquidation_check": "kline high of the last traded price against the period-start margin ratio; the venue liquidates on the mark price, which is smoothed, so the last-price high triggers at least as often \u2014 a conservative channel",
+    "mark_price": "Binance 1h kline close of the hour ending at the boundary (last traded price), not the venue mark price"
+  },
+  "code_revision": "a4f1cf07cf48ea9b1ccaf376a48d9c4add163821",
+  "drawdown_basis": "nav",
+  "evidence_class": "historical",
+  "gates": {
+    "G5_lower_bound_positive_and_persistent": true,
+    "lane_b_go": true
+  },
+  "generated_at": "2026-09-13T06:22:35Z",
+  "inputs": {
+    "data/binance/BTCUSDT_funding_8h.csv": "9f1ad4b47a9cd52590431ed1c4e0b5247f11b9b8e8316a7979855d76ebc8e315",
+    "data/binance/BTCUSDT_perp_1h.csv": "41dbc2128896b0022782b0a3afe2f802338c4f8970da06c2c3e6adfb3fa55abc",
+    "data/binance/BTCUSDT_spot_1h.csv": "d8650027f030bdaee5caa73f726354031d6eaf15940646eb46238a4b08232207",
+    "data/binance/ETHUSDT_funding_8h.csv": "e6c4b297625e21ac5809ee0d5313403b6d4dd7b3447feea8ae37e355247d8e05",
+    "data/binance/ETHUSDT_perp_1h.csv": "e0416dd1e33b6a64f8941a40e9669554bbea1d5aa623247ac3783e5510a82a3e",
+    "data/binance/ETHUSDT_spot_1h.csv": "127030985161895133cd78bad8d1aa3c41b07d821ee0e4730dd947e67fc016f0",
+    "data/deribit/BTC_dvol_daily.csv": "735053848119e08d32ec0973a284c60bdb478a8c5e3bbacecbe8963e16ce0bd6",
+    "data/deribit/BTC_funding_1h.csv.gz": "3afdb1d432f76bf853b145567f31569cb184875283648ccbcf5e03a8258a8fe8",
+    "data/deribit/ETH_dvol_daily.csv": "dbae392ca528730f0a38c03e001bc7cb5729a9439880d9bf92ca9f7c0e1fcee9",
+    "data/deribit/ETH_funding_1h.csv.gz": "3bb1c7ed21440a5000e34f201627cc69d904bcf0a9201add397e54389a7ea9b8"
+  },
+  "live_trading_invoked": false,
+  "manifest_sha256": "2152b1b4e3fd1a6ffc8f9881c1a7663d33a24e27b8205824d98438c95df2ea50",
+  "paper_trading_invoked": false,
+  "parameters": {
+    "block_length_rule": "round(n_clusters ** (1/3)), minimum 2",
+    "g2_hurdle": 0.06,
+    "g3_max_drawdown": 0.2,
+    "g4_min_positive_years": 4,
+    "g5_min_positive_years": 3,
+    "gate_quantile": 0.025,
+    "haircut_per_year": 0.02,
+    "liquidation_move_at_half_margin": 0.49253731343283585,
+    "maintenance_margin": 0.005,
+    "margin_fraction": 0.5,
+    "min_eligible_weeks_per_year": 45,
+    "min_windows_per_year": 10,
+    "n_draws": 10000,
+    "periods_per_year": 1095,
+    "perp_taker_fee": 0.0005,
+    "rebalance_margin_ratio": 0.25,
+    "report_quantile": 0.05,
+    "seed": 20260912,
+    "sma_days": 200,
+    "spot_taker_fee": 0.001,
+    "v1_entry_annualised": 0.08,
+    "v1_exit_level": 0.0,
+    "v1_lookback": 3,
+    "vrp_min_valid_hours": 700,
+    "vrp_step_days": 30,
+    "vrp_window_hours": 720,
+    "weeks_per_year": 52
+  },
+  "per_currency": {
+    "BTC": {
+      "mean_implied_variance": 0.4296057675757576,
+      "mean_realised_variance": 0.30629580747748997,
+      "mean_vrp": 0.12330996009826767,
+      "mean_vrp_points": 1233.0996009826767,
+      "rejection_reasons": {},
+      "share_of_windows_positive": 0.7424242424242424,
+      "windows": [
+        {
+          "implied_variance": 0.719104,
+          "realised_variance": 0.4554355316840502,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 717,
+          "valid_hours_wo166_alignment": 716,
+          "vrp": 0.26366846831594976,
+          "window_start_ms": 1616544000000
+        },
+        {
+          "implied_variance": 0.76370121,
+          "realised_variance": 1.3630619914854265,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 716,
+          "valid_hours_wo166_alignment": 715,
+          "vrp": -0.5993607814854265,
+          "window_start_ms": 1619136000000
+        },
+        {
+          "implied_variance": 1.9614002500000003,
+          "realised_variance": 1.0236774444728516,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.9377228055271487,
+          "window_start_ms": 1621728000000
+        },
+        {
+          "implied_variance": 1.12848129,
+          "realised_variance": 0.5904859813456521,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.537995308654348,
+          "window_start_ms": 1624320000000
+        },
+        {
+          "implied_variance": 0.77193796,
+          "realised_variance": 0.5034591600055204,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 715,
+          "valid_hours_wo166_alignment": 714,
+          "vrp": 0.26847879999447966,
+          "window_start_ms": 1626912000000
+        },
+        {
+          "implied_variance": 0.8660163599999999,
+          "realised_variance": 0.37184151401911847,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.49417484598088146,
+          "window_start_ms": 1629504000000
+        },
+        {
+          "implied_variance": 0.73479184,
+          "realised_variance": 0.5094007742735652,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 717,
+          "valid_hours_wo166_alignment": 716,
+          "vrp": 0.22539106572643475,
+          "window_start_ms": 1632096000000
+        },
+        {
+          "implied_variance": 0.88642225,
+          "realised_variance": 0.3274948352839085,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.5589274147160914,
+          "window_start_ms": 1634688000000
+        },
+        {
+          "implied_variance": 0.81216144,
+          "realised_variance": 0.4788541362152421,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.3333073037847579,
+          "window_start_ms": 1637280000000
+        },
+        {
+          "implied_variance": 0.7644004900000001,
+          "realised_variance": 0.28298533705475754,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.48141515294524256,
+          "window_start_ms": 1639872000000
+        },
+        {
+          "implied_variance": 0.42549528999999997,
+          "realised_variance": 0.5298406789892697,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.1043453889892697,
+          "window_start_ms": 1642464000000
+        },
+        {
+          "implied_variance": 0.46335248999999995,
+          "realised_variance": 0.5653425795586751,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.10199008955867511,
+          "window_start_ms": 1645056000000
+        },
+        {
+          "implied_variance": 0.50055625,
+          "realised_variance": 0.1955720898472812,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.30498416015271884,
+          "window_start_ms": 1647648000000
+        },
+        {
+          "implied_variance": 0.40436881,
+          "realised_variance": 0.6749044843171873,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.2705356743171873,
+          "window_start_ms": 1650240000000
+        },
+        {
+          "implied_variance": 0.8053267599999999,
+          "realised_variance": 0.567828411027986,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.23749834897201394,
+          "window_start_ms": 1652832000000
+        },
+        {
+          "implied_variance": 1.4316122500000004,
+          "realised_variance": 0.6677453756772727,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.7638668743227277,
+          "window_start_ms": 1655424000000
+        },
+        {
+          "implied_variance": 0.6722360099999999,
+          "realised_variance": 0.382270121352713,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.2899658886472869,
+          "window_start_ms": 1658016000000
+        },
+        {
+          "implied_variance": 0.4928040000000001,
+          "realised_variance": 0.3022697639634077,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.19053423603659236,
+          "window_start_ms": 1660608000000
+        },
+        {
+          "implied_variance": 0.6113676099999998,
+          "realised_variance": 0.30913337825739007,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.30223423174260977,
+          "window_start_ms": 1663200000000
+        },
+        {
+          "implied_variance": 0.38950081,
+          "realised_variance": 0.38921567497010606,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.0002851350298939126,
+          "window_start_ms": 1665792000000
+        },
+        {
+          "implied_variance": 1.1638094399999999,
+          "realised_variance": 0.1608947848557307,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 1.0029146551442691,
+          "window_start_ms": 1668384000000
+        },
+        {
+          "implied_variance": 0.36808489,
+          "realised_variance": 0.08383344088856533,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.2842514491114347,
+          "window_start_ms": 1670976000000
+        },
+        {
+          "implied_variance": 0.26440164,
+          "realised_variance": 0.22431471040985376,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.04008692959014623,
+          "window_start_ms": 1673568000000
+        },
+        {
+          "implied_variance": 0.22212369000000004,
+          "realised_variance": 0.3181189124707508,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.09599522247075076,
+          "window_start_ms": 1676160000000
+        },
+        {
+          "implied_variance": 0.3873817600000001,
+          "realised_variance": 0.31491873074859317,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 718,
+          "valid_hours_wo166_alignment": 717,
+          "vrp": 0.07246302925140691,
+          "window_start_ms": 1678752000000
+        },
+        {
+          "implied_variance": 0.31214569,
+          "realised_variance": 0.25445518925221594,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.057690500747784035,
+          "window_start_ms": 1681344000000
+        },
+        {
+          "implied_variance": 0.25090081000000003,
+          "realised_variance": 0.11508021431071838,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.13582059568928165,
+          "window_start_ms": 1683936000000
+        },
+        {
+          "implied_variance": 0.18326961000000003,
+          "realised_variance": 0.14557385944056841,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.03769575055943161,
+          "window_start_ms": 1686528000000
+        },
+        {
+          "implied_variance": 0.19324816,
+          "realised_variance": 0.0670939339688957,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.12615422603110432,
+          "window_start_ms": 1689120000000
+        },
+        {
+          "implied_variance": 0.13104400000000002,
+          "realised_variance": 0.1467376280237506,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.015693628023750572,
+          "window_start_ms": 1691712000000
+        },
+        {
+          "implied_variance": 0.15800625000000001,
+          "realised_variance": 0.10726969003989345,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.050736559960106564,
+          "window_start_ms": 1694304000000
+        },
+        {
+          "implied_variance": 0.13549761000000002,
+          "realised_variance": 0.1756436633496247,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.04014605334962468,
+          "window_start_ms": 1696896000000
+        },
+        {
+          "implied_variance": 0.33154564,
+          "realised_variance": 0.1584275100757036,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.17311812992429637,
+          "window_start_ms": 1699488000000
+        },
+        {
+          "implied_variance": 0.28858384000000004,
+          "realised_variance": 0.19850954934129442,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.09007429065870562,
+          "window_start_ms": 1702080000000
+        },
+        {
+          "implied_variance": 0.51566761,
+          "realised_variance": 0.25190695449881506,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.263760655501185,
+          "window_start_ms": 1704672000000
+        },
+        {
+          "implied_variance": 0.18378368999999997,
+          "realised_variance": 0.31078552638738366,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.1270018363873837,
+          "window_start_ms": 1707264000000
+        },
+        {
+          "implied_variance": 0.4855302400000001,
+          "realised_variance": 0.3662513961129984,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.11927884388700172,
+          "window_start_ms": 1709856000000
+        },
+        {
+          "implied_variance": 0.522729,
+          "realised_variance": 0.3837975086668933,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.13893149133310673,
+          "window_start_ms": 1712448000000
+        },
+        {
+          "implied_variance": 0.30880249,
+          "realised_variance": 0.1577650251712003,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.15103746482879968,
+          "window_start_ms": 1715040000000
+        },
+        {
+          "implied_variance": 0.30935844,
+          "realised_variance": 0.17739431411940712,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.1319641258805929,
+          "window_start_ms": 1717632000000
+        },
+        {
+          "implied_variance": 0.23990403999999996,
+          "realised_variance": 0.25849737404895123,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.018593334048951277,
+          "window_start_ms": 1720224000000
+        },
+        {
+          "implied_variance": 0.31505769,
+          "realised_variance": 0.43684687980201764,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.12178918980201764,
+          "window_start_ms": 1722816000000
+        },
+        {
+          "implied_variance": 0.3056984099999999,
+          "realised_variance": 0.1973047143172504,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.10839369568274951,
+          "window_start_ms": 1725408000000
+        },
+        {
+          "implied_variance": 0.33005025,
+          "realised_variance": 0.16274691256862006,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.16730333743137993,
+          "window_start_ms": 1728000000000
+        },
+        {
+          "implied_variance": 0.36312676000000005,
+          "realised_variance": 0.3046390836082949,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.05848767639170516,
+          "window_start_ms": 1730592000000
+        },
+        {
+          "implied_variance": 0.32228329,
+          "realised_variance": 0.2997252678593221,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.022558022140677925,
+          "window_start_ms": 1733184000000
+        },
+        {
+          "implied_variance": 0.37332099999999996,
+          "realised_variance": 0.29840096748399614,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.07492003251600382,
+          "window_start_ms": 1735776000000
+        },
+        {
+          "implied_variance": 0.28430224,
+          "realised_variance": 0.2847980678613897,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.0004958278613897416,
+          "window_start_ms": 1738368000000
+        },
+        {
+          "implied_variance": 0.30769209,
+          "realised_variance": 0.3638941378332991,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.05620204783329913,
+          "window_start_ms": 1740960000000
+        },
+        {
+          "implied_variance": 0.24552025,
+          "realised_variance": 0.2718743526076505,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.02635410260765053,
+          "window_start_ms": 1743552000000
+        },
+        {
+          "implied_variance": 0.21261321,
+          "realised_variance": 0.14099867183352,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.07161453816648,
+          "window_start_ms": 1746144000000
+        },
+        {
+          "implied_variance": 0.21049744000000004,
+          "realised_variance": 0.10525836413621951,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.10523907586378052,
+          "window_start_ms": 1748736000000
+        },
+        {
+          "implied_variance": 0.13793796,
+          "realised_variance": 0.09617898910594216,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.041758970894057834,
+          "window_start_ms": 1751328000000
+        },
+        {
+          "implied_variance": 0.13053769,
+          "realised_variance": 0.1069690750732687,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.02356861492673132,
+          "window_start_ms": 1753920000000
+        },
+        {
+          "implied_variance": 0.15194403999999997,
+          "realised_variance": 0.07693768376809557,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.07500635623190441,
+          "window_start_ms": 1756512000000
+        },
+        {
+          "implied_variance": 0.12859395999999998,
+          "realised_variance": 0.16704060317697242,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.03844664317697244,
+          "window_start_ms": 1759104000000
+        },
+        {
+          "implied_variance": 0.17969121,
+          "realised_variance": 0.2698556916133974,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.09016448161339741,
+          "window_start_ms": 1761696000000
+        },
+        {
+          "implied_variance": 0.24314761000000004,
+          "realised_variance": 0.20771710972458143,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.03543050027541861,
+          "window_start_ms": 1764288000000
+        },
+        {
+          "implied_variance": 0.17497489,
+          "realised_variance": 0.11269698817228924,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.06227790182771076,
+          "window_start_ms": 1766880000000
+        },
+        {
+          "implied_variance": 0.15015625000000002,
+          "realised_variance": 0.40369519185897523,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.2535389418589752,
+          "window_start_ms": 1769472000000
+        },
+        {
+          "implied_variance": 0.28718881000000007,
+          "realised_variance": 0.266927560143335,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.020261249856665053,
+          "window_start_ms": 1772064000000
+        },
+        {
+          "implied_variance": 0.28847641,
+          "realised_variance": 0.1424463218866278,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.1460300881133722,
+          "window_start_ms": 1774656000000
+        },
+        {
+          "implied_variance": 0.16273156000000003,
+          "realised_variance": 0.09881341551906196,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.06391814448093806,
+          "window_start_ms": 1777248000000
+        },
+        {
+          "implied_variance": 0.12859395999999998,
+          "realised_variance": 0.2685867190241604,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.13999275902416045,
+          "window_start_ms": 1779840000000
+        },
+        {
+          "implied_variance": 0.21678336,
+          "realised_variance": 0.12672292735058316,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.09006043264941685,
+          "window_start_ms": 1782432000000
+        },
+        {
+          "implied_variance": 0.14220441,
+          "realised_variance": 0.13635841720227487,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.00584599279772513,
+          "window_start_ms": 1785024000000
+        }
+      ],
+      "windows_accepted": 66,
+      "windows_rejected": 0,
+      "windows_total": 66,
+      "yearly_mean_vrp": {
+        "2021": 0.35017203841599076,
+        "2022": 0.24163865219120126,
+        "2023": 0.052667092380678106,
+        "2024": 0.07452757940323716,
+        "2025": 0.021396375969952156,
+        "2026": -0.009630827569288332
+      }
+    },
+    "ETH": {
+      "mean_implied_variance": 0.6422261430303031,
+      "mean_realised_variance": 0.5422051556679445,
+      "mean_vrp": 0.10002098736235855,
+      "mean_vrp_points": 1000.2098736235857,
+      "rejection_reasons": {},
+      "share_of_windows_positive": 0.6515151515151515,
+      "windows": [
+        {
+          "implied_variance": 0.8869872400000002,
+          "realised_variance": 0.7544032163578016,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 717,
+          "valid_hours_wo166_alignment": 716,
+          "vrp": 0.13258402364219857,
+          "window_start_ms": 1616544000000
+        },
+        {
+          "implied_variance": 0.84492864,
+          "realised_variance": 2.9800887580195123,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 716,
+          "valid_hours_wo166_alignment": 715,
+          "vrp": -2.1351601180195123,
+          "window_start_ms": 1619136000000
+        },
+        {
+          "implied_variance": 3.4879297599999997,
+          "realised_variance": 1.8958941664502384,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 1.5920355935497612,
+          "window_start_ms": 1621728000000
+        },
+        {
+          "implied_variance": 1.54853136,
+          "realised_variance": 1.0197446224366629,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.528786737563337,
+          "window_start_ms": 1624320000000
+        },
+        {
+          "implied_variance": 1.1737555600000003,
+          "realised_variance": 0.6982440245738218,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 715,
+          "valid_hours_wo166_alignment": 714,
+          "vrp": 0.4755115354261784,
+          "window_start_ms": 1626912000000
+        },
+        {
+          "implied_variance": 1.2144040000000003,
+          "realised_variance": 0.7283354402342074,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.4860685597657929,
+          "window_start_ms": 1629504000000
+        },
+        {
+          "implied_variance": 0.94051204,
+          "realised_variance": 0.7844623457156605,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 717,
+          "valid_hours_wo166_alignment": 716,
+          "vrp": 0.15604969428433946,
+          "window_start_ms": 1632096000000
+        },
+        {
+          "implied_variance": 1.0761987599999998,
+          "realised_variance": 0.42900395197395114,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.6471948080260487,
+          "window_start_ms": 1634688000000
+        },
+        {
+          "implied_variance": 1.265625,
+          "realised_variance": 0.712029102285923,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.553595897714077,
+          "window_start_ms": 1637280000000
+        },
+        {
+          "implied_variance": 1.0096230400000004,
+          "realised_variance": 0.40298694395251544,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.6066360960474849,
+          "window_start_ms": 1639872000000
+        },
+        {
+          "implied_variance": 0.5291107599999999,
+          "realised_variance": 0.9721161910022732,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.4430054310022733,
+          "window_start_ms": 1642464000000
+        },
+        {
+          "implied_variance": 0.5664067600000001,
+          "realised_variance": 0.7574119284203259,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.19100516842032578,
+          "window_start_ms": 1645056000000
+        },
+        {
+          "implied_variance": 0.6222054399999999,
+          "realised_variance": 0.2870472762552157,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.3351581637447842,
+          "window_start_ms": 1647648000000
+        },
+        {
+          "implied_variance": 0.4476948099999999,
+          "realised_variance": 1.0184736276025919,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.570778817602592,
+          "window_start_ms": 1650240000000
+        },
+        {
+          "implied_variance": 0.982081,
+          "realised_variance": 1.2098068192915394,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.22772581929153946,
+          "window_start_ms": 1652832000000
+        },
+        {
+          "implied_variance": 1.8447072399999995,
+          "realised_variance": 1.2220342919320233,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.6226729480679762,
+          "window_start_ms": 1655424000000
+        },
+        {
+          "implied_variance": 1.1661840099999996,
+          "realised_variance": 0.8148062794461283,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.35137773055387134,
+          "window_start_ms": 1658016000000
+        },
+        {
+          "implied_variance": 1.09453444,
+          "realised_variance": 0.6333419342723436,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.46119250572765647,
+          "window_start_ms": 1660608000000
+        },
+        {
+          "implied_variance": 1.3458320100000003,
+          "realised_variance": 0.5091645787731859,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.8366674312268144,
+          "window_start_ms": 1663200000000
+        },
+        {
+          "implied_variance": 0.6432040000000001,
+          "realised_variance": 0.8318885990487097,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.1886845990487096,
+          "window_start_ms": 1665792000000
+        },
+        {
+          "implied_variance": 1.8588595599999997,
+          "realised_variance": 0.32385407663768473,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 1.535005483362315,
+          "window_start_ms": 1668384000000
+        },
+        {
+          "implied_variance": 0.627264,
+          "realised_variance": 0.14019546146394607,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.487068538536054,
+          "window_start_ms": 1670976000000
+        },
+        {
+          "implied_variance": 0.44129449000000015,
+          "realised_variance": 0.3393761021302423,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.10191838786975788,
+          "window_start_ms": 1673568000000
+        },
+        {
+          "implied_variance": 0.40411449000000005,
+          "realised_variance": 0.3389934965108863,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.06512099348911377,
+          "window_start_ms": 1676160000000
+        },
+        {
+          "implied_variance": 0.47334399999999993,
+          "realised_variance": 0.2733787361544444,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 718,
+          "valid_hours_wo166_alignment": 717,
+          "vrp": 0.19996526384555552,
+          "window_start_ms": 1678752000000
+        },
+        {
+          "implied_variance": 0.37797904000000004,
+          "realised_variance": 0.3102470245843867,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.06773201541561336,
+          "window_start_ms": 1681344000000
+        },
+        {
+          "implied_variance": 0.27008808999999995,
+          "realised_variance": 0.10891055347412637,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.16117753652587358,
+          "window_start_ms": 1683936000000
+        },
+        {
+          "implied_variance": 0.20214016,
+          "realised_variance": 0.17605874546954878,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.026081414530451236,
+          "window_start_ms": 1686528000000
+        },
+        {
+          "implied_variance": 0.17297281000000003,
+          "realised_variance": 0.08173758573452565,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.09123522426547438,
+          "window_start_ms": 1689120000000
+        },
+        {
+          "implied_variance": 0.11202408999999999,
+          "realised_variance": 0.17394693744378065,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.061922847443780654,
+          "window_start_ms": 1691712000000
+        },
+        {
+          "implied_variance": 0.13082689000000003,
+          "realised_variance": 0.11519875443149795,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.01562813556850208,
+          "window_start_ms": 1694304000000
+        },
+        {
+          "implied_variance": 0.13897984000000002,
+          "realised_variance": 0.17663193859181733,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.03765209859181731,
+          "window_start_ms": 1696896000000
+        },
+        {
+          "implied_variance": 0.31516996,
+          "realised_variance": 0.2512222540308959,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.06394770596910415,
+          "window_start_ms": 1699488000000
+        },
+        {
+          "implied_variance": 0.33108516000000004,
+          "realised_variance": 0.2617904698655683,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.06929469013443174,
+          "window_start_ms": 1702080000000
+        },
+        {
+          "implied_variance": 0.55636681,
+          "realised_variance": 0.2863235055157079,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.2700433044842921,
+          "window_start_ms": 1704672000000
+        },
+        {
+          "implied_variance": 0.20268004000000003,
+          "realised_variance": 0.416872900212913,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.21419286021291298,
+          "window_start_ms": 1707264000000
+        },
+        {
+          "implied_variance": 0.55771024,
+          "realised_variance": 0.5098119867625763,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.047898253237423694,
+          "window_start_ms": 1709856000000
+        },
+        {
+          "implied_variance": 0.5225844100000001,
+          "realised_variance": 0.5305290475493365,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.007944637549336386,
+          "window_start_ms": 1712448000000
+        },
+        {
+          "implied_variance": 0.44408896,
+          "realised_variance": 0.34826810867126423,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.09582085132873575,
+          "window_start_ms": 1715040000000
+        },
+        {
+          "implied_variance": 0.4611768099999999,
+          "realised_variance": 0.26131687560998706,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.19985993439001282,
+          "window_start_ms": 1717632000000
+        },
+        {
+          "implied_variance": 0.39100008999999997,
+          "realised_variance": 0.3205404062624248,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.07045968373757516,
+          "window_start_ms": 1720224000000
+        },
+        {
+          "implied_variance": 0.46607929,
+          "realised_variance": 0.7026277836841485,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.2365484936841485,
+          "window_start_ms": 1722816000000
+        },
+        {
+          "implied_variance": 0.4419590400000001,
+          "realised_variance": 0.2707973900718289,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.17116164992817118,
+          "window_start_ms": 1725408000000
+        },
+        {
+          "implied_variance": 0.41692848999999993,
+          "realised_variance": 0.25059247565864967,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.16633601434135026,
+          "window_start_ms": 1728000000000
+        },
+        {
+          "implied_variance": 0.4108809999999999,
+          "realised_variance": 0.528138248152532,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.11725724815253208,
+          "window_start_ms": 1730592000000
+        },
+        {
+          "implied_variance": 0.4944902399999999,
+          "realised_variance": 0.5172821561201615,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.02279191612016157,
+          "window_start_ms": 1733184000000
+        },
+        {
+          "implied_variance": 0.5056632099999999,
+          "realised_variance": 0.48503790647314915,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.02062530352685077,
+          "window_start_ms": 1735776000000
+        },
+        {
+          "implied_variance": 0.4125492900000001,
+          "realised_variance": 0.9924473225542424,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.5798980325542422,
+          "window_start_ms": 1738368000000
+        },
+        {
+          "implied_variance": 0.46471488999999994,
+          "realised_variance": 0.5878640987737215,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.12314920877372154,
+          "window_start_ms": 1740960000000
+        },
+        {
+          "implied_variance": 0.44289025,
+          "realised_variance": 0.7236815975356474,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.28079134753564744,
+          "window_start_ms": 1743552000000
+        },
+        {
+          "implied_variance": 0.4383764099999999,
+          "realised_variance": 0.5667640219270366,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.12838761192703668,
+          "window_start_ms": 1746144000000
+        },
+        {
+          "implied_variance": 0.52533504,
+          "realised_variance": 0.4233004322626053,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.1020346077373947,
+          "window_start_ms": 1748736000000
+        },
+        {
+          "implied_variance": 0.38651089000000005,
+          "realised_variance": 0.37249867107311263,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.014012218926887421,
+          "window_start_ms": 1751328000000
+        },
+        {
+          "implied_variance": 0.42484324000000007,
+          "realised_variance": 0.5052579017662302,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.08041466176623013,
+          "window_start_ms": 1753920000000
+        },
+        {
+          "implied_variance": 0.5004147599999998,
+          "realised_variance": 0.23580507293988814,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.2646096870601117,
+          "window_start_ms": 1756512000000
+        },
+        {
+          "implied_variance": 0.4078099599999999,
+          "realised_variance": 0.4577688653154946,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.049958905315494684,
+          "window_start_ms": 1759104000000
+        },
+        {
+          "implied_variance": 0.48790224999999987,
+          "realised_variance": 0.5978547249135417,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.10995247491354188,
+          "window_start_ms": 1761696000000
+        },
+        {
+          "implied_variance": 0.5138022400000002,
+          "realised_variance": 0.4293476439794296,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.0844545960205706,
+          "window_start_ms": 1764288000000
+        },
+        {
+          "implied_variance": 0.37222201,
+          "realised_variance": 0.2210278291479103,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.1511941808520897,
+          "window_start_ms": 1766880000000
+        },
+        {
+          "implied_variance": 0.29398084,
+          "realised_variance": 0.6993594834772938,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.4053786434772938,
+          "window_start_ms": 1769472000000
+        },
+        {
+          "implied_variance": 0.505521,
+          "realised_variance": 0.4424600588805982,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.0630609411194018,
+          "window_start_ms": 1772064000000
+        },
+        {
+          "implied_variance": 0.54007801,
+          "realised_variance": 0.25824663870495285,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.28183137129504715,
+          "window_start_ms": 1774656000000
+        },
+        {
+          "implied_variance": 0.37920964,
+          "realised_variance": 0.17825245920456598,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.20095718079543404,
+          "window_start_ms": 1777248000000
+        },
+        {
+          "implied_variance": 0.23794884000000002,
+          "realised_variance": 0.45078179742195573,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.2128329574219557,
+          "window_start_ms": 1779840000000
+        },
+        {
+          "implied_variance": 0.36917776,
+          "realised_variance": 0.21504295783329194,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": 0.15413480216670808,
+          "window_start_ms": 1782432000000
+        },
+        {
+          "implied_variance": 0.26543104,
+          "realised_variance": 0.26681367106015236,
+          "rejected": false,
+          "rejected_reason": "",
+          "valid_hours": 720,
+          "valid_hours_wo166_alignment": 719,
+          "vrp": -0.0013826310601523506,
+          "window_start_ms": 1785024000000
+        }
+      ],
+      "windows_accepted": 66,
+      "windows_rejected": 0,
+      "windows_total": 66,
+      "yearly_mean_vrp": {
+        "2021": 0.3043302827999706,
+        "2022": 0.25066191382116926,
+        "2023": 0.06354386846485664,
+        "2024": 0.03523704464403912,
+        "2025": -0.055047819127846905,
+        "2026": 0.011484294773884173
+      }
+    }
+  },
+  "pooled": {
+    "bootstrap": {
+      "cluster": {
+        "finite": true,
+        "intervals": {
+          "0.90": [
+            0.04053673152229578,
+            0.1841225234952631
+          ],
+          "0.95": [
+            0.02614051726242652,
+            0.19967105512509067
+          ]
+        },
+        "method": "cluster",
+        "n_clusters": 66,
+        "n_draws": 10000,
+        "point": 0.11166547373031312,
+        "seed": 20260912
+      },
+      "stationary_block": {
+        "finite": true,
+        "intervals": {
+          "0.90": [
+            0.03762927062789081,
+            0.1928369933107141
+          ],
+          "0.95": [
+            0.025046086740935152,
+            0.20832107110260256
+          ]
+        },
+        "method": "stationary_block",
+        "n_clusters": 66,
+        "n_draws": 10000,
+        "point": 0.11166547373031312,
+        "seed": 20260912
+      }
+    },
+    "complete_years": [
+      2022,
+      2023,
+      2024,
+      2025
+    ],
+    "lower_bound_gate_level": {
+      "block_length": 4,
+      "cluster": 0.02614051726242652,
+      "level": 0.95,
+      "minimum": 0.025046086740935152,
+      "quantile": 0.025,
+      "stationary_block": 0.025046086740935152
+    },
+    "lower_bound_positive": true,
+    "mean_vrp": 0.11166547373031312,
+    "mean_vrp_points": 1116.6547373031312,
+    "positive_complete_years": 3,
+    "windows_accepted": 66,
+    "windows_total": 66,
+    "year_check": {
+      "detail": {
+        "2022": {
+          "positive": true,
+          "qualifies": true,
+          "units": 12,
+          "value": 0.24615028300618527
+        },
+        "2023": {
+          "positive": true,
+          "qualifies": true,
+          "units": 12,
+          "value": 0.05810548042276737
+        },
+        "2024": {
+          "positive": true,
+          "qualifies": true,
+          "units": 12,
+          "value": 0.05488231202363814
+        },
+        "2025": {
+          "positive": false,
+          "qualifies": true,
+          "units": 13,
+          "value": -0.016825721578947374
+        }
+      },
+      "positive_years": 3
+    },
+    "yearly_accepted_windows": {
+      "2021": 10,
+      "2022": 12,
+      "2023": 12,
+      "2024": 12,
+      "2025": 13,
+      "2026": 7
+    },
+    "yearly_mean_vrp": {
+      "2021": 0.3272511606079807,
+      "2022": 0.24615028300618527,
+      "2023": 0.05810548042276737,
+      "2024": 0.05488231202363814,
+      "2025": -0.016825721578947374,
+      "2026": 0.0009267336022979189
+    }
+  },
+  "return_basis": "simple_on_inception_capital",
+  "rv_alignment": "return_intervals",
+  "unverifiable_scope": "perp",
+  "work_order": "WO-170"
+}

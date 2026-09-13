@@ -13,7 +13,7 @@ from polymarket_predictive_engine.closing_line import (
 )
 from polymarket_predictive_engine.config import EngineConfig, load_config
 from polymarket_predictive_engine.risk import kelly_fraction, risk_decision, shrunk_kelly_fraction
-from polymarket_predictive_engine.utils import read_json, write_csv
+from polymarket_predictive_engine.utils import read_csv_rows, read_json, write_csv
 
 AS_OF = datetime(2026, 7, 2, 0, 0, tzinfo=timezone.utc)
 
@@ -373,3 +373,259 @@ def test_risk_decision_respects_kelly_shrinkage(tmp_path: Path):
     if shrunk["approved"]:
         assert shrunk["size"] <= plain["size"]
         assert shrunk["kelly_fraction"] <= plain["kelly_fraction"]
+
+
+# --- WO-169: explicit units, the line basis, and verified settlement ---------
+
+
+def _corpus(cfg: EngineConfig, rows: list[dict]) -> None:
+    """Write the WO-101 resolution corpus the settlement join reads."""
+    write_csv(
+        cfg.output_root / "polymarket_training" / "resolution_corpus_v1.csv",
+        rows,
+        fieldnames=["resolution_observation_id", "token_id", "winning_token_id", "resolution_quality"],
+    )
+
+
+def test_units_two_cent_gain_on_ten_cent_entry(tmp_path: Path):
+    """WO-169 item 1: a two-cent gain on a ten-cent purchase is a 20% return, not 2%.
+
+    `clv` is a per-share probability-point difference; the per-dollar return
+    divides it by the entry price. Both are now named by their units."""
+    quotes = build_quote_history([_quote("tokA", "2026-07-01T11:59:00Z", 0.12, bid=0.11)])
+    row = position_clv_row(
+        _position("tokA", "c", entry=0.10, opened="2026-07-01T10:00:00Z", close="2026-07-01T12:00:00Z"),
+        quotes,
+        as_of=AS_OF,
+    )
+    assert row is not None
+    assert row["clv"] == 0.02
+    assert row["clv_per_share"] == 0.02
+    assert row["clv_pct"] == 0.2
+    assert row["return_per_dollar"] == 0.2
+    assert row["line_basis"] == "last_quote_before_close"
+
+
+def test_a_near_one_last_price_is_not_settlement_and_the_ledger_keeps_its_columns(tmp_path: Path, monkeypatch):
+    """WO-169 items 1-2: a last observed quote at 0.999 is not a settlement payout.
+
+    The row says which path produced the line, carries no payout, and states why
+    it is unverified. The append-only ledger gains exactly `line_basis`; a row
+    recorded before this change keeps `""` and is never guessed."""
+    import polymarket_predictive_engine.closing_line as cl
+
+    cfg = _cfg(tmp_path)
+    monkeypatch.setattr(cl, "_fetch_price_history_close_line", lambda token_id, close_time, opened_at, **kw: ("2026-07-01T11:50:00Z", 0.999))
+    write_csv(
+        cfg.output_root / "polymarket_shadow" / "shadow_positions.csv",
+        [
+            _position("tokGone", "worldcup", entry=0.50, opened="2026-07-01T10:00:00Z", close="2026-07-01T12:00:00Z"),
+            _position("tokOpen", "worldcup", entry=0.40, opened="2026-07-01T10:00:00Z", close="2026-09-01T12:00:00Z"),
+            # Quotes rolled off: this one is recovered from the pre-WO-169 ledger row below.
+            _position("tokOld", "worldcup", entry=0.25, opened="2026-07-01T10:00:00Z", close="2026-07-01T12:00:00Z"),
+        ],
+    )
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [_quote("tokOpen", "2026-07-01T11:30:00Z", 0.45, bid=0.44)],
+    )
+    # A ledger row recorded before WO-169: the legacy header, no line_basis column.
+    write_csv(
+        cfg.governance_root / "closing_line_final_history.csv",
+        [
+            {
+                "shadow_position_id": "pos_tokOld",
+                "signal_cohort": "worldcup",
+                "category": "sports_other",
+                "market_id": "mkt_tokOld",
+                "token_id": "tokOld",
+                "entry_price": 0.25,
+                "line_price": 0.30,
+                "line_kind": "closing",
+                "clv": 0.05,
+                "clv_pct": 0.2,
+                "beat_close": True,
+                "quote_count": 0,
+            }
+        ],
+        fieldnames=cl.LEGACY_POSITION_FIELDS,
+    )
+
+    summary = build_closing_line_value(cfg, as_of=AS_OF)
+
+    positions = {row["shadow_position_id"]: row for row in read_csv_rows(cfg.governance_root / "closing_line_value_positions.csv")}
+    graded = positions["pos_tokGone"]
+    assert graded["line_basis"] == "official_price_history_close"
+    assert graded["line_price"] == "0.999"
+    assert graded["settlement_payout"] == ""
+    assert graded["settlement_source"] == ""
+    assert graded["settlement_reason"] == "resolution_corpus_unavailable"
+    assert summary["settlement_join"]["state"] == "resolution_corpus_unavailable"
+    # The row builder itself emits every settlement field blank.
+    official = cl._price_history_final_row(
+        _position("tokGone", "worldcup", entry=0.50, opened="2026-07-01T10:00:00Z", close="2026-07-01T12:00:00Z"),
+        AS_OF,
+    )
+    assert all(official[field] == "" for field in cl.SETTLEMENT_FIELDS)
+    # A provisional row is never a final: it carries its basis and the not_final reason.
+    provisional = positions["pos_tokOpen"]
+    assert provisional["line_basis"] == "latest_provisional"
+    assert provisional["settlement_reason"] == "not_final"
+    # A row recovered from a pre-WO-169 ledger row is blank, never guessed.
+    assert positions["pos_tokOld"]["line_basis"] == ""
+
+    header = (cfg.governance_root / "closing_line_final_history.csv").read_text(encoding="utf-8").splitlines()[0]
+    assert header.split(",") == cl.LEGACY_POSITION_FIELDS + ["line_basis"]
+    ledger = {row["shadow_position_id"]: row for row in read_csv_rows(cfg.governance_root / "closing_line_final_history.csv")}
+    assert ledger["pos_tokGone"]["line_basis"] == "official_price_history_close"
+    assert ledger["pos_tokOld"]["line_basis"] == ""
+
+    # Second run: the recorded basis is restored from the ledger, not recomputed.
+    build_closing_line_value(cfg, as_of=AS_OF)
+    again = {row["shadow_position_id"]: row for row in read_csv_rows(cfg.governance_root / "closing_line_value_positions.csv")}
+    assert again["pos_tokGone"]["line_basis"] == "official_price_history_close"
+    assert again["pos_tokOld"]["line_basis"] == ""
+
+
+def test_settlement_join_from_the_resolution_corpus(tmp_path: Path):
+    """WO-169 item 2: verified settlement comes from the WO-101 corpus, and every
+    miss carries its reason. The join is best-effort; nothing is assumed."""
+    import polymarket_predictive_engine.closing_line as cl
+
+    cfg = _cfg(tmp_path)
+    positions = [
+        _position("tokWin", "worldcup", entry=0.40, opened="2026-07-01T10:00:00Z", close="2026-07-01T12:00:00Z"),
+        _position("tokLose", "worldcup", entry=0.40, opened="2026-07-01T10:00:00Z", close="2026-07-01T12:00:00Z"),
+        _position("tokActive", "worldcup", entry=0.40, opened="2026-07-01T10:00:00Z", close="2026-07-01T12:00:00Z"),
+        _position("tokConflict", "worldcup", entry=0.40, opened="2026-07-01T10:00:00Z", close="2026-07-01T12:00:00Z"),
+        _position("tokAbsent", "worldcup", entry=0.40, opened="2026-07-01T10:00:00Z", close="2026-07-01T12:00:00Z"),
+    ]
+    write_csv(cfg.output_root / "polymarket_shadow" / "shadow_positions.csv", positions)
+    write_csv(
+        cfg.output_root / "polymarket_training" / "websocket_market_features.csv",
+        [_quote(token, "2026-07-01T11:59:00Z", 0.45, bid=0.44) for token in ("tokWin", "tokLose", "tokActive", "tokConflict", "tokAbsent")],
+    )
+    _corpus(
+        cfg,
+        [
+            {"resolution_observation_id": "r1", "token_id": "tokWin", "winning_token_id": "tokWin", "resolution_quality": "clean_settlement"},
+            {"resolution_observation_id": "r2", "token_id": "tokLose", "winning_token_id": "tokOther", "resolution_quality": "clean_settlement"},
+            {"resolution_observation_id": "r3", "token_id": "tokActive", "winning_token_id": "", "resolution_quality": "unresolved_active"},
+            {"resolution_observation_id": "r4", "token_id": "tokConflict", "winning_token_id": "tokConflict", "resolution_quality": "clean_settlement"},
+            {"resolution_observation_id": "r5", "token_id": "tokConflict", "winning_token_id": "tokRival", "resolution_quality": "clean_settlement"},
+        ],
+    )
+
+    summary = build_closing_line_value(cfg, as_of=AS_OF)
+    rows = {row["shadow_position_id"]: row for row in read_csv_rows(cfg.governance_root / "closing_line_value_positions.csv")}
+
+    assert rows["pos_tokWin"]["settlement_payout"] == "1"
+    assert rows["pos_tokWin"]["settlement_source"] == "resolution_corpus_v1"
+    assert rows["pos_tokWin"]["settlement_reason"] == ""
+    assert rows["pos_tokWin"]["settlement_return_per_share"] == "0.6"
+    assert rows["pos_tokWin"]["settlement_return_per_dollar"] == "1.5"
+    assert rows["pos_tokLose"]["settlement_payout"] == "0"
+    assert rows["pos_tokLose"]["settlement_return_per_share"] == "-0.4"
+    assert rows["pos_tokLose"]["settlement_return_per_dollar"] == "-1.0"
+    assert rows["pos_tokActive"]["settlement_reason"] == "unresolved_active"
+    assert rows["pos_tokConflict"]["settlement_reason"] == "conflicting_observations"
+    assert rows["pos_tokAbsent"]["settlement_reason"] == "token_not_in_corpus"
+
+    join = summary["settlement_join"]
+    assert join["state"] == "ok"
+    assert join["positions_checked"] == summary["final_line_positions"] == 5
+    assert join["verified"] == 2
+    assert join["unverified_by_reason"] == {
+        "conflicting_observations": 1,
+        "token_not_in_corpus": 1,
+        "unresolved_active": 1,
+    }
+
+    # An empty token id never reaches the quote path (no series is keyed by ""), so the
+    # join itself is asked: a blank token is unverified with its own reason, and a
+    # verified payout on an entry price outside (0, 1) states no return at all.
+    edge = [
+        {"line_kind": "closing", "token_id": "", "entry_price": 0.4},
+        {"line_kind": "closing", "token_id": "tokWin", "entry_price": 0.0},
+    ]
+    stated = cl._join_settlement(cfg, edge)
+    assert stated["verified"] == 1
+    assert stated["unverified_by_reason"] == {"missing_token_id": 1}
+    assert edge[0]["settlement_reason"] == "missing_token_id"
+    assert edge[1]["settlement_payout"] == 1
+    assert edge[1]["settlement_reason"] == "invalid_entry_price"
+    assert edge[1]["settlement_return_per_share"] == ""
+    assert edge[1]["settlement_return_per_dollar"] == ""
+
+    # No corpus file at all: every row unverified with the recorded reason.
+    (cfg.output_root / "polymarket_training" / "resolution_corpus_v1.csv").unlink()
+    again = build_closing_line_value(cfg, as_of=AS_OF)
+    assert again["settlement_join"]["state"] == "resolution_corpus_unavailable"
+    assert again["settlement_join"]["unverified_by_reason"] == {"resolution_corpus_unavailable": 5}
+
+
+def test_an_unreadable_corpus_leaves_the_build_standing(tmp_path: Path):
+    """WO-169 delta 2, from the build line audit: the join is best-effort, so one corrupt
+    byte appended by a collector must not abort the whole closing-line build.
+
+    The old code opened the corpus without `errors=`, so a `UnicodeDecodeError` escaped the
+    `(OSError, csv.Error)` catch and every downstream reader silently consumed a stale
+    artifact. It also returned "ok" without looking at the file whenever no token needed
+    grading, so an absent corpus could read as available."""
+    import polymarket_predictive_engine.closing_line as cl
+
+    cfg = _cfg(tmp_path)
+    corpus = cfg.output_root / "polymarket_training" / "resolution_corpus_v1.csv"
+    corpus.parent.mkdir(parents=True, exist_ok=True)
+    corpus.write_bytes(b"token_id,winning_token_id,resolution_quality\ntokA,\xff\xfe,clean_settlement\n")
+    state, observations = cl._read_resolution_observations(corpus, {"tokA"})
+    assert state == "ok"
+    assert "tokA" in observations
+
+    corpus.unlink()
+    # Availability is a fact about the file, not about how many tokens happen to need it.
+    assert cl._read_resolution_observations(corpus, set())[0] == "resolution_corpus_unavailable"
+    assert cl._read_resolution_observations(corpus, {"tokA"})[0] == "resolution_corpus_unavailable"
+
+
+def test_corpus_shapes_that_verify_nothing_are_named_honestly(tmp_path: Path):
+    """WO-169 delta 2: a reason must say what is actually true of the row.
+
+    The old code took the LAST observation's quality, so a lone `clean_settlement` carrying no
+    winner reported `clean_settlement` — a reason that reads as if the row were verified — and
+    a blank quality reported `token_not_in_corpus`, which is false: the token IS in the corpus."""
+    import polymarket_predictive_engine.closing_line as cl
+
+    cfg = _cfg(tmp_path)
+    _corpus(
+        cfg,
+        [
+            {"resolution_observation_id": "r1", "token_id": "tokNoWinner", "winning_token_id": "", "resolution_quality": "clean_settlement"},
+            {"resolution_observation_id": "r2", "token_id": "tokBlank", "winning_token_id": "", "resolution_quality": ""},
+            {"resolution_observation_id": "r3", "token_id": "tokMixed", "winning_token_id": "", "resolution_quality": "unresolved_active"},
+            {"resolution_observation_id": "r4", "token_id": "tokMixed", "winning_token_id": "", "resolution_quality": "clean_settlement"},
+        ],
+    )
+    rows = [{"line_kind": "closing", "token_id": token, "entry_price": 0.4} for token in ("tokNoWinner", "tokBlank", "tokMixed")]
+    join = cl._join_settlement(cfg, rows)
+    assert join["verified"] == 0
+    assert rows[0]["settlement_reason"] == "clean_settlement_without_winning_token_id"
+    assert rows[1]["settlement_reason"] == "blank_resolution_quality"
+    # A real non-clean quality still wins over the clean-without-winner case.
+    assert rows[2]["settlement_reason"] == "unresolved_active"
+    assert join["unverified_by_reason"] == {
+        "blank_resolution_quality": 1,
+        "clean_settlement_without_winning_token_id": 1,
+        "unresolved_active": 1,
+    }
+
+
+def test_a_non_finite_clv_serialises_blank_not_the_string_nan(tmp_path: Path):
+    """WO-169 delta 2: `round(nan, 6)` writes the token `nan`, which every `safe_float`
+    reader takes as a number. A quantity that is not a number is written blank."""
+    import polymarket_predictive_engine.closing_line as cl
+
+    assert cl._unit_fields(float("nan"), 0.5) == {"clv_per_share": "", "return_per_dollar": ""}
+    assert cl._unit_fields(float("inf"), 0.5) == {"clv_per_share": "", "return_per_dollar": ""}
+    assert cl._unit_fields(0.02, 0.1) == {"clv_per_share": 0.02, "return_per_dollar": 0.2}
+    assert cl._unit_fields(0.02, 0.0) == {"clv_per_share": 0.02, "return_per_dollar": ""}

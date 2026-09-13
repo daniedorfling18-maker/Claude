@@ -187,6 +187,29 @@ done
 mkdir -p "$SNAP/telemetry"
 cp "$HOST_MANIFEST" "$SNAP/telemetry/manifest.json"
 
+# WO-172: label the extract. Every mirrored CSV over MAX_FILE_KB is header + last
+# CSV_TAIL_LINES rows and every oversized non-CSV is skipped; without a per-file record a
+# reader cannot tell a population from a truncation depth. The writer is given the values in
+# effect here, environment overrides included, so the manifest describes THIS push. Fail-closed:
+# on any failure or timeout the status is stamped manifest_failed and nothing is pushed, which
+# the existing watchdog rule (status != "ok") reports as publication_bridge_unhealthy.
+WHITELIST_ARGS=""
+for dir in $TELEMETRY_DIRS; do
+  WHITELIST_ARGS="$WHITELIST_ARGS --whitelist-dir $dir"
+done
+# shellcheck disable=SC2086
+if ! timeout 300 python3 "$REPO_DIR/scripts/write_telemetry_export_manifest.py" \
+  --snapshot-dir "$SNAP" \
+  --repo-root "$REPO_DIR" \
+  --as-of "$STAMP" \
+  --max-file-kb "$MAX_FILE_KB" \
+  --csv-tail-lines "$CSV_TAIL_LINES" \
+  $WHITELIST_ARGS; then
+  PUSH_STATUS="manifest_failed"
+  echo "$STAMP export manifest failed; nothing pushed" >&2
+  exit 1
+fi
+
 # Build a parentless commit with plumbing: temp index, no working-tree touch.
 export GIT_INDEX_FILE="$SNAP/.gitindex"
 ( cd "$SNAP" && git --git-dir="$GIT_DIR" --work-tree="$SNAP" add -f telemetry ) || exit 0

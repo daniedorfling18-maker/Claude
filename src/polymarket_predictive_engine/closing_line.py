@@ -26,6 +26,7 @@ substitute for them.
 
 from __future__ import annotations
 
+import csv
 import math
 import random
 from collections import defaultdict
@@ -69,6 +70,34 @@ POSITION_FIELDS = [
     "beat_close",
     "quote_count",
 ]
+
+# WO-169: the append-only ledger keeps today's columns plus exactly ``line_basis`` (a point-in-time fact fixed at grading);
+# the run-dependent settlement columns live only in the per-run positions file.
+LEGACY_POSITION_FIELDS = list(POSITION_FIELDS)
+LEDGER_FIELDS = LEGACY_POSITION_FIELDS + ["line_basis"]
+SETTLEMENT_FIELDS = ["settlement_payout", "settlement_source", "settlement_reason", "settlement_return_per_share", "settlement_return_per_dollar"]
+POSITION_FIELDS = LEDGER_FIELDS + ["clv_per_share", "return_per_dollar"] + SETTLEMENT_FIELDS
+LINE_BASIS_QUOTE = "last_quote_before_close"
+LINE_BASIS_PRICE_HISTORY = "official_price_history_close"
+LINE_BASIS_PROVISIONAL = "latest_provisional"
+SETTLEMENT_SOURCE = "resolution_corpus_v1"
+SETTLEMENT_CLEAN_QUALITY = "clean_settlement"
+SETTLEMENT_REASON_UNAVAILABLE = "resolution_corpus_unavailable"
+
+
+def _unit_fields(clv: float, entry_price: float | None) -> dict[str, Any]:
+    """WO-169: the per-share difference and the per-dollar return, named by their units."""
+    if not (isinstance(clv, (int, float)) and math.isfinite(float(clv))):
+        # Build-review finding: `round(nan, 6)` serialises as the string "nan", which every
+        # safe_float reader takes as a number. A quantity that is not a number is blank.
+        return {"clv_per_share": "", "return_per_dollar": ""}
+    per_dollar = round(clv / entry_price, 6) if entry_price is not None and 0 < entry_price < 1 else ""
+    return {"clv_per_share": round(clv, 6), "return_per_dollar": per_dollar}
+
+
+def _blank_settlement() -> dict[str, Any]:
+    return {field: "" for field in SETTLEMENT_FIELDS}
+
 
 EVIDENCE_POSITIVE = "positive_clv_evidence"
 EVIDENCE_NEGATIVE = "negative_clv_evidence"
@@ -261,6 +290,9 @@ def _price_history_final_row(position: dict[str, Any], as_of: datetime) -> dict[
         "clv_vs_bid": "",
         "beat_close": clv > 0,
         "quote_count": 0,
+        "line_basis": LINE_BASIS_PRICE_HISTORY,
+        **_unit_fields(clv, entry_price),
+        **_blank_settlement(),
     }
 
 
@@ -294,6 +326,9 @@ def _load_final_history(path: Path) -> dict[str, dict[str, Any]]:
         restored["beat_close"] = boolish(row.get("beat_close"))
         quote_count = safe_float(row.get("quote_count"))
         restored["quote_count"] = int(quote_count) if quote_count is not None else 0
+        restored["line_basis"] = str(row.get("line_basis") or "")  # "" on rows recorded before WO-169; never guessed
+        restored.update(_unit_fields(clv, entry_price))
+        restored.update(_blank_settlement())
         history[position_id] = restored
     return history
 
@@ -390,6 +425,9 @@ def position_clv_row(
         "clv_vs_bid": round(clv_vs_bid, 6) if clv_vs_bid is not None else "",
         "beat_close": clv > 0,
         "quote_count": len(series),
+        "line_basis": LINE_BASIS_QUOTE if line_kind == "closing" else LINE_BASIS_PROVISIONAL,
+        **_unit_fields(clv, entry_price),
+        **_blank_settlement(),
     }
 
 
@@ -442,6 +480,97 @@ def _aggregate(rows: list[dict[str, Any]], key_field: str, *, minimum_final_samp
             }
         )
     return out
+
+
+def _read_resolution_observations(path: Path, tokens: set[str]) -> tuple[str, dict[str, list[tuple[str, str]]]]:
+    """One streaming pass over the WO-101 corpus, keeping only the graded tokens: token -> [(resolution_quality, winning_token_id)]."""
+    observations: dict[str, list[tuple[str, str]]] = {}
+    if not path.exists():
+        # Build-review finding: with no graded token the old code returned "ok" without ever
+        # looking, so an absent corpus could read as available. Availability is a fact about
+        # the file, not about how many tokens happen to need it.
+        return SETTLEMENT_REASON_UNAVAILABLE, {}
+    if not tokens:
+        return "ok", observations
+    try:
+        # errors="replace", as utils.read_csv_rows uses: one corrupt byte appended by a
+        # collector must leave this join best-effort, not abort every downstream artifact.
+        with path.open("r", encoding="utf-8-sig", newline="", errors="replace") as handle:
+            for row in csv.DictReader(handle):
+                token_id = str(row.get("token_id") or "").strip()
+                if token_id not in tokens:
+                    continue
+                observations.setdefault(token_id, []).append((str(row.get("resolution_quality") or "").strip(), str(row.get("winning_token_id") or "").strip()))
+    except (OSError, csv.Error, UnicodeDecodeError, ValueError):
+        return SETTLEMENT_REASON_UNAVAILABLE, {}
+    return "ok", observations
+
+
+def _join_settlement(cfg: EngineConfig, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """WO-169: verified settlement from the resolution corpus for closing rows only; best-effort, every miss carries its reason."""
+    from .resolution_corpus import RESOLUTION_CORPUS_RELATIVE_PATH
+
+    corpus_path = cfg.output_root / RESOLUTION_CORPUS_RELATIVE_PATH
+    closing = [row for row in rows if row.get("line_kind") == "closing"]
+    for row in rows:
+        row.update(_blank_settlement())
+        if row.get("line_kind") != "closing":
+            row["settlement_reason"] = "not_final"
+    tokens = {str(row.get("token_id") or "").strip() for row in closing if str(row.get("token_id") or "").strip()}
+    state, observations = _read_resolution_observations(corpus_path, tokens)
+    unverified: dict[str, int] = {}
+    verified = 0
+    for row in closing:
+        token_id = str(row.get("token_id") or "").strip()
+        reason = ""
+        payout: int | None = None
+        if state != "ok":
+            reason = state
+        elif not token_id:
+            reason = "missing_token_id"
+        else:
+            seen = observations.get(token_id, [])
+            if not seen:
+                reason = "token_not_in_corpus"
+            else:
+                winners = {winner for quality, winner in seen if quality == SETTLEMENT_CLEAN_QUALITY and winner}
+                if len(winners) > 1:
+                    reason = "conflicting_observations"
+                elif len(winners) == 1:
+                    payout = 1 if next(iter(winners)) == token_id else 0
+                else:
+                    # Build-review finding: the old code took the LAST observation's quality,
+                    # so a lone clean_settlement with no winner reported "clean_settlement" (a
+                    # reason that reads as verified) and a blank quality reported
+                    # "token_not_in_corpus" (factually false: the token IS in the corpus).
+                    qualities = [quality for quality, _ in seen if quality and quality != SETTLEMENT_CLEAN_QUALITY]
+                    if qualities:
+                        reason = qualities[-1]
+                    elif any(quality == SETTLEMENT_CLEAN_QUALITY for quality, _ in seen):
+                        reason = "clean_settlement_without_winning_token_id"
+                    else:
+                        reason = "blank_resolution_quality"
+        if payout is None:
+            row["settlement_reason"] = reason
+            unverified[reason] = unverified.get(reason, 0) + 1
+            continue
+        verified += 1
+        row["settlement_payout"] = payout
+        row["settlement_source"] = SETTLEMENT_SOURCE
+        entry_price = safe_float(row.get("entry_price"))
+        if entry_price is None or not 0 < entry_price < 1:
+            row["settlement_reason"] = "invalid_entry_price"  # verified, but no return can be stated on this entry
+            continue
+        row["settlement_return_per_share"] = round(float(payout) - entry_price, 6)
+        row["settlement_return_per_dollar"] = round(float(payout) / entry_price - 1.0, 6)
+    return {
+        "state": state,
+        "corpus_path": str(corpus_path),
+        "positions_checked": len(closing),
+        "verified": verified,
+        "unverified_by_reason": dict(sorted(unverified.items())),
+        "note": "best-effort: the corpus producers do not select the shadow cohort's tokens; coverage is a named prerequisite work order",
+    }
 
 
 def build_closing_line_value(
@@ -508,7 +637,8 @@ def build_closing_line_value(
             position_id = str(row.get("shadow_position_id") or "").strip()
             if position_id:
                 final_history[position_id] = dict(row)
-    write_csv(history_path, list(final_history.values()), fieldnames=POSITION_FIELDS)
+    write_csv(history_path, list(final_history.values()), fieldnames=LEDGER_FIELDS)
+    settlement_join = _join_settlement(cfg, rows)
 
     cohorts = _aggregate(rows, "signal_cohort", minimum_final_samples=minimum_final_samples, iterations=iterations, seed=seed)
     categories = _aggregate(rows, "category", minimum_final_samples=minimum_final_samples, iterations=iterations, seed=seed)
@@ -575,8 +705,17 @@ def build_closing_line_value(
         "focus_view": focus_view,
         "cohorts": cohorts,
         "categories": categories,
+        "settlement_join": settlement_join,
         "evidence_semantics": {
             "clv": "line midpoint minus shadow entry fill (entry ask + slippage); positive means the market moved toward the bot after entry",
+            "clv_per_share": "the same difference, named by its unit: probability points per share",
+            "return_per_dollar": "clv divided by the entry price: the return per dollar staked; blank when the entry price is not in (0, 1)",
+            "line_basis": "which path produced the line: last_quote_before_close, official_price_history_close, latest_provisional; blank on ledger rows recorded before WO-169",
+            "settlement_payout": "1 or 0 from a clean_settlement observation of this token in resolution_corpus_v1; blank when unverified",
+            "settlement_source": "resolution_corpus_v1 when verified, else blank",
+            "settlement_reason": "why a row is unverified (missing_token_id, token_not_in_corpus, conflicting_observations, resolution_corpus_unavailable, another resolution_quality verbatim, not_final) or invalid_entry_price on a verified row",
+            "settlement_return_per_share": "payout minus entry price; blank when unverified",
+            "settlement_return_per_dollar": "payout divided by entry price minus one; blank when unverified or the entry price is not in (0, 1)",
             "closing": "last quote at/before market close_time; the settlement-independent forward-evidence standard",
             "latest_provisional": "market not yet closed or no pre-close quote; diagnostic only, excluded from evidence CIs",
         },

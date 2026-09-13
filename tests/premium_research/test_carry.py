@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -33,6 +35,8 @@ def _table(n_boundaries: int, *, rate=0.0001, perp=100.0, spot=100.0, high=None,
             "perp_high": seq(high, perp_seq),
             "high_hours": [8] * n_boundaries,
             "close_missing": [False] * n_boundaries,
+            "perp_close_missing": [False] * n_boundaries,
+            "spot_close_missing": [False] * n_boundaries,
             "high_partial": [False] * n_boundaries,
         }
     )
@@ -239,3 +243,229 @@ def test_entry_helper_never_returns_a_boundary_before_its_argument_and_simulate_
         carry.simulate(table, variant="V0", start_ms=MONDAY - HOUR_MS, end_ms=int(table["boundary_ms"].iloc[-1]))
     with pytest.raises(carry.CarryInputError, match="refuse to shift"):
         carry.simulate(table, variant="V0", start_ms=MONDAY, end_ms=int(table["boundary_ms"].iloc[-1]) + HOUR_MS)
+
+
+def test_boundary_table_flags_each_leg_separately() -> None:
+    funding = pd.DataFrame({"calc_time": [MONDAY, MONDAY + PERIOD_MS, MONDAY + 2 * PERIOD_MS], "last_funding_rate": [0.0001] * 3})
+    hours = [MONDAY - HOUR_MS + i * HOUR_MS for i in range(17)]
+    perp = pd.DataFrame({"open_time": hours, "open": 1.0, "high": 1.0, "low": 1.0, "close": 100.0})
+    spot = pd.DataFrame({"open_time": hours, "open": 1.0, "high": 1.0, "low": 1.0, "close": 99.0})
+    spot_gap = spot[spot["open_time"] != MONDAY + PERIOD_MS - HOUR_MS]  # the hour ending at boundary 1, spot only
+    table = carry.boundary_table(funding, perp, spot_gap)
+    assert table["spot_close_missing"].tolist() == [False, True, False]
+    assert table["perp_close_missing"].tolist() == [False, False, False]
+    assert table["close_missing"].tolist() == [False, True, False]
+    perp_gap = perp[perp["open_time"] != MONDAY + PERIOD_MS - HOUR_MS]
+    table = carry.boundary_table(funding, perp_gap, spot)
+    assert table["perp_close_missing"].tolist() == [False, True, False]
+    assert table["spot_close_missing"].tolist() == [False, False, False]
+    assert table["close_missing"].tolist() == [False, True, False]
+    assert table["high_partial"].tolist() == [True, True, False]  # row 0 has one hour; row 1 lost one of its eight
+
+
+def _with_gap(table: pd.DataFrame, row: int, *, spot: bool = False, perp: bool = False) -> pd.DataFrame:
+    table = table.copy()
+    if spot:
+        table.loc[row, "spot_close"] = float("nan")
+    if perp:
+        table.loc[row, "perp_close"] = float("nan")
+    table.loc[row, "close_missing"] = True
+    table["perp_close_missing"] = table["perp_close"].isna()
+    table["spot_close_missing"] = table["spot_close"].isna()
+    return table
+
+
+def test_spot_only_gap_is_rejected_but_verifiable_under_perp_scope() -> None:
+    table = _with_gap(_table(1 + 21, rate=0.0001), 5, spot=True)
+    either = _run(table)
+    perp = _run(table, unverifiable_scope="perp")
+    assert either["unverifiable_open"].tolist()[5:7] == [1, 1] and int(either["unverifiable_open"].sum()) == 2
+    assert int(perp["unverifiable_open"].sum()) == 0
+    assert not carry.weekly_returns(either)["eligible"].any() and not carry.weekly_returns(perp)["eligible"].any()
+    assert either["wealth"].tolist() == perp["wealth"].tolist() and either["funding_received"].tolist() == perp["funding_received"].tolist()
+
+
+def test_perp_gap_is_unverifiable_under_both_scopes() -> None:
+    partial = _table(1 + 21, rate=0.0001)
+    partial.loc[9, "high_hours"] = 6
+    partial.loc[9, "high_partial"] = True
+    partial["perp_close_missing"] = False
+    partial["spot_close_missing"] = False
+    assert int(_run(partial)["unverifiable_open"].sum()) == 1
+    assert int(_run(partial, unverifiable_scope="perp")["unverifiable_open"].sum()) == 1
+    # a whole absent perpetual bar at boundary 5: it is row 5's 8th high and row 6's start close
+    whole = _with_gap(_table(1 + 21, rate=0.0001), 5, perp=True)
+    whole.loc[5, "high_hours"] = 7
+    whole.loc[5, "high_partial"] = True
+    assert int(_run(whole)["unverifiable_open"].sum()) == 2
+    assert _run(whole, unverifiable_scope="perp")["unverifiable_open"].tolist()[5:7] == [1, 1]
+    # a NaN perpetual close with the high left present (unreachable from fetched data)
+    closed = _with_gap(_table(1 + 21, rate=0.0001), 5, perp=True)
+    assert int(_run(closed)["unverifiable_open"].sum()) == 2
+    assert _run(closed, unverifiable_scope="perp")["unverifiable_open"].tolist()[5:7] == [0, 1]
+
+
+def test_unknown_scope_aborts() -> None:
+    table = _table(3)
+    with pytest.raises(carry.CarryInputError, match="unknown unverifiable_scope"):
+        carry.simulate(table, variant="V0", start_ms=int(table["boundary_ms"].iloc[0]), end_ms=int(table["boundary_ms"].iloc[-1]), unverifiable_scope="spot")
+
+
+def test_non_finite_high_with_open_position_is_unverifiable_under_both_scopes() -> None:
+    # Unreachable through the runner (load_inputs rejects a non-finite high before boundary_table runs), but simulate is public:
+    # an open position with no intra-period high to check against must not read as verified under any scope.
+    for scope in ("either", "perp"):
+        table = _table(6)
+        table.loc[3, "perp_high"] = float("nan")
+        frame = _run(table, unverifiable_scope=scope)
+        assert frame["unverifiable_open"].tolist() == [0, 0, 0, 1, 0, 0], scope
+        assert frame["rejected_open"].sum() == 0, scope  # not a rejected period: the close is present and high_partial is False
+        assert frame["forced_liquidations"].sum() == 0
+
+
+def test_rejected_open_is_the_either_scope_count_under_every_scope() -> None:
+    table = _table(10)
+    table.loc[5, "spot_close"] = float("nan")
+    table.loc[5, "close_missing"] = True
+    table.loc[5, "spot_close_missing"] = True
+    either = _run(table, unverifiable_scope="either")
+    perp = _run(table, unverifiable_scope="perp")
+    assert either["unverifiable_open"].tolist() == perp["rejected_open"].tolist() == either["rejected_open"].tolist()
+    assert int(either["unverifiable_open"].sum()) == 2 and int(perp["unverifiable_open"].sum()) == 0
+
+
+def test_table_without_per_leg_flags_is_refused() -> None:
+    table = _table(4).drop(columns=["perp_close_missing"])
+    with pytest.raises(KeyError):
+        _run(table, unverifiable_scope="perp")
+
+
+# ---------------------------------------------------------------------------- WO-170
+
+
+def test_nav_identity_holds_at_every_boundary() -> None:
+    table = _table(1096, rate=0.0001, perp=100.0, spot=100.0)
+    frame = _run(table)
+    assert (np.abs(frame["nav"] - (frame["cash"] + frame["margin"] + frame["spot_value"])) <= 1e-12).all()
+    assert (np.abs(frame["nav"] - frame["wealth"]) <= 1e-12).all()
+    entry = frame.iloc[0]
+    assert entry["cash"] == 1.5 and entry["margin"] == 0.0 and entry["spot_qty"] == 0.0 and entry["nav"] == 1.5 and not entry["marks_carried_forward"]
+    assert round(float(frame["nav"].iloc[-1]), 4) == round(1.5 + 0.1095 - 0.0015 - 0.0015, 4) == 1.6065
+
+
+def test_hand_calculated_cash_flows_three_periods() -> None:
+    table = _table(3, rate=0.001, perp=[101.0, 111.0, 100.0], spot=[100.0, 110.0, 99.0], high=[101.0, 111.0, 100.0])
+    frame = _run(table)
+    r0, r1, r2 = (frame.iloc[i] for i in range(3))
+    assert r0["nav"] == 1.5
+    assert abs(r1["spot_qty"] - 0.01) < 1e-12
+    assert abs(r1["margin"] - 0.40611) < 1e-9 and abs(r1["spot_value"] - 1.1) < 1e-9 and abs(r1["cash"] - (-0.006505)) < 1e-9
+    assert abs(r1["nav"] - 1.499605) < 1e-9
+    assert abs(r1["margin"] / (r1["spot_qty"] * r1["perp_mark"]) - 0.36586) < 1e-5 and r1["rebalances"] == 0
+    assert r2["spot_qty"] == 0.0 and r2["margin"] == 0.0 and abs(r2["cash"] - 1.499115) < 1e-9 and abs(r2["nav"] - 1.499115) < 1e-9
+    assert abs(frame["funding_received"].sum() - 0.00211) < 1e-9 and abs(frame["fees_paid"].sum() - 0.002995) < 1e-9
+    assert abs((r2["nav"] - r0["nav"]) - (-0.000885)) < 1e-9
+
+
+def test_period_return_on_nav_compounds_to_the_nav_path() -> None:
+    frame = _run(_table(3, rate=0.001, perp=[101.0, 111.0, 100.0], spot=[100.0, 110.0, 99.0], high=[101.0, 111.0, 100.0]))
+    assert frame["period_return_on_nav"].iloc[0] == 0.0
+    assert abs(frame["nav"].iloc[0] * np.prod(1.0 + frame["period_return_on_nav"].to_numpy()) - frame["nav"].iloc[-1]) < 1e-12
+    rng = np.random.default_rng(7)
+    prices = 100.0 * np.exp(np.cumsum(rng.normal(0.0, 0.01, size=31)))
+    walk = _table(31, rate=0.0002, perp=list(prices * 1.001), spot=list(prices), high=list(prices * 1.002))
+    frame = _run(walk)
+    assert abs(frame["nav"].iloc[0] * np.prod(1.0 + frame["period_return_on_nav"].to_numpy()) - frame["nav"].iloc[-1]) < 1e-12
+
+
+def test_merged_boundary_carries_marks_forward_and_keeps_the_identity() -> None:
+    table = _table(10)
+    table.loc[5, "spot_close"] = float("nan")
+    table.loc[5, "close_missing"] = True
+    table.loc[5, "spot_close_missing"] = True
+    frame = _run(table, unverifiable_scope="perp")
+    assert bool(frame["marks_carried_forward"].iloc[5]) and not bool(frame["marks_carried_forward"].iloc[0])
+    assert frame["spot_mark"].iloc[5] == frame["spot_mark"].iloc[4]
+    assert (np.abs(frame["nav"] - frame["wealth"]) <= 1e-12).all()
+    assert np.isfinite(frame["period_return_on_nav"].iloc[5])
+    # flat across a merged boundary (V1 never enters at 0.00001 per period): nothing held, cash is the wealth, marks carried
+    low = _table(10, rate=0.00001)
+    low.loc[5, "spot_close"] = float("nan")
+    low.loc[5, "close_missing"] = True
+    low.loc[5, "spot_close_missing"] = True
+    flat = _run(low, variant="V1", unverifiable_scope="perp")
+    assert flat["spot_qty"].iloc[5] == 0.0 and flat["margin"].iloc[5] == 0.0 and flat["nav"].iloc[5] == flat["cash"].iloc[5]
+
+
+def test_pooled_nav_drawdown_uses_the_summed_nav() -> None:
+    from premium_research.runner import _max_drawdown_nav
+
+    a = np.array([1.5, 1.6, 1.5]); b = np.array([1.5, 1.4, 1.5])
+    assert abs(_max_drawdown_nav(a) - (1.5 / 1.6 - 1.0)) < 1e-12 and abs(_max_drawdown_nav(a) + 0.0625) < 1e-12
+    assert abs(_max_drawdown_nav(b) - (1.4 / 1.5 - 1.0)) < 1e-12 and abs(_max_drawdown_nav(b) + 0.0667) < 1e-4
+    assert _max_drawdown_nav(a + b) == 0.0
+    assert math.isnan(_max_drawdown_nav(np.array([1.5, float("nan"), 1.5])))
+
+
+def test_nav_identity_violation_aborts() -> None:
+    # The identity holds by construction; the guard must still fire if a ledger is ever inconsistent.
+    table = _table(3, rate=0.001, perp=[101.0, 111.0, 100.0], spot=[100.0, 110.0, 99.0], high=[101.0, 111.0, 100.0])
+    ledger = carry.simulate(table, variant="V0", start_ms=int(table["boundary_ms"].iloc[0]), end_ms=int(table["boundary_ms"].iloc[-1]))
+    ledger.cash[1] += 1e-6
+    with pytest.raises(carry.CarryInputError, match="NAV identity violated"):
+        carry.ledger_frame(ledger)
+
+
+def test_nav_drawdown_differs_from_compounded_weekly_on_a_grown_ledger() -> None:
+    """WO-170 test 4: the two bases disagree once the ledger has grown, and they
+    disagree in both directions.
+
+    The legacy basis compounds weekly P&L increments normalised to INCEPTION
+    capital, so it cannot see a trough inside a week and it divides a late loss by
+    a stale denominator. The NAV basis reads the ledger's own path at every
+    boundary. Neither is a relabelling of the other."""
+    from quant_lab.risk import max_drawdown_from_returns
+
+    from premium_research.runner import _max_drawdown_nav
+
+    # NAV 1.5 -> 3.0, then -0.15 inside the week with +0.10 recovered by its end.
+    intra_week = np.array([1.5, 3.0, 2.85, 2.95])
+    week_end_returns = pd.Series([(3.0 - 1.5) / 1.5, (2.95 - 3.0) / 1.5])
+    assert abs(max_drawdown_from_returns(week_end_returns) - (-0.05 / 1.5)) < 1e-9
+    assert abs(max_drawdown_from_returns(week_end_returns) + 0.0333) < 1e-4
+    assert abs(_max_drawdown_nav(intra_week) - (-0.15 / 3.0)) < 1e-12
+    assert abs(_max_drawdown_nav(intra_week) + 0.05) < 1e-12
+    # Here the legacy basis UNDERSTATES: it never sees the 0.15 trough.
+    assert abs(_max_drawdown_nav(intra_week)) > abs(max_drawdown_from_returns(week_end_returns))
+
+    # The same 0.15 lost at the week's end with no recovery: now the legacy basis
+    # OVERSTATES, because it divides by 1.5 while the ledger stands at 3.0.
+    no_recovery = np.array([1.5, 3.0, 2.85])
+    held_returns = pd.Series([(3.0 - 1.5) / 1.5, (2.85 - 3.0) / 1.5])
+    assert abs(max_drawdown_from_returns(held_returns) + 0.10) < 1e-9
+    assert abs(_max_drawdown_nav(no_recovery) + 0.05) < 1e-12
+    assert abs(max_drawdown_from_returns(held_returns)) > abs(_max_drawdown_nav(no_recovery))
+
+
+def test_phantom_collateral_yield_trips_the_self_financing_guard() -> None:
+    """WO-170 delta 1: the check the NAV identity could not be.
+
+    `nav = cash + margin + spot_value` and `wealth = q*spot + margin + cash` are the
+    same terms reassociated, so the NAV assertion fires only on a ledger mutated
+    after `simulate` returns. The build review credited 1 bp of phantom collateral
+    yield to `margin` inside the state machine with no cash flow recorded: the
+    annualised return rose from 7.10% to 11.46% and the NAV check stayed silent.
+    Conservation catches it, because the extra value has no source."""
+    table = _table(40, rate=0.0001, perp=100.0, spot=100.0)
+    start, end = int(table["boundary_ms"].iloc[0]), int(table["boundary_ms"].iloc[-1])
+    clean = carry.ledger_frame(carry.simulate(table, variant="V0", start_ms=start, end_ms=end))
+    assert clean["nav"].iloc[-1] > 1.5  # funding was earned, so the ledger did grow
+
+    tampered = carry.simulate(table, variant="V0", start_ms=start, end_ms=end)
+    for index in range(2, len(tampered.margin) - 1):
+        if tampered.position_open[index] and tampered.traded_notional[index] == 0.0:
+            credit = 0.0001 * (tampered.margin[index] + tampered.cash[index])
+            tampered.margin[index] += credit
+            tampered.wealth[index] += credit  # the NAV identity stays satisfied: both sides move together
+    with pytest.raises(carry.CarryInputError, match="self-financing identity violated"):
+        carry.ledger_frame(tampered)

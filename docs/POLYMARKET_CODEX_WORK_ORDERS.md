@@ -3430,6 +3430,10 @@ one-release legacy aliases, the mandatory caveat, and a same-unit non-binding
 pre-event CLV diagnostic sourced only from official in-band history at or
 before close minus six hours. The decision dashboard renders both metrics.
 
+Amendment 2026-09-13 (WO-169; effective only if merged): WO-169 finds that the
+relabel named the wrong unit — `clv` is per share; the per-dollar figure is
+reported beside it, non-binding, pending the owner's decision.
+
 ## WO-86 — Kill-switch staleness guard: stale safety data must STOP, never clear (decision-policy audit 2026-07-14)
 
 MATERIAL, safety-critical for the live stage. Found by line-reading
@@ -8947,6 +8951,14 @@ before that date predate this log and are not retroactively reopened. Seeded 202
 | WO-146 | F | Opus spec, Sonnet build, Opus review + delta re-verify | ~360k | 0 | 2 fixed (`AttributeError` escaping the shell fallback; a test comment misstating what `main` produces), 3 recorded (§146.5, unreachable `isfinite` guards, a dead test branch) | 0 | pending deploy |
 | WO-145.1 registration | D | Opus draft, Opus registration gate **x6** | ~700k reviewer | **7 → 6 → 2 → 0 blockers**, then 3 delta rounds | not yet built | — | pending |
 | WO-166 | F | Opus draft, Opus admission gate x4 to ADMISSIBLE plus 5 delta checks on amendments, Opus build, Opus line-audit + red-team, Opus re-verify | ~1.9M reviewer (admission 346k, line-audit 435k, red-team 154k, delta checks) | 13 → 8 → 3 → 1 → 0 (rounds 1-4), then 1, 0, 1, 0 on amendments | 17 (1 HIGH: a drawdown gate that could never fail; 2 MEDIUM; 14 LOW) fixed; re-verify CONFORMS with 2 low partials closed same day | 0 — three fetches failed closed on data-contract surprises (microsecond timestamps, deadline, DVOL paging) before results existed; each became a dated amendment | verify-manifest and verify-results pass in a fresh clone at `5c26ee6`; Lane A NO-GO on G3, Lane B GO |
+| WO-167 | F | Opus draft, Opus admission gate x2 (6 → 0), Opus build, Opus line-audit + red-team, delta applied same day | ~212k reviewer (line-audit 79k, red-team 133k; admission-gate tokens not recorded before a context compaction) | 6 → 0 | 4 low (line-audit) + 2 (red-team: the charter record and calibration row outstanding at review time; a report row true only under the old scope) — all fixed in the delta `2131825`; delta re-verify CONFORMS with 1 low (a code_revision recorded from a dirty tree) fixed at `bd560fb`/`acc5f76`; 0 escaped | 0 — one pass, two regenerations (disclosure keys; clean-tree revision) with every figure unchanged | fresh-clone `verify-manifest` and both `verify-results` selectors pass at `2131825`; Lane A GO with G1/G2/G4 equal to WO-166 to the last digit; charter 2026-09-13 |
+| WO-170 | F | Opus draft, Opus admission gate x3 to ADMISSIBLE, Opus build, Opus line-audit + red-team (both re-dispatched after the first pair died on a provider rate limit) | ~366k reviewer (line-audit 177k, red-team 188k) | 3 rounds to 0 | 4 major + 7 minor (line-audit: the WO's one behavioural change pinned by nothing — replacing G3's basis selector with a constant left 91 tests and `verify-results` green; registered test 4 never written; the charter record and calibration row missing) and 9 (red-team, 4 HIGH: the gated return divides by inception capital while the NAV runs 46% above it, so G2's 1.99 pp margin is 2.3 bp on the CAGR basis and fails on the NAV basis; "every post-2021 subsample fails G2 before the haircut" — **refuted 2026-09-13 by the S8 gate on the follow-up work order, which recomputed the yearly figures from the same artifact: calendar 2024 reads 10.83% and the trailing 2024-2026 cut 6.13%, both above the hurdle. The reviewer's universal quantifier was wrong and this cell records both the claim as made and its refutation, because a calibration row is the record of what a review said. The true statement is that the multi-year post-2021 cuts reaching 2026 fail before the haircut except 2024-2026.** The GO inherits WO-167's post-hoc completeness rule; the NAV identity is an algebraic tautology that missed a phantom-yield credit worth 4.36 pp/yr) | 0 — 4 fail-closed guards added in delta 1 (registered test 4, a G3-basis test with the threshold between the two magnitudes, an asserted self-financing identity, strict positivity on price columns); all three result sets still verify byte-for-byte | fresh-clone `verify-results` passes for WO-166, WO-167 and WO-170; Lane A GO on the registered basis with the decay and denominator findings recorded in the charter 2026-09-13 |
+| WO-169 | F | Opus draft, Opus admission gate x5 to ADMISSIBLE (17 → 14 → 4 → 1 → 0), Opus build, Opus line-audit | ~? (line-audit in flight at writing) | 17 → 14 → 4 → 1 → 0 | pending | 0 so far — 13 mutation checks all detected; the full offline suite green at 2257 passed, 3 skipped | pending the VPS: the day-after check reads `measurement_v2` from the first dashboard payload render after deployment |
+| WO-171 | M | Opus draft, Opus admission gate x3 to ADMISSIBLE, Opus build, Opus line-audit | ~122k reviewer | 19 → 7 → 0 | 8 major + 8 minor. Three code defects: the final segment was read for EVERY variant (publishing its ROI for every rule and under-counting the read ledger), the availability fallback was per label row rather than per market, and a blank `horizon` was read as `all_valid`. Five test defects, all of the same class: a test that could not fail. Registered test 3 asserted neither `promotable` nor a rank; test 4's truncation never fired; test 8 asserted the line that computes its own field; test 10's consumer clause was never built; `_availability_index` and `dropped_unparseable_timestamp` had no assertions at all. | 0 — all fixed in delta 1; 23 mutation checks now detected, including two the first harness had wrongly reported as detected | pending the VPS: the day-after reads `edge_strategy_search_summary.json` after the next paper-loop run |
+| WO-172 | M | Opus draft, Opus admission gate x4 to ADMISSIBLE, Opus build | ~0 reviewer so far (line-audit not yet dispatched) | 18 → 10 → 1 → 0 | pending | 0 so far — 19 mutation checks all detected after three tests were strengthened rather than three findings dropped (a truncation rule asserted on a file under the size cap, a self-exclusion asserted against a snapshot with no manifest, and a credential scan asserted by substring that a renamed flag satisfied) | pending the VPS: the day-after reads `telemetry/export_manifest.json` on the mirror and one manual `data-coverage-report` run |
+| WO-173 | M | Opus draft, Opus admission gate x3 to ADMISSIBLE, Opus build | ~0 reviewer so far (line-audit not yet dispatched) | 3 rounds to 0 | pending | 0 so far — 15 of 16 mutation checks detected; the sixteenth is not isolable by any mutation because the conjunct it guards is implied by the source check, recorded at the site and in the status line rather than dropped | pending the VPS: the day-after reads `maker_evidence_summary.json` after one run |
+| WO-168 | M | Opus draft, Opus admission gate x13 to ADMISSIBLE | ~1.9M reviewer tokens across 13 passes | 13 rounds to 0 | pending (not yet built) | pending | pending: the day-after greps the three retracted figures in `README.md`, counts `docs/archive`, and runs the two hygiene test files |
+| WO-168a | M | Opus draft, Opus admission gate x10 to ADMISSIBLE | ~1.7M reviewer tokens across 10 passes | 10 rounds to 0 | pending (not yet built) | pending | pending: the day-after tests 18 paths absent and 7 present, greps the added `AGENTS.md` sentence collapsed, and runs the launcher hygiene test file |
 
 **Reading of the 2026-08-02 rows — the tiering held, the review shape did not.**
 Three class-F/M builds went Sonnet-built and Opus-reviewed and produced **zero
@@ -17302,7 +17314,7 @@ paid data. That is recorded as an open owner decision, not solved here.
   estimator and gate below except the drawdown, which uses all weeks (see
   Drawdown); ineligible weeks are counted and reported. If the
   entry or exit boundary itself has no close, the run aborts. Nothing is
-  forward-filled.
+  forward-filled. **Amendment 2026-09-13 (WO-167): WO-167 registers a narrower `unverifiable_scope = "perp"` for its own pass; this definition remains the `"either"` default under which WO-166's committed results verify.**
 - **Variant V0 (the gated one).** Always on. Entry at the first Monday
   00:00 UTC boundary on or after 2020-01-01 that carries a close
   (2020-01-06); exit at the last Monday 00:00 UTC boundary on or before the
@@ -17370,7 +17382,7 @@ paid data. That is recorded as an open owner decision, not solved here.
   (before the data-pull commit; found by the build red-team):** the first
   build compared the signed value against `+0.20`, a comparison that could
   never fail; the sign convention is now stated here, applied with `abs`,
-  labelled in the report, and tested (test 53).
+  labelled in the report, and tested (test 53). Amendment 2026-09-13 (WO-170): WO-170 registers `drawdown_basis = "nav"` (the ledger's own NAV path over every boundary) and `rv_alignment = "return_intervals"` (721 closes, 720 intervals) for its own pass; WO-166's definitions (`compounded_weekly`, `open_time_in_window`) remain the defaults under which WO-166's and WO-167's committed results verify.
 - **Descriptive cuts, fixed here and not extended:** per underlying; per ISO
   year; weeks with BTC spot at the week's start above versus below its
   200-day simple moving average of daily 00:00 UTC closes (weeks without 200
@@ -17382,7 +17394,7 @@ paid data. That is recorded as an open owner decision, not solved here.
   labelled coin-margined, funding-only, no basis, no liquidation model, and
   never pooled with Binance.
 - **Reused code.** `quant_lab/risk.py` `max_drawdown_from_returns`,
-  `conditional_var`. Annualisation: 1,095 periods and 52 weeks per year.
+  `conditional_var`. Annualisation: 1,095 periods and 52 weeks per year. Amendment 2026-09-13 (WO-170): WO-170 registers `drawdown_basis = "nav"` (the ledger's own NAV path over every boundary) and `rv_alignment = "return_intervals"` (721 closes, 720 intervals) for its own pass; WO-166's definitions (`compounded_weekly`, `open_time_in_window`) remain the defaults under which WO-166's and WO-167's committed results verify.
 
 ### Lane B estimator, fixed before the pull
 
@@ -17394,7 +17406,7 @@ paid data. That is recorded as an open owner decision, not solved here.
   00:00 UTC of day `t`, multiplied by `8760 / n` where `n` is the count of
   valid hourly returns (a return spanning more than one hour is not valid);
   a window with `n < 700` is rejected and counted, never interpolated; a
-  window whose start day has no DVOL candle is rejected and counted.
+  window whose start day has no DVOL candle is rejected and counted. Amendment 2026-09-13 (WO-170): WO-170 registers `drawdown_basis = "nav"` (the ledger's own NAV path over every boundary) and `rv_alignment = "return_intervals"` (721 closes, 720 intervals) for its own pass; WO-166's definitions (`compounded_weekly`, `open_time_in_window`) remain the defaults under which WO-166's and WO-167's committed results verify.
 - **Independent unit.** One non-overlapping 30-day window, starting
   2021-03-24 and stepping 30 days while the window ends on or before
   2026-08-31 (66 windows). The pooled value of a window is the **mean of the
@@ -17477,7 +17489,7 @@ non-finite.
 |---|---|---|
 | G1 | `52 × q̂_min − 0.020 > 0` — the annualised 0.025-quantile lower bound (minimum of the two bootstraps), minus the haircut, is positive | the estimator's own uncertainty, one-sided 2.5% per lane |
 | G2 | `52 × μ̂ − 0.020 ≥ 0.060` — the annualised point estimate minus the haircut clears 6.0% | an assumed 4.0% riskless USD yield plus 2.0 pp compensation for venue and basis risk; changed only by a dated amendment to this WO landed before the data-pull commit |
-| G3 | maximum drawdown of the pooled weekly series **≤ 0.20**, forced liquidations **= 0** across both underlyings, and no open position inside a flagged period (`unverifiable_open_periods = 0`) | the drawdown a live system's kill switch would sit below |
+| G3 | maximum drawdown of the pooled weekly series **≤ 0.20**, forced liquidations **= 0** across both underlyings, and no open position inside a flagged period (`unverifiable_open_periods = 0`). Amendment 2026-09-13 (WO-167): WO-167 registers a narrower `unverifiable_scope = "perp"` for its own pass; this definition remains the `"either"` default under which WO-166's committed results verify. Amendment 2026-09-13 (WO-170): WO-170 registers `drawdown_basis = "nav"` (the ledger's own NAV path over every boundary) and `rv_alignment = "return_intervals"` (721 closes, 720 intervals) for its own pass; WO-166's definitions (`compounded_weekly`, `open_time_in_window`) remain the defaults under which WO-166's and WO-167's committed results verify. | the drawdown a live system's kill switch would sit below |
 | G4 | pooled net return positive in **≥ 4 of the 6** ISO years 2020-2025, each with ≥ 45 eligible weeks | persistence across one full cycle |
 | G5 (Lane B) | the 0.025-quantile lower bound (minimum of the two bootstraps) of mean pooled window VRP **> 0**, and the pooled yearly mean positive in **≥ 3 of the 4** calendar years 2022-2025, each with ≥ 10 accepted windows | existence, with persistence |
 
@@ -17666,3 +17678,1592 @@ unchanged. `tests/test_experiment_registry.py` — unchanged and still passes.
 **Not authorised by this text:** any merge, any registration of a primary, any
 collector, any prospective window, any paper or live evidence, any change to
 WO-67's P1-P5, and any use of the sandbox result as verification of record.
+
+## WO-167 — Refine WO-166's completeness rule to the leg the liquidation check reads, and run one fresh pass on the committed inputs — `built-and-run` (2026-09-13; single registered pass complete: Lane A GO on all four gates with G1, G2 and G4 identical to WO-166 to the last digit and `unverifiable_open_periods` 16 → 0 (`rejected_open_periods` 16, all spot-side); Lane B unchanged; results commit `bf14aa3`, regenerated at `2131825` after the build-review delta below (disclosure keys and report rows only, every figure unchanged) and again at `acc5f76` from the clean tree `bd560fb` so the recorded `code_revision` reproduces the files (delta 2 below); `verify-manifest`, `verify-results` and `verify-results --work-order WO-167` pass in a fresh clone at `2131825` and in the working tree at `acc5f76`; line audit CONFORMS with four low findings and red team sound with two findings, all applied in the delta; result recorded in `docs/POLYMARKET_QUANT_MODE_CHARTER.md` under 2026-09-13; the required gate's runner is still offline, so under the GLOBAL RULE this WO cannot count as registered until that gate runs and the squash-merge lands; S8 ADMISSIBLE after one delta pass; `registered-ancestry: a790e51 ancestor-of a790e51 PASS` at dispatch, the build branch standing at `origin/main`'s tip; class F: it changes one input of gate G3; historical-class diagnostic; covered by the registry's WO-166 paragraph only through the dated extension this WO carries (touched file 13, `docs/EXPERIMENT_REGISTRY.md`, effective only if merged); touches `src/premium_research/`, its tests, a new results directory, this register, the charter, and the registry → OWNER MERGE after line-audit; no primary added; no threshold, span, return estimator, or cut changes; the single change is the definition of G3's `unverifiable_open_periods` input; `registered-ancestry:` recorded at dispatch against `origin/main` `a790e51`, the squash-merge of PR #454 that made WO-166 registered. **Disclosure:** this work order exists because WO-166's single pass returned NO-GO on G3 alone, with all 16 unverifiable periods on the spot leg; the rule change below is therefore made after seeing the outcome and is favourable by construction. WO-166's result stays on record unchanged; this pass writes its own results directory.)
+
+**Why this exists.** WO-166 registered: "A period is rejected when the 1h close of the hour
+ending at its boundary is absent for either leg, or when any of the 8 hourly highs inside it is
+absent … A flagged period during which a position is open has unverifiable liquidation status …
+G3 reads False if that count is not zero." Its pass measured every economic gate as passing
+(G1 3.93%, G2 7.99%, G4 6 of 6 years; drawdown 0.32%; forced liquidations 0) and G3 as failing
+on `unverifiable_open_periods = 16`: 8 per underlying, every one caused by an absent **spot**
+bar. The manifest records the two spot 1h series at 31 missing hours each and both perpetual 1h
+series at 0. The liquidation check (`carry.py`, forced liquidation on the period-start margin
+ratio against the maximum intra-period **perpetual** high) reads no spot bar. The registered rule
+was broader than the check it protects.
+
+### The rule change, exactly
+
+- **Unchanged:** a period with an absent bar on either leg is *rejected* — merged into the next
+  period that has a close, flagged, and its ISO week ineligible for every estimator and gate
+  except the drawdown. `μ̂`, both bootstraps, G1, G2 and G4 therefore read the same eligible
+  weeks as WO-166 and must reproduce its figures exactly.
+- **Changed:** a rejected period counts as having **unverifiable liquidation status only when
+  the perpetual-side data the check reads is incomplete** — any of its 8 hourly perpetual highs
+  absent, or the perpetual close at the period's start boundary absent (the margin ratio `m0`
+  at the start is then undefined). For a whole absent perpetual bar the two conditions overlap:
+  the bar ending a boundary is also the last of the preceding period's 8 highs. A period whose
+  only absent bar is a spot bar is rejected but verifiable. G3 is otherwise unchanged: drawdown ≤ 0.20, forced liquidations = 0, and
+  `unverifiable_open_periods = 0` under this definition.
+- **Registered as a scope switch, not a replacement.** `unverifiable_scope = "either"` is the
+  WO-166 definition and stays the default so WO-166's committed results still verify
+  byte-for-byte; `"perp"` is this definition. Any other value aborts. Under the WO-167 configuration the results JSON
+  carries `unverifiable_scope = "perp"` and `work_order = "WO-167"` and the report's first
+  paragraph names both; under the WO-166 configuration neither the JSON nor the report gains a
+  byte, so the committed WO-166 files verify unchanged (test 5). WO-170 inherits this scope for its own pass (amendment 2026-09-13).
+
+### A11 — bias-direction disclosure
+
+This change is a loosening of one G3 input, made after the outcome was known, and every
+period it reclassifies moves G3 the favourable way (16 → expected 0). The argument that the
+effect exceeds the bias is structural, not statistical: the quantity G3 protects is "did an
+intra-period perpetual high breach the liquidation move", which is a function of perpetual
+highs and the period-start perpetual close only; an absent spot bar carries no information
+about it; and the spot-gap periods stay excluded from every estimator, so no return figure
+changes. Channels that remain favourable and unaddressed are WO-166's ten, plus one this WO adds:
+11. post-hoc rule selection — this definition was chosen after G3's outcome was known
+(favourable; no haircut; mitigated only by the structural argument above and by WO-166's
+NO-GO staying on record). The expected outcome, stated so it can fail: `unverifiable_open_periods = 0`
+for both underlyings, G3 True, Lane A GO on the same G1, G2, G4 figures as WO-166. If any
+figure other than the unverifiable count and G3 differs from WO-166's results, the run is a
+defect, not a result.
+
+### Fail-safe sentence (S5)
+
+Every fail branch ends in no verdict. An unknown scope aborts before any period is simulated;
+the WO-167 results directory (`research/premium_poc/results_wo167/`) is written atomically or
+not at all and a second `run` for WO-167 is refused; `verify-results --work-order WO-167`
+recomputes under the `"perp"` scope and reports FAIL on any absent, extra, or byte-different
+file, while `verify-results` without the selector keeps verifying WO-166 under `"either"`; the
+verdict lines are generated from the gate booleans. A pass whose G1, G2, or G4 quantities
+differ from WO-166's committed values is reported as a defect by the day-after check.
+
+### Touch ONLY these files (13 paths)
+
+1. `src/premium_research/carry.py` — `boundary_table` gains `perp_close_missing` and `spot_close_missing` beside `close_missing`; `simulate(..., unverifiable_scope="either")` implements both scopes.
+2. `src/premium_research/runner.py` — `Config.unverifiable_scope`, `Config.work_order`, `Config.results_dir`; `WO167_CONFIG`; the scope threaded into `lane_a` and recorded in the results JSON under the WO-167 configuration only.
+3. `src/premium_research/cli.py` — `run --work-order {WO-166,WO-167}` and the same selector on `verify-results`.
+4. `src/premium_research/report.py` — under the WO-167 configuration the first paragraph names the work order and the scope; under the WO-166 configuration the rendered text is byte-identical to today's.
+5. `tests/premium_research/test_carry.py` — tests 1-4 below.
+6. `tests/premium_research/test_report_and_verify.py` — tests 5-8 below.
+7. `research/premium_poc/results_wo167/carry_v0.json`
+8. `research/premium_poc/results_wo167/carry_v1.json`
+9. `research/premium_poc/results_wo167/vrp.json`
+10. `research/premium_poc/results_wo167/report.md`
+11. `docs/POLYMARKET_CODEX_WORK_ORDERS.md` — this entry, its calibration row, and a dated cross-reference inserted at the end of WO-166's Rejected-periods paragraph and its G3 row: "Amendment 2026-09-13 (WO-167): WO-167 registers a narrower `unverifiable_scope = \"perp\"` for its own pass; this definition remains the `\"either\"` default under which WO-166's committed results verify."
+12. `docs/POLYMARKET_QUANT_MODE_CHARTER.md` — the dated record of the outcome.
+13. `docs/EXPERIMENT_REGISTRY.md` — one dated sentence appended to the WO-166 paragraph: "Amendment 2026-09-13 (WO-167; effective only if merged): this paragraph also covers WO-167, one further pass on WO-166's committed inputs under a narrower G3 completeness definition; no new data, span, family, or evidence class."
+
+`research/premium_poc/data/`, `manifest.json`, and `results/` (WO-166) are not touched.
+
+### Enumerated offline tests (S8/A10); each confirmed to FAIL with its guard reverted, caches purged — tests 1-8 registered at admission, 9-13 by the build-review delta, 14 by delta 2
+
+1. `test_boundary_table_flags_each_leg_separately` — a spot-only absent hour at a boundary sets `spot_close_missing`, not `perp_close_missing`, and `close_missing`; a perpetual-only absent hour the reverse.
+2. `test_spot_only_gap_is_rejected_but_verifiable_under_perp_scope` — boundary 5's spot close absent with the position open: under `"either"` `unverifiable_open` reads `[1, 1]` on rows 5 and 6 (sum 2); under `"perp"` it reads 0 on both; the week is ineligible under both; funding and wealth are identical under both.
+3. `test_perp_gap_is_unverifiable_under_both_scopes` — a 6-high period at row 9 gives 1 under both scopes; removing the perpetual bar that ends at boundary 5 gives 2 under both scopes — row 5 because that bar is its 8th high, row 6 because its start boundary has no perpetual close; a NaN perpetual close with the high left present (unreachable from fetched data) gives 2 under `"either"` and 1 under `"perp"`.
+4. `test_unknown_scope_aborts` — `unverifiable_scope="spot"` raises before any period is simulated.
+5. `test_wo166_results_still_verify_under_the_default_scope` — on the committed research tree (an integration test on committed inputs, about 5 s), `verify_results(root)` returns `[]`.
+6. `test_wo167_config_writes_its_own_results_directory_and_records_the_scope` — on a synthetic tree with one dropped spot boundary hour, the WO-166 config yields `unverifiable_open_periods = 2` (the merged boundary and the one it merges into) and G3 False in `results/`; the WO-167 config yields 0 and G3 True in `results_wo167/`, with `work_order = "WO-167"` and `unverifiable_scope = "perp"` in the JSON, `results/` untouched, and every G1/G2/G4 quantity byte-identical between the two runs.
+7. `test_run_refuses_a_second_wo167_pass` — an existing `results_wo167/` refuses `run` without `--force`.
+8. `test_verify_results_selector_recomputes_under_the_right_scope` — `verify_results(root, config=WO167_CONFIG)` (amended 2026-09-13: the draft wrote `work_order=`; the implementation and the test pass the configuration) passes on the WO-167 tree and reports a byte difference if the WO-166 scope is used against it.
+
+9. `test_non_finite_high_with_open_position_is_unverifiable_under_both_scopes` (delta 2026-09-13) — a row whose `perp_high` is NaN with `high_partial` False and the position open reads `unverifiable_open = 1` under both scopes and `rejected_open = 0`; unreachable from `boundary_table`, guarded because `simulate` is public.
+10. `test_rejected_open_is_the_either_scope_count_under_every_scope` (delta) — with a spot-only boundary gap, `rejected_open` under `"perp"` equals `unverifiable_open` under `"either"` row for row (sum 2), while `unverifiable_open` under `"perp"` sums to 0.
+11. `test_table_without_per_leg_flags_is_refused` (delta) — a table lacking `perp_close_missing` raises instead of falling back to `close_missing`.
+12. `test_committed_wo167_results_differ_from_wo166_only_where_registered` (delta; integration on the committed tree) — for each of the three results files, the set of leaves differing between `results/` and `results_wo167/` is a subset of {`code_revision`, `generated_at`, `work_order`, `unverifiable_scope`, G3, `lane_a_go`, the per-asset and pooled `unverifiable_open_periods` and `rejected_open_periods`}; the manifest hashes are equal; the committed WO-167 file records `rejected_open_periods = 16`.
+13. `test_scope_disclosure_is_keyed_on_the_scope_not_only_the_work_order` (delta) — `Config(unverifiable_scope="perp", work_order="WO-166", results_dir="results_odd")` has `discloses_scope` True and its JSON carries the scope and `rejected_open_periods = 2`; WO-166's own configuration has it False.
+
+**Build-review delta 2026-09-13 (after the single pass; commit `2131825`).** Line audit: CONFORMS,
+four low findings. Red team: no fail-open under the `"perp"` scope (504 single-hour and 27,552
+merged-span perturbations, every read perpetual bar dropped yields a non-zero count), no scope
+leakage (nine differing leaves in `carry_v0.json`, all registered), no hidden relaxation, WO-166
+byte-identical; two findings. Applied, each a disclosure or a tightening: (1) `rejected_open_periods`,
+the count G3 reads under WO-166's `"either"` scope, is written to both carry results JSONs (Lane B's `vrp.json` carries the scope and work-order labels only) and rendered
+beside the scoped count under every configuration other than WO-166's own, and the scoped row is
+labelled "perpetual-side data absent"; the pass was regenerated with `--force` at `2131825` and every
+leaf other than `generated_at`, `code_revision` and the new keys is byte-identical to the `bf14aa3`
+pass (V0 16, V1 14; the report previously read "0 open-position periods with missing bars", which was
+untrue in its plain reading under this scope). (2) The disclosure is keyed on `Config.discloses_scope`
+(scope ≠ `"either"` or work order ≠ WO-166), closing a Python-API-only path that could compute under
+`"perp"` and label the file WO-166. (3) An open position with no finite intra-period perpetual high
+reads unverifiable under both scopes. (4) The per-leg close flag is read strictly. (5) CLI work-order
+choices derive from `CONFIGS`. (6) Test 8's wording corrected. Recorded, not changed: 27 of the 31
+missing spot hours per asset fall mid-period and are flagged by no path, because spot is read only at
+boundary closes and the 8 intra-period highs are perpetual highs; the 16 rejected periods come from the
+4 boundary-hour spot gaps per asset. For each of the 8 merged spans the observed maximum perpetual
+move was between 0.27% and 6.38% against liquidation moves of 37.4% to 122.0% (minimum headroom 35.2
+pp), so the reclassification hides no near-liquidation. Touched-file list unchanged (13 paths; the
+delta touches paths 1-10). Tests 9-13 added; 5 of 5 delta guard mutations detected; 73 tests.
+
+14. `test_run_refuses_a_dirty_estimator_tree` (delta 2) — on a temporary repository, `uncommitted_paths(repo, "src/premium_research")` is `[]` when clean and `["src/premium_research/carry.py"]` after an untracked write; `run` then exits 2 without calling `run_all`; after a commit the list is empty again.
+
+**Build-review delta 2, 2026-09-13 (delta re-verify: CONFORMS, one low finding; commits `bd560fb`, `acc5f76`).** The
+`--force` regeneration at `2131825` ran on a working tree whose `src/premium_research` already
+held the delta while HEAD was still `bf14aa3`, so the files recorded a `code_revision` whose code
+cannot reproduce them (`verify-results` recomputes with the stored string and cannot detect this).
+`run` now refuses when `src/premium_research` has staged, unstaged or untracked changes (exit 2,
+nothing written; test 14), and the results were regenerated once more from the clean tree
+`bd560fb`: every leaf other than `generated_at` and `code_revision` is byte-identical to the
+`2131825` generation. The re-verify's other notes are recorded, not changed: the non-finite-high
+guarantee rests on the loader (`runner.load_inputs`), not on `boundary_table` (test comment
+corrected); the report's `pooled.get(..., "n/a")` fallback is unreachable from the runner. 74 tests.
+
+### Day-after check
+
+In a fresh clone of the branch: `verify-manifest`, `verify-results` (WO-166, `"either"`), and
+`verify-results --work-order WO-167` all pass; `results_wo167/carry_v0.json` records
+`work_order = "WO-167"`, `unverifiable_scope = "perp"`, the same `manifest_sha256` as WO-166's
+results; and its G1, G2 and G4 quantities equal WO-166's to the last digit. The charter carries
+the dated record whichever way the verdict fell.
+
+**Not authorised by this text:** any merge, any registration of a primary, any collector, any
+prospective window, any paper or live evidence, any change to WO-67's P1-P5, any change to
+WO-166's committed results, and any use of the sandbox result as verification of record. A GO
+here triggers only what the registry's evidence policy and WO-166 paragraph already provide: a future
+pre-observation amendment with a fresh out-of-sample window.
+
+## WO-170 — Funding-carry ledger reconciliation: NAV-path risk statistics, an exported cash-flow ledger, explicit price bases, recent-period stability, the realised-variance window alignment, and one corrected pass on the committed inputs — `built-and-run` (2026-09-13; S8 ADMISSIBLE after two delta passes (20 → 9 → 0 defects); `registered-ancestry: a790e51 ancestor-of <build-sha> PASS` to be recorded at dispatch against the `origin/main` tip, with the pre-merge disclosure token `acc5f76 ancestor-of <build-sha>` beside it, per the stacking disclosure below; class F: it changes the definition of one G3 input, the drawdown, from a compounded weekly-increment curve to the ledger's own NAV path; every threshold, span, return estimator for G1, G2, G4 and G5, bootstrap, seed, and cut stays as WO-166 registered; historical-class diagnostic covered by the registry's WO-166 paragraph only through the dated extension this WO carries (path 20, `docs/EXPERIMENT_REGISTRY.md`, effective only if merged); touches `src/premium_research/`, its tests, a new results directory, this register, the charter, and the registry → OWNER MERGE after line-audit; no primary added. **Stacking disclosure (GLOBAL RULE; AGENTS.md "one work order per branch and PR"):** WO-170 is stacked on WO-167's unmerged branch because `research/premium_poc/results_wo167/` and the `"perp"` scope exist only there (WO-167 is not yet squash-merged; the required gate's runner is offline). This deviates from AGENTS.md's one-work-order-per-branch rule and is disclosed here for the owner's decision at merge; nothing in this text authorises the deviation. WO-170 counts as registered only after WO-167's squash-merge lands on `main` and the build branch is rebased so that the new `origin/main` tip — which then contains `research/premium_poc/results_wo167/` — is an ancestor of the build head, recorded as the standard `registered-ancestry:` token; until then a pre-merge token against WO-167's results commit `acc5f76` is recorded as a disclosure only and is superseded by that rebase. **Disclosure:** this work order exists because the 2026-09-13 owner directive found that WO-166's drawdown compounds P&L increments normalised to inception capital as if they were periodic NAV returns, that the results carry no per-boundary ledger from which the cash flows can be identified, that price bases are not labelled in the artifact, and that Lane B's realised variance is computed over 719 return intervals of a 720-hour window. It is drafted after WO-167's GO is known. WO-166's and WO-167's results stay on record unchanged; this pass writes its own results directory. **Build 2026-09-13** at `0097df1`, results at `9eaf094`, one added test at `5a95c4e`, all on `claude/polymarket-quant-trader-9czyse`; one pass; nine files under `research/premium_poc/results_wo170/`; Lane A GO (G1 3.93%, G2 7.99%, G3 pass, G4 6/6) with every gate quantity identical to WO-167's to the last digit; pooled NAV-path drawdown 0.488% against the legacy 0.322% — the correction made G3 STRICTER, the opposite of the drafting intuition, and the A11 disclosure's "direction not known before the run" is now resolved and recorded; Lane B GO with 66/66 windows per currency and +1 return interval on every one; reconciliation matched 49/49/1,112 differing leaves to a registered reason with none unexplained; `verify-results` passes for WO-166, WO-167 and WO-170 from a fresh clone. **Build delta 1, after the independent reviews (4 major + 7 minor from the line audit, 9 from the red team).** Four fail-closed guards were added, none able to admit data or raise a gate reading: registered test 4, which was never written; a test that puts G3's threshold between the two drawdown magnitudes so the gate must flip with the basis (the line audit showed that replacing the basis selector with a constant left all 91 tests and `verify-results` green, so the WO's single behavioural change was pinned by nothing); an asserted self-financing identity `dNAV = q x [(dS) - (dP)] + funding - fees`, because the registered NAV identity is an algebraic tautology that the red team walked past with a phantom collateral-yield credit worth 4.36 pp/yr; and strict positivity on price columns, because a spot close of 0.0 or -1.0 passed every guard, fabricated a 14.1-point NAV drawdown that G3 absorbed, and left the annualised return bit-identical. `SELF_FINANCING_TOLERANCE` and `PRICE_COLUMNS` are the two new literals; all three committed result sets still verify byte-for-byte, so no figure moved. **Conclusion findings recorded, not fixed (fixing them would change a registered estimator after results exist, which is snooping):** the gated return divides by the fixed 1.5 units of inception capital while pooled NAV runs 3.0 to 5.014 (time-average 4.374), so G2's 1.99 pp margin is 2.3 basis points on the CAGR basis and FAILS on the mean-weekly-NAV basis; the multi-year post-2021 cuts fail G2 before the haircut with one exception (2020-2021 23.17%/yr over 100 weeks against 2022-2026 4.57%/yr over 243 and 2023-2026 5.46%/yr over 191, a composition effect of 5.4 pp against a 2.0 pp haircut that names composition as one of its channels), with the last 104 eligible weeks at 4.37% and the last 52 at 2.29%; **the exception, corrected here after the S8 gate on the follow-up work order recomputed the yearly figures: calendar 2024 alone reads 10.83% and the trailing 2024-2026 cut 6.13%, both above the hurdle, so an earlier version of this line and of the charter record claiming "every post-2021 subsample fails" was wrong — the premium after 2021 is intermittent, not absent, and the universal quantifier was not earned;** Lane B's premium decays on the same shape and G5 passes at exactly its 3-of-4 minimum with 2025 negative; the GO inherits WO-167's post-hoc completeness rule (WO-170's exact configuration under WO-166's `"either"` scope gives 16 unverifiable periods, G3 False, Lane A NO-GO, every other leaf identical); and the notional drifts to as much as 1.881, putting capital per notional below the registered 1.5 on 20.5% of BTC boundaries, so "no forced liquidation" describes an over-collateralised account — **corrected 2026-09-13**: this clause first gave the mechanism as retained margin profit re-levering the notional, which the committed ledgers refute, since the spot quantity rises only at inception and never again and the drift is price appreciation outrunning the rebalancer; the figures and the adverse direction are unchanged and the charter's 2026-09-13 correction records the derivation. The charter's 2026-09-13 WO-170 record carries all of this with the supporting tables; the defensible reading there is that a funding-carry premium existed on these two symbols in 2020-2021 and in bull regimes and has decayed towards cash-like levels by 2025-2026. A follow-up work order for the return basis and the era-weighted estimator is the right instrument and is not drafted by this text. Sandbox result, verified from a fresh clone; not verification of record; not registered under the GLOBAL RULE until its squash-merge lands.)
+
+**Why this exists.** WO-166 registered `μ̂` as the mean eligible weekly net return on inception
+capital, `Â = 52 μ̂`, "simple, not compounded" — and registered the drawdown as
+`quant_lab.risk.max_drawdown_from_returns` on the pooled weekly series, which "compounds
+`(1 + r).cumprod()`". Those two definitions are inconsistent with each other: the weekly `r` is
+`ΔW / 1.5`, an increment on the *inception* capital, so compounding it builds a curve that is
+neither the ledger's wealth path nor a chain of periodic returns. On a ledger whose NAV has
+grown, that curve overstates ratio drawdowns (a loss of `x` in inception-capital units reads as
+`x`, not `x × 1.5 / W_t`); reading week ends only understates any trough inside a week. The
+ledger itself (`carry.py`: `wealth = q × spot + margin + cash`, funding credited to margin, fees
+charged to cash, marks at every boundary) is self-financing and correct; what is missing is that
+the risk statistics do not read it, that it is not exported, that the artifact does not say which
+price is a mark and which a trade, and that no recent-period cut exists. Lane B's
+`realised_variance` selects the closes whose `open_time` lies in `[start, start + 720h)`: 720
+closes, hence 719 adjacent returns, and the hour from `start` to `start + 1h` is never covered.
+
+### Switches, and what each configuration writes
+
+- `Config.drawdown_basis ∈ {"compounded_weekly", "nav"}`, default `"compounded_weekly"` (WO-166's);
+  `Config.rv_alignment ∈ {"open_time_in_window", "return_intervals"}`, default
+  `"open_time_in_window"` (WO-166's); any other value of either aborts before any period or window
+  is computed.
+- `Config.discloses_bases = drawdown_basis != "compounded_weekly" or rv_alignment != "open_time_in_window"`.
+  It is True for `WO170_CONFIG` only among `CONFIGS`. **Every addition this WO makes to a results
+  JSON or a report is keyed on `discloses_bases`, never on `discloses_scope`** (which is True for
+  WO-167 and would break its byte identity): `drawdown_basis`, `rv_alignment`, `return_basis`,
+  `bases`, `max_drawdown_nav`, `cagr_nav`, `total_return_on_capital_simple`,
+  `mean_weekly_return_on_nav`, `annualised_return_on_nav`, `pooled.recent_period`, `ledger_files`, the
+  per-window Lane B table, and every report section named below. Under WO-166's and WO-167's
+  configurations no JSON gains or loses a byte, no report gains a line, and no results directory
+  gains or loses a file (tests 5 and 17).
+- `Config.result_files` defaults to WO-166's four files; `WO170_CONFIG = Config(unverifiable_scope=
+  "perp", work_order="WO-170", results_dir="results_wo170", drawdown_basis="nav",
+  rv_alignment="return_intervals", result_files=RESULT_FILES + ("reconciliation.json",
+  "ledger_BTCUSDT_V0.csv", "ledger_ETHUSDT_V0.csv", "ledger_BTCUSDT_V1.csv", "ledger_ETHUSDT_V1.csv"))`.
+  `run` writes exactly `result_files` atomically; `verify-results` recomputes and byte-compares
+  exactly `result_files`, reporting any absent, extra, or differing file. The 2x fee-sensitivity
+  run's ledger is not exported. Selectors: `run --work-order WO-170`, `verify-results --work-order
+  WO-170` (choices from `CONFIGS`). WO-170 inherits WO-167's `"perp"` completeness scope and its
+  `rejected_open_periods` disclosure and says so in its report.
+
+### The changes, exactly
+
+1. **Ledger export (carry.py).** `Ledger` records, at every boundary, `cash`, `margin`, `spot_qty`,
+   `spot_mark`, `perp_mark` and `marks_carried_forward` beside `wealth`. **Entry row:** the accounts
+   recorded are the pre-trade accounts — `cash = capital`, `margin = 0`, `spot_qty = 0`, marks = the
+   entry closes — so `nav = wealth = capital` there and the entry fee falls inside the first period,
+   exactly as WO-166's 2026-09-12 amendment places it. **Merged boundary (close missing):** the
+   marks are the last marked closes carried forward (`marks_carried_forward = True`), which is
+   what `wealth` already reads at `carry.py` (`position.wealth(position.last_spot)`); the accounts
+   are those of the position, open or flat (flat: `cash = wealth`, `margin = 0`, `spot_qty = 0`,
+   marks carried forward). `ledger_frame` adds `spot_value = spot_qty × spot_mark`,
+   `nav = cash + margin + spot_value`, and asserts `|nav − wealth| ≤ 1e-12` at every row, aborting
+   otherwise (basis: both sums are the same three float64 terms in a different association order,
+   so the true difference is at most a few units of 2.2 × 10⁻¹⁶ on O(1) values; 1e-12 leaves a
+   10³ margin). `period_return_on_nav = Δnav / nav_{t−1}`, `0.0` at the entry row (mirroring
+   `period_return_on_capital`'s `diff().fillna(0.0)`), NaN when `nav_{t−1}` is non-finite or ≤ 0. `weekly_returns` adds `return_on_nav = Π(1 + period_return_on_nav) − 1` over the week's
+   periods (NaN if any period is NaN) and `nav_end`. Money is in units of the inception notional
+   `N = 1`; the report's ledger column table states the unit of every column. The ledger is written
+   only under configurations whose `result_files` list it (WO-170's) as `ledger_<SYMBOL>_<VARIANT>.csv`
+   with columns `boundary_ms, boundary_iso, position_open, marks_carried_forward, spot_qty,
+   spot_mark, perp_mark, spot_value, margin, cash, nav, funding_received, fees_paid,
+   traded_notional, period_return_on_capital, period_return_on_nav, flagged, rebalances,
+   forced_liquidations, unverifiable_open, rejected_open`, written by `to_csv(index=False,
+   lineterminator="\n")` with floats in Python `repr` and `boundary_iso` as `%Y-%m-%dT%H:%M:%SZ`, so
+   `verify-results` byte-compares a defined encoding. Under WO-170 each carry JSON carries
+   `ledger_files = {name: sha256}` for the two ledgers of its variant.
+2. **NAV-path risk statistics (runner.py).** `max_drawdown_nav = min_t (nav_t / max_{s≤t} nav_s − 1)`
+   over **every boundary** of the span, entry boundary included, flagged or not, per asset; the
+   pooled figure uses the summed NAV of the two assets (capital `3.0`); NaN if any NAV in the path
+   is non-finite. Under `drawdown_basis = "nav"` **G3 reads the pooled `|max_drawdown_nav| ≤ 0.20`**
+   (the literal 0.20 unchanged; WO-166's basis) and reads False when it is NaN. The WO-166
+   quantity keeps its key `max_drawdown_all_weeks` with its value unchanged under every
+   configuration (so `fee_sensitivity_2x.max_drawdown_all_weeks` is unchanged too), and the
+   report's G3 label moves from that row to the NAV row, the legacy row being relabelled
+   "compounded weekly-increment curve (WO-166 basis; not read by G3 under this configuration)".
+   Descriptive, never gated, under WO-170 only: `cagr_nav = (nav_T / nav_0)^(1/years) − 1`,
+   `total_return_on_capital_simple = (nav_T − nav_0) / nav_0`, `mean_weekly_return_on_nav` (over
+   eligible weeks) and `annualised_return_on_nav = 52 ×` that mean. Levels: per asset, `max_drawdown_nav`
+   and `cagr_nav` only; pooled, `max_drawdown_nav`, `cagr_nav`, `total_return_on_capital_simple`,
+   `mean_weekly_return_on_nav` and `annualised_return_on_nav`. The pooled weekly `return_on_nav` is
+   `nav_end_pooled / nav_start_pooled − 1` on the summed NAV of the two assets (not the mean of the
+   two assets' weekly NAV returns), over eligible weeks.
+3. **G1, G2, G4 unchanged.** `μ̂` remains the mean eligible weekly `ΔW / 1.5`; `Â = 52 μ̂`; both
+   bootstraps, the seed, the 0.025-quantile minimum rule, the haircut and the hurdle are as
+   registered. The JSON gains `return_basis = "simple_on_inception_capital"` under WO-170 only.
+   Callers of the changed functions (A9): `ledger_frame` and `weekly_returns` are called from
+   `lane_a` (three times per configuration: V0, V1, and the 2x fee-sensitivity V0);
+   `realised_variance` from `vrp_series` from `lane_b`; `max_drawdown_from_returns` from
+   `_asset_summary` and from `lane_a`'s pooled block. None of the added columns is read by the
+   eligible-week filter, `return_on_capital`, the bootstraps, the yearly sums, or G5, so G1, G2,
+   G4 and G5 read exactly the series they read today. **Expected outcome, stated so it can fail:**
+   every G1, G2 and G4 leaf equals WO-167's to the last digit; G3 True with the pooled
+   `|max_drawdown_nav|` below 0.01; Lane A GO. If any G1, G2 or G4 leaf differs from
+   `results_wo167/`, the run is a defect, not a result.
+4. **Bases block (runner.py, report.py; WO-170 only).** `bases`, literal: `mark_price = "Binance 1h
+   kline close of the hour ending at the boundary (last traded price), not the venue mark price"`;
+   `execution_price = "the same close plus taker fees (spot 10 bps, perpetual 5 bps); no spread, no
+   slippage, no market impact — a favourable channel, covered only by the declared haircut"`;
+   `funding_notional = "position size × that close; the venue settles on mark-price notional (WO-166
+   A8 bound: ≤ 1 × 10⁻⁵ of notional per period, direction indeterminate)"`; `liquidation_check =
+   "kline high of the last traded price against the period-start margin ratio; the venue liquidates
+   on the mark price, which is smoothed, so the last-price high triggers at least as often — a
+   conservative channel"`; `collateral = "margin 0.5 × notional in USDT; cash and spot earn zero; no
+   cross-margin netting — an unfavourable channel"`; `haircut = "2.0 pp per year, a declared
+   assumption; it is not a measured bound on venue, stablecoin-depeg or liquidation risk and this WO
+   measures none of them"`. The report renders the block as a table "What the prices and cash flows
+   are".
+5. **Recent-period stability (runner.py, report.py; WO-170 only; descriptive, never gated; the
+   window lengths are fixed here, before the run).** `pooled.recent_period.last_52` and `pooled.recent_period.last_104`
+   (basis: one and two years at `WEEKS_PER_YEAR = 52`), each over the last `L` eligible pooled
+   weeks: `weeks`, `mean_weekly_return_on_capital`, `annualised_simple = 52 ×` that mean, the
+   week-cluster 90% interval (same draws and seed), `sharpe_weekly_annualised`, and
+   `max_drawdown_nav` over the contiguous boundary span from the first boundary of the earliest of
+   those `L` weeks to the last boundary of the latest, every boundary in between included (the NAV
+   path is real across ineligible weeks). `pooled.recent_period.rolling_52`: over every window of 52
+   consecutive eligible weeks, the annualised simple return's `min`, `max` and `last` (no
+   share-positive statistic: overlapping windows are not independent units and a share would
+   overstate persistence). Per cut, fewer than `L` eligible weeks → every field of that cut NaN and
+   `state = "insufficient_weeks"`; `rolling_52` needs ≥ 52. Labelled "retrospective diagnostic; not
+   a prospective validation" in the JSON and the report.
+6. **Realised-variance window alignment (vrp.py).** Under `rv_alignment = "return_intervals"`, the
+   window `[start, start + 720h)` is covered by the **721 closes** of the bars whose `open_time`
+   lies in `[start − 1h, start + 719h]` — the close at `start` through the close at `start + 720h`
+   — giving **720 return intervals**; a return is valid only when its two closes are exactly one
+   hour apart; `n_valid ≥ 700` of 720 accepts, otherwise the window is rejected and counted;
+   annualisation `8760 / n_valid` as registered; an absent close at `start` simply makes the first
+   interval invalid. DVOL alignment, the 30-day step, the pooling rule, G5 and its years are
+   unchanged. Exactly, with `S` the old sum of squared valid returns, `n` the old valid count and
+   `r` the added first-hour return (when valid): `RV_new − RV_old = (8760 r² − RV_old) / (n + 1)`,
+   so `|ΔVRP| ≤ max(8760 r², RV_old) / (n + 1)` per currency; the denominator term lowers RV
+   deterministically (favourable to VRP) and the `8760 r²` term raises it; since `E[8760 r²] ≈
+   RV_old`, the expected net change is about zero and the direction is indeterminate per window.
+   Under WO-170 `vrp.json` gains, per currency, `windows`: a list of `{window_start_ms, valid_hours,
+   valid_hours_wo166_alignment, implied_variance, realised_variance, vrp, rejected, rejected_reason}` so the alignment is
+   observable. **Expected outcome, stated so it can fail:** `windows_accepted` 66 of 66 per currency
+   and pooled, `rejection_reasons` empty, every `windows[i].valid_hours` equal to its WO-167 count
+   plus one (verified against a WO-167-alignment recomputation inside the run, written as
+   `windows[i].valid_hours_wo166_alignment`), `mean_realised_variance` per currency changed, G5
+   unchanged (GO with the same three positive years). A window count other than 66 is a defect.
+7. **Reconciliation artifact (runner.py; WO-170 only).** The results directory carries
+   `reconciliation.json`. Inputs: the committed `results_wo167/carry_v0.json`, `carry_v1.json`,
+   `vrp.json` — any of them absent or unparseable at the acting site aborts the run before any file
+   is written. Leaves are addressed by dotted path with list indexes (`pooled.bootstrap.cluster.
+   intervals.0.90.0`). Two NaN leaves compare equal; a leaf NaN in one file and finite in the other
+   differs. For each file, every differing leaf, and every leaf present in WO-167's file and absent
+   from WO-170's (which **aborts**), is matched against a literal per-file table whose entries are
+   an exact path or a prefix ending in `.`; a leaf must match exactly one entry (exact first, then
+   the longest prefix); zero matches aborts before any file is written. The tables, literal:
+   - `carry_v0.json` and `carry_v1.json`: `code_revision`, `generated_at` → `clock_or_revision`;
+     `work_order` → `work_order_label`; `drawdown_basis`, `rv_alignment`, `return_basis` →
+     `configuration_switch`; `bases.` → `bases_block`; `gates.G3_drawdown_bounded_and_no_forced_liquidation`,
+     `gates.lane_a_go`, `pooled.max_drawdown_nav`, `per_asset.BTCUSDT.max_drawdown_nav`,
+     `per_asset.ETHUSDT.max_drawdown_nav` → `drawdown_basis`; `pooled.cagr_nav`,
+     `pooled.total_return_on_capital_simple`, `pooled.mean_weekly_return_on_nav`,
+     `pooled.annualised_return_on_nav`, `per_asset.BTCUSDT.cagr_nav`, `per_asset.ETHUSDT.cagr_nav` →
+     `new_descriptive_field`; `pooled.recent_period.` → `recent_period_cut`; `ledger_files.` →
+     `ledger_export`. Every G1/G2/G4 leaf (`pooled.mean_weekly_return_on_capital`,
+     `pooled.annualised_return_on_capital`, `pooled.annualised_after_haircut`,
+     `pooled.annualised_lower_bound`, `pooled.annualised_lower_bound_after_haircut`,
+     `pooled.bootstrap.`, `pooled.lower_bound_gate_level.`, `pooled.yearly_return_on_capital.`,
+     `pooled.year_check.`, `gates.G1_lower_bound_after_haircut_positive`,
+     `gates.G2_point_after_haircut_at_least_hurdle`, `gates.G4_positive_in_enough_qualifying_years`,
+     `pooled.eligible_weeks`, `pooled.max_drawdown_all_weeks`, `fee_sensitivity_2x.`) has no
+     entry, so a change there aborts.
+   - `vrp.json`: `code_revision`, `generated_at` → `clock_or_revision`; `work_order` →
+     `work_order_label`; `drawdown_basis`, `rv_alignment`, `return_basis` → `configuration_switch`;
+     `bases.` → `bases_block`; `per_currency.BTC.windows.`, `per_currency.ETH.windows.` →
+     `rv_alignment`; and, also → `rv_alignment`, exactly these numeric leaves: `pooled.mean_vrp`,
+     `pooled.mean_vrp_points`, `pooled.bootstrap.`, `pooled.lower_bound_gate_level.`,
+     `pooled.yearly_mean_vrp.`, `pooled.year_check.`, and per currency `mean_realised_variance`,
+     `mean_vrp`, `mean_vrp_points`, `share_of_windows_positive`, `yearly_mean_vrp.`. Carved out (no
+     entry, so a change aborts): `gates.`, `pooled.positive_complete_years`, `pooled.windows_accepted`,
+     `pooled.windows_total`, `per_currency.*.windows_accepted`, `per_currency.*.windows_total`,
+     `per_currency.*.rejection_reasons.`. Any leaf the build finds that matches no entry is a defect in
+     this table, not in the run; the fix is a dated amendment to this entry, passed through S8 and
+     landed before the run — never an edit made during the build.
+   The report gains "Reconciliation against WO-167" (every numeric change with its reason) and
+   "Reconciliation against WO-166" (naming WO-167's two changes by reference to WO-167's record).
+
+### A11 — bias-direction disclosure
+
+- Drawdown basis: on a ledger whose NAV has grown, the compounded weekly-increment curve
+  overstates ratio drawdowns (unfavourable channel removed by this change), while week-end
+  sampling understates intra-week troughs (favourable channel removed by this change); reading
+  every boundary of the NAV path removes both. The net direction on this data is not known before
+  the run and is reported either way; G3's literal threshold is about 60 times the WO-167 figure
+  (0.20 against 0.0032), so no plausible net effect changes G3.
+- Return basis for the gates: unchanged; no channel.
+- Realised-variance alignment: two components with opposite signs per item 6; expected net about
+  zero; per-window direction indeterminate; bounded as stated.
+- Recent-period cuts: two fixed lengths chosen here before the run, never gated, so they cannot
+  be selected on outcome; a reader who prefers a different length is reading a new diagnostic.
+  The rolling statistics use overlapping windows and are reported only as min/max/last.
+- Bases block: disclosure only; changes no number.
+- Haircut: unchanged; restated as an assumption, not evidence. Channels WO-166 and WO-167 listed
+  remain as recorded; this WO adds none.
+
+### Fail-safe sentence (S5)
+
+Every fail branch ends in no verdict. An unknown `drawdown_basis` or `rv_alignment` aborts
+before any period or window is computed; a NAV identity violation at any boundary aborts; a
+non-finite NAV anywhere in the pooled path reads G3 False; `results_wo167/` absent or unparseable,
+a differing or removed leaf matching no entry, or two entries of the same precedence (two exact
+paths, or two prefixes of equal length), aborts before any file is written — otherwise an exact path
+beats a prefix and the longest prefix wins; the results directory is written atomically or not at all and a
+second `run` for WO-170 is refused without `--force`; `run` refuses a dirty `src/premium_research`
+tree (WO-167 delta 2); `verify-results --work-order WO-170` recomputes every file in `result_files`
+and reports FAIL on any absent, extra, or byte-different file; recent-period cuts with fewer than
+`L` eligible weeks read NaN and `insufficient_weeks`; the verdict lines are generated from the gate
+booleans. WO-166's and WO-167's committed files are never written; WO-167's are read only by the
+reconciliation and by the day-after check.
+
+### Touch ONLY these files (20 paths)
+
+1. `src/premium_research/carry.py` — ledger fields, entry-row and merged-boundary accounts, `nav`, the identity assertion, `period_return_on_nav`, `return_on_nav`, `nav_end`.
+2. `src/premium_research/runner.py` — the switches, `discloses_bases`, `result_files`, `WO170_CONFIG`, `max_drawdown_nav`, the NAV descriptives, `return_basis`, `bases`, `recent_period`, `ledger_files`, the ledger writer, the per-window Lane B table, the reconciliation writer and its tables, per-config file lists in `run_all` and `verify_results`.
+3. `src/premium_research/vrp.py` — `rv_alignment`.
+4. `src/premium_research/report.py` — the bases table, the G3 label move, the recent-period section, the reconciliation sections, the ledger column table; byte-identical output under the WO-166 and WO-167 configurations.
+5. `src/premium_research/cli.py` — the selector help text names WO-170; nothing else.
+6. `tests/premium_research/test_carry.py` — tests 1-4, 13, 14.
+7. `tests/premium_research/test_vrp.py` — tests 8-9.
+8. `tests/premium_research/test_report_and_verify.py` — tests 5-7, 10-12, 15-17.
+9. `research/premium_poc/results_wo170/carry_v0.json`
+10. `research/premium_poc/results_wo170/carry_v1.json`
+11. `research/premium_poc/results_wo170/vrp.json`
+12. `research/premium_poc/results_wo170/report.md`
+13. `research/premium_poc/results_wo170/reconciliation.json`
+14. `research/premium_poc/results_wo170/ledger_BTCUSDT_V0.csv`
+15. `research/premium_poc/results_wo170/ledger_ETHUSDT_V0.csv`
+16. `research/premium_poc/results_wo170/ledger_BTCUSDT_V1.csv`
+17. `research/premium_poc/results_wo170/ledger_ETHUSDT_V1.csv`
+18. `docs/POLYMARKET_CODEX_WORK_ORDERS.md` — this entry, its calibration row, and the dated cross-reference "Amendment 2026-09-13 (WO-170): WO-170 registers `drawdown_basis = "nav"` (the ledger's own NAV path over every boundary) and `rv_alignment = "return_intervals"` (721 closes, 720 intervals) for its own pass; WO-166's definitions (`compounded_weekly`, `open_time_in_window`) remain the defaults under which WO-166's and WO-167's committed results verify." appended to WO-166's "Drawdown" bullet, its G3 row in the thresholds table, its "Reused code" bullet, and its Lane B `RV²_t` bullet; and the sentence "WO-170 inherits this scope for its own pass" appended to WO-167's scope-switch paragraph.
+19. `docs/POLYMARKET_QUANT_MODE_CHARTER.md` — the dated record of the outcome.
+20. `docs/EXPERIMENT_REGISTRY.md` — one dated sentence appended to the WO-166 paragraph: "Amendment 2026-09-13 (WO-170; effective only if merged): this paragraph also covers WO-170, one corrected pass on WO-166's committed inputs with NAV-path risk statistics, an exported ledger, explicit price bases, fixed recent-period cuts, and the realised-variance window aligned to 720 return intervals; no new data, span, family, or evidence class."
+
+`research/premium_poc/data/`, `manifest.json`, `results/` (WO-166) and `results_wo167/` (WO-167) are not touched.
+
+### Enumerated offline tests (S8/A10); each confirmed to FAIL with its guard reverted, caches purged
+
+1. `test_nav_identity_holds_at_every_boundary` — on the constant-funding, flat-price, 1,095-period synthetic of WO-166 test 18 (`f = 0.0001`, `S = P = 100`), `nav == cash + margin + spot_value` at every row within `1e-12`, equals `wealth`, the entry row reads `cash = 1.5, margin = 0, spot_qty = 0, nav = 1.5`, and the final NAV is `1.5 + 0.1095 − 0.0015 − 0.0015 = 1.6065` to four decimals.
+2. `test_hand_calculated_cash_flows_three_periods` — spot closes `100, 110, 99`, perpetual closes `101, 111, 100`, intra-period highs equal to the perpetual closes (no liquidation check fires), rates `0.001` at each boundary, V0 from boundary 0 to boundary 2: entry row `nav = 1.5`; the trade at boundary 0 sets `q = 0.01`, entry fees `0.001505`, margin `0.505`, cash `−0.006505`; at boundary 1 margin `0.505 − 0.1 + 0.00111 = 0.40611`, spot value `1.1`, nav `1.499605`, margin ratio `0.40611 / 1.11 = 0.36586` (no resize); at boundary 2 margin `0.40611 + 0.11 + 0.001 = 0.51711`, exit fees `0.00149`, cash `0.99 + 0.51711 − 0.006505 − 0.00149 = 1.499115`, nav `1.499115`; funding total `0.00211`, fees total `0.002995`, hedge mark-to-market `q × [(99 − 100) − (100 − 101)] = 0` (the price difference `perp − spot` is `1` at entry and at exit), so `nav_T − nav_0 = −0.000885`; all to `1e-9`.
+3. `test_period_return_on_nav_compounds_to_the_nav_path` — `nav_0 × Π(1 + period_return_on_nav) == nav_T` within `1e-12` on the test-2 ledger and on a 30-period random-walk ledger with seed 7.
+4. `test_nav_drawdown_differs_from_compounded_weekly_on_a_grown_ledger` — a hand-built series whose NAV rises from `1.5` to `3.0` then loses `0.15` inside one week and recovers `0.10` by that week's end: `max_drawdown_all_weeks` reads `−0.0333` (`−0.05 / 1.5` on the week-end increment), `max_drawdown_nav` reads `−0.05` (`−0.15 / 3.0` at the intra-week trough); and on a series that loses `0.15` at week end without recovery, the legacy figure reads `−0.10`, the NAV figure `−0.05`.
+5. `test_wo166_and_wo167_results_still_verify_under_their_defaults` — on the committed tree, `verify_results(root)` and `verify_results(root, config=WO167_CONFIG)` both return `[]` (integration, about 10 s).
+6. `test_wo170_config_differs_from_wo167_only_where_the_tables_allow` — on a synthetic tree with one spot boundary gap, run WO-167 then WO-170: every differing leaf across the three JSONs matches exactly one table entry; every carved-out leaf (the G1/G2/G4 set and the Lane B carve-outs) is identical; `reconciliation.json` lists each differing leaf with its reason and nothing else.
+7. `test_reconciliation_aborts_on_an_unexplained_leaf` — monkeypatching `lane_a` to emit one extra pooled key under WO-170 makes `run_all` raise `RuntimeError` naming the key, and the results directory does not exist afterwards; the same for a pooled key removed.
+8. `test_rv_window_uses_721_closes_and_720_intervals` — 721 consecutive hourly closes where every return is zero except the first (`ln 2` from the close at `start` to the close at `start + 1h`): under `"open_time_in_window"` `n_valid = 719` and `rv = 0`; under `"return_intervals"` `n_valid = 720` and `rv = (ln 2)² × 8760 / 720 = 5.8455` to four decimals.
+9. `test_rv_alignment_missing_start_close_only_loses_one_interval` — the same series without the bar ending at `start`: `n_valid = 719` under `"return_intervals"` and the window is accepted; an unknown alignment string raises before any window is read.
+10. `test_recent_period_cuts_use_the_last_eligible_weeks_only` — 60 eligible weeks of return `c = 0.002` with two ineligible weeks interleaved: `last_52.mean_weekly_return_on_capital = 0.002`, `annualised_simple = 0.104`, `rolling_52` min = max = last = `0.104`; `last_104.state = "insufficient_weeks"` with every field NaN; with only 40 eligible weeks both cuts and `rolling_52` read `insufficient_weeks`.
+11. `test_bases_block_and_return_basis_present_under_wo170_only` — the six literal `bases` strings, `return_basis`, `drawdown_basis`, `rv_alignment` are present under `WO170_CONFIG` and absent under `small_config()` and under the WO-167 configuration; the WO-170 report contains "What the prices and cash flows are" and the G3 label on the NAV row; the WO-166 and WO-167 reports contain neither.
+12. `test_result_files_are_per_config_and_verified` — under `WO170_CONFIG` the results directory contains exactly the nine files and `carry_v0.json.ledger_files` holds the two V0 ledgers' sha256; deleting one ledger makes `verify_results` report it absent; an extra file is reported; the WO-166 configuration still writes exactly four.
+13. `test_pooled_nav_drawdown_uses_the_summed_nav` — asset A's NAV path `1.5 → 1.6 → 1.5` and asset B's `1.5 → 1.4 → 1.5` in the same periods: `max_drawdown_nav` is `−0.0625` for A (`1.5 / 1.6 − 1`), `−0.0667` for B (`1.4 / 1.5 − 1`), and `0.0` pooled (`3.0 → 3.0 → 3.0`).
+14. `test_merged_boundary_carries_marks_forward_and_keeps_the_identity` — with the spot close absent at boundary 5 while open: row 5 has `marks_carried_forward = True`, `spot_mark` equal to row 4's, `nav == wealth` within `1e-12`, and `period_return_on_nav` finite; the entry row has `marks_carried_forward = False`.
+15. `test_reconciliation_aborts_when_wo167_results_are_absent` — with `results_wo167/` missing, `run_all` under `WO170_CONFIG` raises before writing, and the directory does not exist afterwards.
+16. `test_reconciliation_nan_and_removed_leaves` — two NaN leaves compare equal; a leaf NaN in WO-167 and finite in WO-170 needs a table entry (it is under `pooled.recent_period.` in the test) and a NaN in a carved-out leaf aborts.
+17. `test_wo167_bytes_unchanged_by_the_new_switches_on_a_synthetic_tree` — running `WO167_CONFIG` on a synthetic tree at this revision writes exactly the files and bytes the pre-WO-170 code wrote (recorded in the test as the expected sha256 of each file computed once on the same synthetic tree and clock at `acc5f76`), so the switches change nothing under their defaults.
+
+### Day-after check
+
+In a fresh clone of the branch: `verify-manifest`; `verify-results`; `verify-results --work-order WO-167`; `verify-results --work-order WO-170` all pass; `results_wo170/reconciliation.json` lists every differing leaf with a reason; `results_wo170/carry_v0.json` records `work_order = "WO-170"`, `drawdown_basis = "nav"`, `rv_alignment = "return_intervals"`, the same `manifest_sha256` as WO-166's results, and G1, G2, G4 quantities equal to WO-167's to the last digit; the four ledger CSVs satisfy `nav = cash + margin + spot_value` row by row (a reader can check any row with a calculator); `vrp.json` shows 66 accepted windows per currency with `valid_hours` one above `valid_hours_wo166_alignment` on every window; the charter carries the dated record whichever way the verdict fell.
+
+**Not authorised by this text:** any merge, any registration of a primary or a lane, any collector, any prospective window, any paper or live evidence, any change to WO-67's P1-P5, any change to WO-166's or WO-167's committed results, any threshold change, and any use of the sandbox result as verification of record.
+
+## WO-171 — Strategy search: chronological train / validation / untouched final split with label-availability purging, a complete tested-variant registry, family-wise correction, fee-net returns, a benchmark and hurdle, and a monitoring ledger — `built` (2026-09-13; S8 ADMISSIBLE after two delta passes (19 → 7 → 0 defects); `registered-ancestry: a790e51 ancestor-of <build-sha> PASS` to be recorded at dispatch; class M: a diagnostic module whose `promotable` output yields at most a shadow candidate (read by the shadow scan, `run_promoted_rule_shadow_scan.py:442,657`, which sets `rule_scope = "promoted"`, and by the liquidity-discovery queue, `run_polymarket_liquidity_discovery.py:660-666`, as a recommendation string only); no registered gate, threshold, primary, or H1-H3 evaluator is touched; touches `src/`, the example config, tests, and this register → orchestrator-mergeable after line-audit unless the owner routes it; `registered-ancestry:` to be recorded at dispatch against the `origin/main` tip, `a790e51` at drafting. **Disclosure.** This work order exists because an external review received on 2026-09-13 and the owner's same-day instruction to the drafting agent (relayed in session, not recorded in the repository; it authorises neither build nor merge — authorization lives at the merge) found that the search ranks candidates by their holdout results and confidence bounds, so the holdout is selection data and cannot also confirm; that no multiple-comparison correction is applied although the registry specifies BH-FDR at 10% elsewhere; that only the top `max_ranked_rules = 100` variants are written, so the tested family is not recorded; and that rows' `_profit_per_usdc` is gross of the venue taker fee. Every gate below is at least as strict as its existing counterpart and two are new; because the selection segment moves from the last 25% of markets to the middle 25%, a given rule's promotability can change in either direction. **Build 2026-09-13** at `eeca63e` on `claude/polymarket-quant-trader-9czyse`, with delta 1 applied the same day after the independent line audit (8 major, 8 minor). All ten items built; the full offline suite green; 23 mutation checks, each confirmed to fail with its guard reverted and caches purged. **Three code defects the audit found, now fixed.** (a) The final segment was evaluated for EVERY variant, not only promotable rules as item 3 registers, so both CSVs published a final-period ROI and clustered interval for every rule — the selection channel this work order exists to close, reopened one layer out for any downstream reader — and `final_period_reads` counted only the promotable rules while every variant had in fact been read. The read is now a separate `attach_final_segment` call made once per promotable rule after selection is complete, non-promotable rows carry empty final columns, and the ledger count is the number of reads that happened. (b) `_availability_index` took `resolution_time or close_time` row by row, so one label row's close time could outvote another row's resolution time on the same market, producing an availability time the registered per-market rule never names; the fallback is now per market. (c) A BLANK `horizon` was read as `all_valid`, so a market whose labels carry no horizon gained an availability time it had not earned and survived the fail-closed drop; a missing key still defaults, a present blank no longer does. **Five test defects, now fixed.** Registered test 3 asserted neither `promotable` nor a ranking position, because it called the evaluator directly and the evaluator computes neither — it now runs end to end over two corpora that differ only in the final segment and asserts every selection field and the whole ranking are byte-identical while the final readings differ. Registered test 4 was vacuous: 26 variants against a cap of 100 meant truncation never fired and the "family written before truncation" guard could be reverted green — the cap is now below the variant count. Registered test 8 asserted the identity that computes `excess_over_buy_all`, which cannot fail, on a fixture where the rule spanned the whole segment so the excess was always zero — it now uses two rules at different registered category fee rates with the margin known by hand. Registered test 10's consumer-reader clause was never built — the two scripts' reader shapes now run over the new summary and an equivalent old-shaped one and must select the same rules. `_availability_index` had no test at all and `dropped_unparseable_timestamp` had no assertion anywhere in the repository; both now do. **Recorded, not changed:** the all-rows `roi`, `rows`, `markets` and `win_rate` display fields now span the final quarter as well, which no gate, reason string or ranking key reads; the p-value hurdle is bound to `min_validation_roi` rather than a separate literal, so one config key moves both the ROI gate and the hurdle; and the entry-price floor moved from all rows to validation rows, which is the registered change but is not uniformly stricter than its predecessor. Sandbox diagnostic; the run of record is the VPS; not registered under the GLOBAL RULE until its squash-merge lands.)
+
+**Why this exists.** `strategy_search.py:142-153` splits markets chronologically into development and
+holdout; `:284-295` sets the gate literals and `:296-345` sets `promotable` and ranks by
+`holdout_roi_ci_low` and `holdout_roi`; `:348` truncates the written family to 100; `:126` defines
+profit as `target / price − 1` with no fee. On the 2026-07-13 mirror: 724 joined rows, 80 markets,
+60 development / 20 holdout, 100 ranked of an unrecorded family, 0 promotable. A rule selected on
+the holdout and then reported with the holdout's confidence bound is reported with a bound that
+does not account for the selection.
+
+### The changes, exactly
+
+1. **Three-way chronological split by market (`strategy_search.py`).** Markets are ordered by their
+   latest `prediction_timestamp` (UTC via `utils.parse_timestamp`; a row whose timestamp does not
+   parse is dropped and counted as `dropped_unparseable_timestamp`). With `n` markets after dropping those
+   with no availability time (item 2's first step) and rows with unparseable timestamps: `train = int(round(0.5 n))`, `validation = int(round(0.25 n))`, `final = n − train −
+   validation` (Python's round-half-to-even applies; the earliest markets are train, the latest final;
+   literals 0.5 / 0.25 / 0.25 with basis: the registry's H3 protocol uses a 60/40 discovery/validation
+   split, the directive requires a third untouched segment, and 25% of the 80-market mirror is 20
+   markets, above the 4-market floor). The two overlap purges of item 2 run after the split, remove markets from their
+   segment without re-splitting, and cannot change `n`. Any segment with fewer than 1 market at the
+   split or empty after the purges → `status = "insufficient_markets"`, no rule evaluated, and both
+   CSVs written empty (as the `disabled` branch at `:262` does), so no stale file survives; the
+   smallest workable `n` is therefore 4.
+2. **Purge by label availability (`strategy_search.py`).** A second pass over `labels.csv` (producer: `labels.build_labels`, `labels.py:183`; absent → `status = "no_labels"`) restricted to
+   `horizon == "all_valid"` rows builds `market_id → availability_time` = the maximum parsed
+   `resolution_time`, else the maximum parsed `close_time`, else `None`; the index is keyed on the
+   same `market_id` the search uses as `_market_key` (`:118`) and is passed into the split function,
+   so every comparison happens at the split site on values it holds. A market with `None` is dropped
+   from every segment (fail-closed; `purged_no_availability_time`). A train market whose availability
+   time is at or after the earliest `prediction_timestamp` of any validation market is purged from
+   train (`purged_train_overlaps_validation`); a validation market whose availability time is at or
+   after the earliest final `prediction_timestamp` is purged from validation
+   (`purged_validation_overlaps_final`). No embargo constant: the embargo is the availability time.
+   The summary records `availability_basis = "venue_resolution_time_else_close_time"`; both are
+   earlier than the collector's observation time, so this rule purges fewer train markets than an
+   observation-time rule would (named in A11).
+3. **Selection on train and validation only; final evaluated, never selected on.** Per-rule schema
+   (every existing key kept as a labelled alias for one release, so every consumer reads what it
+   reads today — `dev_rows = train_rows`, `dev_markets = train_markets`, `dev_roi = train_roi`,
+   `dev_profit_usdc_per_1_stake`, `dev_win_rate`, `holdout_rows = validation_rows`,
+   `holdout_markets = validation_markets`, `holdout_roi = validation_roi`,
+   `holdout_profit_usdc_per_1_stake`, `holdout_win_rate`, `holdout_roi_ci_low =
+   validation_roi_ci_low`, `holdout_roi_ci_high = validation_roi_ci_high`; new keys `train_*`,
+   `validation_*`, `validation_p_value`, `bh_significant`, `benchmark_buy_all_roi`,
+   `excess_over_buy_all`, `turnover_rows_per_market_day`, `max_drawdown_net_per_stake`,
+   `cost_sensitivity_2x_validation_roi`, and the flattened `final_rows`, `final_markets`,
+   `final_roi`, `final_roi_ci_low`, `final_roi_ci_high`, `final_evidence_class`). Floors, literal:
+   train `min_rows` 20, `min_markets` 5, `min_train_roi` 0.02 (the existing `min_dev_roi`);
+   validation `min_validation_rows` 6, `min_validation_markets` 4, `min_avg_entry_price` 0.05 (price-
+   based, outcome-independent, applied to the mean `_price` of the rule's **validation** rows so the
+   final segment never enters family membership; the all-rows `avg_entry_price` key stays for display
+   only); gates: `min_validation_roi` 0.02 and validation ROI bootstrap lower
+   bound ≥ 0.0 (the existing `min_holdout_roi_ci_lower_bound`) — all the existing literals at
+   `:284-295` under their new names, old names read as fallbacks (new key wins when both exist), and
+   the VPS runtime config's old keys keep working; `split_fractions` is literal-only (0.5, 0.25, 0.25,
+   echoed under `settings.split_fractions`), and the old `holdout_fraction` key is ignored and
+   recorded under `settings.ignored_keys`. `promotable` = every floor **and** every gate
+   **and** item 5's `bh_significant`. Ranking uses validation only. For each promotable rule the
+   `final` segment is evaluated and written under the `final_*` keys with `final_evidence_class =
+   "retrospective"` and the literal note "a final-period read is confirmation of a rule selected
+   elsewhere; it feeds no selection and no gate"; the `final_*` keys never enter `promotable`,
+   `promotion_reason`, or the ranking key.
+4. **Complete tested-variant registry.** `cfg.governance_root / edge_strategy_search_family.csv`
+   records **every** `(rule_family, rule_value)` evaluated, including those failing any floor, with
+   the schema of item 3 (empty final columns for non-promotable rules); `family_size` and
+   `family_tested_size` in the summary. `max_ranked_rules` truncates `top_rules` and
+   `edge_strategy_search.csv` only; the family file is written before them.
+5. **Family-wise correction (Benjamini-Hochberg, q = 0.10, the registry's rate).** The tested family
+   is every rule at or above the validation floors (`min_validation_rows`, `min_validation_markets`,
+   `min_avg_entry_price`) — never a ROI or interval condition, so membership cannot shrink on
+   outcomes; `m = family_tested_size`. Each such rule's one-sided p-value is the share of the 2,000
+   market-cluster bootstrap resamples (seed 20260625, the existing literal) whose validation ROI ≤
+   the hurdle 0.02, floored at `1 / 2000 = 0.0005`; a non-finite p-value counts in `m` with `p = 1.0`
+   (never excluded). BH over the family; `bh_significant` per rule; `bh_rejections` in the summary.
+   Consequence, stated: the floor 0.0005 exceeds `q / m` once `m > 200`, so a lone rule at the floor cannot
+   be rejected once `m > 200`, and `k` rules at the floor are rejected only when `k ≥ m / 200` —
+   conservative by construction. Rules below the floors are
+   `untested_insufficient_sample` and outside the family.
+6. **Fee-net returns.** `_profit_per_usdc` becomes net of the canonical WO-94 taker fee at entry:
+   `fee_per_dollar = polymarket_common.fees.taker_fee_per_share(price=p, schedule=
+   polymarket_common.fees.resolve_taker_fee_schedule(row)) / p`, which is `rate × (1 − p)` when fees
+   are enabled and `0.0` otherwise; the schedule resolver reads the joined row's `fee_schedule_rate`,
+   `fees_enabled`, `fee_type`, `category` and `fee_schedule_exponent` and applies its own documented
+   fallbacks (blank metadata → the category default in `CATEGORY_TAKER_FEE_RATES`, unknown category →
+   "other"; `fees_enabled = false` with no rate → 0.0; malformed rate → the conservative maximum of
+   the category default and 0.07). A win at entry 0.5 with rate 0.05 yields `(1 − 0.5) / 0.5 − 0.025
+   = 0.975` per dollar and a loss yields `−1 − 0.025 = −1.025` (the fee is paid either way).
+   `cost_sensitivity_2x_validation_roi` repeats the validation ROI at double the fee.
+7. **Benchmark and hurdle.** `benchmark_buy_all`: the validation ROI and clustered interval of buying
+   every validation row; per rule, `excess_over_buy_all`. The hurdle is the existing 0.02 validation
+   ROI floor, with its basis written into the summary: "half a typical 1-2c spread on a 50c contract
+   (1-2%); the taker fee is already netted in every ROI".
+8. **Reporting per rule (clock = `prediction_timestamp`; data-relative replay of recorded rows, stated
+   in the docstring per S1):** rows, markets, validation ROI with interval, turnover = validation rows
+   per market-day where a market-day is a distinct (`_market_key`, UTC date), maximum drawdown of
+   the cumulative fee-net profit per 1 USDC stake over validation rows ordered by
+   (`prediction_timestamp`, `_market_key`, `token_id`), win rate, and the cost sensitivity.
+9. **Monitoring ledger.** `cfg.governance_root / edge_strategy_search_final_period_ledger.csv`,
+   append-only via `utils.append_csv_rows` with the fixed column list `run_utc, rule_family,
+   rule_value, final_rows, final_markets, final_roi, final_roi_ci_low, final_roi_ci_high`, where
+   `run_utc` is the summary's `generated_at_utc` (one clock per run); no promotable rules → nothing
+   appended, `ledger_status = "ok"`, `final_period_reads` = the existing row count (0 when the file
+   is absent); a header
+   mismatch (`append_csv_rows` raises `ValueError`) → `ledger_status = "schema_mismatch"`, no append,
+   `final_period_reads = null`; otherwise `final_period_reads` = the ledger's row count after this
+   run's append. The summary's `inference_note` states: "validation statistics are recomputed on
+   every run over a growing corpus and the family-wise correction applies per run; each run is a
+   further look; final-period reads are listed in the ledger and their count is `final_period_reads`".
+10. **Consumers (A9, each read verified at the site).** `scripts/run_promoted_rule_shadow_scan.py:472-474,
+    708-716` (`dev_rows`, `dev_markets`, `dev_roi`, `holdout_rows`), `scripts/run_polymarket_liquidity_discovery.py:641,693`
+    (`holdout_rows`, `promotable`), `src/polymarket_predictive_engine/dashboard.py:2009` (`dev_*`,
+    `holdout_*`), `scripts/run_polymarket_live_paper_loop.py:1294-1298,1336` (`status`,
+    `promotable_rules`, `top_rules`), `scripts/run_polymarket_local_live_loop.py:858` (the schedule
+    key) — all keys kept; `polymarket_predictive_config.example.yaml:1406-1415` gains the new keys
+    beside the old with a comment naming the precedence.
+
+### A11 — bias-direction disclosure
+
+Selection on validation with a family-wise correction and a separate untouched final segment
+removes the favourable channel (selection reported with an unadjusted bound). Purging removes a
+favourable channel (labels visible before their availability), but the availability basis is the
+venue's resolution time, else close time — both earlier than the collector's observation time —
+so the purge is weaker than an observation-time rule and that residual is favourable. Fee-netting
+lowers every ROI. The buy-all benchmark can only make a rule look less special. The BH floor can
+only reduce rejections. One further favourable residual: the final segment is re-read on every run,
+so its "untouched" status decays with the number of runs — recorded by the ledger, not corrected.
+
+### Fail-safe sentence (S5)
+
+A market without an availability time is dropped from every segment; a row with an unparseable
+timestamp is dropped and counted; any segment below 1 market after the purge, or a missing
+`labels.csv`, yields `insufficient_markets` / `no_labels` with no rule evaluated and both CSVs
+written empty; a non-finite interval makes a rule not promotable; a non-finite p-value is 1.0 and
+stays in the family; the family file is written before `top_rules`; every write is atomic; the
+ledger is append-only and a schema mismatch appends nothing; nothing here changes any registered
+gate, and a promotable rule remains a shadow candidate only.
+
+### Touch ONLY these files (5 paths)
+
+1. `src/polymarket_predictive_engine/strategy_search.py`
+2. `tests/polymarket_predictive_engine/test_strategy_search_gate.py` — tests 1-11 (existing tests amended to the validation names).
+3. `src/polymarket_predictive_engine/dashboard.py` — the alias label only.
+4. `polymarket_predictive_config.example.yaml` — the new keys beside the old, lines 1406-1415.
+5. `docs/POLYMARKET_CODEX_WORK_ORDERS.md` — this entry and its calibration row.
+
+### Enumerated offline tests (S8/A10); each confirmed to FAIL with its guard reverted, caches purged
+
+1. `test_three_way_split_is_chronological_by_market` — 12 markets with distinct latest timestamps: train = the earliest 6, validation = the next 3, final = the last 3; with 3 markets the status is `insufficient_markets` (final would be 0) and both CSVs are written empty.
+2. `test_train_market_whose_label_arrives_after_validation_starts_is_purged` — a train market with `resolution_time` one second after the earliest validation timestamp is purged and counted; one second before is kept; a market with neither time is dropped from every segment; a market with only `close_time` uses it.
+3. `test_selection_reads_validation_only_and_final_never_feeds_promotable` — fixture: 30 train rows over 6 markets with train ROI 0.10, 6 validation rows over 4 markets all wins at entry 0.5 (validation ROI 0.975, interval lower bound above 0.02), and a final segment where the same rule loses every row: the rule is promotable with `final_roi < 0`; a second rule that loses on validation and wins every final row is not promotable; swapping the two rules' final rows changes no `promotable` and no ranking position.
+4. `test_family_file_records_every_variant_beyond_max_ranked` — 150 distinct rule values with `max_ranked_rules = 100`: the family file has 150 rows and `family_size = 150`; `top_rules` has at most 10 and the ranked CSV 100.
+5. `test_bh_fdr_hand_example` — `_bh_significant([0.001, 0.02, 0.04, 0.5], q=0.10)`: thresholds `0.025, 0.05, 0.075, 0.10`, three rejections; with the third p at 0.08 the rejections are two (`0.02 ≤ 0.05`; `0.08 > 0.075`); a non-finite p is treated as 1.0 and counted in `m`.
+6. `test_bootstrap_p_value_is_one_sided_against_the_hurdle_and_floored` — resamples all above 0.02 give `p = 0.0005`; all at or below give `p = 1.0`.
+7. `test_profit_is_net_of_the_taker_fee` — `_fee_net_profit_per_usdc(row)` at entry 0.5 with `fee_schedule_rate = 0.05`, `fees_enabled = true`: `fee_per_dollar = 0.025`; win `0.975`, loss `−1.025`; at double the fee `0.95` and `−1.05`; with `fees_enabled = false` and no rate, `0.0` fee.
+8. `test_benchmark_and_excess` — validation rows with buy-all ROI 0.10 and a rule at 0.25: `excess_over_buy_all = 0.15`.
+9. `test_final_period_ledger_appends_one_row_per_promotable_rule_per_run` — two runs append two rows for one promotable rule; `final_period_reads` reads 2 after the second run; a pre-existing ledger with a different header yields `ledger_status = "schema_mismatch"`, no append, `final_period_reads = null`.
+10. `test_consumers_read_the_same_keys` — a summary from the new code carries every alias key (`dev_rows`, `dev_markets`, `dev_roi`, `dev_profit_usdc_per_1_stake`, `dev_win_rate`, `holdout_rows`, `holdout_markets`, `holdout_roi`, `holdout_profit_usdc_per_1_stake`, `holdout_win_rate`, `holdout_roi_ci_low`, `holdout_roi_ci_high`) with values equal to their `train_*`/`validation_*` twins; the reader functions of the shadow-scan and liquidity-discovery scripts (imported, not the loops) return the same selections on the new summary as on an equivalent old-shaped one.
+11. `test_turnover_and_drawdown_use_the_prediction_timestamp_clock` — validation rows across 2 markets on 3 UTC dates (5 market-days) with 10 rows: turnover `2.0`; profits `+1, −1.025, −1.025, +1` in timestamp order give `max_drawdown_net_per_stake = −2.05`; a row with an unparseable timestamp is dropped and counted.
+
+### Day-after check
+
+On the VPS after the next paper-loop iteration that runs the search: `edge_strategy_search_summary.json` has `status = "computed"`, `family_size ≥ ranked_rules`, `bh_rejections`, `final_period_reads` and `ledger_status` present, `settings.split_fractions = [0.5, 0.25, 0.25]`, `availability_basis = "venue_resolution_time_else_close_time"`; `edge_strategy_search_family.csv` row count equals `family_size`; `promoted_rule_shadow_summary.json` still reports its `promoted_rules` count without error.
+
+**Not authorised by this text:** any promotion beyond a shadow candidate, any change to a registered gate or to H1-H3's evaluators, any change to a binding contract document, any paper or live evidence, any merge.
+
+## WO-172 — Telemetry export manifest with truncation accounting, a complete research-ledger export, and a data-coverage report that classifies every starved input path — `built` (2026-09-13; S8 ADMISSIBLE after three delta passes (18 → 10 → 1 → 0 defects); `registered-ancestry: a790e51 ancestor-of <build-sha> PASS` to be recorded at dispatch; class M; touches `scripts/push_vps_telemetry.sh` (a VPS cron path), two new scripts, one new engine module, the CLI, tests and recorded fixtures, this register → orchestrator-mergeable after line-audit unless the owner routes it; `registered-ancestry:` to be recorded at dispatch against the `origin/main` tip, `a790e51` at drafting. **Disclosure.** This work order exists because an external review received on 2026-09-13 and the owner's same-day instruction to the drafting agent (relayed in session, not recorded in the repository; it authorises neither build nor merge — authorization lives at the merge) found that the telemetry mirror caps CSVs at 200 rows without any per-file marker, so the −$218.01 "across 200 closed positions" in the charter is an extract; and that four input paths (wallet fills, sharp-anchor joins, calibration joins, implication legs) were empty or unusable in every snapshot without a record of whether that is ingestion failure, coverage limitation, staleness, or a measured negative. Everything here is measurement and labelling; nothing changes a gate, a collector's behaviour, or the mirror's whitelist. WO numbers 168-173 are reserved by the drafts of this cycle; their register entries land in one register commit, and each build is its own branch and PR. **Build 2026-09-13** on `claude/polymarket-quant-trader-9czyse`: all four items built with their eleven enumerated tests plus two static script guards; nineteen mutation checks, each confirmed to fail with its guard reverted and caches purged; the full offline suite green. The five recorded coverage fixtures reproduce this entry's figures exactly — `fills_seen = 0` (generated 2026-07-17), `total_rows_fetched = 30` with `total_rows_joined = 0` and 30 stale, `rejected_join_rows = 17420` with `clean_settled_joined_rows = 0`, `events_scanned = 300` with `classified_legs = 0`, `groups_with_complete_ask_side = 67` with `flagged_deviations = 0` — and classify as two ingestion failures, two coverage limitations, one join failure and one measured negative, the last scoped to "within 67 complete-ask groups". Three mutation checks initially read NOT DETECTED and the tests were strengthened rather than the finding dropped: the truncation rule was asserted on a file under the size cap, so a size-boundary rule passed; the manifest's self-exclusion was asserted against a snapshot that never contained a manifest; and the export script's credential scan was asserted by substring, which a renamed flag satisfied. Sandbox diagnostic; the run of record is the VPS; not registered under the GLOBAL RULE until its squash-merge lands. **Build delta 1, after the independent line audit (4 major, 11 minor across both work orders).** Two fail-opens fixed. `measured_negative` was reachable on two paths this entry does not register it for: "fills seen, none scored" read as a measured negative when it is the registered definition of a coverage limitation, so the day a wallet-fills collector runs and every row is skipped the H3 lane would have published as evidence of no edge — the exact reading this work order exists to prevent; and the implication scan could reach `measured_negative` with a null scope. Both are corrected, and a measured negative now cannot be constructed without its scope: the guard raises at the one site every entry passes through. Second, `bool(None)` is False, so a manifest entry with no `truncated` key, or an explicit null, read as whole and produced an attribution figure from a ledger whose own line counts, held in the same entry, showed it was an extract; a figure is now stated only on an explicit `truncated = false` whose line counts agree. Four minors also fixed: `status` was an unconditional literal, so an artifact whose every path read `unknown` still published `ok`, and it now reports `partial` with the unknown paths named; the report read only the registered literal fills path while the reader it cites resolves a configured setting first, so it reported a confident ingestion failure about a file that may exist elsewhere, and it now reads the configured path and records which one it read; a skip reason said "size_unreadable" after a successful stat and now says `absent_from_snapshot`; a source that vanished between the copy and the manifest walk read `truncated = false`, so `--mode full`'s completeness assertion passed on an entry nothing could demonstrate, and it now reads `null` and is refused; and the export script cleared its cleanup trap before the rename, leaving the temporary directory behind if the rename failed. Six tests added, fourteen mutation checks on the delta all detected. Sandbox diagnostic; the run of record is the VPS; not registered under the GLOBAL RULE until its squash-merge lands.)
+
+### The changes, exactly
+
+1. **Per-file export manifest (`scripts/write_telemetry_export_manifest.py`, new; called by
+   `push_vps_telemetry.sh` after the `copy_capped` loop and the `manifest.json` copy (line 188) and
+   before the `git add -f telemetry` (line 192), so the manifest enters the staged tree).** The script passes what it knows as arguments — `--snapshot-dir "$SNAP"
+   --repo-root "$REPO_DIR" --as-of "$STAMP" --max-file-kb "$MAX_FILE_KB" --csv-tail-lines
+   "$CSV_TAIL_LINES"` and one `--whitelist-dir` per line of `TELEMETRY_DIRS` — so the manifest
+   records the values in effect (env overrides included), not the script defaults; the writer imports
+   `credential_guard.PAYLOAD_EXCLUDED_FRAGMENTS` and mirrors the copier's `-maxdepth 2` walk to
+   discover files the copier skipped. It runs under `timeout 300` (wall-clock; basis: the
+   scheduler's existing per-job timeout precedent at `run_vps_ops_scheduler.sh:444`). For every
+   file under the snapshot's `telemetry/` except itself: `source_path`, `source_bytes`,
+   `source_lines_after_header` (newline-delimited lines after the first, the unit `tail -n`
+   truncates by; `null` for non-CSV), `exported_lines_after_header`, `truncated :=
+   source_lines_after_header > exported_lines_after_header`, `truncation_rule := "whole"` iff
+   `exported_sha256 == source_sha256` else `"header_plus_tail:<N>"` (derived from the snapshot alone,
+   never from a size boundary), `source_mtime_utc` (`st_mtime` normalised to UTC), `source_sha256`,
+   `exported_sha256`, `schema_sha256` (CSV: sha256 of the header line; JSON: sha256 of the sorted
+   top-level key list), `snapshot_utc` (= `--as-of`, the one clock the commit message uses).
+   `telemetry/manifest.json` is listed with `source_path = outputs/performance/vps_telemetry_manifest.json`.
+   Files the copier skipped are listed under `skipped` with `reason` ∈ {`"oversized_non_csv:<kb>"`,
+   `"size_unreadable"`} (files beyond depth 2 are out of the copier's scope and out of this
+   manifest's). The `filters` block records the five argument values and the two name exclusions.
+   Written to `telemetry/export_manifest.json` atomically (temp + rename). **On any failure or
+   timeout the script sets `PUSH_STATUS="manifest_failed"` and exits 1**, so the existing EXIT trap
+   stamps `telemetry_push_status.json` with that status and nothing is pushed (fail-closed: no
+   unlabelled extract); the existing watchdog rule `bad_bridge = age > PUSH_STATUS_MAX_SECONDS or
+   status != "ok"` (`degraded_state_watchdog.py:1359`) then fires `publication_bridge_unhealthy` on
+   its next cycle — no new registration is needed. The lock is released by the existing `cleanup`
+   trap. The push script's guard tests (`tests/test_polymarket_vps_docker.py:769`,
+   `tests/polymarket_predictive_engine/test_wo73_controls.py:229`,
+   `tests/polymarket_predictive_engine/test_push_status_stamps.py:120`) stay green: one parentless
+   commit, no Actions trigger, guard before archive before copy, and no mention of the heavy corpora
+   directories in the script text.
+2. **Complete research-ledger export (`scripts/export_research_ledgers.sh`, new; VPS-only; no
+   cadence; no push; owner-run).** Copies, whole, the ledgers named in a literal list in that
+   script — `outputs/polymarket_shadow/shadow_positions.csv`,
+   `outputs/polymarket_model_governance/closing_line_final_history.csv`,
+   `outputs/polymarket_model_governance/closing_line_value_positions.csv`,
+   `outputs/maker_carry/maker_carry_history.csv`, `outputs/maker_carry/maker_live_test_history.csv`,
+   `outputs/polymarket_model_governance/edge_strategy_search.csv` (producer: `run_edge_strategy_search`,
+   manual CLI and the paper loop) — into
+   `outputs/research_exports/.<UTC stamp>.tmp/`, verifies each copy (`source_sha256 ==
+   exported_sha256` and equal line counts, retried once: `maker_live_test_history.csv` is append-only
+   (`ledger_anchor.py:68`) and can be torn mid-copy, while the other five are rewritten atomically by
+   `utils.write_csv` and a copy sees old-or-new), writes the manifest with the same writer in `--mode full` (`truncated = false` on
+   every entry, asserted), runs `credential_guard._scan_csv(path, repo_root, tail_rows=None)` and
+   `_scan_json` on every file including the manifest (a `--scan-credentials DIR` mode of the manifest
+   writer, touched file 2, invoked by the export script), and renames the directory to
+   `outputs/research_exports/<stamp>/` only when every check passes; on any failure it deletes only
+   that freshly created temporary directory. The resolution corpus is **not** exported: the charter's
+   2026-07-11 record keeps the training corpora on the VPS. This is how a complete ledger reaches an
+   off-box analysis: the owner copies the directory; the mirror never carries it.
+3. **Data-coverage report (`src/polymarket_predictive_engine/data_coverage_report.py`, new; CLI
+   `data-coverage-report`).** Reads, read-only, with the producer of each named: `smart_flow_clv.json`
+   (producer: the manual CLI `smart-flow-clv` only; `refresh_governance.py:244` records no scheduled
+   producer), `inputs/polymarket/public_wallet_fills.csv` (no producer is registered anywhere in the
+   repository; its only reference is the reader `smart_flow_clv.py:243`), `sharp_anchor_coverage.json`
+   and `family_calibration_scorecard.json` (producer: `refresh-governance`, every 21,600 s),
+   `implication_scan.json` and `event_group_scan.json` (producer: the `trade_prints` job, every 900 s),
+   `shadow_positions.csv` (producer: the paper loop), `shadow_signal_cohort_pnl.json` (producer:
+   `write_signal_cohort_pnl`), and the export manifest — on the VPS absent (it lives only in the push's temporary snapshot); on a mirror checkout read from `--export-manifest PATH`, recorded in the artifact as `export_manifest_path`, else absent. Writes
+   `outputs/polymarket_model_governance/data_coverage_report.json` with `utils.write_json` (atomic;
+   the directory is also written by `governance_refresh` and read every 30 minutes by the push
+   script's `find`/`cp`, which copies whole files, so the only interleaving is a stale-or-fresh copy).
+   Per path: the artifact and fields read, `producer`, `producer_cadence_seconds` (`null` when none),
+   `population`, `eligible`, `excluded` (with the source's own reason histogram where it exposes
+   one), `missing_outcomes`, the source's `generated_at_utc`, `age_seconds` against the run clock,
+   and one `classification`, first match wins in this order:
+   - `unknown` — the artifact is absent, unparseable, unreadable, or a required field is missing or
+     non-finite (fail-closed; never a measured negative);
+   - `ingestion_failure` — the producer's input is absent or has zero rows (`fills_seen = 0` with the
+     fills file absent or empty);
+   - `coverage_limitation` — input rows exist but none could be used (`total_rows_fetched > 0`,
+     `total_rows_joined = 0`; or `events_scanned > 0`, `classified_legs = 0`);
+   - `join_failure` — joins were attempted and every one was rejected (`rejected_join_rows > 0`,
+     `clean_settled_joined_rows = 0`);
+   - `measured_negative` — complete inputs were scanned and the scan found zero
+     (`groups_with_complete_ask_side > 0`, `flagged_deviations = 0`), stated with its scope
+     ("within 67 complete-ask groups").
+   `stale` is a second flag, never a classification: `true` when `age_seconds` exceeds the producing
+   lane's registered ceiling in `degraded_state_watchdog.REGISTERED_JOB_FRESHNESS_MAX_SECONDS` —
+   `governance_refresh` (sharp-anchor, calibration, and, having no lane of its own, smart-flow) and
+   `trade_prints` (implication, event-group) — read from that table, not re-typed (the table holds
+   25,200 s and 1,200 s respectively at drafting); an unparseable or
+   missing `generated_at_utc` → `stale = true`, `age_seconds = null`; `producer_state ∈ {scheduled,
+   manual_only, no_producer_registered}` per path. Each path carries `evidence_rule`: `"absence of
+   evidence: untested"` for `ingestion_failure`, `coverage_limitation` and `join_failure`;
+   `"measured negative within stated scope"` for `measured_negative`. A `pnl_attribution_check` block
+   groups the shadow ledger's **closed** rows (`status == "closed"`, the ledger's column) by its own
+   `signal_cohort` column; a closed row whose `realised_pnl_usdc` is blank or non-finite →
+   `state = "unknown_malformed_row"` with the row count and no figure: `closed_total_pnl_usdc`,
+   `attributed_by_cohort` (non-blank cohorts), `unattributed_pnl_usdc` (rows with a blank cohort),
+   and, under a distinct name with `comparable = false`, the cohort file's
+   `cohorts[].shadow_total_pnl_usdc` sum (realised plus unrealised at mark, `shadow_cohort.py:765-769`).
+   `ledger_completeness_basis` ∈ {`manifest`, `vps`, `unknown`}: the block reads a figure only when
+   the manifest marks `shadow_positions.csv` `truncated = false`, or when the CLI is run with
+   `--ledger-source vps` (recorded in the artifact); a manifest marking it truncated →
+   `state = "unknown_truncated_input"` with both line counts; no manifest and no flag →
+   `state = "unknown_no_manifest"`, no figure. Every artifact states `paper_trading_invoked = false`
+   and `live_trading_invoked = false`.
+4. **Recorded fixtures.** The five JSONs from the committed telemetry snapshot `origin/vps-telemetry`
+   `fcebaa2` (2026-08-21T02:00:09Z), verbatim (they contain no identifiers to sanitise — lists are
+   empty or sport names; `credential_guard._scan_json` finds nothing), under
+   `tests/fixtures/recorded/coverage_2026-08-21/` with README provenance per convention; the
+   synthetic manifests the tests need are built in `tmp_path`, never committed as recorded fixtures.
+
+### A11 — bias-direction disclosure
+
+Labelling cannot move a number. The classification set is closed, `unknown` is first-match, and a
+missing artifact cannot read as a measured negative. Stale ceilings are read from the registered
+table of the producing lane, so they cannot be set looser than the watchdog's own; a looser ceiling
+would push `stale` toward `false`, the favourable direction, which is why they are not literals here.
+A truncated or unmanifested ledger yields no attribution figure.
+
+### Fail-safe sentence (S5)
+
+A manifest-writer failure or timeout stamps `manifest_failed` and pushes nothing; a research export
+whose copy, manifest, or credential scan fails is deleted from its temporary directory and nothing
+is renamed into place; every artifact is written atomically; every missing, unparseable, unreadable,
+non-finite or absent field classifies `unknown`; an unparseable timestamp is stale with a null age;
+a truncated or unmanifested ledger yields no attribution figure; the coverage report reads and never
+writes any producer's artifact.
+
+### Touch ONLY these files (10 paths)
+
+1. `scripts/push_vps_telemetry.sh` — the writer call with its arguments and timeout, the `manifest_failed` status and exit.
+2. `scripts/write_telemetry_export_manifest.py` (new).
+3. `scripts/export_research_ledgers.sh` (new).
+4. `src/polymarket_predictive_engine/data_coverage_report.py` (new).
+5. `src/polymarket_predictive_engine/cli.py` — the `data-coverage-report` command in `COMMANDS`.
+6. `tests/polymarket_predictive_engine/test_telemetry_export_manifest.py` (new) — tests 1-4.
+7. `tests/polymarket_predictive_engine/test_data_coverage_report.py` (new) — tests 5-11.
+8. `tests/fixtures/recorded/coverage_2026-08-21/` — five JSONs (one path entry).
+9. `tests/fixtures/recorded/README.md` — the provenance entry.
+10. `docs/POLYMARKET_CODEX_WORK_ORDERS.md` — this entry and its calibration row.
+
+Not touched: the whitelist, `MAX_FILE_KB`, `CSV_TAIL_LINES`, the credential guard module, the watchdog's ceiling table, the scheduler (scheduling the coverage report with its own ceiling is a deployment decision named in the day-after check, not built here), the resolution corpus.
+
+### Enumerated offline tests (S8/A10); each confirmed to FAIL with its guard reverted, caches purged
+
+1. `test_manifest_records_truncation_for_a_capped_csv` — a 1,000-line-after-header CSV copied as header + last 200: `source_lines_after_header = 1000`, `exported_lines_after_header = 200`, `truncated = true`, `truncation_rule = "header_plus_tail:200"`, both sha256 values equal the files' digests.
+2. `test_manifest_records_whole_files_and_skipped_oversized` — a 10-line CSV: `truncated = false`, `rule = "whole"`; a 400 KB JSON absent from the snapshot appears under `skipped` with `oversized_non_csv:400`; a > 300 KB CSV with 150 lines, which the copier passes through header + tail, reads `truncation_rule = "header_plus_tail:200"` and `truncated = false`; the manifest lists `telemetry/manifest.json` with its performance-directory source and excludes itself.
+3. `test_schema_sha256_changes_only_when_the_header_changes` — two CSVs with the same header and different rows share `schema_sha256`; a renamed column changes it; the value contains the fragment `sha` in its key so `credential_guard._inspect_field` exempts it (asserted by scanning a manifest built in `tmp_path`).
+4. `test_push_script_calls_the_writer_with_arguments_and_fails_closed` — static: the script text calls the writer after `copy_capped` and before `add -f telemetry` (`text.index("write_telemetry_export_manifest.py") < text.index("add -f telemetry")`) with the five arguments and `--whitelist-dir`, under `timeout 300`, sets `PUSH_STATUS="manifest_failed"` and `exit 1` on failure; the three existing guard tests pass unchanged.
+5. `test_smart_flow_classifies_ingestion_failure_on_the_recorded_fixture` — `fills_seen = 0` and no fills file → `ingestion_failure`, `producer_state = "manual_only"`, the fills path `producer_state = "no_producer_registered"`, evidence rule "absence of evidence: untested".
+6. `test_sharp_anchor_classifies_coverage_limitation` — `total_rows_fetched = 30`, `total_rows_joined = 0`, `total_stale_rows = 30` → `coverage_limitation` with `population = 30`, `eligible = 0`, `producer = "refresh-governance"`, `producer_cadence_seconds = 21600`.
+7. `test_calibration_classifies_join_failure` — `rejected_join_rows = 17420`, `clean_settled_joined_rows = 0` → `join_failure`, `population = 17420`.
+8. `test_implication_is_coverage_limitation_and_event_group_is_measured_negative` — `events_scanned = 300`, `classified_legs = 0` → `coverage_limitation`; `groups_with_complete_ask_side = 67`, `flagged_deviations = 0` → `measured_negative` with scope "within 67 complete-ask groups".
+9. `test_missing_or_non_finite_reads_unknown_and_stale_is_a_second_flag` — an absent artifact → `unknown`; `fills_seen = "nan"` → `unknown`; an unparseable `generated_at_utc` → `stale = true`, `age_seconds = null`; clock-advance on both lanes reading the registered table: a governance-lane fixture dated 6 h before the run clock reads `stale = false` and 8 h reads `true`; a trade-prints-lane fixture 15 min before reads `false` and 25 min reads `true`; classifications unchanged by the flag.
+10. `test_pnl_attribution_check_uses_the_ledger_and_refuses_a_truncated_one` — a synthetic manifest marking `shadow_positions.csv` truncated (source 1,000, exported 200) → `unknown_truncated_input` with both counts and no figure; with `truncated = false`, closed rows summing to −218.01 of which rows with a blank `signal_cohort` sum to −18.01 → `closed_total_pnl_usdc = −218.01`, `unattributed_pnl_usdc = −18.01`, `attributed_by_cohort` summing to −200.00; the cohort file's sum is reported under its own name with `comparable = false`.
+11. `test_no_manifest_means_no_figure_unless_the_source_is_declared` — the same ledger with no manifest → `unknown_no_manifest`; with `--ledger-source vps` → the figures above and `ledger_completeness_basis = "vps"`.
+
+### Day-after check
+
+After deployment, `origin/vps-telemetry` carries `telemetry/export_manifest.json` with one entry per mirrored file (its own excluded), `shadow_positions.csv` marked `truncated = true` with both line counts; `outputs/performance/telemetry_push_status.json` reads `ok` and `outputs/ops_scheduler/degraded_state_watchdog.json` reads `evaluations[registration_id="publication_bridge_unhealthy"].bridges[bridge="telemetry"].status = "ok"` (on a writer failure: `"manifest_failed"` and `state = "incident"`). The coverage report is not production-checkable until it is scheduled: the owner runs `data-coverage-report` once and reads `outputs/polymarket_model_governance/data_coverage_report.json` with the five classifications and `pnl_attribution_check.ledger_completeness_basis = "vps"`; scheduling it with a ceiling is a deployment decision.
+
+**Not authorised by this text:** any change to what the mirror publishes, any collector change, any export of the training corpora, any gate, any paper or live evidence, any merge.
+
+## WO-173 — Maker evidence summary: modelled versus realized, hypothetical fills and book coverage, adverse-selection status against the registered Tier-0 floor, and the size cap and reward-share model named as assumptions — `built` (2026-09-13; S8 ADMISSIBLE after three delta passes (16 → 5 → 1 → 0 defects); `registered-ancestry: a790e51 ancestor-of <build-sha> PASS` to be recorded at dispatch; class M; a new read-only reporting module beside the frozen study; `maker_carry_study.py`, `maker_fill_replay.py`, `maker_live_test.py`, M-A/M-B/M-C and every registered threshold are untouched; touches `src/`, the CLI, tests, recorded fixtures, the charter and this register → orchestrator-mergeable after line-audit unless the owner routes it; `registered-ancestry:` to be recorded at dispatch against the `origin/main` tip, `a790e51` at drafting. **Disclosure.** This work order exists because an external review received on 2026-09-13 and the owner's same-day instruction to the drafting agent (relayed in session, not recorded in the repository; it authorises neither build nor merge — authorization lives at the merge) found that maker profitability and capacity were stated in both directions — a retracted $63.62/day adverse-selection figure still printed in the README, a $1.68/day modelled carry that rests on three replay-confirmed hypothetical fills with 77.45% of opportunities lacking contemporaneous book state, a wallet scoreboard at zero rewards, and a flat capital curve that the sizing code's `max_size_multiple` partly imposes. The study's own `honesty_clause` already says simulated fills are unverifiable and net carry is an upper bound; what is missing is one artifact that places every such figure under its registered evidence class with its uncertainty. The README correction itself is a separate draft (WO-168, not yet registered). **Build 2026-09-13** on `claude/polymarket-quant-trader-9czyse`: both items built with all ten enumerated tests plus two more; sixteen mutation checks, fifteen confirmed to fail with their guard reverted and caches purged. The sixteenth — the conjunct requiring no section to read `source_absent` — cannot be isolated by any mutation, because a section reads `source_absent` exactly when its file is missing or unparseable, which is also when its source does; it is kept because the register names it and because the two could diverge if a future section were derived from more than one file, and the code says so at the site. The three sanitised fixtures reproduce this entry's figures exactly: `net_carry_usd_per_day = 1.68` against `target_usd_per_day = 3.33`, `share_model = "published_v2"`, one portfolio market at $470; `simulated_fills = 3`, `confirmed_fills = 3`, `confirmed_fill_ratio = 0.136364`, `no_contemporaneous_state_rate = 0.77451` giving a book-coverage rate of `0.22549`, `replay_days = 14.0`; `status = "below_tier0_minimum_3_of_10_fills"` with `implied_usd_per_day = 0.682944` and the 15-minute markout spanning −0.02 to 0.01 on 3 fills; `rewards_usd_total = 0` with `scoreboard = "flat_no_net_evidence"` and `read_only = true`; and `max_size_multiple = 5`, `cap_binding = true`, `curve_flat_beyond_usd = 500.0`, `flat_curve_is_model_bounded = true`. The charter's 2026-08-23 maker correction gains the dated WO-173 sentence. Sandbox diagnostic; the run of record is the VPS; not registered under the GLOBAL RULE until its squash-merge lands. **Build delta 1, after the independent line audit.** The most serious finding in this cycle: **54 real Polymarket condition identifiers survived the sanitiser** and were byte-identical to the telemetry mirror — 17 as the KEYS of `excluded_stale_condition_ids`, which the sanitiser walked past because it rewrote only values, and 37 embedded inside `official_snapshot.files_written` path strings, which it walked past because it rewrote only values that were exactly an identifier. The leak was invertible: the first written file's id is the first portfolio entry's condition id, so a reader could map an inert id back to a real one by position. `credential_guard._scan_json` returned clean and could not have done otherwise — it matches a hex only as a whole field value and never sees a dict key as a value — so item 2's reliance on it was necessary and not sufficient. The sanitiser now rewrites every hex identifier run wherever it occurs, as a value, as a key, or as a substring; both affected fixtures were regenerated and their README hashes updated; and a new test asserts the property directly, naming the three leaked identifiers as the regression they are. **Verified after the fix: zero of the identifiers in any committed fixture also appear in the source snapshot.** Three further findings fixed: `int(configured)` truncated a fractional Tier-0 floor, so a config of 12.9 gave a floor of 12 and 12 confirmed fills read `measured_on_12_fills` while the study's own non-truncating rule called the same count insufficient — verbatim the favourable channel this entry's A11 claims to have removed; the floor is now compared untruncated and its label prints the ceiling, so the printed number is never looser than the compared one. With the study absent, `max_size_multiple` and its source were read from policy settings before the absent-study branch, so "every capacity figure null" was false of two of the seven and the test enumerated only the five that were null; both now read null and the test enumerates every key. And a non-empty portfolio of unreadable entries read `cap_binding = true` vacuously, asserting that the cap binds on data that says nothing; it now reads null. Three tests added, ten mutation checks on the delta all detected. Sandbox diagnostic; the run of record is the VPS; not registered under the GLOBAL RULE until its squash-merge lands.)
+
+### The changes, exactly
+
+1. **`src/polymarket_predictive_engine/maker_evidence_summary.py` (new; `run_maker_evidence_summary(cfg, *, now: datetime | None = None)`, `None` → wall-clock UTC, the house form of `crypto_updown_model.py:185`;
+   CLI `maker-evidence-summary` — `COMMANDS` gains the name and `main()` gains
+   `elif args.command == "maker-evidence-summary": run_maker_evidence_summary(cfg)`).** Reads,
+   read-only, three artifacts, each with its producer and its absent display: `outputs/maker_carry/
+   maker_carry_study.json` (producer: the intraday study, WO-36), `maker_fill_replay.json` (producer:
+   the Tier-0 replay, WO-83), `maker_live_test.json` (producer: the read-only wallet scoreboard,
+   WO-88/89); each section carries `state ∈ {"present", "source_absent"}`; an absent, unparseable or unreadable file → that section `state = "source_absent"`,
+   every figure in it `null`, summary `status = "partial"`. No history CSV is read. Writes
+   `outputs/maker_carry/maker_evidence_summary.json` with `utils.write_json` (atomic) — `status ∈
+   {"ok", "partial"}`, `"ok"` iff every `sources.*.state = "present"`, no section has `state =
+   "source_absent"`, and `capacity.curve_state != "curve_unreadable"`; a `null` that is the honest reading
+   (an unmeasured haircut, a non-flattening curve, an absent `target_net_usd_per_day`) does not make
+   the summary partial:
+   - `modelled`: `net_carry_usd_per_day` (study `portfolio_net_carry_usd_per_day`),
+     `target_usd_per_day` (study `target_net_usd_per_day`; absent → `null`),
+     `evidence_class = "modeled"` (the registry's vocabulary) with `evidence_note = "simulated maker
+     fills; an upper bound per the study's honesty_clause"`, `honesty_clause` copied as a string,
+     `share_model` (study `share_model`) with `share_model_note = "assumed reward-sharing model, not
+     observed receipts"`, `portfolio_markets`, `portfolio_capital_usd`;
+   - `hypothetical_fills`: replay `simulated_fills`, `confirmed_fills`, `confirmed_fill_ratio`,
+     `last_in_queue_evaluable_opportunities`, `no_contemporaneous_state_opportunities`,
+     `no_contemporaneous_state_rate`, `contemporaneous_book_coverage_rate = round(1 − rate, 6)`
+     (`null` when the rate is absent, non-finite, or outside [0, 1]) with the literal note "share of
+     simulated fill opportunities with contemporaneous book state; distinct from the registered
+     markout-window `coverage`", `replay_days`, `quoting_basis`;
+   - `adverse_selection`: `status` ∈ {`"unmeasured"` (confirmed fills absent, non-finite, non-integral, or < 1),
+     `"below_tier0_minimum_<n>_of_<min>_fills"` (1 ≤ n < min), `"measured_on_<n>_fills"` (n ≥ min)}
+     with `<min>` = `max(MB_TIER0_MIN_CONFIRMED_FILLS, v)` where `v` is
+     `cfg.raw["maker_carry_study"]["mb_tier0_min_confirmed_fills"]` when finite and ≥ 0 (mirroring the
+     study's tighten-only `_mb_tighter_min` at `:2041-2047`; the registered constant is 10 at `:177`),
+     recorded as `adverse_selection.tier0_min_confirmed_fills = <min>` with `tier0_floor_source =
+     "config_tightened"` iff `<min> > MB_TIER0_MIN_CONFIRMED_FILLS`, else `"registered"`, `implied_usd_per_day` (replay `implied_adverse_usd_per_day`),
+     `markout_per_fill` by horizon with the replay's `realized_markout_distribution` min/max/count per
+     horizon as the uncertainty statement, `simulation_to_reality_haircut` (numeric or `null`) and
+     `simulation_to_reality_haircut_status ∈ {"reported", "unmeasured"}`, and the literal sentence
+     "fills below the Tier-0 floor do not bound adverse selection; the figure is a point on a
+     distribution whose width is the min/max shown";
+   - `realized`: scoreboard `rewards_usd_total`, `fills` (= `fill_attribution.maker_test_fills`),
+     `fills_last_24h` (= `maker_test_fills_last_24h`), `inventory_pnl_usd`, `scoreboard`,
+     `read_only`, `evidence_class = "live-real-money"` with `evidence_note = "read-only observation of a
+     human-run wallet; no order path; zero to date"`; any absent key → `null`;
+   - `capacity`: `max_size_multiple` = `maker_carry_study.maker_policy_settings(cfg)["max_size_multiple"]`
+     (registered default 5, `MAKER_POLICY_DEFAULTS`, `:185`), with `max_size_multiple_source ∈
+     {"policy_settings", "unknown"}` — absent, non-finite, non-integral or < 1 → `null` and `"unknown"` (the study itself coerces with `int()` at `:1871`, so `5.0` reads as 5);
+     `cap_binding` = every entry of the study's `portfolio` list has `size_multiple ==
+     max_size_multiple` (`null` when the list is empty or the cap is `null`); `capital_curve` copied
+     from the study; `curve_flat_beyond_usd` = after sorting by `capital_cap_usd` ascending, the
+     smallest cap `c` such that `capital_used_usd` at `c` equals `capital_used_usd` at every larger
+     cap, with at least one larger cap; `null` if the last two entries differ (a readable curve that
+     does not flatten keeps `capacity.curve_state = "readable"`), or when the curve is unreadable —
+     `capacity.curve_state ∈ {"readable", "curve_unreadable"}`, `curve_unreadable` iff fewer than two
+     entries or any entry has an absent or non-finite `capital_cap_usd`, `capital_used_usd` or
+     `portfolio_markets`; `capacity.state` is the section's `{"present", "source_absent"}` like every
+     other section (the study file absent → every capacity figure `null`); the flat segment = entries
+     with `capital_cap_usd ≥ curve_flat_beyond_usd`; `flat_curve_is_model_bounded = true` iff every
+     flat-segment entry has `portfolio_markets ≤ 1` or `cap_binding` is `true`, `false` otherwise,
+     `null` when `curve_flat_beyond_usd` is `null`; the literal note "a flat curve bounded by
+     `max_size_multiple` and by the number of portfolio markets is a modelling constraint, not a
+     measured market capacity; a curve that never flattens says nothing about capacity";
+   - `gates_reference`: the study's `maker_gates` copied as a parsed object without modification
+     (frozen; never recomputed);
+   - `generated_at_utc`: the run clock, the single anchor every `age_seconds` is computed from;
+   - `sources`: per input, path, `generated_at_utc`, `state ∈ {"present", "source_absent",
+     "timestamp_unreadable"}`, and `age_seconds` = run clock − `generated_at_utc` (`null`, state
+     `timestamp_unreadable`, when absent, unparseable, or later than the run clock); no staleness
+     threshold is applied — `age_seconds` is reported only;
+   - `paper_trading_invoked = false`, `live_trading_invoked = false`.
+2. **Recorded fixtures.** The three JSONs from the committed telemetry snapshot `origin/vps-telemetry`
+   `fcebaa2` (2026-08-21T02:00:09Z; study `generated_at_utc` 2026-08-20T10:46:56Z, replay
+   2026-08-21T01:42:15Z, live 2026-08-21T01:41:31Z), **sanitised per the README convention** —
+   wallet addresses, token, condition, market, asset identifiers, slugs and URLs replaced with
+   deterministic inert values of the same shape, type and length; no test asserts an identifier
+   value — under `tests/fixtures/recorded/maker_2026-08-21/`, each with the sha256 of the committed
+   (sanitised) file in the README entry, which records the source commit and the three timestamps.
+
+### A11 — bias-direction disclosure
+
+Labelling moves no number. Copying the study's figures beside the realized zeros can only make
+the modelled carry look less supported. Two channels are named: a `measured_on_<n>_fills` label
+on fewer fills than the registered Tier-0 floor would read as measured what the registry calls
+insufficient (favourable) — removed by the three-state status; and a `false` capacity flag on a
+curve that never flattens would assert a measured capacity about a segment that does not exist
+(favourable) — removed by the `null` rule. The gates block is copied, never recomputed, so this
+artifact can neither pass nor fail M-A/M-B/M-C.
+
+### Fail-safe sentence (S5)
+
+An absent, unparseable, or unreadable source yields `source_absent` for its section with every
+figure `null` and `status = "partial"`; a non-finite or out-of-range numeric field yields `null`;
+`adverse_selection.status` reads `unmeasured` unless the confirmed-fill count is a finite number
+with an integral value ≥ 1 (`<n>` printed as that integer); the capacity flag is `null` whenever the curve is unreadable or does not flatten and `true`
+only on the stated rule; an unreadable timestamp yields a `null` age and `timestamp_unreadable`;
+writes are atomic; nothing is written to any producer's artifact.
+
+### Touch ONLY these files (9 paths)
+
+1. `src/polymarket_predictive_engine/maker_evidence_summary.py` (new).
+2. `src/polymarket_predictive_engine/cli.py` — the `COMMANDS` entry and the dispatch branch.
+3. `tests/polymarket_predictive_engine/test_maker_evidence_summary.py` (new) — tests 1-10.
+4. `tests/fixtures/recorded/maker_2026-08-21/maker_carry_study.json` (new, sanitised).
+5. `tests/fixtures/recorded/maker_2026-08-21/maker_fill_replay.json` (new, sanitised).
+6. `tests/fixtures/recorded/maker_2026-08-21/maker_live_test.json` (new, sanitised).
+7. `tests/fixtures/recorded/README.md` — the provenance entry.
+8. `docs/POLYMARKET_CODEX_WORK_ORDERS.md` — this entry and its calibration row.
+9. `docs/POLYMARKET_QUANT_MODE_CHARTER.md` — one dated sentence under the 2026-08-23 verification pass pointing to the artifact as the place where the maker figures carry their evidence class.
+
+### Enumerated offline tests (S8/A10); each confirmed to FAIL with its guard reverted, caches purged
+
+1. `test_modelled_block_on_the_recorded_fixtures` — with the run clock later than every `generated_at_utc`, `status = "ok"`; `net_carry_usd_per_day = 1.68`, `target_usd_per_day = 3.33`, `evidence_class = "modeled"`, `share_model = "published_v2"`, `portfolio_markets = 1`, `portfolio_capital_usd = 470.0`, the honesty clause equal to the fixture's string.
+2. `test_hypothetical_fills_and_coverage` — `simulated_fills = 3`, `confirmed_fills = 3`, `confirmed_fill_ratio = 0.136364`, `no_contemporaneous_state_rate = 0.77451`, `contemporaneous_book_coverage_rate = 0.22549` (rounded to 6 places), `replay_days = 14.0`.
+3. `test_adverse_selection_status_reads_the_tier0_floor` — on the fixture `status = "below_tier0_minimum_3_of_10_fills"`, `implied_usd_per_day = 0.682944`, the 15m horizon shows `min = −0.02`, `max = 0.01`, `count = 3`, `simulation_to_reality_haircut = null` with `simulation_to_reality_haircut_status = "unmeasured"`; with `confirmed_fills = 0` the status reads `unmeasured`; with `confirmed_fills = 10` it reads `measured_on_10_fills` and `tier0_floor_source = "registered"`; with the config tightened to 12 and `confirmed_fills = 10` it reads `below_tier0_minimum_10_of_12_fills` and `config_tightened`; with the config set to 5 the floor stays 10; with `confirmed_fills = "nan"` or `2.5` it reads `unmeasured`; `10.0` reads as 10.
+4. `test_realized_block_reads_the_scoreboard` — `rewards_usd_total = 0`, `fills = 0` (from `fill_attribution.maker_test_fills`), `fills_last_24h = 0`, `scoreboard = "flat_no_net_evidence"`, `read_only = true`, `evidence_class = "live-real-money"`.
+5. `test_capacity_flag_is_model_bounded_on_a_one_market_portfolio` — on the fixture (caps 250, 500, 1000, 2000, 5000 with used 0, 470, 470, 470, 470 and markets 0, 1, 1, 1, 1; `portfolio[0].size_multiple = 5`): `max_size_multiple = 5`, `max_size_multiple_source = "policy_settings"`, `cap_binding = true`, `curve_flat_beyond_usd = 500.0`, `flat_curve_is_model_bounded = true`; on a synthetic curve whose used capital keeps rising through the last two entries with 4 markets: `curve_flat_beyond_usd = null` and the flag `null`; on a synthetic flat curve with 4 markets and `size_multiple = 2` against a cap of 5: the flag `false`.
+6. `test_gates_block_is_copied_never_recomputed` — `summary["gates_reference"] == study["maker_gates"]` as parsed objects and their `json.dumps(..., sort_keys=True)` strings are equal; altering a study threshold in the fixture changes the copy and nothing else.
+7. `test_missing_sources_fail_closed` — with `maker_live_test.json` absent: `realized.state = "source_absent"`, every realized figure `null`, `status = "partial"`; a non-finite `portfolio_net_carry_usd_per_day` reads `null`; an empty `capital_curve` reads `curve_flat_beyond_usd = null`, the flag `null`, `capacity.curve_state = "curve_unreadable"`, `status = "partial"`; with the study file absent `capacity.state = "source_absent"` and every capacity figure `null`; a rate of 1.5 reads `contemporaneous_book_coverage_rate = null`; a `generated_at_utc` later than the run clock reads `status = "partial"`.
+8. `test_source_age_advances_with_the_run_clock` — with an injected run clock, `sources.maker_carry_study.age_seconds` equals the clock minus 2026-08-20T10:46:56Z in seconds; advancing the clock by 3600 s adds exactly 3600; a `generated_at_utc` absent, unparseable, or later than the clock → `age_seconds = null`, `state = "timestamp_unreadable"`.
+9. `test_cli_registers_maker_evidence_summary` — `"maker-evidence-summary" in COMMANDS`.
+10. `test_capacity_flag_is_never_false_on_an_unreadable_curve` (property test, `hypothesis`) — over random lists of `(capital_cap_usd, capital_used_usd, portfolio_markets)` in which at least one entry has an absent or non-finite field, the flag is never `false`.
+
+### Day-after check
+
+On the VPS after one run of `maker-evidence-summary`: `outputs/maker_carry/maker_evidence_summary.json` exists with `status = "ok"`, `sources.*.state = "present"` and `age_seconds` non-null for all three, `modelled.evidence_class = "modeled"`, `realized.rewards_usd_total` equal to the scoreboard's value, `adverse_selection.status` naming the confirmed-fill count against the floor, and `capacity.flat_curve_is_model_bounded` present; readable off-box at `origin/vps-telemetry:telemetry/outputs/maker_carry/maker_evidence_summary.json` (the directory is whitelisted). Scheduling it beside the study is a deployment step named here, not built.
+
+**Not authorised by this text:** any change to M-A/M-B/M-C, the study, the replay, the scoreboard, any gate, any paper or live evidence, any merge.
+
+## WO-169 — Units and settlement grading in the closing-line and verdict chain: explicit per-share and per-dollar fields, verified settlement separated from the last quote, cluster-bootstrap inference beside the sign test, population accounting, and a recomputation command whose run of record is the VPS — `built` (2026-09-13; S8 ADMISSIBLE after four delta passes (17 → 14 → 4 → 1 → 0 defects); `registered-ancestry: a790e51 ancestor-of <build-sha> PASS` to be recorded at dispatch; class F: it touches `profit_verdict.py`, the registered legacy verdict engine, by ADDING a non-binding measurement block; the binding Gate A/B/C rules, thresholds, alpha, floors, field names and verdict logic are unchanged, per the owner's WO-87 decision of 2026-07-14 that the binding metric is not swapped mid-study; frozen surface → OWNER MERGE after line-audit; `registered-ancestry:` to be recorded at dispatch against the `origin/main` tip, `a790e51` at drafting. **Disclosure.** This work order exists because an external review received on 2026-09-13 and the owner's same-day instruction to the drafting agent (relayed in session, not recorded in the repository; it authorises neither build nor merge — authorization lives at the merge) found that `clv = line_price − entry_price` (a per-share price difference) is consumed by `profit_verdict.py` as "net settlement return per dollar", that a last observed quote is graded as if it were a settlement payout, and that the sign test tests win frequency, not expectancy. **The figures in this entry were computed by the drafting agent in an agent sandbox on 2026-09-13 from `git show origin/vps-telemetry:telemetry/outputs/polymarket_model_governance/closing_line_final_history.csv` at `fcebaa2` (snapshot 2026-08-21T02:00:09Z; sha256 `4b66d07f1050125dbe01d39220fafc1261929291090b9e565abba4d6b4b17b33`), a committed repository snapshot, not a VPS or `paths.output_root` path; no amendment in force permits computing on production telemetry in a sandbox; the figures are diagnostic and not verification of record.** The corrected measurement is unfavourable to the tested strategy on that ledger (−8.65% per dollar against −1.39% per share) and cannot produce a YES; whether it should REPLACE the binding metric is an owner decision this text does not make. **Recorded for the owner, not touched (frozen surface):** on the binding path `utils.safe_float("nan")` returns NaN, a `clv = "nan"` row passes the Gate A filter at `profit_verdict.py:362-364`, a NaN unit mean makes `mean <= 0` read False at `:622-625`, and Gate A can then reach `pass` on the sign test alone at `:633` — a fail-open of the A2 class on a frozen surface; the mirrored ledger contains no such row. **Build 2026-09-13** at `8daeb29` on `claude/polymarket-quant-trader-9czyse`: all four items and all ten enumerated tests built; thirteen mutation checks run, each confirmed to fail with its guard reverted and bytecode caches purged; the full offline suite green at 2257 passed, 3 skipped (2026-07-27 amendment). The reconcile command reproduces this entry's figures exactly on the recorded fixture: `per_share.unit_mean = -0.013943`, `per_dollar.unit_mean = -0.086501`, 22 of 55 units positive, `mean_taker_fee_per_dollar = 0.026809`, `net_after_costs = -0.12331`, 90% cluster interval `[-0.281562, 0.114739]`, `cluster_standard_error = 0.118009`, `line_price_strictly_inside_0_01_0_99 = 21`, `settlement_verified_finals = 0`, `would_bind.gate_a = fail`, `state = ok`. **Build delta 1 (touch list, 11 paths → 12).** The recorded fixture terminates its lines with CRLF and `.gitattributes` carries `*.csv text eol=lf`, so the first staged blob hashed `1098f71d474a628ebdc4c4840d604f168e872c14cc493833fe4ad45b0d718447`, not the recorded `4b66d07f...b33`: a fresh checkout would have hashed differently and test 10 would have failed from a clone, destroying the byte identity this entry names as the provenance proof. `.gitattributes` is therefore touched — one appended line exempting that single path from end-of-line normalisation — and test 10 asserts the exemption, the 91 CRLF terminators and the sha256 together. A fresh clone of the branch was checked: the fixture hashes `4b66d07f...b33` and the three test files pass there (38 tests). No other path outside the registered eleven was touched. The build remains a sandbox diagnostic; the run of record is the VPS, and this entry is not registered under the GLOBAL RULE until its squash-merge lands. **Build delta 2, after the independent line audit (4 major, 11 minor).** Three were records this build had not yet committed and now has: the dated charter record (touch-list item 10), the registry sentence (item 11) and the WO-87 cross-reference (item 9), all landed with delta 1's commit. The fourth was a defect: `_read_resolution_observations` opened the corpus without `errors=`, so a single non-UTF-8 byte raised `UnicodeDecodeError` past the `(OSError, csv.Error)` catch and would have aborted the entire closing-line build, leaving every downstream reader on a stale artifact — contrary to this entry's own fail-safe sentence and to item 2's "best-effort". It now reads with `errors="replace"`, as `utils.read_csv_rows` does, and catches the wider set. Seven minor findings are also fixed: an absent corpus with no graded token returned "ok" without opening the file and now returns `resolution_corpus_unavailable`; two corpus shapes borrowed a neighbouring observation's quality as their reason (a lone `clean_settlement` with no winner read as `clean_settlement`, which reads as verified, and a blank quality read as `token_not_in_corpus`, which is false) and now carry `clean_settlement_without_winning_token_id` and `blank_resolution_quality` — **this extends item 2's registered closed set by exactly those two literals, and the extension is recorded here rather than left implicit**; a non-finite `clv` serialised as the string `nan` and now serialises blank; `mean_taker_fee_per_dollar` was averaged over every Gate A unit while the mean it is subtracted from covers only per-dollar-eligible units, so a final at `entry_price == 1.0` contributed a zero fee without contributing to the mean and raised `net_after_costs` above what its population supports — it is now averaged over the same units, with Gate B's own figure kept beside it as `gate_b_mean_taker_fee_per_dollar`; the block's key set is now uniform across `state`, so an absent ledger returns nulls rather than missing keys; `by_line_basis` now resolves at this entry's literal `by_line_basis[<value>]` path with the nested `counts` kept as a one-release alias; the reconcile command no longer removes its destination before the replacement is in place, nor touches a sibling path outside `--output-dir`; and the dead `_finite` helper added to a frozen-surface module is removed. Four further findings are recorded and not changed: `would_bind`'s third branch fails closed on a non-finite mean where this text would have let it fall through (safe direction, unreachable on real data); the "`""` on every pre-change row" invariant holds only because a pre-WO-169 row with live quotes is re-graded, which is the module's pre-existing behaviour and not a guess; and the two audit findings about the audited tree's cleanliness, which delta 1's commit resolved. Five tests were added for the delta-2 fixes. All are non-binding or fail-closed; none changes a gate, a threshold, the verdict or the frozen fail-open recorded above.)
+
+**Why this exists.** `closing_line.py:242` and `:370` compute `clv = line_price − entry_price`
+in probability points per share and also emit `clv_pct = clv / entry_price`, the return per
+dollar staked; `profit_verdict.py:362` reads `clv` as `settlement_return` and every rule string,
+docstring and JSON label (`:13`, `:92`, `:182`, `:187`, `:330`) calls it "net settlement return
+per dollar"; Gate B (`:389-392`, `:663-666`) subtracts a per-dollar taker fee `rate × (1 − p)`
+and per-dollar haircuts from that per-share figure. A two-cent gain on a ten-cent purchase is a
+20% return, not 2%. On the snapshot named above (90 rows) the engine's own clustering gives 55
+units and a per-share unit mean of −0.013943 (the recorded figure); dividing each final by its
+entry price under the same clustering gives −0.086501 per dollar. 21 of the 70 eligible finals
+have a `line_price` strictly inside (0.01, 0.99): they are the last price-history observation at
+or before `close_time`, not a settlement payout, and no field says so. WO-87 found in July that
+the graded quantity was settlement return rather than closing-line value and the owner chose
+"relabel, don't swap"; WO-169 finds that the relabel named the wrong unit. The sign test (`:268`,
+exact binomial under `p = 0.5` on the count of positive units) tests whether more than half the
+units were profitable; a strategy can be profitable with fewer than half its units winning and
+unprofitable with more, and dividing by a positive entry price changes no sign, so the corrected
+mean's p-value is the same 0.947605 while the mean itself changes six-fold.
+
+### The changes, exactly
+
+1. **Explicit units on every scored row (`closing_line.py`).** Two field lists. `LEDGER_FIELDS` is
+   today's `POSITION_FIELDS` plus exactly `line_basis` — a point-in-time fact fixed at grading (which
+   path produced the final), written once when the final is first recorded, restored by
+   `_load_final_history`, and `""` on every row recorded before this change, never guessed —
+   and `closing_line_final_history.csv` is written with it, so the append-only ledger gains that one
+   column and no recorded value is rewritten (its docstring's "nothing is backfilled or re-estimated"
+   holds); the five run-dependent `settlement_*` columns stay out of the ledger. `POSITION_FIELDS` (the per-run
+   `closing_line_value_positions.csv`) gains `clv_per_share` (identical value to `clv`),
+   `return_per_dollar` (identical value to `clv_pct`; `""` when `entry_price` is not in (0, 1)),
+   `line_basis` ∈ {`"last_quote_before_close"` (the quote path, `line_kind == "closing"`),
+   `"official_price_history_close"` (`_price_history_final_row`), `"latest_provisional"`, and `""`
+   for every row recovered from a ledger row written before this change}, `settlement_payout` ∈
+   {`0`, `1`, `""`}, `settlement_source` (`""` or `"resolution_corpus_v1"`), `settlement_reason`
+   (`""` when verified, else one of the reasons in item 2), `settlement_return_per_share`
+   (`payout − entry_price`, `""` when unverified) and `settlement_return_per_dollar`
+   (`payout / entry_price − 1`, `""` when unverified); on a verified row whose `entry_price` is not in
+   (0, 1) both returns are `""` and `settlement_reason = "invalid_entry_price"`. Row builders
+   (`position_clv_row`, `_price_history_final_row`) emit every `settlement_*` field as `""`; the join
+   in `build_closing_line_value` fills them for `line_kind == "closing"` rows only, so
+   `settlement_join.positions_checked == final_line_positions` by construction, and a provisional row
+   carries `settlement_reason = "not_final"`. `clv`, `clv_pct`, `beat_close`, `line_kind` and every existing column
+   keep their names and values. `evidence_semantics` in `closing_line_value.json` gains one literal
+   entry per new field. Consumers (A9, every one a key-based read, none pinning the field set;
+   `artifact_contracts.py` has no closing-line or verdict entry): `closing_line_value.json` —
+   `profit_verdict.py:574`, `promotion_review.py:185`, `research_focus.py:1345`, `dashboard.py:5458`,
+   `evidence_history.py:120`, `scripts/audit_polymarket_local_history.py:454`;
+   `closing_line_value_positions.csv` — `profit_verdict.py:672`, `edge_attribution.py:188`;
+   `closing_line_final_history.csv` — `profit_verdict.py:338`, `price_history_collector.py:135`;
+   `profit_verdict.json` — `operating_state.py:676`; `build_profit_verdict` — single caller
+   `dashboard.py:5740` (there is no `profit-verdict` CLI command), which embeds the whole payload,
+   so the dashboard payload grows by `measurement_v2` and the artifact refreshes on dashboard payload
+   render; `_clustered_focus_finals` — single caller `profit_verdict.py:594`;
+   `position_clv_row` and `_bootstrap_mean_ci` — imported by `smart_flow_clv.py:20-27`, whose
+   `write_csv(..., fieldnames=SMART_FLOW_POSITION_FIELDS)` drops the added keys
+   (`extrasaction="ignore"`), so its output is unchanged.
+2. **Verified settlement from the WO-101 resolution corpus (`closing_line.py`; best-effort join
+   with its coverage stated).** Producer: the three resolution collectors (`resolution_collector`,
+   `websocket_resolution_collector`, `historical_backfill`) append to
+   `cfg.output_root / polymarket_training / resolution_corpus_v1.csv`; none of them selects markets
+   from the closing-line ledger today, so coverage of the shadow cohort's tokens is not guaranteed
+   and `settlement_verified_finals` may legitimately read 0. The producer-side change that would
+   guarantee coverage — `collect-resolutions` enqueuing every `market_slug` in
+   `closing_line_final_history.csv` within `max_markets`, the `price_history_collector._priority_final_rows`
+   template — is a named prerequisite work order, not yet drafted (its number is assigned at its registration), not built here; until it lands the join is
+   best-effort and every unverified row carries its reason. The corpus is read in one streaming
+   pass filtered on the graded token ids (no per-position fan-out; the pre-event diagnostic at
+   `profit_verdict.py:428-446` is the template); an `OSError` or a missing file → every row
+   `settlement_source = ""`, `settlement_reason = "resolution_corpus_unavailable"`, summary
+   `settlement_join.state = "resolution_corpus_unavailable"`. A position is settlement-verified when
+   the corpus holds at least one observation with its exact non-empty `token_id`,
+   `resolution_quality == "clean_settlement"` (the literal the collectors write), and a non-empty
+   `winning_token_id`; `payout = 1` if `winning_token_id == token_id` else `0`. Reasons, the corpus-join subset that
+   populates `settlement_join.unverified_by_reason`, closed: `missing_token_id`, `token_not_in_corpus`,
+   `conflicting_observations`, `resolution_corpus_unavailable`, and any other `resolution_quality`
+   string verbatim; the two row-level reasons defined in item 1 — `not_final` (never counted, since
+   the join runs over closing rows only) and `invalid_entry_price` (on a verified row) — complete the
+   set of values `settlement_reason` can take. `settlement_join` reports `positions_checked`, `verified`, `unverified_by_reason`.
+   The join writes `closing_line_value_positions.csv` and the JSON only.
+3. **Non-binding `measurement_v2` block in `profit_verdict.json` (`profit_verdict.py`).** The only
+   edits to `build_profit_verdict` are one call to a new `_build_measurement_v2(final_history_path, positions_path, clusters,
+   cluster_rows, clustering_coverage, settings, diagnostic_substrings)` — `build_profit_verdict`
+   passes its two governance-root paths — and one payload key.
+   `_clustered_focus_finals`, `_sign_test_p`, `_fixture_tags`, `_entries_per_day`,
+   `_build_pre_event_clv_diagnostic`, the Gate A/B/C branches, and the `gates`, `verdict` and
+   `extension_resolution` construction are unchanged (verified by the line audit's diff, not by a
+   test). The block carries `"binding": false` and the literal note "Informational under WO-87's
+   owner decision of 2026-07-14: the binding Gate A metric is the per-share figure above; replacing
+   it requires a dated owner amendment". Contents, with `state ∈ {ok, unavailable, accounting_mismatch}`:
+   - `population`, two tiers, from a second `read_csv_rows` of the same ledger inside the new
+     function: `final_history_rows` (all rows; an absent or empty ledger → `state = "unavailable"`),
+     `closing_rows`; tier one applies Gate A's four filters in Gate A's order —
+     `excluded_by_reason.diagnostic_cohort`, `missing_return` (`safe_float(clv) is None`),
+     `missing_unit_key` — so `closing_rows = eligible_finals + Σ tier-one exclusions` and
+     `eligible_finals == clustering_coverage.eligible_finals` and `units == len(clusters)`; tier two:
+     `per_dollar_eligible_finals = eligible_finals − invalid_entry_price − non_finite_return`
+     (`entry_price` not in (0, 1); `clv` non-finite), with `per_dollar_units` the count of units with
+     at least one per-dollar-eligible final. Both identities asserted; a failure reads
+     `state = "accounting_mismatch"`.
+   - `by_line_basis`: counts of eligible finals per `line_basis` value including the `""` bucket for
+     rows recovered from pre-deployment ledger rows, `line_price_strictly_inside_0_01_0_99` (the
+     count with `0.01 < line_price < 0.99`; basis: the coarsest venue tick, 0.01, from either bound),
+     `line_price_strictly_inside_0_10_0_90` (WO-87's near-settled convention, for continuity),
+     `line_price_unparseable` (missing or non-finite, never counted as inside), and
+     `settlement_verified_finals` (from `closing_line_value_positions.csv`'s `settlement_payout`,
+     joined by `shadow_position_id`; 0 when that file is absent);
+   - `per_share` (the binding basis): unit mean, units positive, sign-test p — Gate A's numbers,
+     repeated for the side-by-side; `null` and `units = 0` when there are no eligible finals;
+     `unit_mean` and `sign_test_p` `null` with `reason = "non_finite_unit_mean"` whenever Gate A's
+     mean is not finite, the frozen Gate A field being left exactly as the binding path emits it;
+   - `per_dollar`: `unit_mean` = unit mean of `clv / entry_price` over per-dollar-eligible finals
+     (`null` when none; the last-quote basis), `settlement_unit_mean` = unit mean of
+     `settlement_return_per_dollar` over settlement-verified finals only, joined from
+     `closing_line_value_positions.csv` by `shadow_position_id` like `settlement_verified_finals`
+     (`null` when that file is absent or no row is verified),
+     `units_positive`,
+     `mean_taker_fee_per_dollar` (the same fee tuple Gate B reads), `net_after_costs` = unit mean
+     − the registered exit and adverse-selection haircuts − the mean fee;
+   - `inference`: market-cluster percentile bootstrap of the per-dollar unit mean — **1,000 draws**
+     (basis: `closing_line.py:456`'s `bootstrap_iterations` default), **seed 20260913**, each draw
+     resampling the unit means, taken in `sorted(cluster_rows)` order, with replacement, `n_units` per
+     draw; interval `[m[49], m[949]]` of the 1,000 sorted resampled means (the 5th and 95th
+     percentiles by that index convention; basis: the registry's H2/H3 90% clustered-interval
+     convention); `null` with fewer than **3** units (basis: 3 is the smallest `n` at which the
+     probability that every draw hits the minimum unit, `n^−n`, falls below 0.05 — `2^−2 = 0.25`,
+     `3^−3 = 0.037` — so the `m[49]` bound no longer collapses to the unit minimum); the cluster
+     standard error `sd(unit means, ddof = 1) / √n_units`, `null` when `n_units < 2`; and the sentence "the sign test compares
+     the count of positive units with a fair coin; it is not a test of expected profit and is
+     unchanged by the unit correction";
+   - `would_bind`: Gate A's four branches in Gate A's order on the per-dollar basis —
+     `clustering_coverage.state != "sufficient"` → `pending`; `per_dollar_units < minimum_final_samples` →
+     `pending`; per-dollar unit mean `null` or ≤ 0 → `fail`; the sign test on per-dollar-positive
+     units out of `per_dollar_units` (equal to `units` on the fixture, 55 = 55) with p ≤ alpha → `pass`,
+     else `pending` —
+     and `would_bind.gate_b = "not_evaluated"` unless `would_bind.gate_a == "pass"`, then `pass`
+     iff `net_after_costs > 0`; labelled informational.
+   Every comparison reads False on a missing or non-finite operand; the block never touches
+   `verdict`, `extension_resolution` or `gates`.
+4. **Recomputation command (`cli.py`).** `profit-verdict-reconcile --final-history PATH --output-dir
+   DIR [--positions PATH] [--force]` runs item 3's arithmetic on any final-history CSV with no
+   config (the `load_config` exemption at `cli.py:344` gains this command beside `config-check`), no
+   `output_root`, no network: it copies `--final-history` to `<tempdir>/closing_line_final_history.csv`
+   and `--positions`, if given, to `<tempdir>/closing_line_value_positions.csv`, calls
+   `_clustered_focus_finals(SimpleNamespace(governance_root=tempdir), ...)` unchanged, uses
+   `profit_verdict.DEFAULT_SETTINGS` (12, 0.10, 0.005, 0.005, 0.05) and
+   `closing_line.DEFAULT_DIAGNOSTIC_COHORT_SUBSTRINGS` literally, records them under `settings_used`,
+   and writes `reconciliation.json` (input sha256 and row count, the
+   legacy per-share figures, the corrected per-dollar figures, the interval, the population and
+   line-basis accounting, and a `differences` list with exactly three entries named `unit_mismatch`,
+   `settlement_unverified`, `inference_method`) and `report.md`, atomically, refusing an existing
+   output directory without `--force` (exit 2, nothing written). **The run of record is on the VPS**
+   against `outputs/polymarket_model_governance/closing_line_final_history.csv`; no sandbox run of
+   this command is committed under `research/` (the first draft proposed one; withdrawn because no
+   amendment in force permits computing on production telemetry in a sandbox).
+5. **Recorded fixture.** The snapshot named in the disclosure is committed byte-identical as
+   `tests/fixtures/recorded/closing_line_final_history_2026-08-21.csv` (90 rows). Its `market_id`
+   values are 0x-prefixed 64-hex condition ids and its `token_id` values are public on-chain token
+   ids; they are retained verbatim — departing from the README's sanitisation convention and the
+   `vps_discovery_starvation_2026-07-16.json` precedent — because byte identity with `fcebaa2` is
+   the provenance proof and the market and fixture clustering must reproduce 55 units; the README
+   entry says so, and test 10 runs the key-aware scanner `credential_guard._scan_csv`, which exempts
+   public-identifier keys, and asserts no finding. Running tests on a committed recorded fixture is
+   within the 2026-07-27 amendment.
+
+### A11 — bias-direction disclosure, one line per channel
+
+- Per-dollar re-weighting: data-dependent (a final at entry 0.05 and line 0.999 reads +18.98 per
+  dollar against +0.949 per share); on this ledger it is unfavourable to the strategy (−8.65%
+  against −1.39%); structurally the direction is unknown.
+- Settlement-verified subset: selected by collector coverage, not by outcome; its mean can differ
+  from the full set in either direction; direction unknown.
+- Percentile bootstrap on a distribution bounded at −1 and unbounded above (unit SD 0.875, n = 55):
+  the interval's coverage error is unstated; the interval is reported as descriptive uncertainty.
+- Sign test: invariant to the unit correction; no channel.
+- A later owner decision to swap the binding metric would be post-hoc regardless of direction, and
+  is recorded as such.
+
+### Fail-safe sentence (S5)
+
+Every fail branch ends in no change to the verdict. `measurement_v2` never writes `verdict`,
+`gates` or `extension_resolution`; an absent or empty final-history file leaves the block
+`state = "unavailable"`; a missing or unreadable resolution corpus (`OSError` caught) leaves every
+settlement field empty with the reason recorded; an empty `token_id` → `missing_token_id`; a token
+absent from the corpus → `token_not_in_corpus`; a non-finite or out-of-range entry price excludes
+the final from the per-dollar figures with its reason counted and is never divided; a missing or
+non-finite `line_price` is counted under `line_price_unparseable`, never as inside; zero eligible
+finals → every mean and p-value `null`, `units = 0`, and `would_bind.gate_a` not `pass`; a
+population identity failure reads `state = "accounting_mismatch"`; fewer than 3 units gives a
+`null` interval; the reconcile command refuses an existing output directory without `--force` and
+writes atomically; the ledger is written with `LEDGER_FIELDS` — today's list plus exactly `line_basis` — and no recorded value is rewritten; the new positions-file
+columns are `""` wherever a value is not known.
+
+### Touch ONLY these files (11 paths)
+
+1. `src/polymarket_predictive_engine/closing_line.py` — items 1-2.
+2. `src/polymarket_predictive_engine/profit_verdict.py` — item 3 (additive; the functions and branches named in item 3 unchanged, verified by the line audit's diff).
+3. `src/polymarket_predictive_engine/cli.py` — the `profit-verdict-reconcile` command in `COMMANDS` and the `load_config` exemption at `:344` (item 4).
+4. `tests/polymarket_predictive_engine/test_closing_line.py` — tests 1-3.
+5. `tests/polymarket_predictive_engine/test_profit_verdict.py` — tests 4-8.
+6. `tests/polymarket_predictive_engine/test_verdict_reconcile.py` (new) — tests 9-10.
+7. `tests/fixtures/recorded/closing_line_final_history_2026-08-21.csv` (new).
+8. `tests/fixtures/recorded/README.md` — provenance entry (branch, commit, snapshot time, sha256, the identifier-retention departure and its reason).
+9. `docs/POLYMARKET_CODEX_WORK_ORDERS.md` — this entry, its calibration row, and a dated cross-reference at the end of WO-87's DECIDED paragraph: "Amendment 2026-09-13 (WO-169; effective only if merged): WO-169 finds that the relabel named the wrong unit — `clv` is per share; the per-dollar figure is reported beside it, non-binding, pending the owner's decision."
+10. `docs/POLYMARKET_QUANT_MODE_CHARTER.md` — the dated record with the legacy-versus-corrected table computed by test 4 on the recorded fixture, carrying the disclosure sentence from this status line verbatim and the label "diagnostic; not verification of record".
+11. `docs/EXPERIMENT_REGISTRY.md` — one dated sentence appended to the "Semantics clarification" paragraph: "Amendment 2026-09-13 (WO-169; effective only if merged): the graded quantity is the per-share difference `line_price − entry_price`, not a per-dollar return; the per-dollar figure is reported beside it and binds nothing until a further owner decision."
+
+Not touched: the dashboard, operating state, IPS renderer, cost ledger, `artifact_contracts.py`, the three resolution collectors (the prerequisite work order), and every frozen gate.
+
+### Enumerated offline tests (S8/A10); each confirmed to FAIL with its guard reverted, caches purged
+
+1. `test_units_two_cent_gain_on_ten_cent_entry` — `position_clv_row` with entry 0.10 and a closing quote at 0.12: `clv = clv_per_share = 0.02`, `clv_pct = return_per_dollar = 0.2`, `line_basis = "last_quote_before_close"`.
+2. `test_a_near_one_last_price_is_not_settlement_and_the_ledger_keeps_its_columns` — through `build_closing_line_value` with `_fetch_price_history_close_line` monkeypatched to return a line at 0.999 and no corpus file: the positions row reads `line_basis = "official_price_history_close"`, `settlement_payout = ""`, `settlement_reason = "resolution_corpus_unavailable"`; `_price_history_final_row` itself emits every `settlement_*` field as `""`; a provisional row reads `"latest_provisional"` with `settlement_reason = "not_final"`; after `build_closing_line_value` the ledger's header equals today's list plus exactly `line_basis`, a freshly graded final's `line_basis` is recorded in the ledger and restored on the next run, and a row recovered from a ledger row recorded before this change carries `line_basis = ""` in both files.
+3. `test_settlement_join_from_the_resolution_corpus` — a corpus with `clean_settlement` and `winning_token_id` equal to the position's token gives `settlement_payout = 1`, `settlement_return_per_share = 1 − 0.4 = 0.6`, `settlement_return_per_dollar = 1 / 0.4 − 1 = 1.5`; a losing token gives `0`, `−0.4`, `−1.0`; quality `unresolved_active` → unverified with that reason; two clean observations naming different winners → `conflicting_observations`; a token absent from the corpus → `token_not_in_corpus`; an empty position token → `missing_token_id`; a missing corpus file → `settlement_join.state = "resolution_corpus_unavailable"`; a recovered row with `entry_price = 0` and a verified payout → `settlement_return_per_share = ""`, `settlement_return_per_dollar = ""`, `settlement_reason = "invalid_entry_price"`.
+4. `test_measurement_v2_population_accounting_on_the_recorded_fixture` — on the recorded fixture: `final_history_rows = 90`, `closing_rows = 90`, `excluded_by_reason.diagnostic_cohort = 20`, `eligible_finals = 70 = clustering_coverage.eligible_finals`, `units = 55 = len(clusters)`, `per_dollar_eligible_finals = 70`, `per_share.unit_mean = −0.013943`, `per_dollar.unit_mean = −0.086501`, `per_dollar.units_positive = 22`, `per_dollar.mean_taker_fee_per_dollar = 0.026809`, `per_dollar.net_after_costs = −0.12331` (= −0.086501 − 0.005 − 0.005 − 0.026809), `line_price_strictly_inside_0_01_0_99 = 21`, `by_line_basis[""] = 70`, `settlement_verified_finals = 0`, `inference.cluster_standard_error = 0.118009` (sample SD 0.875175 / √55), `would_bind.gate_a = "fail"`, `would_bind.gate_b = "not_evaluated"`; both identities hold and `state = "ok"`.
+5. `test_legacy_gate_a_values_unchanged_on_the_recorded_fixture` — `gates.A_edge_exists` reads `independent_market_units = 55`, `settled_finals_total = 70`, `unit_mean_net_settlement_return_per_dollar = −0.013943`, `units_settled_profitable = 22`, `sign_test_p = 0.947605` (the values at `fcebaa2`), the three `registered_rule` strings equal the module's literals, and `verdict` is the same with and without `measurement_v2` present.
+6. `test_per_dollar_bootstrap_is_seeded_and_reproducible` — two calls give identical intervals; on the fixture the interval is `[−0.281562, 0.114739]` (unit means in `sorted(cluster_rows)` order) and `lower < unit_mean < upper`; with 2 units the interval is `null`.
+7. `test_would_bind_mirrors_gate_a_in_order` — a fixture whose per-dollar mean is positive with 12 of 12 units positive reads `would_bind.gate_a = "pass"` (sign-test p = 0.000244) and `would_bind.gate_b` evaluated, while `gates.A_edge_exists.state` is whatever the per-share basis gives; with `clustering_coverage.state` forced to insufficient, `would_bind.gate_a = "pending"` before any mean is read; the block carries `binding: false` and the sign-test sentence.
+8. `test_two_tier_accounting_on_non_finite_inputs` — a two-final ledger with `entry_price = 0` on one and `clv = "nan"` on the other: Gate A reads `pending` on the unit floor (2 < 12) with `settled_finals_total = 2`; `measurement_v2` reads `eligible_finals = 2` (tier one includes both, as Gate A does), `per_dollar_eligible_finals = 0` with `invalid_entry_price = 1` and `non_finite_return = 1`, `per_dollar.unit_mean = null`, `per_share.unit_mean = null` with `reason = "non_finite_unit_mean"` while the frozen `gates.A_edge_exists.unit_mean_net_settlement_return_per_dollar` is non-finite (the fail-open recorded above, observed and not fixed), both identities hold, and nothing is divided.
+9. `test_reconcile_cli_writes_versioned_artifacts_without_config` — `"profit-verdict-reconcile" in COMMANDS`; the command on the fixture into `tmp_path` with `--config /nonexistent/config.yaml` and an empty cwd exits 0 and writes `reconciliation.json` with the input sha256 `4b66d07f…b33`, `legacy.per_share_unit_mean = −0.013943`, `corrected.per_dollar_unit_mean = −0.086501`, the three `differences` names, and `report.md`; `reconciliation.json.settings_used` equals `DEFAULT_SETTINGS`' five values and the default diagnostic substrings; `cli.load_config` monkeypatched to raise is never called; `read_csv_rows` monkeypatched to record paths opens only the `--final-history` path and paths under the command's own temporary staging directory, nothing under `tmp_path / "outputs"` and no `polymarket_predictive_config.example.yaml`, and without `--positions` no positions path; a second run without `--force` exits 2 and changes nothing.
+10. `test_recorded_fixture_provenance_and_no_credentials` — the README entry names `origin/vps-telemetry`, `fcebaa2`, `2026-08-21T02:00:09Z` and a sha256 line equal to the file's sha256; `credential_guard._scan_csv(path, repo_root, tail_rows=None)` returns `[]`.
+
+### Day-after check
+
+On the VPS, after the first dashboard payload render following deployment (the artifact's only writer), `outputs/polymarket_model_governance/profit_verdict.json` carries `measurement_v2` with `binding = false`, `state = "ok"`, `population.closing_rows = population.eligible_finals + Σ tier-one exclusions`, `population.eligible_finals = gates.A_edge_exists.settled_finals_total`, and `settlement_join` reported with `positions_checked = closing_line_value.final_line_positions` and `unverified_by_reason` present; `gates.A_edge_exists` reads `independent_market_units = 55`, `settled_finals_total = 70`, `unit_mean_net_settlement_return_per_dollar = −0.013943`, `units_settled_profitable = 22`, `sign_test_p = 0.947605` (the ledger is unchanged since 2026-08-21 while the VPS is offline); `closing_line_final_history.csv`'s header gains exactly `line_basis`, every pre-deployment row carries `""` there, and the row count is unchanged (90 at `fcebaa2`); `closing_line_value_positions.csv` carries `line_basis` on every row (`""` for rows recovered from pre-deployment ledger rows). `settlement_verified_finals > 0` needs the prerequisite collector work order and is not this WO's check. Remaining dependencies: the VPS deployment; that prerequisite for corpus coverage.
+
+**Not authorised by this text:** any change to the binding Gate A/B/C metric, thresholds, alpha, floors, or the terminal verdict; any change to the frozen fail-open recorded above; any merge; any paper or live evidence; any change to WO-67's P1-P5; any registration; and any use of a sandbox computation as verification of record.
+
+## WO-168 — Front-page and documentation reconciliation: a README that states the research objective, the evidence and its limits, retracted figures corrected, an exhaustive classification of every document, and superseded material archived with references — `draft` (2026-09-13, revised after the first S8 pass and eleven times after delta passes. The fourth delta pass found that the entry defeated its own test 2, because the backticked placeholders its text must write are not paths and the test resolved them as paths; the fifth found that the fix for that pass's scoping minor had made a sentence about inbound references false; and the sixth found three defects all created by the fifth's own fixes, and that this entry was three separable work orders bound into one against `AGENTS.md:244`, with a different one of the three failing almost every pass. **The launcher removal is therefore split out as WO-168a**, which is gated independently; nothing in this entry depends on its verdict; what remains here is the front page, the evidence document, the classification and the archive; class M, not D: class D is docs/register only, and this work order adds `tests/test_repository_hygiene.py`, so it needs an Engineer; touches `README.md`, one link in `README_DOCKER_MONITOR.md`, a new `docs/EVIDENCE_STATE_2026-09-13.md`, `docs/archive/`, the moved documents, one new test file, and this register → OWNER MERGE (`README.md` is a canonical front door and the register is a frozen surface); `registered-ancestry: <origin-main-sha> ancestor-of <build-sha> PASS` to be recorded at dispatch in the full token form; both halves are placeholders, because registering this entry advances `main`, so the tip at dispatch cannot be `a790e51`, the tip at drafting. **Disclosure.** This work order exists because an external review received on 2026-09-13 found that the README still prints an adverse-selection figure of $63.62/day and a net of −$60.60/day that the charter retracted on 2026-08-23, that the front page does not say what the repository is now trying to establish or what evidence exists and with what limits, and that superseded documents and launchers sit beside canonical ones with nothing marking which is which. The dependency-scan history of drafts one to three, and the scan itself, move with the launcher removal to WO-168a. Nothing here changes a gate, a threshold, a result, or any registered number; the only registered text it changes is this entry and its calibration row, which is why it routes to OWNER MERGE; every move is a `git mv` and is recoverable from Git history.)
+
+### The changes, exactly
+
+1. **README (`README.md`), rewritten in full. Its eight sections are `##`-level markdown headings, in this order and with exactly these heading texts, no trailing punctuation: `## What this repository is for`, `## Generated state`, `## State of the evidence`, `## Retracted figures`, `## Supported workflows`, `## Known limitations`, `## Governance in one paragraph`, `## Documents`. No other `##` heading appears on the page, so "the next heading of the same level" is well defined for every section and the last section's region runs to end of file.** The three
+   sentences below are kept verbatim and are newly pinned by test 1, which compares these three sentences and the objective paragraph after normalising whitespace — every run of whitespace collapsed to a single space — because the README wraps all five; the same normalisation applies to the close-out guard sentence in *Supported workflows*, which is 92 characters normalised and wraps for the same reason. (The existing
+   `tests/test_vps_only_operating_docs.py::test_canonical_front_doors_are_vps_only` does not pin
+   them: for `README.md` it asserts only that "VPS only" or "VPS-only" appears and "local-first"
+   does not; its literal sentence assertions are about `AGENTS.md` and
+   `docs/POLYMARKET_CURRENT_STATE.md`.) The sentences, placed in *Supported workflows*: "Production and verification are VPS-only. Do not run Python engines, tests,
+   Docker, dashboards, scheduled tasks, collectors, model training, brokers, or watchdogs on the
+   local workstation. Local work is limited to code inspection and editing, Git/GitHub operations,
+   and SSH control." The rewritten page must clear **all eight** of `_DRIFT_PATTERNS`
+   (`src/polymarket_predictive_engine/operating_state.py:60-69`), which
+   `front_door_drift_violations` scans over the WHOLE file, and must carry the literal
+   `performance/operating_state.md` pointer the same function requires; item 1's *Generated state*
+   section supplies the pointer, and test 1 asserts all eight patterns are absent rather than the
+   single one an earlier draft named.
+   - *What this repository is for.* First, the objective paragraph. Its text: "This repository
+     is a research engine for one question: can a pre-registered, fail-closed, paper-only process
+     tell a profitable, executable strategy apart from a historical premium, an accounting error,
+     an overfit result, or insufficient evidence? A defensible negative result is a successful
+     outcome." Then one paragraph naming the Polymarket engine as the principal system and the
+     SuperBru score engine as ancillary.
+   - *Generated state.* Second, keeping the pointer
+     `outputs/performance/operating_state.md` (and `outputs/performance/operating_state.json`)
+     that `operating_state.py:533-558` requires README.md to carry and
+     `tests/polymarket_predictive_engine/test_operating_state.py::test_front_door_repo_docs_only_point_to_generated_state`
+     asserts against the real repository. The current README carries it only under "Start with
+     generated state", which this rewrite replaces, so without this section that existing test
+     fails. The dashboard is named by `PM_DASHBOARD_PUBLIC_URL`, never by the bare IP the current
+     README prints, which already contradicts AGENTS.md's Tailscale-only rule, and the rewritten page prints no bare-IPv4 URL anywhere.
+   - *State of the evidence.* README carries **no live or dynamic figure from a producer's artifact** — a rule whose only mechanical enforcement is the eight `_DRIFT_PATTERNS`, which are narrower than the rule, so the patterns are its registered proxy, and nothing else asserts it beyond test 1's pinning of the three retracted tokens (dates, pull-request numbers
+     and registered constants are not dynamic values): one paragraph naming
+     the evidence classes and a link. (The three retracted figures below and the 2.0 pp haircut
+     constant are not dynamic values — they are a withdrawal notice and a registered constant — and
+     the drift rule at `docs/OPERATING_STATE.md:59` does not reach them.) The paragraph links to `docs/EVIDENCE_STATE_2026-09-13.md` (new, item 4) beside the
+     generated-state pointer, which stays a fenced literal and **not** a markdown link, because
+     `outputs/performance/` is not in the repository and test 2 resolves every relative link;
+     written as a link it would add a second miss and the entry would fail its own test. `docs/OPERATING_STATE.md:59` reads "README.md and AGENTS.md may point
+     here or to the generated files, but must not restate dynamic values", and that document is
+     not in this WO's touch list, so the table cannot live on the front page. Moving it is the
+     smaller change than amending a canonical document.
+
+   - *Retracted figures.* "Until 2026-09-13 this page printed adverse selection at $63.62/day, a net
+     of −$60.60/day, and a gross of $3.02/day. The charter's correction of 2026-08-23 withdrew the
+     section that asserted them; none of the three appears in any artifact on the telemetry mirror.
+     The recorded readings and their evidence classes are in `docs/EVIDENCE_STATE_2026-09-13.md`, linked under "State of the evidence" above." This is the one section of `README.md` in which
+     those three tokens may appear, and test 1 pins each to it.
+   - *Supported workflows.* VPS production (Paths A and B, by reference to `AGENTS.md`); the offline
+     `pytest` suite in an ephemeral sandbox (2026-07-27 amendment); offline historical research from
+     the two named public sources under `research/` (2026-09-12 amendment), with the reproduction
+     commands `python -m premium_research.cli verify-manifest` and `verify-results`, which exist
+     on `main` today. The `--work-order` selector does not: `git show origin/main:src/premium_research/cli.py`
+     has no such argument, and `results_wo167/` and `results_wo170/` exist only on the build
+     branch. The two commands, spelled exactly `verify-results --work-order WO-167` and `verify-results --work-order WO-170`, are therefore printed only under the same close-out guard as the WO-170 row, together with the literal sentence "These two selectors land with
+     WO-167's and WO-170's merges and do not exist on `main` today.", which is the sentence test 1
+     asserts, stated here because a test may not demand a literal the specification does not
+     mandate. The fourth supported workflow is reading the telemetry mirror
+     `origin/vps-telemetry`, whose JSON is complete while its CSVs are the last 200 rows; a
+     per-file manifest is WO-172, admitted, and not registered under the GLOBAL RULE until its
+     squash-merge lands.
+   - *Known limitations.* The self-hosted runner has accepted no job since 2026-08-23T12:36Z and the
+     VPS has been offline since 2026-08-21 (`docs/VPS_OUTAGE_2026-08-21.md`); two merges have landed
+     since (#452 on 2026-08-22, #454 on 2026-09-12), #454 carrying no completed required-gate run (runs 627
+     cancelled and 628 queued, `docs/VPS_OUTAGE_2026-08-21.md`); whether #452 was gated before the
+     runner stopped is not established by any artifact in this repository, which itself records
+     that its evidence cannot distinguish a host down from 2026-08-21T02:00 from one degraded on
+     08-21 and unresponsive by 08-23; telemetry CSVs are truncated; the Gate A unit defect (WO-169, admitted; not registered under the GLOBAL RULE until its squash-merge lands); the strategy search selects on its holdout (WO-171, admitted; not
+     registered under the GLOBAL RULE until its squash-merge lands); maker capacity is
+     model-bounded; the funding-carry haircut of 2.0 pp is an assumption.
+   - *Governance in one paragraph.* One work order per PR; S8 admission; the GLOBAL RULE; owner
+     merge for frozen and registered surfaces; no live order path; the evidence classes.
+   - *Documents.* The README prints the canonical table in full and, below it, one line per remaining class giving the class name and its count, counted as test 4 counts it, over members under `docs/`; the membership lists live only in the test file, so the front page carries no list that can go stale silently, and test 1 asserts that each class line's printed count equals the count the classification gives for that class, so a printed count cannot drift from the dictionary either — without that assertion the page would carry eight unpinned numbers, which is the channel this work order exists to close. Every file under `docs/` (recursive) except `docs/archive/README.md` appears in exactly one class, and the
+     README's table names the first class in full as markdown links:
+     - **canonical** (17 rows, each a link; 13 of them under `docs/`, and the partition sum below
+       counts only those 13): `README.md` — one of the five documents
+       `docs/OPERATING_STATE.md:62-76` names authoritative, and the row test 4 checks for —
+       `docs/EVIDENCE_STATE_2026-09-13.md` (new, item 4; a dated evidence record, not a front
+       door, which is why the drift rule does not reach it), `AGENTS.md`, `docs/ENGINEERING_STANDARDS.md`,
+       `docs/EXPERIMENT_REGISTRY.md`, `docs/POLYMARKET_CODEX_WORK_ORDERS.md`,
+       `docs/POLYMARKET_QUANT_MODE_CHARTER.md`, `docs/POLYMARKET_QUANT_TRADING_CONTRACT.md`,
+       `docs/OPERATING_STATE.md`, `docs/ORACLE_VPS_SETUP.md`, `docs/POLYMARKET_DOCKER_SAFETY_AUDIT.md`,
+       `docs/POLYMARKET_EDGE_STRATEGY_RESET.md`, `docs/VPS_OUTAGE_2026-08-21.md`,
+       `docs/POLYMARKET_SHARP_ANCHOR.md` (sharp-odds anchor sourcing: the `fetch-sharp-odds` and
+       `build-sharp-anchor` CLI subcommands; its overlay section describes the refuted directional
+       lane), `docs/SYSTEM_MAP.md` — one of the five documents `docs/OPERATING_STATE.md:62-76`
+       names authoritative, so it is canonical rather than merely cross-referenced —
+       `src/polymarket_predictive_engine/cli.py`,
+       `src/superbru_score_engine` — the last two so every row of `AGENTS.md`'s "Stable references"
+       table and of the current README's table is present;
+     - **owner-surface** (5): `docs/OWNER_AMENDMENT_MB1_TIER0_COVERAGE.md`,
+       `docs/OWNER_AMENDMENT_SHARP_LINKING_EVALUATOR.md`, `docs/OWNER_DECISION_FUNDING_GOVERNANCE.md`,
+       `docs/KEY_CUSTODY_DESIGN_WO67_P5.md`, `docs/OWNER_CHECKS.md`. The class name records where these
+       sit in the governance chain, not a Git authorship claim: every file in it was last touched by
+       the owner-account squash merge that the register itself warns never says who wrote what;
+     - **draft template, unsigned, not in force** (1): `docs/DRAFT_OWNER_AMENDMENT_WO67.md`, whose own
+       header reads "UNSIGNED TEMPLATE. NOT IN EFFECT. This file authorizes nothing";
+     - **referenced by code or tests** (12, kept where they are): `A1_WITHDRAWAL_AND_EXIT_RAIL_RUNBOOK`,
+       `EXECUTOR_SUB_ACCOUNT_AND_CREDENTIAL_DRILL`, `HUMAN_STAGE1_OPERATOR_RUNBOOK`, `MICRO_DRILL_RUNBOOK`,
+       `POLYMARKET_ACTUARIAL_MODEL_GOVERNANCE`, `POLYMARKET_API_ASSIMILATION`, `POLYMARKET_DATA_QUALITY_STANDARD`,
+       `POLYMARKET_LIVE_TRADING_APPROVAL_CHECKLIST`, `POLYMARKET_MODEL_VALIDATION_STANDARD`,
+       `POLYMARKET_PIPELINE_MAP`, `POLYMARKET_RISK_CONTROL_STANDARD`, `RESTORE`;
+     - **retired in place with a loud notice** (6): the five pinned by
+       `test_legacy_local_runbooks_are_loudly_archived` (`POLYMARKET_SHADOW_RESEARCH_RUNBOOK`,
+       `POLYMARKET_RESEARCH_README`, `POLYMARKET_PAPER_TRADING_LOOP`, `RUNNING_LEAN`,
+       `POLYMARKET_RUNTIME_CONTEXT_20260628`) and `POLYMARKET_CURRENT_STATE` (pinned by
+       `test_canonical_front_doors_are_vps_only`);
+     - **kept by cross-reference** (10, each with its actual referrer named in the classification and
+       asserted by test 4 to contain the token): `DRAFT_RISK_PREMIUM_HYPOTHESES` (the register),
+       `EXECUTOR_LIVE_OPS_CONTROL_PLANE` (`docs/OPERATING_STATE.md`), `EXECUTOR_REPLAY_CERTIFICATION`
+       (`docs/EXECUTOR_SUB_ACCOUNT_AND_CREDENTIAL_DRILL.md`, itself a code-referenced runbook, which is
+       why the class is "kept by cross-reference" and not "from a governing document"),
+       `MAKER_PICKOFF_SCALING_EXPERIMENT` (the charter), `QUANT_CURRICULUM` (the charter),
+       `MARKET_MAKING_MODELS_RESEARCH` (the register), `POLYMARKET_STRATEGY_OPTIONS` (the register),
+       `WO69_CI_ENFORCEMENT` (the register) — one referrer each, never a disjunction, because a
+       disjunction cannot be a literal dictionary value —
+       `POLYMARKET_VPS_DOCKER_RUNBOOK` (`ORACLE_VPS_SETUP`), and `ACTUARIAL_AUDIT_PREDICTIVE_VALUE`
+       (`POLYMARKET_RESEARCH_README`) — a dated 2026-06-24 audit whose own scope line covers the
+       Polymarket engine as well as the score engine, so it is not SuperBru ancillary. Its referrer
+       is itself in the retired-in-place class, the same situation as `EXECUTOR_REPLAY_CERTIFICATION`'s
+       and admissible for the same reason: a retired-in-place document stays in the tree under a
+       loud notice and is pinned by `test_legacy_local_runbooks_are_loudly_archived`, so it cannot
+       vanish and leave an orphan behind it, and test 4 asserts it still contains the token;
+     - **SuperBru ancillary** (9, enumerated): `backtest_validation`, `chaser_points_inference`,
+       `leader_defence_workflow`, `predictive_value_controls`, `round_summary_behaviour`,
+       `smartbet_grid_calibration`, `superbru-automation-context`, `validation_layer`,
+       `SUPERBRU_CLV_VS_CLOSE_EXPERIMENT`;
+     - **incident records** (1, kept): the literal path
+       `docs/incidents/2026-07-13-wo73-append-only-ledger-migration.md`, not a glob, so the class
+       has the same form as every other;
+     - **archived** (15, item 2).
+     The classification is the literal dictionary in `tests/test_repository_hygiene.py`, and test 4
+     asserts it is an exhaustive partition of `docs/**/*.md` **on the post-change tree**, which is
+     the only tree the test ever runs against. It is: 13 canonical files under `docs/` (the 17 table
+     rows less `README.md`, `AGENTS.md`, `cli.py` and `src/superbru_score_engine`, none of which is
+     under `docs/`) + 5
+     owner-surface + 1 unsigned draft + 12 code-referenced + 6 retired in place + 10 kept by
+     cross-reference + 9 SuperBru ancillary + 1 incident record + 15 archived = **72**. Today's tree
+     holds 71 files under `docs/**/*.md`; the change adds `docs/EVIDENCE_STATE_2026-09-13.md` and
+     moves 15 into `docs/archive/`, so the post-change tree holds **57** outside the archive and 15
+     inside it, and `docs/archive/README.md` is excluded from the domain. The archived class keys its
+     15 entries at `docs/archive/<name>.md`, their post-move paths, so "every listed path exists"
+     holds.
+2. **Archive (`docs/archive/`).** `git mv` of exactly these 15 files. On the pre-registration tree exactly two inbound
+   references exist repository-wide and both are repointed by this work order; no other file in any
+   scan root references any of them (verified against every git-tracked file on `a790e51`). Registering this
+   entry adds the 15 names to `docs/POLYMARKET_CODEX_WORK_ORDERS.md`, which is inside the `docs/`
+   scan root, as bare basenames and deliberately not as paths or links, so the enumeration itself creates no reference test 2 resolves. The entry does write `docs/archive/...` and `docs/EVIDENCE_STATE_2026-09-13.md` tokens, and every one of them is a post-change path: they resolve on the build tree and are inert at registration, because `tests/test_repository_hygiene.py` lands with this work order's build rather than with its registration. No count of them is given, deliberately. An earlier draft stated one and it was wrong within a pass, because the sentence counts the entry that contains it and every later edit moves it; the property is what matters and the property does not go stale. The 15: `POLYMARKET_ACTUARIAL_GRADE_GAP_ASSESSMENT_20260628.md`,
+   `POLYMARKET_ENGINE_APPLY_NOTES.md`, `POLYMARKET_LIVE_LEARNING_SYSTEM_DESIGN.md`,
+   `POLYMARKET_MISPRICING_BOT.md`, `POLYMARKET_PAPER_PROFIT_AUDIT.md`,
+   `POLYMARKET_PREDICTIVE_POWER_ROADMAP.md`, `POLYMARKET_STRATEGY_V2.md`,
+   `POLYMARKET_STRATEGY_V2_QUICKSTART.md`, `POLYMARKET_VPS_DOCKER_DRY_RUN.md`,
+   `VPS_DOCKER_DRY_RUN_MONITOR.md`, `VPS_RESTART_FORENSICS_2026-07-12.md`, `VENTURE_THESIS.md`,
+   `LIVE_DUTCH_ARB_DOCKER.md`, `POLYMARKET_RESOLUTION_COLLECTOR.md` (882 bytes; superseded by `src/polymarket_predictive_engine/resolution_collector.py`), and
+   `handoff/polymarket_overnight_governance_20260625.md`, which lands flattened at
+   `docs/archive/polymarket_overnight_governance_20260625.md` (no nested `handoff/` directory), so
+   `ls docs/archive | wc -l` reads 16. The one cross-reference between moved files
+   (`LIVE_DUTCH_ARB_DOCKER.md:170` → `POLYMARKET_MISPRICING_BOT.md`) is updated to the new path,
+   and so is the one from outside `docs/`: `README_DOCKER_MONITOR.md:56` names the same moved file,
+   which the second draft's claim of "no non-archived document references any moved file" missed
+   because neither its scan roots nor test 2's scan set included repository-root markdown. Both now
+   do. Outbound references from archived files to files that stay are left as they are. `docs/archive/README.md` lists every
+   archived file with `reason` ∈ {`dated snapshot`, `superseded by <canonical file>`, `legacy local
+   design; VPS-only rule`} and the canonical replacement, or the literal `none` where no canonical file replaces it. Each row is `| file | reason | replacement |`, one data row per archived file and no others; `replacement` is the path named after `superseded by ` when that is the reason, and the literal `none` for every other reason. Its first line records the command used: "Moved here by `git mv`; every file is recoverable from Git history." — stated here because a test may not demand of a document what the document's own specification does not mandate.
+3. **Regression guard (`tests/test_repository_hygiene.py`, new).** **Tests 1-5 below** — all of
+   them, and the count is stated here because item 3 is what creates the file, so a builder who
+   follows it literally must write every test the entry enumerates. Anchored off `__file__` (A3),
+   each scan asserting a non-zero visit count; the literal classification of item 1 lives in this
+   file.
+
+4. **`docs/EVIDENCE_STATE_2026-09-13.md` (new).** A dated, non-front-door document, outside the
+   scope of the front-door drift rule, holding the table: one row per line with the columns
+   `line`, `evidence class`, `reading`, `what it rests on`, `where recorded`, every figure
+   traceable to a named artifact on the telemetry mirror `origin/vps-telemetry` at `fcebaa2`
+   (2026-08-21) or to a committed file. Its header, the text above the first table row, carries the literal `2026-08-21` and the literal sentence
+   "These are readings of the 2026-08-21 snapshot, not current state.", and states that current
+   state lives in the generated files. Each row is `| line | evidence class | reading | what it rests on | where recorded |`. The first two cells are given literally here, and the remaining prose of the bullet fills `reading`, `what it rests on` and `where recorded` at the builder's discretion, in that order, with no prose left out, and each `line` cell is written exactly as backticked here, capitalisation included. Of the six class words, `modeled` names a registered evidence class and `historical-class diagnostic` names a registered class qualifier; the other four — `unread`, `untested`, `terminal`, `existence observed` — are reading states, not registered classes, and none of them relabels a lane upward: `H1 sharp-anchor maker carry` / `modeled`; `H2 dutch-book` / `unread`; `H3 smart-flow` / `untested`; `The legacy $100/month verdict engine` / `terminal`; `Perpetual funding carry` / `historical-class diagnostic`; `Variance risk premium` / `existence observed`. An earlier draft gave these cells twice in different capitalisations, once here and once as the opening words of the bullets below, and the test pinned the other one. No guarded row names an artifact or field of an unlanded work order either: `annualised_simple` and `carry_v0.json` do not appear in this document. On the three guarded rows — `The legacy $100/month verdict engine`, `Perpetual funding carry` and `Variance risk premium` — no numeric token appears other than `$100/month`, `−0.013943`, `55`, `2026-08-19` and the work-order numbers `WO-166`, `WO-167`, `WO-169` and `WO-170`: distributing the bullet's prose adds none, and none may be added. The clause "results committed on the build branch, not yet recorded in the charter or the register" falls entirely inside one cell, because test 5 matches it as a contiguous literal over a row that carries `|` separators. Two earlier drafts derived these cells from the prose instead, first by splitting at semicolons and then at the second em-dash, and neither rule is applicable: three of the six rows carry fewer than two em-dashes, and one splits into a cell that contradicts its own closing clause.
+   Test 5's row-scoped assertions are evaluated over the whole table row. Rows:
+     - H1 sharp-anchor maker carry — modeled — `insufficient_evidence` (`maker_carry_study.json`
+       `maker_gates.maker_verdict`), with the three gate states printed as the artifact writes them:
+       M-A `pending`, M-B `pending`, M-C `pass_by_construction`; modelled net carry
+       +$1.68/day against the $3.33/day target (`portfolio_net_carry_usd_per_day`,
+       `target_net_usd_per_day`) is a simulation whose adverse-selection charge rests on 3
+       replay-confirmed hypothetical fills (`maker_fill_replay.json` `confirmed_fills`) with 77.5% of
+       opportunities lacking contemporaneous book state (`no_contemporaneous_state_rate`); realized
+       wallet rewards $0 (`maker_live_test.json` `rewards_usd_total`); capacity bounded by the sizing
+       model, not measured (WO-173, admitted; not registered under the GLOBAL RULE until its
+       squash-merge lands).
+     - H2 dutch-book — no deviation found in the 2026-08-21 scan, which is **not** the verdict —
+       `implication_scan.json` `events_scanned = 300`, `flagged_deviations = 0`;
+       `event_group_scan.json` `groups_with_complete_ask_side = 67`, `flagged_deviations = 0`,
+       `max_executable_basket_usd = 0.0`. `docs/VPS_OUTAGE_2026-08-21.md` records that
+       `outputs/h2_dutch/h2_evaluation.json` is the only artifact permitted to state H2's verdict
+       and that a zero-flag scan reading is an inference from the scan, not the verdict; that file
+       has not been read since the host went offline, so H2's evidence class is **unread**.
+     - H3 smart-flow — untested — `smart_flow_clv.json` `fills_seen = 0`, last generated
+       2026-07-17; in the charter's recorded words, "its input was never collected and its job
+       stopped running". An ingestion failure, not a negative result.
+     - The legacy $100/month verdict engine — terminal `no_for_tested_edge_classes` on the registered
+       clock (2026-08-19; `profit_verdict.json`); its binding Gate A metric is a per-share price
+       difference labelled per dollar (−0.013943 on 55 units, `unit_mean_net_settlement_return_per_dollar`);
+       the corrected per-dollar reading is WO-169: results committed on the build branch, not yet recorded in the charter or the register, and no figure from it is
+       printed on this row.
+     - Perpetual funding carry (crypto; historical-class diagnostic; not verification of record):
+       WO-166 NO-GO on its completeness rule, which is the one reading of the three that has an
+       artifact of record on `main` today. WO-167's refined completeness rule: results committed on the build branch, not yet recorded in the charter or the register.
+       WO-170's corrected pass: results committed on the build branch, not yet recorded in the charter or the register. Neither WO-167 nor WO-170 prints a figure on this row.
+     - Variance risk premium — existence observed, in the merged, charter-recorded WO-166
+       artifact `research/premium_poc/results/vrp.json`; parked; no tradeable claim. WO-170's
+       realignment of that lane: results committed on the build branch, not yet recorded in the charter or the register, and no figure from it is printed on this row.
+
+### A11 — bias-direction disclosure
+
+**Why the close-out guard is unconditional.** **The guard is unconditional, and that is deliberate.** An earlier draft made it conditional on each work order's status line reading `built-and-run`, which an offline test can only evaluate against the working tree; on the build branch that condition is already satisfied, so the guard would have imposed nothing exactly where it is meant to bite, and its result would have flipped with the merge order of unrelated work orders. Written unconditionally it is hermetic and test 5 can assert it. A favourable verdict gets no weaker a guard than an unfavourable one, which is why WO-170's corrected pass is guarded alongside WO-169's unfavourable correction. Lifting these three rows once their close-outs land on `main` is a dated follow-up work order, not a condition inside this one.
+
+No estimator; no number changes. But the direction is **favourable**, and naming it is the point of
+this section. The page being replaced prints adverse selection at $63.62/day and a net of
+−$60.60/day and treats H1 as closed; the replacement records `insufficient_evidence` and a modelled +$1.68/day in `docs/EVIDENCE_STATE_2026-09-13.md`, not on the page, which under item 1 carries no figure from a producer's artifact. That is a strictly more favourable reading of the maker lane. It is defensible only
+because it is the charter's own correction of 2026-08-23, which checked those figures against the
+telemetry mirror and found the $63.62 appears in no artifact — not because a page rewrite may soften
+a verdict. Three channels point the other way and are stated for balance: every figure carries its
+evidence class, no figure is printed from a work order whose close-out has not landed, and the
+retracted figures stay on the page under their own heading rather than disappearing. The residual
+favourable channel is that a reader who saw only the old page will read the maker lane as improved
+when what improved is the measurement, not the lane. A second residual, disclosed rather than
+repaired: the rewritten page names WO-167, WO-169, WO-170, WO-171 and WO-172, and the new evidence document adds WO-173, none of which appears in `main`'s register or charter today, so a reader on `main` cannot resolve any of the six.
+Each is qualified in place, either as admitted and not registered under the GLOBAL RULE until its squash-merge lands, or, for WO-167, WO-169 and WO-170, by the close-out guard sentence, which is the honest form of an unresolvable reference; omitting them instead
+would print a state of the evidence the branch knows to be stale.
+
+### Fail-safe sentence (S5)
+
+A moved file whose old path is still referenced from a non-archived document, as a markdown link or
+a backtick `docs/<name>.md` token, fails test 2 — where a token containing `*`, `<` or `>` is a
+form rather than a path and is skipped, without which this register entry's own placeholders would
+fail the test it enumerates; an archived file without a README row fails test 3; a README that
+regains a retracted figure fails test 1; a document that is in no class or in two fails test 4;
+an evidence row among the three that name a work order with results on a build branch, printing a figure from a work order whose close-out has not landed, fails test 5; no runtime path reads any file this work order touches, because it touches only
+documents, one link, and a new test file.
+
+### Touch ONLY these files (7 entries)
+
+1. `README.md`
+2. `docs/archive/README.md` (new).
+3. `tests/test_repository_hygiene.py` (new).
+4. `docs/POLYMARKET_CODEX_WORK_ORDERS.md` — this entry and its calibration row.
+5. The 15 files moved into `docs/archive/` (item 2), one path each; `LIVE_DUTCH_ARB_DOCKER.md`
+   additionally has its one link at `:170` repointed, so it is the one moved file whose content
+   also changes.
+6. `README_DOCKER_MONITOR.md` — its one link at `:56` repointed to `docs/archive/POLYMARKET_MISPRICING_BOT.md`.
+7. `docs/EVIDENCE_STATE_2026-09-13.md` (new, item 4).
+`AGENTS.md` and every file under `scripts/` are **not** touched by this work order; they move with
+the launcher removal to WO-168a.
+
+### Enumerated offline tests (S8/A10); each to be confirmed to FAIL with its guard reverted before the pull request is opened
+
+1. `test_readme_carries_the_retraction_and_the_evidence_pointer` — one escape, stated: a retracted figure re-entered in a different spelling, such as `$63.62 per day`, is not caught, because only the three literal tokens are pinned; each of `63.62`, `60.60` and `3.02/day` occurs **exactly once** in `README.md`, and that occurrence is on a line between the "Retracted figures" heading and the next heading of the same level, so a retracted figure cannot be quoted anywhere else on the page; each class line in *Documents* prints a count equal to the classification's count for that class; `README.md` carries exactly eight `##` headings, and all eight section headings are present, in item 1's order — "What this repository is for", "Generated state", "State of the evidence", "Retracted figures", "Supported workflows", "Known limitations", "Governance in one paragraph", "Documents" — because an earlier draft pinned four of the eight and left "Supported workflows" and "Governance in one paragraph" anchored by nothing; the objective paragraph's two sentences and the three VPS-only sentences present after the same whitespace normalisation item 1 states, where a `##` heading line is one whose first three characters are exactly `## `, regions are extracted from the unnormalised text first and each region is then normalised on its own so the collapse never crosses a blank line, because the README wraps all five; none of the eight `_DRIFT_PATTERNS` regexes in
+   `src/polymarket_predictive_engine/operating_state.py:60-69` matches anywhere in `README.md`; the
+   literal `performance/operating_state.md` pointer is present; and, one escape stated: a selector spelled another way, such as `--work-order=WO-167`, does not trip the guard's antecedent and the sentence is then not required; and no bare IPv4 URL matching
+   `https?://\d{1,3}(?:\.\d{1,3}){3}` appears in `README.md`, which pins the one defect item 1
+   names and nothing else would catch — `README.md:19` prints `http://129.151.178.42:8765/` today,
+   against AGENTS.md's Tailscale-only rule. The literal `docs/EVIDENCE_STATE_2026-09-13.md` appears between the "State of the evidence" heading and the next heading of the same level, so the work order's central new document cannot be orphaned by a README that names its section and links nothing. And if either of the literals `verify-results --work-order WO-167` or `verify-results --work-order WO-170` appears in `README.md`, the literal sentence "These two selectors land with WO-167's and WO-170's merges and do not exist on `main` today." appears, on the same whitespace-normalised text, between the "Supported workflows" heading and the next heading of the same level — a second close-out guard that was prose only until the eighth pass, on commands a reader of `main` cannot run.
+2. `test_every_reference_to_a_doc_resolves` — every `](<target>)` relative link and every backtick `docs/<name>.md` token in **every repository-root `*.md` file** (which is `README.md`, `AGENTS.md`, `CLAUDE.md`, `BACKTESTING_README.md`, `DAILY_AUTOMATION_README.md`, `README_DOCKER_MONITOR.md`) and every markdown file under `docs/`, recursively, outside `docs/archive/`, resolves to an existing **path** (`src/superbru_score_engine` is a directory), subject to one skip rule and one allowlist entry. A backticked span is a token only when its **entire** content matches `docs/` followed by a path ending in `.md`. A span carrying a line or range suffix (`….md:59`, `….md:62-76`) is a citation, not a path, and is not a token; neither is a bare directory span, nor the allowlist tuple quoted below. Without this shape rule the five line-suffixed citations already in this register from earlier work orders, and the six this entry adds, would each be read as a stale reference — eleven further misses, and pass-5's blocker rebuilt under a looser reading. An implementation that does not return exactly 126 tokens and one miss on `a790e51` is not this rule. **Skip rule: a token containing `*`, `<` or `>` is a form, not a path, and is not resolved.** It is load-bearing, not cosmetic. This register entry lands in `docs/POLYMARKET_CODEX_WORK_ORDERS.md`, which is inside the scanned domain, at registration and therefore before dispatch, and its text writes the forms `docs/**/*.md`, `docs/<name>.md`, `docs/archive/<name>.md` and `](<target>)`. Without the skip rule the test would read those as stale references to files that cannot exist and would fail on a correct post-change tree: the entry would defeat its own test, which is the same self-blinding this work order closes for test 4 by excluding `docs/archive/README.md` from the classified domain. The link metavariable is written `](<target>)`, with angle brackets, precisely so that the one skip rule covers the link form as well; spelled with a bare word inside the parentheses it would not be skipped, and the test would resolve that word as a path and report it missing. **Allowlist: the single literal entry** `("docs/POLYMARKET_CODEX_WORK_ORDERS.md", "docs/VPS_PAPER_RUNBOOK.md")` — historical register text this WO may not edit, naming a file that no longer exists — **and the test asserts that entry is the ONLY miss**, so a new stale reference fails. Verified by running the rule over `a790e51`: 126 tokens visited, exactly one miss, and it is that entry. At least **100** such tokens visited — 126 on `a790e51`, the declared ancestry (86 in `docs/**`, 18 in `README.md`, 19 in `AGENTS.md`, 1 in `CLAUDE.md`, 2 in `README_DOCKER_MONITOR.md`, 0 in the other two), 142 on `c6530a9`, the current branch tip **before** this work order's changes, and not fewer than 161 on the build branch it produces, all recomputed independently. The floor is 100 and not 120 because it must be a floor on the repository rather than on this entry: the post-change tree loses the 8 tokens that leave the non-archived domain when `LIVE_DUTCH_ARB_DOCKER.md` moves into `docs/archive/`, taking `docs/**` from 86 to 78 on `a790e51` and from 102 to 94 on `c6530a9`, the floor being set from the `a790e51` figure so that it stays a floor if the build re-bases, and `README.md` is rewritten wholesale, so the part of the count this work order does not author is 78 plus the 22 in `AGENTS.md`, `CLAUDE.md` and `README_DOCKER_MONITOR.md`, which is exactly 100 with the rewritten README counted as zero. Repository-root markdown is in the scan set, which is how `README_DOCKER_MONITOR.md:56` is caught. A file in the scan set that cannot be read or decoded fails this test rather than being skipped, because a silent skip would be fail-open for exactly the stale reference the test exists to catch. One limit, stated rather than hidden: the scan set is markdown only, so a reference to a moved document from a `.py`, `.yml` or `.sh` file would escape it. Every git-tracked file was scanned by hand on 2026-09-13 and no such reference exists today. **Why the register stays in the domain,** although excluding it would delete the allowlist, the only miss, the eleven line-suffixed citations and the whole self-defeat class at once: the register is the document every work order edits, so it is where a new stale reference is most likely to appear, and excluding it would blind the test exactly where the churn is. The historical misses it carries are bounded by a literal allowlist the test asserts is exactly one entry, so that set cannot grow silently; the cost of keeping it is the shape rule and the skip rule, both stated above. On the pre-registration tree exactly two non-archived documents reference a file item 2 moves, both to `POLYMARKET_MISPRICING_BOT` — `README_DOCKER_MONITOR.md:56` and `docs/LIVE_DUTCH_ARB_DOCKER.md:170` — and both are repointed by this work order (touch-list entries 6 and 5); no third exists (verified against every git-tracked file on `a790e51`). This entry then names all 15, as bare basenames — `handoff/polymarket_overnight_governance_20260625.md` with its source subdirectory, which is still not a `docs/`-prefixed path — and deliberately not as paths or links, so it adds no token this test resolves.
+3. `test_archive_readme_lists_every_archived_file` — every file under `docs/archive/` except `README.md` has a row in `docs/archive/README.md` Each row is `| file | reason | replacement |`, one row per archived file and no other rows, with a reason from the closed set, where `superseded by ` is matched as a prefix and the remainder must be a path that exists, that path is also the `replacement` cell, and `replacement` is the literal `none` for every other reason; the row count equals the file count (15); one escape, stated: the row-to-replacement mapping is not pinned, only its shape, so a wrong-but-existing replacement passes; and `docs/archive/README.md` contains the literal string `git mv` anywhere in the file, which is a substring check rather than a sentence check and is stated as such; it is what pins item 2's requirement that the file record the move command used. The launcher removal and its workflow caveat are recorded in WO-168a, which performs them; this work order records neither, so neither merge order can make this file state something that has not happened.
+4. `test_docs_classification_is_an_exhaustive_partition` — the classification keys the 15 archived files at `docs/archive/<name>.md`, so every listed path exists after the move; `docs/archive/README.md` is excluded from the domain; every one of the **57** files under `docs/**/*.md` outside `docs/archive/` appears in exactly one of the eight non-archived classes; counting only class members under `docs/`, the **nine** class counts sum to **72**, which equals those 57 plus the 15 archived; an earlier draft asserted 71 against a post-move domain and could not have passed; test 4 also asserts that the five documents `docs/OPERATING_STATE.md:62-76` names authoritative all fall in the canonical class; the README's documents table names every canonical row as a link; every file in `AGENTS.md`'s "Stable references" table appears in the canonical class; and for each of the 10 entries in the cross-reference class, the file named as its referrer exists and contains the referenced file's name, so a renamed or deleted referrer fails rather than leaving an orphan classed as referenced; and the nine class sizes, counting only members under `docs/`, are literally 13 (of 17 canonical rows, the other four being `README.md`, `AGENTS.md`, `cli.py` and `src/superbru_score_engine`), 5, 1, 12, 6, 10, 9, 1 and 15, so the dictionary cannot drift away from the counts this entry prints without failing. One escape, stated: a swap of two files between two classes preserves every count and every membership check, so test 4 would not catch it; what it does catch is any file entering, leaving, or being double-counted.
+5. `test_evidence_state_rows_carry_a_class_and_respect_the_close_out_guard` — the test item 4 had none, which matters because two of the three A11 counter-channels are enforced by prose alone without it, and printing WO-170's favourable corrected pass before its close-out lands is the highest-value mutation in this work order. `docs/EVIDENCE_STATE_2026-09-13.md` exists; its header contains the whole literal sentence "These are readings of the 2026-08-21 snapshot, not current state.", not merely the fragment `not current state`, which a header reading "this is not current state" would also satisfy; and it carries one row for each of the six lines item 4 enumerates, each **paired** with its own class rather than merely containing some class word, because a swap between rows is an upward relabel and membership alone would pass it: `H1 sharp-anchor maker carry` with `modeled`, `H2 dutch-book` with `unread`, `H3 smart-flow` with `untested`, `The legacy $100/month verdict engine` with `terminal`, `Perpetual funding carry` with `historical-class diagnostic`, and `Variance risk premium` with `existence observed` — each `line` cell written exactly as item 4 backticks it, so the test and the specification pin one literal rather than two. And the close-out guard is asserted unconditionally: each of the three guarded rows, named by item 4's own line cells — `The legacy $100/month verdict engine`, `Perpetual funding carry` and `Variance risk premium`, which are the three rows that name a work order whose results are committed on a build branch; the H1 row names WO-173, which has no results to print, and is therefore not guarded — contains the literal sentence "results committed on the build branch, not yet recorded in the charter or the register", and on those three rows the only numeric tokens permitted are the literals `$100/month`, `−0.013943`, `55` and `2026-08-19`, which are already of record on `main`, together with the work-order numbers `WO-166`, `WO-167`, `WO-169` and `WO-170`; every other `%`-suffixed figure, `$`-prefixed figure and bare decimal number, and each of `annualised_simple` and `carry_v0.json`, is forbidden. The guard therefore fails the moment a figure is printed ahead of its close-out, in the favourable direction as readily as the unfavourable one, and it reads the document alone, so no merge order can flip it. One escape, stated: a figure from an unlanded work order printed on the H1, H2 or H3 row is not caught, because the numeric restriction is scoped to the three guarded rows.
+
+### Day-after check
+
+Not a runtime change. Owner-runnable on `main` after merge: `grep -o -F '63.62' README.md | wc -l`, and the same for `60.60` and `3.02/day`, each print 1 — counting occurrences as test 1 does rather than lines, and matching literally, since `63.62` and `3.02` are regexes — and `grep -n -F` places each under the "Retracted figures" heading; `ls docs/archive | wc -l` prints 16 (15 files plus the README); the sandbox run of `tests/test_vps_only_operating_docs.py` and `tests/test_repository_hygiene.py`, the second of which is where all five enumerated tests live, is stated in the PR per the 2026-07-27 amendment, and the required gate re-runs them when its runner returns (no date can be given for that).
+
+**Not authorised by this text:** any change to a gate, threshold, result, or evidence class; any change to registered text other than this entry and its calibration row; any merge; the removal of any file that a scan at dispatch finds referenced. The launcher removal and `AGENTS.md`'s closing sentence belong to WO-168a and are not authorised here either; the three legacy compose files are retired by neither work order and stay where they are.
+
+## WO-168a — Unreferenced legacy launchers removed after a recorded dependency scan — `draft` (2026-09-13, the number of completed gate passes on this entry is the rejection ledger's row count, stated there and nowhere else, and no surface carries a draft ordinal for this entry, derived or written; the WO-168 draft ordinals in item 1 are the sibling's, historical, and fixed at the split; split out of WO-168 on WO-168's seventh S8 pass; class M, not D: it removes 18 files under `scripts/` and adds a test file, so it needs an Engineer; touches `scripts/` (18 removals), two passages of `AGENTS.md` — the first sentence of its two-sentence closing paragraph, and a new three-sentence passage in "Work-order and Git discipline" — a new `tests/test_repository_hygiene_launchers.py` and this register → OWNER MERGE, because `AGENTS.md` is the canonical instruction file; `registered-ancestry: <origin-main-sha> ancestor-of <build-sha> PASS` to be recorded at dispatch in the full token form, both halves placeholders because registering this entry advances `main`. **Why this is its own work order.** `AGENTS.md:244` requires one work order per branch and per pull request. WO-168 bundled three separable changes — the front-page rewrite, the documentation classification and archive, and this launcher removal — and failed seven consecutive S8 passes up to the split, with a different one of the three failing almost every time. The scan, the closure and every count below are re-derived from the commit at each gate pass and again at dispatch; nothing in this entry rests on an earlier pass having checked them. It is separated so that the part that is ready is not held by the parts that are not. **Disclosure.** This work order exists because an external review received on 2026-09-13 found that superseded launchers sit beside canonical ones with nothing marking which is which. No owner instruction is cited; none exists in the repository. It authorises no run, no pass, no build, no merge, and no capital. Nothing here changes a gate, a threshold, a result, or any registered number; the only registered text it changes is the first sentence of `AGENTS.md`'s closing paragraph, the three sentences added to `AGENTS.md`'s "Work-order and Git discipline" section, and this register entry and its calibration row, which is why it routes to OWNER MERGE. Every removal is recoverable from Git history.)
+
+### The changes, exactly
+
+1. **Launchers removed (`scripts/`).** Scan roots, literal and exhaustive: the directories, each scanned recursively,
+ `src/`, `scripts/`, `tests/`, `.github/`, `docs/` (recursive, including any `docs/archive/` a later work order creates),
+ `analysis/`, `research/`, `examples/`, `notebooks/`, `config/`, `calibration/`,
+ **plus every repository-root file matching `*.md`, `*.yml`, `*.yaml`, `*.toml`, `*.ini`,
+ `*.cmd` or `Dockerfile*`**; git-tracked files only — a generated or gitignored file under a scan root, today the six under
+ `src/superbru_score_engine.egg-info/` and `config/polymarket_live_approval.yaml`, is not a
+ referrer, so the scan is reproducible from the commit rather than from a built working tree —
+ `__pycache__` excluded, and an unreadable or undecodable file is
+ not a referrer. That rule is fail-closed for test 1 and, by the same token, fail-open for the
+ removal decision: an unreadable file that did reference a launcher could not save it. It is
+ inert today — on `c6530a9` the only git-tracked files under these roots that fail to decode as UTF-8 are
+ `research/premium_poc/data/deribit/BTC_funding_1h.csv.gz` and its `ETH` twin, neither of which
+ can reference a script — and the build re-checks that the skipped set is still those two. `.claude/` is deliberately NOT a
+ scan root: it is agent-configuration space the lifecycle companion itself calls
+ non-register-reviewed, and the repository's own A3-sensitive scans exclude it, so no file's
+ survival may depend on it. Also outside the roots, with the reason stated because WO-168's third draft's defect was exactly an unstated omission: `data/`, `inputs/` and `outputs/` are generated
+ or input state and hold no code reference; `.git/`, `.pytest_cache/` and `.ruff_cache/` are Git
+ internals and untracked tool caches; and the repository-root files that match none of the
+ seven patterns — `.env.example`, `.env.vps-paper.example`, `.dockerignore`, `.gitignore`,
+ `.gitattributes` and `polymarket_local_live_fix_git.patch` — were checked by hand at `c6530a9` and name none of the 18. WO-168's third draft named a hand-listed root set that omitted `BACKTESTING_README.md`,
+ `DAILY_AUTOMATION_README.md`, `README_DOCKER_MONITOR.md`, `start_polymarket_bot.cmd`,
+ `config.yaml`, `config.example.yaml`, `calibration_profiles.yaml`, `pytest.ini`, and four
+ directories — which is the A3 defect class itself. `DAILY_AUTOMATION_README.md:19` names
+ `run_daily_superbru_local.ps1`, so that file and the six reachable only through it were on
+ the removal list wrongly. **Excluded from the referrer set, at dispatch and in test 1:** **two**
+ files, because each must name the removed launchers in order to record or assert their
+ removal — `tests/test_repository_hygiene_launchers.py`, and **this register,
+ `docs/POLYMARKET_CODEX_WORK_ORDERS.md`**, which enumerates all eighteen basenames below and
+ lands on `main` at registration, before dispatch. An earlier version of this list carried a
+ third, the archive README that WO-168 creates under `docs/archive/`, named here without a path
+ so it adds no token that work order's reference test resolves; this work order neither creates nor touches it, and nothing here writes a launcher name into it — and WO-168's registered test 3 records that neither work order writes a launcher name into that file in either merge order — so excluding it would never have been load-bearing. Without both
+ exclusions the record
+ blinds the scan it is recorded in: every removed basename would have a referrer inside the
+ roots, a builder following this text literally would remove nothing and would report eighteen
+ files as "gained a reference", and test 1 would be permanently defeated for exactly those
+ names. The dispatch-time re-scan runs against the pre-change tree with these two excluded. **Matching rule, corrected in WO-168's third draft after its first S8
+ delta pass.** A reference is the basename as a substring, or — for a `.py` script — an import of its
+ stem: `^\s*from <stem> import`, `^\s*import <stem>\b`, or the dotted form `scripts.<stem>` followed by a non-word character. WO-168's second draft said "the stem as a whole word" for `.py` files, which is not an import: under it
+ `config_check.py` read as referenced by an unrelated `config_check` subparser and function,
+ `run_defensive_model.py` by an unrelated `run_defensive_model` function, and
+ `check_superbru_fixtures.py` by the workflow FILENAME `check_superbru_fixtures.yml` at
+ `.github/workflows/ci.yml:51,74,124`, `.github/SECRETS.md:43` and `tests/test_required_pr_gate.py:263` — three files that same draft listed for removal. Under the corrected rule all three are at zero referrers.
+ **The removal set is the transitive closure, computed to a fixpoint:** removing a launcher removes
+ it as a referrer, so scripts whose only referrers were removed become unreferenced in turn. Under
+ the exhaustive roots the fixpoint is **18 files in three waves** and is stable (a fourth wave
+ finds nothing). **141 files under `scripts/` at `c6530a9`, 123 after removal** — the earlier
+ 139 and 121 were true at `a790e51` and went stale when `export_research_ledgers.sh` and
+ `write_telemetry_export_manifest.py` landed, which is why the count is anchored to a commit
+ rather than to "today" and is re-derived at dispatch. Exactly these 18 are removed, by `git rm` of each path, subject to the fail-safe sentence below, which this entry records rather than deferring to a file it does not
+ touch:
+ - wave 1 (12, no referrer at all): `check_superbru_fixtures.py`, `config_check.py`,
+ `install_daily_superbru_task.ps1`, `install_polymarket_local_live_task.ps1`,
+ `log_strategy_v2_persistence.ps1`, `predict_latest_cached.ps1`, `run_daily_oddspedia_overlay.ps1`,
+ `run_daily_superbru_scheduled.ps1`, `run_data_inventory_local.ps1`, `run_defensive_model.py`,
+ `run_probability_converter_loop.sh`, `wc_grid_validation.py`;
+ - wave 2 (4, referred to only by wave 1): `audit_oddspedia_available_data_cdp_session.py`,
+ `audit_superbru_available_data_cdp_session.py`, `build_data_inventory_summary.py`,
+ `scrape_oddspedia_cdp_session.py`;
+ - wave 3 (2, referred to only by waves 1-2): `enhance_superbru_fixture_coverage.py`,
+ `filter_oddspedia_high_value_market_paths.py`.
+ **Kept, and why:** `run_daily_superbru_local.ps1` is named by `DAILY_AUTOMATION_README.md:19`,
+ so it and the six scripts reachable only through it — `archive_oddspedia_snapshot.py`,
+ `compare_oddspedia_movement.py`, `notify_daily_superbru_action_items.py`,
+ `scrape_superbru_pool_cdp_session.py`, `scrape_superbru_pool_picks_cdp_session.py`,
+ `scrape_superbru_results_cdp_session.py` — all stay.
+ **Kept, with the referrer recorded:** the nine `command:` targets of the legacy compose files,
+ which **five** files carry, not three. Seven are kept by one compose file each —
+ `run_dutch_arb_monitor.sh`, `run_live_mispricing_loop.sh` and `run_sharp_anchor_loop.sh` by
+ `docker-compose.live.yml`; `run_long_short_loop.sh` by `docker-compose.monitor.yml`;
+ `run_long_short_loop.py`, `run_market_making_eval_loop.py` and `run_probability_converter_loop.py`
+ by `docker-compose.polymarket-fixed.yml`. The other two are referenced more widely and would
+ survive those three files' retirement: `polymarket_mispricing_bot.py` from
+ `docker-compose.monitor.yml`, `docker-compose.polymarket-fixed.yml`,
+ `docker-compose.polymarket-wide-raw.yml`, `docs/POLYMARKET_PIPELINE_MAP.md`,
+ `LIVE_DUTCH_ARB_DOCKER.md` and `POLYMARKET_MISPRICING_BOT.md` under `docs/` — named as bare
+ basenames deliberately, because WO-168 may move both into `docs/archive/` and its
+ reference-resolution test scans this register, so a `docs/`-prefixed path written here would
+ fail that test in one merge order —
+ `tests/polymarket_predictive_engine/test_taker_fees.py`, and six scripts that import its stem
+ — `polymarket_long_short_engine.py`, `run_polymarket_liquidity_discovery.py`,
+ `run_polymarket_live_paper_loop.py`, `run_polymarket_local_live_loop.py`,
+ `run_polymarket_pipeline.py` and `run_promoted_rule_shadow_scan.py`, each carrying
+ `import polymarket_mispricing_bot` — and `tests/test_polymarket_public_search_discovery.py`,
+ fourteen referrers in all;
+ `polymarket_ml_collector.py` from `docker-compose.polymarket-collector.yml`,
+ `docker-compose.polymarket-fixed.yml`, `docker-compose.polymarket-wide-raw.yml` and
+ `docs/POLYMARKET_PIPELINE_MAP.md`. Also kept: `exact_chase.py`, `ev_contrarian.py` and
+ `differentiation_overlay.py`, each named independently by `analysis/README.md`, so none depends
+ on the others for survival. Retiring the three legacy compose files — `docker-compose.live.yml`,
+ `docker-compose.monitor.yml` and `docker-compose.polymarket-fixed.yml` — is a separate
+ decision and would orphan only the seven. One consequence of the removal is recorded here
+ because nothing else records it: `.github/workflows/check_superbru_fixtures.yml` is kept, and
+ it is named for `check_superbru_fixtures.py`, which this work order deletes. The workflow is
+ `workflow_dispatch`-only and its single step echoes and exits 1 under the workflow name "Superbru Fixture Checker (Manual Only - Disabled Pending Auto Pick
+ Hardening)", so it never invokes the script and removal is safe today;
+ re-enabling it would mean re-implementing the script from Git history. `.github/SECRETS.md:43` still describes that workflow as scheduled daily; that line is stale and sits outside this work order's touch list. Separately, `README.md:148-149` carries the claim this work order is amending in `AGENTS.md`, in different words, and about the scripts rather than about that workflow — "Legacy local scripts remain for history and regression coverage only. Their presence is not an active run instruction." — and this work order does not touch `README.md`: WO-168 rewrites that page in full and none of its eight registered sections carries the sentence, so it is not expected to survive that rewrite, although WO-168 pins no assertion of its absence. In the order where this entry merges first the line is stale on `main` until WO-168 lands, and is named here for that reason. The build re-runs the scan at dispatch, against the pre-change
+ tree and with **both** record-keeping files excluded as above —
+ `tests/test_repository_hygiene_launchers.py` and `docs/POLYMARKET_CODEX_WORK_ORDERS.md`, this register,
+ which enumerates all eighteen basenames and sits inside the `docs/` scan root — and removes only files still at zero references, subject to the fail-safe sentence below; any file that has gained a reference is left and named in the status line.
+ `AGENTS.md`'s closing paragraph becomes the following in full. Only its first sentence changes; its second sentence, "Their presence is not permission to run them locally.", is unchanged and is quoted inside the replacement only so the builder copies a finished paragraph rather than reconstructing one. The replaced sentence names the scan roots rather than a short list of file kinds, because an earlier draft listed "a test, workflow, compose file, script, or document", which is narrower than the rule this work order registers and would have gone false silently the first time a survivor's only referrer was a root `Dockerfile`, `.cmd` or `.toml`, three of which are already live referrers today: "Legacy local launchers and runbooks remain only where another file under the repository's scan roots still references them, as the rule in "Work-order and Git discipline" defines them; the 18 unreferenced ones were removed under WO-168a and remain in Git history. Their presence is not permission
+ to run them locally."
+
+2. **Regression guard (`tests/test_repository_hygiene_launchers.py`, new).** Tests 1-2
+ below, anchored off `__file__` (A3), each scan asserting a non-zero visit count; the literal scan roots of item 1 live in this file. The git-tracked set is obtained by `git ls-files` run against the repository root derived from `__file__`, and a non-zero exit, a missing `git`, or an empty enumeration each fail the test rather than skip it. The registered rule binds every file under `scripts/` while the test enforces over the git-tracked ones; the divergence is deliberate and is the safe direction, since an untracked file cannot be shipped.
+
+**What test 1 registers, stated because it outlives this cleanup.** Test 1 is not a one-off check
+on the removal; it is a standing repository invariant, that every file under `scripts/` must be named by at least one other file under the eleven directory roots or the repository-root files matching the seven patterns of item 1, twenty-two of them at `c6530a9`, counting neither the enforcing test file nor this register.
+Two things follow and are registered here rather than discovered by the next author. First, the
+invariant is weak evidence of life: a basename inside a comment satisfies it, two dead scripts naming each other survive the fixpoint permanently, and it proves nothing about reachability. Second, it is a real constraint on future work: on the post-removal
+tree 38 of the 123 surviving scripts have exactly one referrer (re-derived at `c6530a9` under this item's own matching rule, over git-tracked files, with both record-keeping files excluded; an earlier draft printed 41, which is this same rule counted over all 141 scripts on the pre-removal tree rather than over the 123 survivors on the post-removal one), so a pull request that adds a
+script before its caller, or that deletes a document or a test, can turn the suite red without
+touching `scripts/` at all. **The invariant this work order therefore registers, in `AGENTS.md` rather than here because it
+binds every future pull request and outlives this entry: every file under `scripts/` must be named by at least one **other** file under the scan roots, counting neither the enforcing test file nor this register, in both directions — a pull request that adds
+a script acquires its referrer in the same pull request, and a pull request that removes a script's last referrer, whatever kind of file it is, another script included, either keeps a referrer or removes the script.** There is no allowlist and no escape hatch, deliberately; a
+script that genuinely needs neither is a script that needs a registered reason, which is a work
+order and not a test exemption. The deletion direction is the one that will bite first: 38 of
+the 123 survivors have exactly one referrer, and deleting `DAILY_AUTOMATION_README.md` alone
+would orphan seven scripts in a single step. The three sentences added to `AGENTS.md`'s "Work-order and Git discipline" section are quoted verbatim here, in full, so the builder copies rather than authors registered text. They are one passage and must be added whole, as a single standalone paragraph rather than as bullets, because collapsed a single paragraph matches the literal while three bullets do not, the list separators landing inside the string, and deliberately without a dated `### Amendment` heading of its own: the literal is pinned character for character by test 2, and a dated heading would have to be pinned with it, so the provenance lives in this entry and in the closing paragraph instead; dropping the third sentence, "There is no allowlist.", would fail test 2's in-full-and-exactly-once check and print 0 in the day-after check: "Every file under `scripts/`, at any depth, must be named by at least one **other** file under the repository's scan roots, as `tests/test_repository_hygiene_launchers.py` defines them — its basename appearing in that other file, or, for a `.py` script, an import of its stem — and neither that test file nor `docs/POLYMARKET_CODEX_WORK_ORDERS.md` counts as a referrer. A pull request that adds a script acquires its referrer in the same pull request; a pull request that removes a script's last referrer either keeps a referrer or removes the script. There is no allowlist."
+
+
+### Rejection ledger
+
+**The discipline.** This entry is redrafted after every gate pass. Before each re-gate a row is
+added here for the pass just completed, so the row count equals the number of passes completed, and the heading carries no ordinal of its own — an earlier draft derived one from this row count, which the sibling work order's gate showed relocates the maintenance burden rather than removing it, since the derivation reads as satisfied while both the ledger and the ordinal are wrong. A gate that finds this ledger short by one row has
+found the defect the ledger exists to prevent, and that is a blocking finding rather than a stale
+count. No surface other than this ledger carries a count of the passes on this entry or a claim about what they found; the WO-168 figures in the preamble and in item 1 are historical, fixed at the split, and cannot move; an
+earlier draft kept an inline tally and a character count, and both went stale in consecutive passes.
+1. Five blockers in the lift out of WO-168: the script counts were stale at the commit they named;
+   the sentence written into `AGENTS.md` carried the wrong work-order number; a stale item reference
+   and two post-move paths that do not exist on this entry's tree; a promised record in a file this
+   entry does not touch, which created a two-way merge-order dependency with the sibling; and an
+   exclusion set of three where only two are load-bearing here.
+2. Five blockers: the previous pass's exclusion-count fix was applied at two of four sites and still
+   named the sibling's file as a resolvable token; the figure justifying a standing repository rule
+   was 41 where the rule yields 38; the registered rule was narrower than the invariant the test
+   creates and belonged in `AGENTS.md`; the absence assertion could never fire, because the
+   superseded sentence is line-wrapped between two words; and the referrer-file count was a
+   working-tree artifact that counted gitignored build output inside a scan root.
+3. Three blockers, all in the `AGENTS.md` material: the preamble understated the change at two
+   sites; the registered sentence was not the invariant test 1 asserts and was vacuous as worded,
+   because the enforcing test file lists every surviving basename and sits under a scan root; and
+   the presence check had no whitespace collapse, so it could never pass against a hard-wrapped
+   file.
+4. Four blockers: the passage called one sentence at six sites is three; the whole-file collapse
+   destroyed the structure two checks require; the sentence pinned two counts that nothing
+   maintains and misdescribed the file it points at; and item 1 and the fail-safe prescribed
+   opposite behaviour for the same dispatch condition.
+5. Two blockers and four majors: the bias summary declared one channel both open and closed; the
+   README disclosure was false under either reading of the claim it meant; the character count was
+   stale, because the previous pass's own fixes lengthened the passage; the provenance and tally
+   were stale by one; the closing-paragraph instruction would have duplicated a sentence; and the
+   exclusion delegation left a rename hole that would have made the invariant vacuous in silence.
+6. Two blockers, three majors and ten minors: test 2's first check was ambiguous, one reading
+   failing a compliant build and the other leaving a registered sentence deletable in silence; the
+   absence check's scope was unstated and the consequence claimed for it was false under the
+   entry's own scoping rule; the character count went stale a second consecutive pass and is now
+   removed rather than corrected; the provenance and tally were stale again and misattributed the
+   previous pass; and the exclusion-set parse had no shape rule, the natural one returning three
+   paths rather than two.
+7. Two blockers, four majors and ten minors: this ledger's first written row miscounted the pass that forced it into existence, saying nine minors where ten were issued; the ledger's own scope rule — that no other surface carries a per-pass count or a completeness claim — was false at a preamble sentence that counted gate passes on the sibling and claimed what they found; the dismissal of the earlier 41 figure as unproducible was itself wrong, since 41 is this same rule counted over the pre-removal tree; the not-authorised clause named `AGENTS.md`'s closing sentence, which is the sentence that does not change, so read literally it forbade the change item 1 mandates; test 2's escape sentence attached the absence check's justification to the exactly-once check, leaving the absence check without its own; and the collapse rule claimed never to cross a blank line, which is false of the section region one check uses.
+8. One blocker, one major and six minors: the preamble derived a draft ordinal from the ledger's row count and it was off by one, because the rows count gated drafts and the draft under gate has no row yet — the derived form reading as satisfied while wrong, which is verbatim the failure mode the ledger two lines later says was removed; the narrowed scope rule was still false at one live site in the day-after check, which claimed what a pass on this entry had closed; and six minors — a dangling antecedent in the collapse rule, test 2's four checks not being enumerable as written, an unnamed A10 escape where the scan-root list is pinned by nothing, unqualified draft ordinals in item 1, the `AGENTS.md` passage carrying no provenance, and the dispatch paragraph not repeating the fail-safe subordination.
+9. Two blockers, two majors and eight minors, one blocker of which was not a defect: the ledger's last two rows were appended out of order, so rows 7 and 8 reported each other's passes; the preamble's "no surface carries a draft ordinal at all" was false against four of the sibling's ordinals in item 1; the day-after check's replacement collapse reason was false in a new way, since the sentence it greps for is not in the file today at all; and eight minors. The second blocker, that the pass-7 row overstated its blocker count, was not a defect in this entry: the dispatch brief for that pass gave the gate the sequence 5, 5, 3, 4, 2, 2, 1, 1 where the true sequence is 5, 5, 3, 4, 2, 2, 2, 1, and the gate reasoned correctly from wrong input. The row is left as written and the error is recorded here, because a finding that rests on the drafter's own bad brief must not be allowed to change correct text.
+
+### A11 — bias-direction disclosure
+
+No estimator; no number changes; no gate reads anything this work order writes. **First channel:**
+**the removal decision itself is fail-open in one direction and fail-closed in the other.** An
+unreadable or undecodable file is not a referrer, so a launcher it referenced would still be
+removed; that is the favourable-to-removal direction and it is disclosed rather than argued away.
+It is inert today, because the only files under the scan roots that fail to decode as UTF-8 are
+two gzip archives that can reference nothing. In the other direction the rule is conservative: a
+basename appearing anywhere in any file under the roots, even inside a comment, keeps a launcher
+alive, so the removal set is the smallest the evidence supports rather than the largest.
+**Second channel: the scan-root boundary itself.** A launcher referenced only from outside the
+roots — `data/`, `inputs/`, `outputs/`, `.claude/`, or the six root files matching none of the seven
+patterns — is not seen, so it too is favourable to removal. Checked by hand at `c6530a9`: none of the 18 is named in any of them, and that check is re-run against the dispatch commit alongside the scan. `.pytest_cache/` and
+`.ruff_cache/` are excluded separately and for a different reason: they are regenerated caches
+whose contents are lists of the paths last linted, not references, and `.ruff_cache` does name
+ten of the 18 for exactly that reason. Nothing survives on a lint cache.
+**Third channel, disclosed:** the two record-keeping files excluded from the referrer set are
+excluded because each enumerates the removal candidates for audit, and without the exclusion the
+record would blind the scan it is recorded in. That exclusion makes removal easier, not harder,
+and it is bounded to exactly two named files. Of the three, one is closed by a rule and two are left open in principle: the undecodable-file rule is closed by the fail-safe sentence below, which stops the build on any file it cannot read or decode outside the two recorded archives; the scan-root boundary is inert at `c6530a9` and re-checked at dispatch rather than closed by a rule; and the record-keeping exclusion is bounded to exactly two named files. All three point the same way, towards removing more rather than less, and that is stated rather than argued away; the conservative matching rule is what bounds them.
+
+### Fail-safe sentence (S5)
+
+A launcher that has gained a reference anywhere under the scan roots is not removed; the scan is
+re-run at dispatch against the pre-change tree and only the fixpoint it computes is removed. If the dispatch scan's fixpoint differs from the 18 recorded here, no file outside the intersection is removed, the differing files are named in the status line, and the entry is amended before any further removal; the recorded set is never forced, and the build stops with no pull request opened until the entry is amended. A file under the scan roots that cannot be read or decoded is not a
+referrer, which is fail-open for the removal decision; the dispatch scan therefore stops the build if it meets any file it cannot read or decode, other than the two recorded gzip archives
+`research/premium_poc/data/deribit/BTC_funding_1h.csv.gz` and its `ETH` twin, so the malformed
+branch is stop-and-amend rather than remove-anyway. No runtime path reads any file this work order touches: every compose file and image entrypoint on the VPS path —
+`docker-compose.vps-paper.yml`, `docker-compose.yml`, the `Dockerfile` CMD and
+`Dockerfile.monitor` — together with `scripts/run_vps_ops_scheduler.sh` and every file under
+`.github/workflows/`, names none of the 18; the single CI artifact affected is
+`check_superbru_fixtures.yml`, which is named for a removed script but never invokes it, and the nine legacy compose targets and
+the three independently-referenced analysis scripts are kept, not removed.
+
+### Touch ONLY these files (4 entries)
+
+1. The 18 launchers removed (item 1), one path each.
+2. `AGENTS.md` — the first sentence of the closing paragraph, and a three-sentence passage added to "Work-order and Git discipline".
+3. `tests/test_repository_hygiene_launchers.py` (new).
+4. `docs/POLYMARKET_CODEX_WORK_ORDERS.md` — this entry and its calibration row.
+
+### Enumerated offline tests (S8/A10); each to be confirmed to FAIL with its guard reverted before the pull request is opened
+
+1. `test_every_script_is_referenced` — every path returned by `git ls-files -- scripts/`, recursively and at any depth, is referenced from at least one file under the literal scan roots other than itself, under item 1's corrected matching rule (basename substring, or for a `.py` script an import of its stem); at least 100 scripts visited (141 at `c6530a9`, 123 after removal); the 18 removed names are absent from `scripts/`; the two exclusion paths are parsed from the registered `AGENTS.md` passage by test 2's fourth check rather than restated here, and this test asserts there are exactly two such spans, that both exist in the repository, and that one is this test file's own path relative to the repository root; exactly **two** files are excluded from the referrer set — this test file and `docs/POLYMARKET_CODEX_WORK_ORDERS.md`, the register that enumerates all eighteen basenames — and the test asserts the exclusion set has exactly two members, so recording a removal cannot hide it and the set cannot grow silently; an unreadable or undecodable file is not a referrer (fail-closed: it cannot keep a launcher alive). The test computes the same fixpoint item 1 records and asserts it is empty on the post-removal tree, so a newly orphaned launcher fails it. Four further assertions, because an empty fixpoint alone is satisfied by over-removal as readily as by correct removal: the test carries the literal list of the 123 surviving basenames and asserts every one of them is present under `scripts/`, which subsumes `run_daily_superbru_local.ps1` and the six scripts reachable only through it and the nine legacy compose targets; the count is therefore **at least 123** rather than exactly 123, so a later work order that adds a referenced script need not edit the literal, while deleting any recorded survivor fails. An earlier draft asserted an exact count of 123 plus seven named files, which a builder could satisfy while also deleting `exact_chase.py` and adding one referenced script of their own; at least **400** referrer files are visited (721 git-tracked files at `c6530a9`, 719 of them decoding as UTF-8, and 704 and 702 on the post-change tree; a built working tree also carries seven generated files under the roots, which the rule excludes); and the root list the scan uses is exactly the eleven directories and seven root patterns of item 1, asserted literally — the assertion carries its own copy of the list rather than comparing the constant to itself, so narrowing a root takes two edits in the same file; unlike the exclusion set, that pin is not in registered text, and one pull request editing both would silently narrow the `AGENTS.md` rule, which delegates the roots to this file, because without it dropping `src/`, `.github/`, `examples/`, `notebooks/`, `config/` or `calibration/`, or any of the `*.yaml`, `*.toml`, `*.ini`, `*.cmd` and `Dockerfile*` root patterns, leaves the fixpoint empty and every other assertion green, while `research/` alone among the unused roots is caught, by the UTF-8 set below; and the set of files under the roots that fail to decode as UTF-8 is exactly `{research/premium_poc/data/deribit/BTC_funding_1h.csv.gz, research/premium_poc/data/deribit/ETH_funding_1h.csv.gz}`, which is the assertion A11's inertness claim rests on and which nothing else checks. A second standing constraint follows and is registered rather than discovered: test 1 pins that set to exactly those two archives, so a pull request that adds any file that does not decode as UTF-8, a raster diagram in `docs/` included, must amend the literal in the same pull request.
+2. `test_agents_md_carries_both_registered_amendments` (an earlier draft named this `test_agents_closing_sentence_names_the_removal`, which covered only two of its four checks) — the collapsed last non-empty block of `AGENTS.md` is, character for character, the whole two-sentence replacement paragraph quoted in item 1, so a builder who deleted the closing paragraph and inserted the new sentence anywhere fails, and so does a builder who keeps the new sentence but drops "Their presence is not permission to run them locally.". An earlier draft asserted only that the amended sentence was **present in** the last block, under which that second sentence was pinned by nothing and could be deleted from the canonical instruction file with every check green; the file is first split into blocks on blank lines, and headings are recognised on lines whose first three characters are exactly `## ` or `### `; each check then runs against the block or section it names, with every run of whitespace inside that region collapsed to a single space and the collapsed region then stripped of leading and trailing whitespace, so a block's collapse never crosses a blank line and a section's is bounded by its own heading lines; the two regions the checks name — "the last non-empty block" and "the span from the `## Work-order and Git discipline` line to the first line beginning `### ` after it" — are each well defined. An earlier draft collapsed the whole file at once, which left no paragraphs and no line starts and so destroyed the structure two of these four checks need. The literal "remain only for repository history and regression coverage" appears in no block of the file, each block collapsed separately — the collapse is load-bearing here, because the superseded sentence is line-wrapped between "and" and "regression" in the file as it stands, so an uncollapsed literal check could never fire and would be vacuously true before the change as well as after; the check is over the whole of `AGENTS.md` and not only its last block, which is what fails a builder who appends the new paragraph without deleting the old one; and the three-sentence passage added to "Work-order and Git discipline" is present in full and exactly once — one escape, stated: that check is bounded to the section, so a second copy of the passage placed outside it is not counted — between the `## Work-order and Git discipline` line and the first line beginning `### ` after it, which is tighter than "the next heading of the same level" and excludes that section's two dated amendments. And the two paths test 1 excludes from the referrer set are read out of the registered `AGENTS.md` passage rather than restated in the test file. The passage carries four backticked spans — `scripts/`, `tests/test_repository_hygiene_launchers.py`, `.py` and `docs/POLYMARKET_CODEX_WORK_ORDERS.md`; the two paths are exactly those spans whose content contains a `/` and ends in `.py` or `.md`, and the fourth check parses the passage's backticked spans and hands test 1 the two exclusion paths, test 1 asserting there are exactly two such spans, because the natural shape rule of "ends in `.py` or `.md`" returns three. So widening the exclusion set in the test alone fails: the rule and its guard cannot be moved together by one edit. One seam remains between the two delegations and is closed here: test 1 asserts that both paths parsed out of the passage exist in the repository and that one of them is this test file's own path relative to the repository root, so a rename or move of the test file that does not amend `AGENTS.md` fails loudly instead of leaving the renamed file unexcluded, where — carrying the literal list of all 123 survivors — it would become a referrer for every script and make the invariant vacuous in silence. The collapse is load-bearing for this assertion too: the passage is hard-wrapped across several lines in `AGENTS.md`, so an uncollapsed presence check could never pass, and a builder would resolve it either by putting the whole passage on one unwrapped line in the canonical instruction file or by silently editing registered text.
+
+### Day-after check
+
+Not a runtime change. Owner-runnable on `main` after merge: `test -e scripts/<name>` is false for
+each of the 18 removed names, and true for `scripts/run_daily_superbru_local.ps1` and the six
+scripts reachable only through it; the sandbox run of
+`tests/test_repository_hygiene_launchers.py` is stated in the PR per the 2026-07-27 amendment, and
+the required gate re-runs it when its runner returns (no date can be given for that). The two `AGENTS.md` changes are checked too, because a standing rule binding every future contributor is this work order's most consequential change and nothing else makes it owner-visible: `tr -s '[:space:]' ' ' < AGENTS.md | grep -c -F 'There is no allowlist.'` prints 1, collapsed for the reason test 2 collapses the passage region: the builder hard-wraps the added paragraph, so this sentence may land split across two lines and an uncollapsed literal check would miss a correct build, and `tail -8 AGENTS.md` shows the amended closing paragraph, the extra lines allowing for the builder's wrap width.
+
+**Not authorised by this text:** any change to a gate, threshold, result, or evidence class; any change to registered text other than the first sentence of `AGENTS.md`'s closing paragraph, the three sentences added to `AGENTS.md`'s "Work-order and Git discipline" section, and this entry and its calibration row; any merge; the removal of any file that the scan at dispatch finds referenced; the
+retirement of the legacy compose files.

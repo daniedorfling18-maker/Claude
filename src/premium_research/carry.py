@@ -59,6 +59,11 @@ CAPITAL_PER_NOTIONAL = 1.0 + MARGIN_FRACTION
 MAINTENANCE_MARGIN = 0.005
 REBALANCE_MARGIN_RATIO = 0.25
 
+NAV_IDENTITY_TOLERANCE = 1e-12
+# WO-170 delta 1: the conservation check runs on absolute USD-per-notional flows, so its
+# floor is float64 rounding accumulated over a period, not the NAV identity's exact reassociation.
+SELF_FINANCING_TOLERANCE = 1e-9  # WO-170: nav and wealth are the same three float64 terms in a different association order (true gap <= a few x 2.2e-16 on O(1) values)
+
 V1_LOOKBACK = 3
 V1_ENTRY_ANNUALISED = 0.08
 V1_EXIT_LEVEL = 0.0
@@ -105,6 +110,8 @@ def boundary_table(funding: pd.DataFrame, perp_1h: pd.DataFrame, spot_1h: pd.Dat
                 "perp_high": float(max(highs)) if highs else float("nan"),
                 "high_hours": int(len(highs)),
                 "close_missing": bool(not (math.isfinite(pc) and math.isfinite(sc))),
+                "perp_close_missing": bool(not math.isfinite(pc)),
+                "spot_close_missing": bool(not math.isfinite(sc)),
                 "high_partial": bool(len(highs) < 8),
             }
         )
@@ -151,8 +158,16 @@ class Ledger:
     rebalances: list[int] = field(default_factory=list)
     forced_liquidations: list[int] = field(default_factory=list)
     unverifiable_open: list[int] = field(default_factory=list)
+    rejected_open: list[int] = field(default_factory=list)  # open position inside a rejected period, under every scope (the WO-166 "either" count)
+    # WO-170: the accounts behind ``wealth`` at every boundary, so the cash flows are identifiable and ``nav`` can be re-derived.
+    cash: list[float] = field(default_factory=list)
+    margin: list[float] = field(default_factory=list)
+    spot_qty: list[float] = field(default_factory=list)
+    spot_mark: list[float] = field(default_factory=list)
+    perp_mark: list[float] = field(default_factory=list)
+    marks_carried_forward: list[bool] = field(default_factory=list)
 
-    def append(self, boundary: int, wealth: float, *, funding: float = 0.0, fees: float = 0.0, traded: float = 0.0, open: bool, flagged: bool = False, rebalanced: int = 0, liquidated: int = 0, unverifiable: int = 0) -> None:
+    def append(self, boundary: int, wealth: float, *, funding: float = 0.0, fees: float = 0.0, traded: float = 0.0, open: bool, flagged: bool = False, rebalanced: int = 0, liquidated: int = 0, unverifiable: int = 0, rejected: int = 0, cash: float = 0.0, margin: float = 0.0, spot_qty: float = 0.0, spot_mark: float = float("nan"), perp_mark: float = float("nan"), carried: bool = False) -> None:
         self.boundary_ms.append(int(boundary))
         self.wealth.append(float(wealth))
         self.funding_received.append(float(funding))
@@ -163,6 +178,13 @@ class Ledger:
         self.rebalances.append(int(rebalanced))
         self.forced_liquidations.append(int(liquidated))
         self.unverifiable_open.append(int(unverifiable))
+        self.rejected_open.append(int(rejected))
+        self.cash.append(float(cash))
+        self.margin.append(float(margin))
+        self.spot_qty.append(float(spot_qty))
+        self.spot_mark.append(float(spot_mark))
+        self.perp_mark.append(float(perp_mark))
+        self.marks_carried_forward.append(bool(carried))
 
 
 def _check_prices(spot_price: float, perp_price: float) -> None:
@@ -233,7 +255,10 @@ def v1_targets(rates: np.ndarray) -> np.ndarray:
     return target
 
 
-def simulate(table: pd.DataFrame, *, variant: str, start_ms: int, end_ms: int, capital: float = CAPITAL_PER_NOTIONAL, fee_mult: float = 1.0) -> Ledger:
+UNVERIFIABLE_SCOPES = ("either", "perp")  # "either": WO-166 (any absent bar); "perp": WO-167 (perpetual-side data the liquidation check reads)
+
+
+def simulate(table: pd.DataFrame, *, variant: str, start_ms: int, end_ms: int, capital: float = CAPITAL_PER_NOTIONAL, fee_mult: float = 1.0, unverifiable_scope: str = "either") -> Ledger:
     """Run V0 (always on between ``start_ms`` and ``end_ms``) or V1 (signal-driven) over the boundary table.
 
     ``start_ms`` is the boundary at which V0 enters; ``end_ms`` is the boundary
@@ -241,6 +266,9 @@ def simulate(table: pd.DataFrame, *, variant: str, start_ms: int, end_ms: int, c
     """
     if variant not in {"V0", "V1"}:
         raise CarryInputError(f"unknown variant {variant!r}")
+    if unverifiable_scope not in UNVERIFIABLE_SCOPES:
+        raise CarryInputError(f"unknown unverifiable_scope {unverifiable_scope!r}; registered values are {UNVERIFIABLE_SCOPES}")
+    perp_only = unverifiable_scope == "perp"
     rows = table[(table["boundary_ms"] >= start_ms) & (table["boundary_ms"] <= end_ms)].reset_index(drop=True)
     if len(rows) < 2:
         raise CarryInputError("fewer than two boundaries inside the requested span")
@@ -254,6 +282,7 @@ def simulate(table: pd.DataFrame, *, variant: str, start_ms: int, end_ms: int, c
     pending_rates: list[float] = []
     pending_high = float("nan")
     pending_flag = False
+    prev_perp_close_missing = False  # the entry boundary carries a close (asserted above)
 
     for index, row in rows.iterrows():
         boundary = int(row["boundary_ms"])
@@ -273,22 +302,32 @@ def simulate(table: pd.DataFrame, *, variant: str, start_ms: int, end_ms: int, c
             if variant == "V0" or bool(targets[0]):
                 position, trade = open_position(position.cash, spot_close, perp_close, notional=min(1.0, position.cash / CAPITAL_PER_NOTIONAL), fee_mult=fee_mult)
                 fees, traded = trade.fees, trade.traded_notional
-            ledger.append(boundary, starting_wealth, fees=fees, traded=traded, open=position.open)
+            # WO-170: the entry row records the PRE-trade accounts (cash = capital, nothing held), so nav == wealth there and the
+            # entry fee falls inside the first period, exactly where WO-166 placed it.
+            ledger.append(boundary, starting_wealth, fees=fees, traded=traded, open=position.open, cash=starting_wealth, margin=0.0, spot_qty=0.0, spot_mark=spot_close, perp_mark=perp_close, carried=False)
             continue
 
         row_high = float(row["perp_high"])
         if math.isfinite(row_high):
             pending_high = row_high if not math.isfinite(pending_high) else max(pending_high, row_high)
         pending_flag = pending_flag or bool(row["high_partial"])
+        # WO-167 scope: this period's liquidation check is unverifiable only if one of its perpetual
+        # highs is absent or the perpetual close at its start boundary (the previous row) is absent.
+        perp_incomplete = bool(row["high_partial"]) or prev_perp_close_missing
+        prev_perp_close_missing = bool(row["perp_close_missing"])  # strict: a table without the per-leg flag is not a boundary table
 
         if bool(row["close_missing"]):
             pending_rates.append(rate)
             # An open position inside a period with missing bars has unverifiable liquidation status.
-            ledger.append(boundary, position.wealth(position.last_spot) if position.open else position.cash, open=position.open, flagged=True, unverifiable=int(open_at_start))
+            merged_unverifiable = int(open_at_start and (perp_incomplete if perp_only else True))
+            ledger.append(boundary, position.wealth(position.last_spot) if position.open else position.cash, open=position.open, flagged=True, unverifiable=merged_unverifiable, rejected=int(open_at_start), cash=position.cash, margin=position.margin, spot_qty=position.q, spot_mark=position.last_spot, perp_mark=position.last_perp, carried=True)
             continue
 
         flagged = pending_flag or bool(pending_rates)
-        unverifiable = int(flagged and open_at_start)
+        unverifiable = int(open_at_start and (perp_incomplete if perp_only else flagged))
+        rejected = int(open_at_start and flagged)
+        if open_at_start and not math.isfinite(pending_high):
+            unverifiable = 1  # no intra-period perpetual high to check against: liquidation status is unverifiable under every scope
 
         if position.open:
             m0 = position.margin_ratio(position.last_perp)
@@ -327,7 +366,7 @@ def simulate(table: pd.DataFrame, *, variant: str, start_ms: int, end_ms: int, c
         pending_rates = []
         pending_high = float("nan")
         pending_flag = False
-        ledger.append(boundary, position.wealth(spot_close), funding=funding, fees=fees, traded=traded, open=position.open, flagged=flagged, rebalanced=rebalanced, liquidated=liquidated, unverifiable=unverifiable)
+        ledger.append(boundary, position.wealth(spot_close), funding=funding, fees=fees, traded=traded, open=position.open, flagged=flagged, rebalanced=rebalanced, liquidated=liquidated, unverifiable=unverifiable, rejected=rejected, cash=position.cash, margin=position.margin, spot_qty=position.q, spot_mark=spot_close, perp_mark=perp_close, carried=False)
     return ledger
 
 
@@ -347,11 +386,89 @@ def ledger_frame(ledger: Ledger, *, capital: float = CAPITAL_PER_NOTIONAL) -> pd
             "rebalances": ledger.rebalances,
             "forced_liquidations": ledger.forced_liquidations,
             "unverifiable_open": ledger.unverifiable_open,
+            "rejected_open": ledger.rejected_open,
+            "cash": ledger.cash,
+            "margin": ledger.margin,
+            "spot_qty": ledger.spot_qty,
+            "spot_mark": ledger.spot_mark,
+            "perp_mark": ledger.perp_mark,
+            "marks_carried_forward": ledger.marks_carried_forward,
         }
     )
     frame["period_return_on_notional"] = frame["wealth"].diff().fillna(0.0)
     frame["period_return_on_capital"] = frame["period_return_on_notional"] / capital
+    # WO-170: the NAV identity. ``spot_value`` is 0 when nothing is held (a flat position may carry NaN marks).
+    qty = frame["spot_qty"].to_numpy(dtype=float)
+    frame["spot_value"] = np.where(qty != 0.0, qty * frame["spot_mark"].to_numpy(dtype=float), 0.0)
+    frame["nav"] = frame["cash"] + frame["margin"] + frame["spot_value"]
+    gap = np.abs(frame["nav"].to_numpy(dtype=float) - frame["wealth"].to_numpy(dtype=float))
+    if not bool(np.all(gap <= NAV_IDENTITY_TOLERANCE)):
+        worst = int(np.nanargmax(np.where(np.isfinite(gap), gap, np.inf)))
+        raise CarryInputError(f"NAV identity violated at boundary {int(frame['boundary_ms'].iloc[worst])}: nav {frame['nav'].iloc[worst]!r} vs wealth {frame['wealth'].iloc[worst]!r}")
+    _assert_self_financing(frame)
+    nav = frame["nav"].to_numpy(dtype=float)
+    prev = np.concatenate(([float("nan")], nav[:-1]))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ret = (nav - prev) / prev
+    ret = np.where(np.isfinite(prev) & (prev > 0.0), ret, float("nan"))
+    ret[0] = 0.0  # the entry row carries no period, mirroring period_return_on_capital's diff().fillna(0.0)
+    frame["period_return_on_nav"] = ret
     return frame
+
+
+def _assert_self_financing(frame: pd.DataFrame) -> None:
+    """WO-170 delta 1: the identity the NAV check could not see.
+
+    ``nav = cash + margin + spot_qty x spot_mark`` and ``wealth = q x spot + margin
+    + cash`` are the same three terms reassociated, so the NAV assertion is an
+    algebraic tautology: it fires only if the exported ledger is mutated after the
+    fact. The build review demonstrated a single-site credit of phantom collateral
+    yield inside the state machine that raised the annualised return from 7.10% to
+    11.46% with the NAV check silent. This asserts CONSERVATION instead — every
+    change in NAV must be explained by the position's mark-to-market, the funding it
+    received and the fees it paid, with no unexplained source of value:
+
+        dNAV_t = q_{t-1} x [(S_t - S_{t-1}) - (P_t - P_{t-1})] + funding_t - fees_t
+
+    Two kinds of transition are skipped. Where either mark is absent or carried
+    forward, the ledger has no price at which to state the mark-to-market, and those
+    periods are excluded from every estimator anyway. Where either endpoint traded
+    (entry, exit or a resize), the fee is booked to the row that decided the trade
+    while its NAV effect lands on the next, so the one-step form does not apply; on
+    the committed ledgers that is 22 transitions out of 7,288 per ledger, and the
+    identity is asserted on every other one.
+    """
+    qty = frame["spot_qty"].to_numpy(dtype=float)
+    spot = frame["spot_mark"].to_numpy(dtype=float)
+    perp = frame["perp_mark"].to_numpy(dtype=float)
+    nav = frame["nav"].to_numpy(dtype=float)
+    funding = frame["funding_received"].to_numpy(dtype=float)
+    fees = frame["fees_paid"].to_numpy(dtype=float)
+    carried = frame["marks_carried_forward"].to_numpy(dtype=bool)
+    traded = frame["traded_notional"].to_numpy(dtype=float) != 0.0
+    if nav.size < 2:
+        return
+    held = qty[:-1]
+    priced = np.isfinite(spot[:-1]) & np.isfinite(spot[1:]) & np.isfinite(perp[:-1]) & np.isfinite(perp[1:])
+    checkable = priced & ~carried[1:] & ~carried[:-1] & ~traded[1:] & ~traded[:-1]
+    expected = held * ((spot[1:] - spot[:-1]) - (perp[1:] - perp[:-1])) + funding[1:] - fees[1:]
+    gap = np.abs((nav[1:] - nav[:-1]) - expected)
+    gap = np.where(checkable, gap, 0.0)
+    if not bool(np.all(gap <= SELF_FINANCING_TOLERANCE)):
+        worst = int(np.argmax(gap))
+        boundary = int(frame["boundary_ms"].iloc[worst + 1])
+        raise CarryInputError(
+            f"self-financing identity violated at boundary {boundary}: NAV moved by "
+            f"{nav[worst + 1] - nav[worst]!r} but mark-to-market, funding and fees explain {expected[worst]!r}"
+        )
+
+
+def _compound(series: pd.Series) -> float:
+    """WO-170: ``prod(1 + r) - 1`` over a week's periods; NaN if any period return is not finite."""
+    values = series.to_numpy(dtype=float)
+    if values.size == 0 or not np.isfinite(values).all():
+        return float("nan")
+    return float(np.prod(1.0 + values) - 1.0)
 
 
 def iso_week_key(boundary_ms: int) -> tuple[int, int]:
@@ -385,6 +502,9 @@ def weekly_returns(frame: pd.DataFrame) -> pd.DataFrame:
             rebalances=("rebalances", "sum"),
             forced_liquidations=("forced_liquidations", "sum"),
             unverifiable_open=("unverifiable_open", "sum"),
+            rejected_open=("rejected_open", "sum"),
+            return_on_nav=("period_return_on_nav", _compound),
+            nav_end=("nav", "last"),
             week_end_ms=("boundary_ms", "max"),
             negative_funding_periods=("funding_received", lambda s: int((s < 0).sum())),
         )

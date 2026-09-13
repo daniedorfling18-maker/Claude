@@ -1,0 +1,298 @@
+{
+  "assumptions": {
+    "adverse_selection_model": "charge = worst of 24h@1min bars, 7d@10min bars, and the empirical markout of band-crossing prints at 5min, queue-share weighted against resting band depth",
+    "capital_curve": "2026-07-11 WO-57 planning aid only: each listed cap reruns the registered greedy sizing, but no curve value is read by an M-gate or policy.",
+    "quote_distance": "per-market best of [0.25, 0.5, 0.75] x rewards_max_spread from mid",
+    "quote_size_shares": "rewards_min_size per market, both sides",
+    "resolution_risk": "WO-51 screen: high subjective/UMA-dispute-prone wording is excluded from the quote portfolio; corpus evidence may only escalate LOW classes to MEDIUM.",
+    "share_model": "published_v2",
+    "share_model_details": "market + complement books; Q_min=max(min(Q1,Q2), max(Q1,Q2)/c) inside [0.1, 0.9], strict min outside band; our hypothetical quote enters both sides symmetrically",
+    "share_model_legacy": "one-release audit column retained in candidates as old min(same-token bid, ask) share",
+    "staleness_guard": "2026-07-14 WO-80 tighten-only universe filter: otherwise eligible rewarded markets are excluded when their latest explicit title date or venue close time is past, or when UMA resolution is proposed/disputed. Registered M-gates are unchanged.",
+    "supplementary_income": "rebates + holding rewards are reported as uncounted income only; they are excluded from portfolio_net_carry_usd_per_day and every M-gate",
+    "thin_book_guard": "raw share > 0.05 excluded from portfolio",
+    "universe_scan_mode": "yield_first_v1",
+    "universe_scan_mode_note": "2026-07-11 WO-56 coverage change only: rewarded markets are pre-screened by pot x published-rule min-size share before the existing expensive history/markout study. The registered gate metric remains the sized portfolio net carry at the $500 cap."
+  },
+  "candidates_measured": 41,
+  "candidates_resolution_high_risk": 15,
+  "candidates_thin_book_untrusted": 0,
+  "capital_curve": [
+    {
+      "capital_cap_usd": 250.0,
+      "capital_used_usd": 0.0,
+      "net_per_day_per_capital_used": null,
+      "net_usd_per_day": 0,
+      "net_usd_per_month": 0,
+      "portfolio_markets": 0
+    },
+    {
+      "capital_cap_usd": 500.0,
+      "capital_used_usd": 470.0,
+      "net_per_day_per_capital_used": 0.00357447,
+      "net_usd_per_day": 1.68,
+      "net_usd_per_month": 50.4,
+      "portfolio_markets": 1
+    },
+    {
+      "capital_cap_usd": 1000.0,
+      "capital_used_usd": 470.0,
+      "net_per_day_per_capital_used": 0.00357447,
+      "net_usd_per_day": 1.68,
+      "net_usd_per_month": 50.4,
+      "portfolio_markets": 1
+    },
+    {
+      "capital_cap_usd": 2000.0,
+      "capital_used_usd": 470.0,
+      "net_per_day_per_capital_used": 0.00357447,
+      "net_usd_per_day": 1.68,
+      "net_usd_per_month": 50.4,
+      "portfolio_markets": 1
+    },
+    {
+      "capital_cap_usd": 5000.0,
+      "capital_used_usd": 470.0,
+      "net_per_day_per_capital_used": 0.00357447,
+      "net_usd_per_day": 1.68,
+      "net_usd_per_month": 50.4,
+      "portfolio_markets": 1
+    }
+  ],
+  "capital_for_100_per_month": null,
+  "clears_100_per_month_target": false,
+  "composition_diff_status": "ok",
+  "departed_reasons": {
+    "measured_not_sized": 1
+  },
+  "errors": [],
+  "excluded_stale": 17,
+  "excluded_stale_by_reason": {
+    "venue_close_time_past": 17
+  },
+  "excluded_stale_condition_ids": {
+    "0x03314e3990204e534ec026c948b56fea3fa94d22d920742de5398b9feff58d01": [
+      "venue_close_time_past"
+    ],
+    "0x0fa287da930d97093bf87da9e9952a1498447fabaf5ff7a3518dc67f695dcd02": [
+      "venue_close_time_past"
+    ],
+    "0x11f9643cdb8dde6823cf80b0458a97e42fad758e48cb4be791be3fc5467825b3": [
+      "venue_close_time_past"
+    ],
+    "0x4c4fe18ea12c2bcfd845da52d8068a98d73848a1daf3021790bd1e5ba238f2ad": [
+      "venue_close_time_past"
+    ],
+    "0x4dc2118542f54875c4e580557cf4783c800a57fff3ba529980c629a7317a84d0": [
+      "venue_close_time_past"
+    ],
+    "0x575e005713115637c475dbd2f239459c6302b75e7d038ea799a92ba1c74ad7e0": [
+      "venue_close_time_past"
+    ],
+    "0x57fd6c39a872ffa9631ffa2c8e7d481c016b5ddb968c1992eaaf7e3b077653fa": [
+      "venue_close_time_past"
+    ],
+    "0x5dc5cc8a851ded31f7dc892b211500d8a1992dec58262ab7c8037556a2e94f12": [
+      "venue_close_time_past"
+    ],
+    "0x5dcbae314244382db5d31c88c293352288481efb86ac7336048c32c05059c2a3": [
+      "venue_close_time_past"
+    ],
+    "0x61975dd33aa5df497fa2d94d9d2581972b0019f1a736470e72f70ac934aa7e01": [
+      "venue_close_time_past"
+    ],
+    "0x7114b07384815b2b10d68f0ac6dd4f862372add5ecf45a6edc8d7390bfd37afc": [
+      "venue_close_time_past"
+    ],
+    "0x7a72ab43e36f053c28ae7b493a0dec9d25d4fc57a0c88778f68efcb1164065dd": [
+      "venue_close_time_past"
+    ],
+    "0x846868a848944981e86b0d8f46062e750ae6b5f7d1f41f6320ccc37d8c2745d6": [
+      "venue_close_time_past"
+    ],
+    "0x88c7d216c20319fa1b57b92745abfdc8ca5f4e9464b97c74e28b9d6ffa16c730": [
+      "venue_close_time_past"
+    ],
+    "0xbfb1f00dfc1dfd79177a6a16cd8013f8d42e81975350e88851dc2f75c676318d": [
+      "venue_close_time_past"
+    ],
+    "0xdaa65227da9ab86c7e42011d0a7d5b6a292dcd24015503494cc15397b86f9dc6": [
+      "venue_close_time_past"
+    ],
+    "0xfbd023310a19ef3e08415f6b0085d38f1ae8bbd3a1926b2d4cb50cdd6857a6f4": [
+      "venue_close_time_past"
+    ]
+  },
+  "excluded_stale_condition_ids_truncated": false,
+  "excluded_stale_examples": [
+    {
+      "market_id": "74e35b0",
+      "question": "sanitised-49f1131cbca0",
+      "reasons": [
+        "venue_close_time_past"
+      ]
+    },
+    {
+      "market_id": "a6575ed",
+      "question": "sanitised-18ca6d84a846",
+      "reasons": [
+        "venue_close_time_past"
+      ]
+    },
+    {
+      "market_id": "968a90e",
+      "question": "sanitised-deff7b22e248",
+      "reasons": [
+        "venue_close_time_past"
+      ]
+    },
+    {
+      "market_id": "ba4fd73",
+      "question": "sanitised-5a3e531d4d3c",
+      "reasons": [
+        "venue_close_time_past"
+      ]
+    },
+    {
+      "market_id": "e7d4df4",
+      "question": "sanitised-291f319344bd",
+      "reasons": [
+        "venue_close_time_past"
+      ]
+    },
+    {
+      "market_id": "af119fa",
+      "question": "sanitised-075a049ad016",
+      "reasons": [
+        "venue_close_time_past"
+      ]
+    },
+    {
+      "market_id": "3515086",
+      "question": "sanitised-a09e2ffba29d",
+      "reasons": [
+        "venue_close_time_past"
+      ]
+    },
+    {
+      "market_id": "aa75a5e",
+      "question": "sanitised-4c77ae5e13d9",
+      "reasons": [
+        "venue_close_time_past"
+      ]
+    },
+    {
+      "market_id": "2c86b1c",
+      "question": "sanitised-e5984bf82134",
+      "reasons": [
+        "venue_close_time_past"
+      ]
+    },
+    {
+      "market_id": "e51cfb5",
+      "question": "sanitised-21aba11868cc",
+      "reasons": [
+        "venue_close_time_past"
+      ]
+    }
+  ],
+  "generated_at_utc": "2026-08-20T10:46:56Z",
+  "honesty_clause": "Simulated maker fills are unverifiable (queue position, intra-minute jumps, competitor reaction). Net carry is an UPPER BOUND on the reward-share side and an approximation on the pick-off side. A YES here justifies deeper study only - never order placement.",
+  "ledger_commit": {
+    "lock": "maker_carry_ledger_commit",
+    "status": "committed"
+  },
+  "live_trading_invoked": false,
+  "maker_gates": {
+    "M_A_carry_evidence": {
+      "counting": "distinct_utc_days",
+      "latest_run_at_target": false,
+      "registered_rule": "Trusted net carry must meet the daily target on the required number of distinct UTC days, including the latest run, and each counted day's portfolio markout must be measured (an observed markout, not merely the minimum print count).",
+      "required_runs": 7,
+      "runs_at_or_above_target": 8,
+      "share_model_scope": "published_v2_only",
+      "state": "pending"
+    },
+    "M_B_adverse_realism": {
+      "mb1_tier0_coverage_sufficient": false,
+      "note": "every portfolio market must carry a MEASURED markout charge (empirical fills) AND (M-B.1 amendment) its own recent official-book Tier-0 coverage.",
+      "registered_rule": "Every portfolio market must carry a measured empirical markout charge.",
+      "state": "pending"
+    },
+    "M_C_payout_floor": {
+      "min_daily_payout_usd": 1.0,
+      "registered_rule": "Every sized market must clear the venue's daily reward payout floor.",
+      "state": "pass_by_construction"
+    },
+    "governance_note": "A supported verdict NEVER places or authorises orders. Acting on the quote sheet is a human decision taken outside this system; the repo stays paper-only regardless.",
+    "maker_verdict": "insufficient_evidence",
+    "registered_at_utc": "2026-07-09T13:00:00Z"
+  },
+  "maker_study_intraday_skipped_cycles_total": 15,
+  "paper_trading_invoked": false,
+  "portfolio": [
+    {
+      "capital_usd": 470.0,
+      "complement_outcome": "No",
+      "complement_token_id": "11111111111111111111111111111111111111111111111111111111113489447470123372613",
+      "condition_id": "0x642d5c7b5a89f5ca5adfc94da80733aee73d8671e9b21dc14f2f775b822ad244",
+      "end_date_utc": "2026-12-31",
+      "event_risk_flags": [],
+      "event_slug": "sanitised-c9eb3117a2ac",
+      "event_start_time_utc": "",
+      "market_id": "3147d4f",
+      "market_slug": "sanitised-e2dba0764345",
+      "market_url": "sanitised-98d29f654bbb",
+      "markout_measured": true,
+      "net_carry_usd_per_day": 1.6821,
+      "order_price_min_tick_size": 0.01,
+      "order_ticket_status": "exact",
+      "outcome": "Yes",
+      "question": "sanitised-024e315a0311",
+      "quote_ask_price": 0.25,
+      "quote_bid_price": 0.22,
+      "quote_distance": 0.0112,
+      "quote_distance_fraction": 0.25,
+      "quote_size_shares": 1000.0,
+      "reference_best_ask": 0.24,
+      "reference_best_bid": 0.23,
+      "reference_mid_price": 0.235,
+      "resolution_risk": "medium",
+      "resolution_risk_class": "other",
+      "size_multiple": 5,
+      "token_id": "111111111111111111111111111111111111111111111111111111111117681439564703859871",
+      "uma_resolution_status": "",
+      "uncounted_holding_usd_per_day": 0.0515,
+      "uncounted_rebate_usd_per_day": 0.0,
+      "uncounted_supplementary_income_usd_per_day": 0.0515
+    }
+  ],
+  "portfolio_capital_usd": 470.0,
+  "portfolio_departed": 1,
+  "portfolio_entered": 1,
+  "portfolio_markets": 1,
+  "portfolio_markout_measured": true,
+  "portfolio_net_carry_usd_per_day": 1.68,
+  "portfolio_net_carry_usd_per_month": 50.4,
+  "portfolio_uncounted_holding_usd_per_day": 0.0515,
+  "portfolio_uncounted_rebate_usd_per_day": 0.0,
+  "portfolio_uncounted_supplementary_income_usd_per_day": 0.0515,
+  "share_model": "published_v2",
+  "status": "ok",
+  "study_trigger": "intraday_job",
+  "target_net_usd_per_day": 3.33,
+  "top_portfolio_market": "0x642d5c7b5a89f5ca5adfc94da80733aee73d8671e9b21dc14f2f775b822ad244",
+  "top_portfolio_question": "Mojtaba Khamenei seen in public by December 31?",
+  "training_harvest_age_seconds": 27122.204,
+  "training_harvest_window_state": "before_window",
+  "universe_pot_usd_per_day": 11820.0,
+  "universe_rewarded_markets": 80,
+  "universe_scan_mode": "yield_first_v1",
+  "work_order": "WO-36",
+  "yield_scan_considered_markets": 80,
+  "yield_scan_fallback": false,
+  "yield_scan_protected_members_added": 1,
+  "yield_scan_protected_members_considered": 1,
+  "yield_scan_scored_markets": 80,
+  "yield_scan_selected_markets": 40
+}

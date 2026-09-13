@@ -1,0 +1,20 @@
+{
+  "bootstrap_iterations": 1000,
+  "bootstrap_seed": 20260703,
+  "bucket_count": 10,
+  "clean_settled_joined_rows": 0,
+  "evidence_counts": {},
+  "families": [],
+  "families_scored": 0,
+  "families_with_minimum_rows": 0,
+  "generated_at_utc": "2026-08-20T19:57:53Z",
+  "git_commit": "unknown",
+  "governance_note": "Family calibration is diagnostic; promotion still requires forward shadow evidence, paper fills, and unchanged governance gates.",
+  "live_trading_invoked": false,
+  "market_beats_model_families": [],
+  "minimum_rows": 25,
+  "model_beats_market_families": [],
+  "paper_trading_invoked": false,
+  "rejected_join_rows": 17420,
+  "status": "no_clean_settled_rows"
+}

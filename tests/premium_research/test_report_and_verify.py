@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -35,7 +36,7 @@ def _write(path: Path, frame: pd.DataFrame) -> ManifestEntry:
     )
 
 
-def build_synthetic_root(root: Path, *, seed: int = 11, funding_level: float = 0.0002, drop_perp_hour: int | None = None) -> None:
+def build_synthetic_root(root: Path, *, seed: int = 11, funding_level: float = 0.0002, drop_perp_hour: int | None = None, drop_spot_hour: int | None = None) -> None:
     """A small but complete research tree: two symbols, 100 days, hourly prices, 8h funding, DVOL, Deribit funding."""
     rng = np.random.default_rng(seed)
     hours = DAYS * 24
@@ -50,6 +51,8 @@ def build_synthetic_root(root: Path, *, seed: int = 11, funding_level: float = 0
         perp_frame = pd.DataFrame({"open_time": open_time, "open": perp, "high": perp * 1.002, "low": perp * 0.998, "close": perp})
         if drop_perp_hour is not None and symbol == "BTCUSDT":
             perp_frame = perp_frame.drop(index=drop_perp_hour).reset_index(drop=True)
+        if drop_spot_hour is not None and symbol == "BTCUSDT":
+            spot_frame = spot_frame.drop(index=drop_spot_hour).reset_index(drop=True)
         boundaries = np.array([START + i * 8 * HOUR_MS for i in range(1, DAYS * 3)], dtype=np.int64)
         funding = pd.DataFrame({"calc_time": boundaries, "calc_time_raw": boundaries, "funding_interval_hours": 8, "last_funding_rate": funding_level + rng.normal(0.0, 0.00005, size=len(boundaries))})
         entries.append(_write(root / "data" / "binance" / f"{symbol}_funding_8h.csv", funding))
@@ -261,3 +264,467 @@ def test_binance_manifest_entries_must_carry_verified_upstream_checksums(tmp_pat
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     failures = verify_manifest(root / "manifest.json", root)
     assert len(failures) == 6 and all("binance entry without verified upstream checksums" in f for f in failures)
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_wo166_results_still_verify_under_the_default_scope() -> None:
+    root = REPO_ROOT / "research" / "premium_poc"
+    assert (root / "results" / "carry_v0.json").is_file()
+    assert runner.verify_results(root) == []
+
+
+def _scope_config(base: runner.Config, **overrides) -> runner.Config:
+    return runner.Config(**{**base.__dict__, **overrides})
+
+
+def test_wo167_config_writes_its_own_results_directory_and_records_the_scope(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, funding_level=0.0006, drop_spot_hour=24 * 10 + 7)  # the hour ending at a boundary, spot only
+    wo166 = _scope_config(small_config())
+    wo167 = _scope_config(small_config(), unverifiable_scope="perp", work_order="WO-167", results_dir="results_wo167")
+    runner.run_all(root, code_revision="x", generated_at="2026-09-13T00:00:00Z", config=wo166)
+    runner.run_all(root, code_revision="x", generated_at="2026-09-13T00:00:00Z", config=wo167)
+    a = json.loads((root / "results" / "carry_v0.json").read_text(encoding="utf-8"))
+    b = json.loads((root / "results_wo167" / "carry_v0.json").read_text(encoding="utf-8"))
+    assert a["work_order"] == "WO-166" and "unverifiable_scope" not in a  # WO-166's JSON gains no key
+    assert b["work_order"] == "WO-167" and b["unverifiable_scope"] == "perp"
+    assert a["pooled"]["unverifiable_open_periods"] == 2 and a["gates"]["G3_drawdown_bounded_and_no_forced_liquidation"] is False
+    assert b["pooled"]["unverifiable_open_periods"] == 0 and b["gates"]["G3_drawdown_bounded_and_no_forced_liquidation"] is True
+    for key in ("mean_weekly_return_on_capital", "annualised_return_on_capital", "annualised_after_haircut", "annualised_lower_bound", "annualised_lower_bound_after_haircut", "yearly_return_on_capital", "yearly_eligible_weeks", "eligible_weeks", "max_drawdown_all_weeks", "sharpe_weekly_annualised", "forced_liquidations"):
+        assert a["pooled"][key] == b["pooled"][key], key
+    for gate in ("G1_lower_bound_after_haircut_positive", "G2_point_after_haircut_at_least_hurdle", "G4_positive_in_enough_qualifying_years"):
+        assert a["gates"][gate] == b["gates"][gate], gate
+    assert "rejected_open_periods" not in a["pooled"] and b["pooled"]["rejected_open_periods"] == 2  # the either-scope count travels with the perp-scope result
+    assert "rejected for an absent bar on either leg" in (root / "results_wo167" / "report.md").read_text(encoding="utf-8")
+    assert "perpetual-side data absent" in (root / "results_wo167" / "report.md").read_text(encoding="utf-8")
+    assert sorted(p.name for p in (root / "results").iterdir()) == sorted(runner.RESULT_FILES)
+    text = (root / "results_wo167" / "report.md").read_text(encoding="utf-8")
+    assert text.startswith("# WO-167 proof-of-concept results") and "**perp**" in text
+    assert "Completeness scope" not in (root / "results" / "report.md").read_text(encoding="utf-8")
+    assert runner.verify_results(root, config=wo166) == []
+    assert runner.verify_results(root, config=wo167) == []
+
+
+def test_run_refuses_a_second_wo167_pass(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root)
+    wo167 = _scope_config(small_config(), unverifiable_scope="perp", work_order="WO-167", results_dir="results_wo167")
+    runner.run_all(root, code_revision="x", generated_at="2026-09-13T00:00:00Z", config=wo167)
+    with pytest.raises(RuntimeError, match="one analysis pass"):
+        runner.run_all(root, code_revision="x", generated_at="2026-09-13T00:00:00Z", config=wo167)
+
+
+def test_verify_results_selector_recomputes_under_the_right_scope(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, funding_level=0.0006, drop_spot_hour=24 * 10 + 7)
+    wo167 = _scope_config(small_config(), unverifiable_scope="perp", work_order="WO-167", results_dir="results_wo167")
+    runner.run_all(root, code_revision="x", generated_at="2026-09-13T00:00:00Z", config=wo167)
+    assert runner.verify_results(root, config=wo167) == []
+    wrong_scope = _scope_config(small_config(), unverifiable_scope="either", work_order="WO-167", results_dir="results_wo167")
+    failures = runner.verify_results(root, config=wrong_scope)
+    assert failures and all(f.startswith("byte difference") for f in failures)
+    with pytest.raises(ValueError, match="unknown unverifiable_scope"):
+        runner.Config(unverifiable_scope="spot")
+
+
+# Differences the WO-167 pass is registered to produce against WO-166's committed results; anything else is a defect (WO-167 A11).
+WO167_PERMITTED_DIFFERENCES = {
+    "code_revision", "generated_at", "work_order", "unverifiable_scope",
+    "gates.G3_drawdown_bounded_and_no_forced_liquidation", "gates.lane_a_go",
+    "pooled.unverifiable_open_periods", "pooled.rejected_open_periods",
+    "per_asset.BTCUSDT.unverifiable_open_periods", "per_asset.ETHUSDT.unverifiable_open_periods",
+    "per_asset.BTCUSDT.rejected_open_periods", "per_asset.ETHUSDT.rejected_open_periods",
+}
+
+
+def _flatten(payload, prefix=""):
+    out = {}
+    for key, value in payload.items():
+        name = f"{prefix}{key}"
+        if isinstance(value, dict):
+            out.update(_flatten(value, name + "."))
+        else:
+            out[name] = value
+    return out
+
+
+def test_committed_wo167_results_differ_from_wo166_only_where_registered() -> None:
+    root = REPO_ROOT / "research" / "premium_poc"
+    for name in ("carry_v0.json", "carry_v1.json", "vrp.json"):
+        a = _flatten(json.loads((root / "results" / name).read_text(encoding="utf-8")))
+        b = _flatten(json.loads((root / "results_wo167" / name).read_text(encoding="utf-8")))
+        differing = {k for k in set(a) | set(b) if a.get(k, "<absent>") != b.get(k, "<absent>")}
+        assert differing <= WO167_PERMITTED_DIFFERENCES, sorted(differing - WO167_PERMITTED_DIFFERENCES)
+        assert a["manifest_sha256"] == b["manifest_sha256"]
+    v0 = json.loads((root / "results_wo167" / "carry_v0.json").read_text(encoding="utf-8"))
+    assert v0["work_order"] == "WO-167" and v0["unverifiable_scope"] == "perp"
+    assert v0["pooled"]["unverifiable_open_periods"] == 0 and v0["pooled"]["rejected_open_periods"] == 16
+
+
+def test_scope_disclosure_is_keyed_on_the_scope_not_only_the_work_order(tmp_path: Path) -> None:
+    # A Python-API configuration that narrows the scope but keeps WO-166's label must still disclose the scope.
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, funding_level=0.0006, drop_spot_hour=24 * 10 + 7)
+    odd = _scope_config(small_config(), unverifiable_scope="perp", work_order="WO-166", results_dir="results_odd")
+    assert odd.discloses_scope is True and small_config().discloses_scope is False
+    runner.run_all(root, code_revision="x", generated_at="2026-09-13T00:00:00Z", config=odd)
+    payload = json.loads((root / "results_odd" / "carry_v0.json").read_text(encoding="utf-8"))
+    assert payload["unverifiable_scope"] == "perp" and payload["pooled"]["rejected_open_periods"] == 2
+
+
+def test_run_refuses_a_dirty_estimator_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    import subprocess
+
+    from premium_research import cli
+
+    repo = tmp_path / "repo"
+    (repo / "src" / "premium_research").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "base"], check=True)
+    assert cli.uncommitted_paths(repo, "src/premium_research") == []
+    (repo / "src" / "premium_research" / "carry.py").write_text("x = 1\n", encoding="utf-8")
+    assert cli.uncommitted_paths(repo, "src/premium_research") == ["src/premium_research/carry.py"]
+    monkeypatch.setattr(cli, "REPO_ROOT", repo)
+    calls: list[str] = []
+    monkeypatch.setattr("premium_research.runner.run_all", lambda *a, **k: calls.append("ran"))
+    assert cli.main(["--root", str(tmp_path / "nowhere"), "run"]) == 2
+    assert "uncommitted changes" in capsys.readouterr().err and calls == []
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "clean"], check=True)
+    assert cli.uncommitted_paths(repo, "src/premium_research") == []
+
+
+# ---------------------------------------------------------------------------- WO-170
+
+WO170_SYNTHETIC_KWARGS = {"funding_level": 0.0006, "drop_spot_hour": 24 * 10 + 7}
+CLOCK = "2026-09-13T00:00:00Z"
+# sha256 of every file a WO-167 run and a WO-166 run write on the synthetic tree above with clock CLOCK and revision "x",
+# computed once at 70a8971 (before WO-170's switches existed) so the switches are proven to change nothing under their defaults.
+WO167_SYNTHETIC_SHA256 = {
+    "carry_v0.json": "7d17caa8316c36e7ed039bbf6a8d0df72672bc1736bd066e4bd490ddc7e4d8d0",
+    "carry_v1.json": "7617fcbff4538b7cac8d6fcc46fdf5df16609d5d2f6d34d66ac212446c025dc6",
+    "report.md": "8a197805335279b70c58df1ed7fa9b08c9a00dbe2c5475b55b29e3c2cac203c9",
+    "vrp.json": "d4f56b7376184b5f2b3c991843a98df110aebbbcaa9dbfa6861393befd63351c",
+}
+WO166_SYNTHETIC_SHA256 = {
+    "carry_v0.json": "60c0d0c20027f1eea4e59616ba598f59921447eb1229eafbfa350637bb800813",
+    "carry_v1.json": "45c93125e445f189c6917c3f8cf8395ab64a67f586b83608633b36b4b0f4a24b",
+    "report.md": "f7aa4948294c655f96a99bdd066ae52164e6f823f00e56bb66e9ba8cf1ce34ef",
+    "vrp.json": "29fdfac11b12a31fadbcd342a3448dcafe283ed6609e01fbf4f9ac78db84b27c",
+}
+G124_LEAVES = (
+    "pooled.mean_weekly_return_on_capital", "pooled.annualised_return_on_capital", "pooled.annualised_after_haircut", "pooled.annualised_lower_bound",
+    "pooled.annualised_lower_bound_after_haircut", "pooled.eligible_weeks", "pooled.max_drawdown_all_weeks",
+    "gates.G1_lower_bound_after_haircut_positive", "gates.G2_point_after_haircut_at_least_hurdle", "gates.G4_positive_in_enough_qualifying_years",
+)
+
+
+def _wo167_and_wo170(root: Path) -> tuple[runner.Config, runner.Config]:
+    wo167 = _scope_config(small_config(), unverifiable_scope="perp", work_order="WO-167", results_dir="results_wo167")
+    wo170 = _scope_config(small_config(), unverifiable_scope="perp", work_order="WO-170", results_dir="results_wo170", drawdown_basis="nav", rv_alignment="return_intervals", result_files=runner.WO170_RESULT_FILES)
+    return wo167, wo170
+
+
+def _sha(path: Path) -> str:
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_wo166_and_wo167_results_still_verify_under_their_defaults() -> None:
+    root = REPO_ROOT / "research" / "premium_poc"
+    assert runner.verify_results(root) == []
+    assert runner.verify_results(root, config=runner.WO167_CONFIG) == []
+
+
+def test_wo170_config_differs_from_wo167_only_where_the_tables_allow(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, **WO170_SYNTHETIC_KWARGS)
+    wo167, wo170 = _wo167_and_wo170(root)
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo167)
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo170)
+    recon = json.loads((root / "results_wo170" / "reconciliation.json").read_text(encoding="utf-8"))
+    tables = runner._reconciliation_tables(wo170)
+    for name in ("carry_v0.json", "carry_v1.json", "vrp.json"):
+        old = runner._flatten(json.loads((root / "results_wo167" / name).read_text(encoding="utf-8")))
+        new = runner._flatten(json.loads((root / "results_wo170" / name).read_text(encoding="utf-8")))
+        differing = sorted(k for k in set(old) | set(new) if not (k in old and k in new and runner._leaf_equal(old[k], new[k])))
+        listed = sorted(d["path"] for d in recon["files"][name]["differences"])
+        assert differing == listed, name
+        for path in differing:
+            assert runner._match_reason(path, tables[name]) == next(d["reason"] for d in recon["files"][name]["differences"] if d["path"] == path)
+        if name != "vrp.json":
+            for leaf in G124_LEAVES:
+                if leaf.startswith("gates.") and name == "carry_v1.json":
+                    continue  # V1 is descriptive and never gated
+                assert runner._leaf_equal(old[leaf], new[leaf]), leaf
+            for leaf in (k for k in old if k.startswith(("pooled.bootstrap.", "pooled.yearly_return_on_capital.", "pooled.year_check.", "fee_sensitivity_2x."))):
+                assert runner._leaf_equal(old[leaf], new[leaf]), leaf
+        else:
+            for leaf in (k for k in old if k.startswith("gates.") or k in ("pooled.positive_complete_years", "pooled.windows_accepted", "pooled.windows_total")):
+                assert runner._leaf_equal(old[leaf], new[leaf]), leaf
+    v0 = json.loads((root / "results_wo170" / "carry_v0.json").read_text(encoding="utf-8"))
+    assert v0["gates"]["G3_drawdown_bounded_and_no_forced_liquidation"] is True and v0["pooled"]["unverifiable_open_periods"] == 0
+
+
+def test_reconciliation_aborts_on_an_unexplained_leaf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, **WO170_SYNTHETIC_KWARGS)
+    wo167, wo170 = _wo167_and_wo170(root)
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo167)
+    original = runner._lane_a_full
+
+    def extra_key(*args, **kwargs):
+        result, frames = original(*args, **kwargs)
+        result["pooled"]["surprise"] = 1.0
+        return result, frames
+
+    monkeypatch.setattr(runner, "_lane_a_full", extra_key)
+    with pytest.raises(RuntimeError, match="pooled.surprise"):
+        runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo170)
+    assert not (root / "results_wo170").exists()
+
+    def removed_key(*args, **kwargs):
+        result, frames = original(*args, **kwargs)
+        result["pooled"].pop("rebalances")
+        return result, frames
+
+    monkeypatch.setattr(runner, "_lane_a_full", removed_key)
+    with pytest.raises(RuntimeError, match="absent from this pass"):
+        runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo170)
+    assert not (root / "results_wo170").exists()
+
+
+def _weekly_and_nav(n_eligible: int, *, ineligible_at: tuple[int, ...] = (), value: float = 0.002) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """A pooled weekly frame of ``n_eligible`` eligible weeks (plus ineligible ones) and a flat pooled NAV frame on the same weeks."""
+    weeks = n_eligible + len(ineligible_at)
+    monday = 1704067200000
+    rows = []
+    nav_rows = []
+    nav = 3.0
+    for i in range(weeks):
+        week_end = monday + (i + 1) * 7 * 24 * 3_600_000
+        eligible = i not in ineligible_at
+        rows.append({"iso_year": 2024 if week_end < 1735603200000 else 2025, "iso_week": i + 1, "week_end_ms": week_end, "return_on_capital": value if eligible else 0.0, "eligible": eligible})
+        for k in range(21):
+            boundary = week_end - (20 - k) * 8 * 3_600_000
+            nav_rows.append({"boundary_ms": boundary, "nav_pooled": nav, "iso_year": rows[-1]["iso_year"], "iso_week": i + 1})
+    weekly = pd.DataFrame(rows)
+    nav_frame = pd.DataFrame(nav_rows)
+    return weekly, nav_frame
+
+
+def test_recent_period_cuts_use_the_last_eligible_weeks_only() -> None:
+    weekly, nav_frame = _weekly_and_nav(60, ineligible_at=(10, 40))
+    out = runner._recent_period(weekly, nav_frame, small_config())
+    assert out["last_52"]["state"] == "ok" and out["last_52"]["weeks"] == 52
+    assert abs(out["last_52"]["mean_weekly_return_on_capital"] - 0.002) < 1e-12 and abs(out["last_52"]["annualised_simple"] - 0.104) < 1e-12
+    assert out["last_52"]["max_drawdown_nav"] == 0.0
+    assert out["rolling_52"]["state"] == "ok" and out["rolling_52"]["windows"] == 9
+    assert abs(out["rolling_52"]["min_annualised_simple"] - 0.104) < 1e-12 and abs(out["rolling_52"]["max_annualised_simple"] - 0.104) < 1e-12 and abs(out["rolling_52"]["last_annualised_simple"] - 0.104) < 1e-12
+    assert out["last_104"]["state"] == "insufficient_weeks" and math.isnan(out["last_104"]["annualised_simple"])
+    weekly, nav_frame = _weekly_and_nav(40)
+    out = runner._recent_period(weekly, nav_frame, small_config())
+    assert out["last_52"]["state"] == out["last_104"]["state"] == out["rolling_52"]["state"] == "insufficient_weeks"
+
+
+def test_bases_block_and_return_basis_present_under_wo170_only(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, **WO170_SYNTHETIC_KWARGS)
+    wo167, wo170 = _wo167_and_wo170(root)
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo167)
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo170)
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=small_config())
+    a = json.loads((root / "results" / "carry_v0.json").read_text(encoding="utf-8"))
+    b = json.loads((root / "results_wo167" / "carry_v0.json").read_text(encoding="utf-8"))
+    c = json.loads((root / "results_wo170" / "carry_v0.json").read_text(encoding="utf-8"))
+    for key in ("bases", "return_basis", "drawdown_basis", "rv_alignment"):
+        assert key not in a and key not in b and key in c, key
+    assert c["bases"] == runner.BASES and c["return_basis"] == "simple_on_inception_capital" and c["drawdown_basis"] == "nav" and c["rv_alignment"] == "return_intervals"
+    assert small_config().discloses_bases is False and wo167.discloses_bases is False and wo170.discloses_bases is True
+    text170 = (root / "results_wo170" / "report.md").read_text(encoding="utf-8")
+    assert "What the prices and cash flows are" in text170 and "NAV path over every boundary (peak-to-trough, negative; G3 reads its magnitude)" in text170
+    for name in ("results", "results_wo167"):
+        text = (root / name / "report.md").read_text(encoding="utf-8")
+        assert "What the prices and cash flows are" not in text and "NAV path" not in text
+
+
+def test_result_files_are_per_config_and_verified(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, **WO170_SYNTHETIC_KWARGS)
+    wo167, wo170 = _wo167_and_wo170(root)
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo167)
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo170)
+    assert sorted(p.name for p in (root / "results_wo170").iterdir()) == sorted(runner.WO170_RESULT_FILES) and len(runner.WO170_RESULT_FILES) == 9
+    v0 = json.loads((root / "results_wo170" / "carry_v0.json").read_text(encoding="utf-8"))
+    assert set(v0["ledger_files"]) == {"ledger_BTCUSDT_V0.csv", "ledger_ETHUSDT_V0.csv"}
+    for name, digest in v0["ledger_files"].items():
+        assert _sha(root / "results_wo170" / name) == digest
+    ledger = pd.read_csv(root / "results_wo170" / "ledger_BTCUSDT_V0.csv")
+    assert list(ledger.columns) == list(runner.LEDGER_COLUMNS)
+    assert (np.abs(ledger["nav"] - (ledger["cash"] + ledger["margin"] + ledger["spot_value"])) <= 1e-9).all()
+    assert runner.verify_results(root, config=wo170) == []
+    (root / "results_wo170" / "ledger_ETHUSDT_V1.csv").unlink()
+    assert runner.verify_results(root, config=wo170) == ["missing: ledger_ETHUSDT_V1.csv"]
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo170, force=True)
+    (root / "results_wo170" / "stray.txt").write_text("x", encoding="utf-8")
+    assert runner.verify_results(root, config=wo170) == ["extra file: stray.txt"]
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=small_config())
+    assert sorted(p.name for p in (root / "results").iterdir()) == sorted(runner.RESULT_FILES)
+
+
+def test_reconciliation_aborts_when_wo167_results_are_absent(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, **WO170_SYNTHETIC_KWARGS)
+    _, wo170 = _wo167_and_wo170(root)
+    with pytest.raises(RuntimeError, match="reconciliation input missing"):
+        runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo170)
+    assert not (root / "results_wo170").exists()
+
+
+def test_reconciliation_nan_and_removed_leaves(tmp_path: Path) -> None:
+    nan = float("nan")
+    assert runner._leaf_equal(nan, nan) and not runner._leaf_equal(nan, 1.0) and not runner._leaf_equal(1, 1.0)
+    tables = runner._reconciliation_tables(small_config())
+    assert runner._match_reason("pooled.recent_period.last_52.annualised_simple", tables["carry_v0.json"]) == "recent_period_cut"
+    assert runner._match_reason("generated_at", tables["carry_v0.json"]) == "clock_or_revision"
+    with pytest.raises(RuntimeError, match="unexplained difference"):
+        runner._match_reason("pooled.annualised_after_haircut", tables["carry_v0.json"])
+    root = tmp_path / "premium_poc"
+    (root / "results_wo167").mkdir(parents=True)
+    base = {"pooled": {"x": nan, "annualised_after_haircut": 0.1, "recent_period": {"a": nan}}, "generated_at": "t"}
+    for name in ("carry_v0.json", "carry_v1.json", "vrp.json"):
+        (root / "results_wo167" / name).write_text(json.dumps(base), encoding="utf-8")
+    same = {"carry_v0.json": {"pooled": {"x": nan, "annualised_after_haircut": 0.1, "recent_period": {"a": 0.5}}, "generated_at": "u"}}
+    same["carry_v1.json"] = same["carry_v0.json"]
+    same["vrp.json"] = {"pooled": {"x": nan, "annualised_after_haircut": 0.1, "recent_period": {"a": nan}}, "generated_at": "u"}
+    out = runner.reconcile(root, small_config(), same)
+    assert [d["path"] for d in out["files"]["carry_v0.json"]["differences"]] == ["generated_at", "pooled.recent_period.a"]
+    assert out["files"]["vrp.json"]["differing_leaves"] == 1  # only the clock; two NaN leaves compare equal
+    bad = {**same, "vrp.json": {"pooled": {"x": 1.0, "annualised_after_haircut": 0.1, "recent_period": {"a": nan}}, "generated_at": "u"}}
+    with pytest.raises(RuntimeError, match="unexplained difference at pooled.x"):
+        runner.reconcile(root, small_config(), bad)
+    removed = {**same, "vrp.json": {"pooled": {"annualised_after_haircut": 0.1, "recent_period": {"a": nan}}, "generated_at": "u"}}
+    with pytest.raises(RuntimeError, match="absent from this pass"):
+        runner.reconcile(root, small_config(), removed)
+
+
+def test_wo167_bytes_unchanged_by_the_new_switches_on_a_synthetic_tree(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, **WO170_SYNTHETIC_KWARGS)
+    wo167, _ = _wo167_and_wo170(root)
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo167)
+    assert {p.name: _sha(p) for p in (root / "results_wo167").iterdir()} == WO167_SYNTHETIC_SHA256
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=small_config())
+    assert {p.name: _sha(p) for p in (root / "results").iterdir()} == WO166_SYNTHETIC_SHA256
+
+
+def test_g3_reads_the_nav_path_under_the_nav_basis(tmp_path: Path) -> None:
+    """WO-170's single behavioural change, pinned so it can fail.
+
+    Added after the build line audit found that replacing the basis selector with
+    a constant left all 91 tests and `verify-results` green: on the committed data
+    both bases pass, so no artifact could show the gate had ever read the ledger's
+    NAV path. Here the threshold sits BETWEEN the two magnitudes, so G3 must flip
+    with the basis and only with the basis."""
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root)
+    base = small_config()
+    inputs = runner.load_inputs(root, runner.Config(**{**base.__dict__, "work_order": "WO-170", "drawdown_basis": "nav", "rv_alignment": "return_intervals", "results_dir": "results_g3", "result_files": tuple(runner.WO170_RESULT_FILES)}))
+
+    def lane_a(basis: str, threshold: float) -> dict:
+        config = runner.Config(**{
+            **base.__dict__,
+            "work_order": "WO-170",
+            "drawdown_basis": basis,
+            "rv_alignment": "return_intervals",
+            "results_dir": "results_g3",
+            "result_files": tuple(runner.WO170_RESULT_FILES),
+            "g3_max_drawdown": threshold,
+        })
+        return runner._lane_a_full(inputs, config, variant="V0")[0]
+
+    loose = lane_a("nav", 0.20)
+    legacy_dd = abs(float(loose["pooled"]["max_drawdown_all_weeks"]))
+    nav_dd = abs(float(loose["pooled"]["max_drawdown_nav"]))
+    # The premise of the test: on this tree the NAV path draws down and the
+    # week-end increments do not, so a threshold between them separates the bases.
+    assert legacy_dd < 0.0005 < nav_dd < 0.20
+    assert loose["pooled"]["forced_liquidations"] == 0 and loose["pooled"]["unverifiable_open_periods"] == 0
+
+    strict_nav = lane_a("nav", 0.0005)
+    strict_legacy = lane_a("compounded_weekly", 0.0005)
+    assert strict_nav["gates"]["G3_drawdown_bounded_and_no_forced_liquidation"] is False
+    assert strict_legacy["gates"]["G3_drawdown_bounded_and_no_forced_liquidation"] is True
+    assert loose["gates"]["G3_drawdown_bounded_and_no_forced_liquidation"] is True
+    # Nothing but G3 moves with the basis.
+    for key in ("G1_lower_bound_after_haircut_positive", "G2_point_after_haircut_at_least_hurdle", "G4_positive_in_enough_qualifying_years"):
+        assert strict_nav["gates"][key] == strict_legacy["gates"][key]
+    assert strict_nav["pooled"]["max_drawdown_all_weeks"] == strict_legacy["pooled"]["max_drawdown_all_weeks"]
+    assert strict_nav["pooled"]["max_drawdown_nav"] == strict_legacy["pooled"]["max_drawdown_nav"]
+
+
+def test_unknown_drawdown_basis_aborts_before_any_period_is_computed() -> None:
+    """WO-170 fail-safe: the switch is validated at construction, not at first use."""
+    base = small_config()
+    with pytest.raises(ValueError, match="drawdown_basis"):
+        runner.Config(**{**base.__dict__, "drawdown_basis": "nav_path"})
+    with pytest.raises(ValueError, match="rv_alignment"):
+        runner.Config(**{**base.__dict__, "rv_alignment": "window_open_times"})
+
+
+def test_reconciliation_match_precedence_rules() -> None:
+    """WO-170 item 7: exact beats prefix, the longest prefix wins, and two entries of
+    the same precedence abort. The registered tables contain no overlap today, so
+    without this the rules are inert and a future table amendment could silently
+    change which reason a leaf is attributed to."""
+    exact_and_prefix = [("exact", "a.b.c", "exact reason"), ("prefix", "a.b.", "prefix reason")]
+    assert runner._match_reason("a.b.c", exact_and_prefix) == "exact reason"
+    assert runner._match_reason("a.b.d", exact_and_prefix) == "prefix reason"
+    nested = [("prefix", "a.", "short prefix"), ("prefix", "a.b.", "long prefix")]
+    assert runner._match_reason("a.b.c", nested) == "long prefix"
+    assert runner._match_reason("a.z", nested) == "short prefix"
+    with pytest.raises(RuntimeError, match="unexplained difference"):
+        runner._match_reason("zzz", nested)
+    with pytest.raises(RuntimeError, match="two exact entries"):
+        runner._match_reason("a.b.c", [("exact", "a.b.c", "one"), ("exact", "a.b.c", "two")])
+    with pytest.raises(RuntimeError, match="two prefixes of equal length"):
+        runner._match_reason("a.b.c", [("prefix", "a.b", "one"), ("prefix", "a.c", "two"), ("prefix", "a.x", "three"), ("prefix", "a.b", "four")])
+    # The registered tables must contain no such overlap today.
+    for table in runner._reconciliation_tables(runner.WO170_CONFIG).values():
+        exacts = [key for kind, key, _ in table if kind == "exact"]
+        prefixes = [key for kind, key, _ in table if kind == "prefix"]
+        assert len(exacts) == len(set(exacts))
+        assert len(prefixes) == len(set(prefixes))
+
+
+def test_non_positive_price_is_refused_before_any_period_is_computed(tmp_path: Path) -> None:
+    """WO-170 delta 1: finite is not enough.
+
+    The build review set one BTCUSDT spot close at a boundary hour to 0.0 and then to
+    -1.0. Both passed every guard, fabricated a 14.1-point NAV drawdown that G3
+    absorbed without comment, and left the annualised return bit-identical, because
+    weekly `return_on_capital` is a telescoping sum of wealth increments: a boundary
+    corruption that reverses inside the week is invisible to G1, G2 and G4. Prices are
+    positive by definition, so the loader now refuses them."""
+    for bad in (0.0, -1.0):
+        root = tmp_path / f"tree_{bad}"
+        build_synthetic_root(root)
+        path = root / "data" / "binance" / "BTCUSDT_spot_1h.csv"
+        frame = pd.read_csv(path)
+        frame.loc[24, "close"] = bad
+        payload = frame.to_csv(index=False, lineterminator="\n").encode("utf-8")
+        path.write_bytes(payload)
+        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+        for entry in manifest["entries"]:
+            if entry["path"].endswith("BTCUSDT_spot_1h.csv"):
+                entry["sha256"] = hashlib.sha256(payload).hexdigest()
+        (root / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        with pytest.raises(RuntimeError, match="non-positive price"):
+            runner.load_inputs(root, small_config())
+    # Signed columns are untouched: a negative funding rate is ordinary data.
+    root = tmp_path / "negative_funding"
+    build_synthetic_root(root, funding_level=-0.0002)
+    assert runner.load_inputs(root, small_config())["files"]

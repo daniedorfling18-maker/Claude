@@ -95,10 +95,13 @@ from .sharp_linking_evaluator import run_sharp_linking_evaluator
 from .stage_ticket_eligibility import run_stage_ticket_eligibility
 from .reconstructed_signal_clv import run_reconstructed_clv_study
 from .refresh_governance import LOCK_CONTENTION_EXIT_CODE, refresh_governance
+from .data_coverage_report import build_data_coverage_report
+from .maker_evidence_summary import run_maker_evidence_summary
 from .resolution_collector import collect_resolutions
 from .runtime_lock import runtime_lock
 from .sharp_anchor import build_sharp_anchor
 from .sharp_odds_fetch import fetch_sharp_odds
+from .profit_verdict import run_verdict_reconcile
 from .smart_flow_clv import build_smart_flow_clv
 from .snapshot_ingest import ingest_scanner_snapshot
 from .snapshot_label_collector import collect_snapshot_labels
@@ -119,6 +122,9 @@ from .utils import read_json, write_json
 
 COMMANDS = [
     "config-check",
+    "profit-verdict-reconcile",
+    "data-coverage-report",
+    "maker-evidence-summary",
     "pipeline-inventory",
     "pipeline-health",
     "inventory",
@@ -288,6 +294,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--websocket-seconds", type=int, default=60)
     parser.add_argument("--websocket-input", default=None)
     parser.add_argument("--fills-input", default=None, help="smart-flow-clv: public wallet fills CSV input")
+    parser.add_argument("--final-history", default=None, help="profit-verdict-reconcile: a closing_line_final_history.csv to measure (no config, no output root)")
+    parser.add_argument("--positions", default=None, help="profit-verdict-reconcile: optional closing_line_value_positions.csv for settlement fields")
+    parser.add_argument("--output-dir", default=None, help="profit-verdict-reconcile: directory for reconciliation.json and report.md")
+    parser.add_argument("--export-manifest", default=None, help="data-coverage-report: a WO-172 export manifest, used to tell a whole ledger from an extract")
+    parser.add_argument("--ledger-source", default=None, choices=("vps",), help="data-coverage-report: declare the ledger complete without a manifest (VPS only)")
+    parser.add_argument("--force", action="store_true", help="profit-verdict-reconcile: replace an existing output directory")
     parser.add_argument(
         "--strategy",
         default=None,
@@ -341,9 +353,17 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        cfg = load_config(args.config) if args.command != "config-check" else None
+        cfg = load_config(args.config) if args.command not in ("config-check", "profit-verdict-reconcile") else None
         if args.command == "config-check":
             _print(config_check(args.config))
+        elif args.command == "profit-verdict-reconcile":
+            if not args.final_history or not args.output_dir:
+                raise RuntimeError("profit-verdict-reconcile needs --final-history and --output-dir")
+            _print(run_verdict_reconcile(args.final_history, args.output_dir, positions=args.positions, force=args.force))
+        elif args.command == "data-coverage-report":
+            _print(build_data_coverage_report(cfg, export_manifest_path=args.export_manifest, ledger_source=args.ledger_source))
+        elif args.command == "maker-evidence-summary":
+            _print(run_maker_evidence_summary(cfg))
         elif args.command == "pipeline-inventory":
             _print({"rows": len(pipeline_inventory(cfg))})
         elif args.command == "pipeline-health":

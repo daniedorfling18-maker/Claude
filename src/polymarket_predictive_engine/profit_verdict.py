@@ -46,10 +46,17 @@ gates above.
 from __future__ import annotations
 
 import csv
+import hashlib
+import math
+import random
 import re
+import shutil
+import statistics
+import tempfile
 from datetime import datetime, timedelta, timezone
 from math import comb
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from .config import EngineConfig
@@ -85,6 +92,15 @@ REGISTERED_MAX_POSITION_ID_FALLBACK_FRACTION = 0.10
 # arithmetic and thresholds, but names the outcome-dependent quantity honestly.
 # True pre-event CLV is a separate, non-binding diagnostic on the same units.
 PRE_EVENT_REFERENCE_HOURS = 6
+
+# WO-169: the non-binding measurement block beside the frozen Gate A metric. Literals with their registered bases.
+MEASUREMENT_V2_DRAWS = 1000  # closing_line_value's bootstrap_iterations default
+MEASUREMENT_V2_SEED = 20260913
+MEASUREMENT_V2_MIN_UNITS = 3  # the smallest n at which n^-n < 0.05, so the lower bound cannot collapse to the unit minimum
+MEASUREMENT_V2_LOWER_INDEX, MEASUREMENT_V2_UPPER_INDEX = 49, 949  # the 5th and 95th percentiles of 1,000 sorted resampled means
+MEASUREMENT_V2_NOTE = "Informational under WO-87's owner decision of 2026-07-14: the binding Gate A metric is the per-share figure above; replacing it requires a dated owner amendment"
+MEASUREMENT_V2_SIGN_TEST_SENTENCE = "the sign test compares the count of positive units with a fair coin; it is not a test of expected profit and is unchanged by the unit correction"
+RECONCILE_DIFFERENCES = ("unit_mismatch", "settlement_unverified", "inference_method")
 PRE_EVENT_MIN_PRICE = 0.05
 PRE_EVENT_MAX_PRICE = 0.95
 PRE_EVENT_OFFICIAL_SOURCE_PREFIX = "polymarket_clob_prices_history:"
@@ -568,6 +584,277 @@ def _build_pre_event_clv_diagnostic(
     }
 
 
+def _unit_key(row: dict[str, Any]) -> str:
+    return str(row.get("market_id") or row.get("market_slug") or "").strip() or str(row.get("shadow_position_id") or "").strip()
+
+
+def _build_measurement_v2(
+    final_history_path: Path,
+    positions_path: Path | None,
+    clusters: dict[str, list[tuple[float, float]]],
+    cluster_rows: dict[str, list[dict[str, Any]]],
+    clustering_coverage: dict[str, Any],
+    settings: dict[str, Any],
+    diagnostic_substrings: list[str],
+) -> dict[str, Any]:
+    """WO-169: the same units as Gate A, measured per dollar staked beside the binding per-share figure. Binds nothing."""
+    minimum_samples = int(settings["minimum_final_samples"])
+    alpha = float(settings["sign_test_alpha"])
+    haircut = float(settings["exit_cost_haircut_per_dollar"]) + float(settings["adverse_selection_haircut_per_dollar"])
+    block: dict[str, Any] = {"binding": False, "note": MEASUREMENT_V2_NOTE, "registered_on": "2026-09-13", "same_clustering_as_gate_a": True}
+    rows = read_csv_rows(final_history_path)
+    if not rows:
+        # Build-review finding: an absent ledger used to return a block missing six keys, so a
+        # consumer indexing them raised instead of reading a null. The shape is now uniform.
+        block["state"] = "unavailable"
+        block["population"] = None
+        block["by_line_basis"] = None
+        block["per_share"] = None
+        block["per_dollar"] = None
+        block["inference"] = None
+        block["would_bind"] = {"gate_a": "pending", "gate_b": "not_evaluated", "binding": False, "basis": "per_dollar", "units_read": 0}
+        return block
+    closing = [row for row in rows if str(row.get("line_kind") or "") == "closing"]
+    # tier one: Gate A's four filters, in Gate A's order
+    excluded = {"diagnostic_cohort": 0, "missing_return": 0, "missing_unit_key": 0}
+    eligible: list[dict[str, Any]] = []
+    for row in closing:
+        cohort = str(row.get("signal_cohort") or "").lower()
+        if any(sub in cohort for sub in diagnostic_substrings):
+            excluded["diagnostic_cohort"] += 1
+            continue
+        if safe_float(row.get("clv")) is None:
+            excluded["missing_return"] += 1
+            continue
+        if not _unit_key(row):
+            excluded["missing_unit_key"] += 1
+            continue
+        eligible.append(row)
+    # tier two: the per-dollar basis needs a finite return and an entry price inside (0, 1)
+    tier_two = {"invalid_entry_price": 0, "non_finite_return": 0}
+    per_dollar_units: list[float] = []
+    per_dollar_unit_fees: list[float] = []
+    per_dollar_eligible = 0
+    for unit_id in sorted(cluster_rows):
+        values: list[float] = []
+        fees: list[float] = []
+        for row in cluster_rows[unit_id]:
+            entry_price = safe_float(row.get("entry_price"))
+            clv = safe_float(row.get("clv"))
+            if entry_price is None or not 0 < entry_price < 1:
+                tier_two["invalid_entry_price"] += 1
+                continue
+            if clv is None or not math.isfinite(clv):
+                tier_two["non_finite_return"] += 1
+                continue
+            values.append(clv / entry_price)
+            fees.append(float(settings["taker_fee_rate"]) * (1.0 - entry_price))
+        if values:
+            per_dollar_eligible += len(values)
+            per_dollar_units.append(sum(values) / len(values))
+            per_dollar_unit_fees.append(sum(fees) / len(fees))
+    population = {
+        "final_history_rows": len(rows),
+        "closing_rows": len(closing),
+        "excluded_by_reason": excluded,
+        "eligible_finals": len(eligible),
+        "units": len(clusters),
+        "per_dollar_excluded_by_reason": tier_two,
+        "per_dollar_eligible_finals": per_dollar_eligible,
+        "per_dollar_units": len(per_dollar_units),
+    }
+    identity_one = len(closing) == len(eligible) + sum(excluded.values()) and len(eligible) == int(clustering_coverage.get("eligible_finals", -1)) and len(clusters) == len(cluster_rows)
+    identity_two = per_dollar_eligible == len(eligible) - sum(tier_two.values())
+    block["population"] = population
+    # line basis and settlement, from the ledger and the per-run positions file
+    by_basis: dict[str, int] = {}
+    inside_001, inside_010, unparseable = 0, 0, 0
+    for row in eligible:
+        basis = str(row.get("line_basis") or "")
+        by_basis[basis] = by_basis.get(basis, 0) + 1
+        line_price = safe_float(row.get("line_price"))
+        if line_price is None or not math.isfinite(line_price):
+            unparseable += 1
+            continue
+        if 0.01 < line_price < 0.99:
+            inside_001 += 1
+        if 0.10 < line_price < 0.90:
+            inside_010 += 1
+    settlement_by_position: dict[str, dict[str, Any]] = {}
+    if positions_path is not None:
+        for row in read_csv_rows(positions_path):
+            payout = safe_float(row.get("settlement_payout"))
+            if payout in (0.0, 1.0):
+                settlement_by_position[str(row.get("shadow_position_id") or "").strip()] = row
+    eligible_ids = {str(row.get("shadow_position_id") or "").strip() for row in eligible}
+    verified_ids = {pid for pid in settlement_by_position if pid in eligible_ids}
+    block["by_line_basis"] = {
+        **dict(sorted(by_basis.items())),
+        "counts": dict(sorted(by_basis.items())),  # one-release alias for a reader pinned to the nested shape
+        "line_price_strictly_inside_0_01_0_99": inside_001,
+        "line_price_strictly_inside_0_10_0_90": inside_010,
+        "line_price_unparseable": unparseable,
+        "settlement_verified_finals": len(verified_ids),
+        "settlement_verified_source": str(positions_path) if positions_path is not None else None,
+    }
+    # per share: Gate A's numbers, repeated
+    unit_means = [sum(v for v, _ in values) / len(values) for values in clusters.values()]
+    unit_fee_means = [sum(f for _, f in values) / len(values) for values in clusters.values()]
+    per_share_mean = sum(unit_means) / len(unit_means) if unit_means else None
+    per_share: dict[str, Any] = {"units": len(unit_means)}
+    if per_share_mean is None:
+        per_share.update({"unit_mean": None, "units_positive": 0, "sign_test_p": None})
+    elif not math.isfinite(per_share_mean):
+        per_share.update({"unit_mean": None, "units_positive": sum(1 for v in unit_means if v > 0), "sign_test_p": None, "reason": "non_finite_unit_mean"})
+    else:
+        positive = sum(1 for v in unit_means if v > 0)
+        per_share.update({"unit_mean": round(per_share_mean, 6), "units_positive": positive, "sign_test_p": round(_sign_test_p(positive, len(unit_means)), 6)})
+    block["per_share"] = per_share
+    # per dollar
+    # Build-review finding: the fee must be averaged over the SAME units as the mean it is
+    # subtracted from. Gate B's tuple covers every Gate A unit, including finals tier two
+    # excluded, and a final at entry_price == 1.0 contributes a zero fee to that average while
+    # contributing nothing to the mean — raising net_after_costs above what its population
+    # supports. `gate_b_mean_taker_fee_per_dollar` keeps Gate B's own figure for comparison.
+    gate_b_mean_fee = round(sum(unit_fee_means) / len(unit_fee_means), 6) if unit_fee_means else None
+    mean_fee = round(sum(per_dollar_unit_fees) / len(per_dollar_unit_fees), 6) if per_dollar_unit_fees else None
+    pd_mean = sum(per_dollar_units) / len(per_dollar_units) if per_dollar_units else None
+    pd_positive = sum(1 for v in per_dollar_units if v > 0)
+    settlement_values: dict[str, list[float]] = {}
+    for unit_id in sorted(cluster_rows):
+        for row in cluster_rows[unit_id]:
+            pid = str(row.get("shadow_position_id") or "").strip()
+            if pid in verified_ids:
+                value = safe_float(settlement_by_position[pid].get("settlement_return_per_dollar"))
+                if value is not None and math.isfinite(value):
+                    settlement_values.setdefault(unit_id, []).append(value)
+    settlement_unit_means = [sum(v) / len(v) for v in settlement_values.values()]
+    per_dollar: dict[str, Any] = {
+        "unit_mean": round(pd_mean, 6) if pd_mean is not None else None,
+        "settlement_unit_mean": round(sum(settlement_unit_means) / len(settlement_unit_means), 6) if settlement_unit_means else None,
+        "units_positive": pd_positive,
+        "mean_taker_fee_per_dollar": mean_fee,
+        "gate_b_mean_taker_fee_per_dollar": gate_b_mean_fee,
+        "net_after_costs": round(pd_mean - haircut - mean_fee, 6) if pd_mean is not None and mean_fee is not None else None,
+    }
+    block["per_dollar"] = per_dollar
+    # inference: percentile bootstrap over unit means in sorted(cluster_rows) order
+    n_units = len(per_dollar_units)
+    interval: list[float] | None = None
+    if n_units >= MEASUREMENT_V2_MIN_UNITS:
+        rng = random.Random(MEASUREMENT_V2_SEED)
+        means = sorted(sum(per_dollar_units[rng.randrange(n_units)] for _ in range(n_units)) / n_units for _ in range(MEASUREMENT_V2_DRAWS))
+        interval = [round(means[MEASUREMENT_V2_LOWER_INDEX], 6), round(means[MEASUREMENT_V2_UPPER_INDEX], 6)]
+    block["inference"] = {
+        "method": "market-cluster percentile bootstrap of the per-dollar unit mean",
+        "draws": MEASUREMENT_V2_DRAWS,
+        "seed": MEASUREMENT_V2_SEED,
+        "interval_90": interval,
+        "cluster_standard_error": round(statistics.stdev(per_dollar_units) / math.sqrt(n_units), 6) if n_units >= 2 else None,
+        "sign_test_sentence": MEASUREMENT_V2_SIGN_TEST_SENTENCE,
+    }
+    # would_bind: Gate A's four branches in Gate A's order, on the per-dollar basis
+    if str(clustering_coverage.get("state")) != "sufficient":
+        gate_a = "pending"
+    elif n_units < minimum_samples:
+        gate_a = "pending"
+    elif pd_mean is None or not math.isfinite(pd_mean) or pd_mean <= 0:
+        gate_a = "fail"
+    else:
+        p_value = _sign_test_p(pd_positive, n_units)
+        gate_a = "pass" if p_value is not None and p_value <= alpha else "pending"
+    gate_b = "not_evaluated"
+    if gate_a == "pass":
+        net = per_dollar["net_after_costs"]
+        gate_b = "pass" if net is not None and net > 0 else "fail"
+    block["would_bind"] = {"gate_a": gate_a, "gate_b": gate_b, "binding": False, "basis": "per_dollar", "units_read": n_units}
+    block["state"] = "ok" if identity_one and identity_two else "accounting_mismatch"
+    return block
+
+
+def run_verdict_reconcile(final_history: str | Path, output_dir: str | Path, *, positions: str | Path | None = None, force: bool = False) -> dict[str, Any]:
+    """WO-169: the corrected measurement on any final-history CSV, with no config, output root, or network; the run of record is the VPS."""
+    final_path = Path(final_history)
+    out_dir = Path(output_dir)
+    if out_dir.exists() and not force:
+        raise RuntimeError(f"{out_dir} already exists; pass --force to replace it")
+    settings = dict(DEFAULT_SETTINGS)
+    from .closing_line import DEFAULT_DIAGNOSTIC_COHORT_SUBSTRINGS
+
+    diagnostic_substrings = list(DEFAULT_DIAGNOSTIC_COHORT_SUBSTRINGS)
+    payload_bytes = final_path.read_bytes()
+    staging = Path(tempfile.mkdtemp(prefix="verdict-reconcile-"))
+    try:
+        staged_history = staging / "closing_line_final_history.csv"
+        staged_history.write_bytes(payload_bytes)
+        staged_positions: Path | None = None
+        if positions is not None:
+            staged_positions = staging / "closing_line_value_positions.csv"
+            staged_positions.write_bytes(Path(positions).read_bytes())
+        clusters, coverage, cluster_rows = _clustered_focus_finals(SimpleNamespace(governance_root=staging), diagnostic_substrings, float(settings["taker_fee_rate"]))
+        block = _build_measurement_v2(staged_history, staged_positions, clusters, cluster_rows, coverage, settings, diagnostic_substrings)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    legacy = {"per_share_unit_mean": block.get("per_share", {}).get("unit_mean"), "units": block.get("per_share", {}).get("units"), "units_positive": block.get("per_share", {}).get("units_positive"), "sign_test_p": block.get("per_share", {}).get("sign_test_p")}
+    corrected = {"per_dollar_unit_mean": block.get("per_dollar", {}).get("unit_mean"), "settlement_unit_mean": block.get("per_dollar", {}).get("settlement_unit_mean"), "interval_90": block.get("inference", {}).get("interval_90"), "net_after_costs": block.get("per_dollar", {}).get("net_after_costs")}
+    payload = {
+        "work_order": "WO-169",
+        "generated_at_utc": now_utc(),
+        "input": {"path": str(final_path), "sha256": hashlib.sha256(payload_bytes).hexdigest(), "rows": block.get("population", {}).get("final_history_rows")},
+        "settings_used": {key: settings[key] for key in ("minimum_final_samples", "sign_test_alpha", "exit_cost_haircut_per_dollar", "adverse_selection_haircut_per_dollar", "taker_fee_rate")} | {"diagnostic_cohort_substrings": diagnostic_substrings},
+        "legacy": legacy,
+        "corrected": corrected,
+        "measurement_v2": block,
+        "differences": [
+            {"name": "unit_mismatch", "detail": "the binding metric is line_price - entry_price per share; the corrected figure divides each final by its entry price"},
+            {"name": "settlement_unverified", "detail": "finals whose line_price is a last observed quote, not a settlement payout, are counted; verified settlement is reported where the resolution corpus covers the token"},
+            {"name": "inference_method", "detail": "a market-cluster percentile bootstrap interval of the per-dollar mean is reported beside the sign test, which tests win frequency only"},
+        ],
+        "evidence_class": "diagnostic; not verification of record",
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+    lines = [
+        "# WO-169 verdict reconciliation (diagnostic; not verification of record)",
+        "",
+        f"Input `{final_path.name}` sha256 `{payload['input']['sha256']}`, {payload['input']['rows']} rows.",
+        "",
+        "| quantity | legacy (per share, binding) | corrected (per dollar, non-binding) |",
+        "|---|---|---|",
+        f"| unit mean | {legacy['per_share_unit_mean']} | {corrected['per_dollar_unit_mean']} |",
+        f"| units / positive | {legacy['units']} / {legacy['units_positive']} | {block.get('population', {}).get('per_dollar_units')} / {block.get('per_dollar', {}).get('units_positive')} |",
+        f"| sign-test p | {legacy['sign_test_p']} | unchanged by the unit correction |",
+        f"| 90% cluster-bootstrap interval | — | {corrected['interval_90']} |",
+        f"| net after registered costs | — | {corrected['net_after_costs']} |",
+        f"| settlement-verified finals | — | {block.get('by_line_basis', {}).get('settlement_verified_finals')} |",
+        "",
+        "Differences: " + "; ".join(f"{d['name']} — {d['detail']}" for d in payload["differences"]) + ".",
+        "",
+    ]
+    # Build-review finding: the previous form removed the destination before the rename, so a
+    # crash in that window left no output directory at all, and it rmtree'd a sibling path
+    # outside --output-dir. The staging directory is now created by mkdtemp beside the
+    # destination (same filesystem, so rename is atomic) and the old directory is moved aside
+    # first, so a replacement never destroys the previous run before the new one is in place.
+    out_dir.parent.mkdir(parents=True, exist_ok=True)
+    staged_out = Path(tempfile.mkdtemp(prefix=f".{out_dir.name}.", dir=out_dir.parent))
+    write_json(staged_out / "reconciliation.json", payload)
+    (staged_out / "report.md").write_text("\n".join(lines), encoding="utf-8")
+    previous = None
+    if out_dir.exists():
+        previous = Path(tempfile.mkdtemp(prefix=f".{out_dir.name}.old.", dir=out_dir.parent)) / "previous"
+        out_dir.rename(previous)
+    try:
+        staged_out.rename(out_dir)
+    except OSError:
+        if previous is not None:
+            previous.rename(out_dir)
+        raise
+    if previous is not None:
+        shutil.rmtree(previous.parent, ignore_errors=True)
+    return payload
+
+
 def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
     settings = effective_verdict_settings(cfg)
     target = safe_float((cfg.raw.get("profit_tracking", {}) or {}).get("target_monthly_profit_usdc")) or 100.0
@@ -646,6 +933,15 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
         )
 
     pre_event_clv_diagnostic = _build_pre_event_clv_diagnostic(cfg, cluster_rows)
+    measurement_v2 = _build_measurement_v2(
+        cfg.governance_root / "closing_line_final_history.csv",
+        cfg.governance_root / "closing_line_value_positions.csv",
+        clusters,
+        cluster_rows,
+        clustering_coverage,
+        settings,
+        diagnostic_substrings,
+    )
 
     # Gate B - net of execution costs. Entry-side slippage lives inside shadow
     # fills; the charges here are the exit haircut, the registered
@@ -754,6 +1050,7 @@ def build_profit_verdict(cfg: EngineConfig) -> dict[str, Any]:
         "target_monthly_profit_usdc": target,
         "semantics_caveat": GATE_A_SEMANTICS_CAVEAT,
         "pre_event_clv_diagnostic": pre_event_clv_diagnostic,
+        "measurement_v2": measurement_v2,
         "gates": {
             "A_edge_exists": {
                 "registered_rule": verdict_gate_definition("A_edge_exists")["rule"],

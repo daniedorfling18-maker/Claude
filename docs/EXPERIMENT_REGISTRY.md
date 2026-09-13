@@ -315,6 +315,10 @@ to say what the metric is, and a separately-registered diagnostic — true
 pre-event CLV against the last in-band [0.05, 0.95] price at or before
 close_time − 6h — is reported alongside. The diagnostic feeds no gate in
 this study; every verdict rendering carries the settlement-return caveat.
+Amendment 2026-09-13 (WO-169; effective only if merged): the graded quantity is
+the per-share difference `line_price − entry_price`, not a per-dollar return; the
+per-dollar figure is reported beside it and binds nothing until a further owner
+decision.
 
 ## Diagnostic / parked surface
 
@@ -341,4 +345,11 @@ exactly as that section provides, and is not itself registration; a NO-GO
 result closes the family it tested. The freeze paragraph's "no
 promotion-oriented modelling or agent time without amendment" applies to
 these families; if merged, this paragraph is that amendment for WO-166's
-scope only.
+scope only. Amendment 2026-09-13 (WO-167; effective only if merged): this
+paragraph also covers WO-167, one further pass on WO-166's committed inputs
+under a narrower G3 completeness definition; no new data, span, family, or
+evidence class. Amendment 2026-09-13 (WO-170; effective only if merged): this
+paragraph also covers WO-170, one corrected pass on WO-166's committed inputs with NAV-path
+risk statistics, an exported ledger, explicit price bases, fixed recent-period cuts, and the
+realised-variance window aligned to 720 return intervals; no new data, span, family, or evidence
+class.

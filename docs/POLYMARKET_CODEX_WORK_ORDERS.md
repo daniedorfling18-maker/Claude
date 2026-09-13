@@ -17302,7 +17302,7 @@ paid data. That is recorded as an open owner decision, not solved here.
   estimator and gate below except the drawdown, which uses all weeks (see
   Drawdown); ineligible weeks are counted and reported. If the
   entry or exit boundary itself has no close, the run aborts. Nothing is
-  forward-filled.
+  forward-filled. **Amendment 2026-09-13 (WO-167): WO-167 registers a narrower `unverifiable_scope = "perp"` for its own pass; this definition remains the `"either"` default under which WO-166's committed results verify.**
 - **Variant V0 (the gated one).** Always on. Entry at the first Monday
   00:00 UTC boundary on or after 2020-01-01 that carries a close
   (2020-01-06); exit at the last Monday 00:00 UTC boundary on or before the
@@ -17477,7 +17477,7 @@ non-finite.
 |---|---|---|
 | G1 | `52 × q̂_min − 0.020 > 0` — the annualised 0.025-quantile lower bound (minimum of the two bootstraps), minus the haircut, is positive | the estimator's own uncertainty, one-sided 2.5% per lane |
 | G2 | `52 × μ̂ − 0.020 ≥ 0.060` — the annualised point estimate minus the haircut clears 6.0% | an assumed 4.0% riskless USD yield plus 2.0 pp compensation for venue and basis risk; changed only by a dated amendment to this WO landed before the data-pull commit |
-| G3 | maximum drawdown of the pooled weekly series **≤ 0.20**, forced liquidations **= 0** across both underlyings, and no open position inside a flagged period (`unverifiable_open_periods = 0`) | the drawdown a live system's kill switch would sit below |
+| G3 | maximum drawdown of the pooled weekly series **≤ 0.20**, forced liquidations **= 0** across both underlyings, and no open position inside a flagged period (`unverifiable_open_periods = 0`). Amendment 2026-09-13 (WO-167): WO-167 registers a narrower `unverifiable_scope = "perp"` for its own pass; this definition remains the `"either"` default under which WO-166's committed results verify. | the drawdown a live system's kill switch would sit below |
 | G4 | pooled net return positive in **≥ 4 of the 6** ISO years 2020-2025, each with ≥ 45 eligible weeks | persistence across one full cycle |
 | G5 (Lane B) | the 0.025-quantile lower bound (minimum of the two bootstraps) of mean pooled window VRP **> 0**, and the pooled yearly mean positive in **≥ 3 of the 4** calendar years 2022-2025, each with ≥ 10 accepted windows | existence, with persistence |
 
@@ -17666,3 +17666,105 @@ unchanged. `tests/test_experiment_registry.py` — unchanged and still passes.
 **Not authorised by this text:** any merge, any registration of a primary, any
 collector, any prospective window, any paper or live evidence, any change to
 WO-67's P1-P5, and any use of the sandbox result as verification of record.
+
+## WO-167 — Refine WO-166's completeness rule to the leg the liquidation check reads, and run one fresh pass on the committed inputs — `admitted` (2026-09-13; S8 ADMISSIBLE after one delta pass; `registered-ancestry: a790e51 ancestor-of a790e51 PASS` at dispatch, the build branch standing at `origin/main`'s tip; class F: it changes one input of gate G3; historical-class diagnostic; covered by the registry's WO-166 paragraph only through the dated extension this WO carries (touched file 13, `docs/EXPERIMENT_REGISTRY.md`, effective only if merged); touches `src/premium_research/`, its tests, a new results directory, this register, the charter, and the registry → OWNER MERGE after line-audit; no primary added; no threshold, span, return estimator, or cut changes; the single change is the definition of G3's `unverifiable_open_periods` input; `registered-ancestry:` recorded at dispatch against `origin/main` `a790e51`, the squash-merge of PR #454 that made WO-166 registered. **Disclosure:** this work order exists because WO-166's single pass returned NO-GO on G3 alone, with all 16 unverifiable periods on the spot leg; the rule change below is therefore made after seeing the outcome and is favourable by construction. WO-166's result stays on record unchanged; this pass writes its own results directory.)
+
+**Why this exists.** WO-166 registered: "A period is rejected when the 1h close of the hour
+ending at its boundary is absent for either leg, or when any of the 8 hourly highs inside it is
+absent … A flagged period during which a position is open has unverifiable liquidation status …
+G3 reads False if that count is not zero." Its pass measured every economic gate as passing
+(G1 3.93%, G2 7.99%, G4 6 of 6 years; drawdown 0.32%; forced liquidations 0) and G3 as failing
+on `unverifiable_open_periods = 16`: 8 per underlying, every one caused by an absent **spot**
+bar. The manifest records the two spot 1h series at 31 missing hours each and both perpetual 1h
+series at 0. The liquidation check (`carry.py`, forced liquidation on the period-start margin
+ratio against the maximum intra-period **perpetual** high) reads no spot bar. The registered rule
+was broader than the check it protects.
+
+### The rule change, exactly
+
+- **Unchanged:** a period with an absent bar on either leg is *rejected* — merged into the next
+  period that has a close, flagged, and its ISO week ineligible for every estimator and gate
+  except the drawdown. `μ̂`, both bootstraps, G1, G2 and G4 therefore read the same eligible
+  weeks as WO-166 and must reproduce its figures exactly.
+- **Changed:** a rejected period counts as having **unverifiable liquidation status only when
+  the perpetual-side data the check reads is incomplete** — any of its 8 hourly perpetual highs
+  absent, or the perpetual close at the period's start boundary absent (the margin ratio `m0`
+  at the start is then undefined). For a whole absent perpetual bar the two conditions overlap:
+  the bar ending a boundary is also the last of the preceding period's 8 highs. A period whose
+  only absent bar is a spot bar is rejected but verifiable. G3 is otherwise unchanged: drawdown ≤ 0.20, forced liquidations = 0, and
+  `unverifiable_open_periods = 0` under this definition.
+- **Registered as a scope switch, not a replacement.** `unverifiable_scope = "either"` is the
+  WO-166 definition and stays the default so WO-166's committed results still verify
+  byte-for-byte; `"perp"` is this definition. Any other value aborts. Under the WO-167 configuration the results JSON
+  carries `unverifiable_scope = "perp"` and `work_order = "WO-167"` and the report's first
+  paragraph names both; under the WO-166 configuration neither the JSON nor the report gains a
+  byte, so the committed WO-166 files verify unchanged (test 5).
+
+### A11 — bias-direction disclosure
+
+This change is a loosening of one G3 input, made after the outcome was known, and every
+period it reclassifies moves G3 the favourable way (16 → expected 0). The argument that the
+effect exceeds the bias is structural, not statistical: the quantity G3 protects is "did an
+intra-period perpetual high breach the liquidation move", which is a function of perpetual
+highs and the period-start perpetual close only; an absent spot bar carries no information
+about it; and the spot-gap periods stay excluded from every estimator, so no return figure
+changes. Channels that remain favourable and unaddressed are WO-166's ten, plus one this WO adds:
+11. post-hoc rule selection — this definition was chosen after G3's outcome was known
+(favourable; no haircut; mitigated only by the structural argument above and by WO-166's
+NO-GO staying on record). The expected outcome, stated so it can fail: `unverifiable_open_periods = 0`
+for both underlyings, G3 True, Lane A GO on the same G1, G2, G4 figures as WO-166. If any
+figure other than the unverifiable count and G3 differs from WO-166's results, the run is a
+defect, not a result.
+
+### Fail-safe sentence (S5)
+
+Every fail branch ends in no verdict. An unknown scope aborts before any period is simulated;
+the WO-167 results directory (`research/premium_poc/results_wo167/`) is written atomically or
+not at all and a second `run` for WO-167 is refused; `verify-results --work-order WO-167`
+recomputes under the `"perp"` scope and reports FAIL on any absent, extra, or byte-different
+file, while `verify-results` without the selector keeps verifying WO-166 under `"either"`; the
+verdict lines are generated from the gate booleans. A pass whose G1, G2, or G4 quantities
+differ from WO-166's committed values is reported as a defect by the day-after check.
+
+### Touch ONLY these files (13 paths)
+
+1. `src/premium_research/carry.py` — `boundary_table` gains `perp_close_missing` and `spot_close_missing` beside `close_missing`; `simulate(..., unverifiable_scope="either")` implements both scopes.
+2. `src/premium_research/runner.py` — `Config.unverifiable_scope`, `Config.work_order`, `Config.results_dir`; `WO167_CONFIG`; the scope threaded into `lane_a` and recorded in the results JSON under the WO-167 configuration only.
+3. `src/premium_research/cli.py` — `run --work-order {WO-166,WO-167}` and the same selector on `verify-results`.
+4. `src/premium_research/report.py` — under the WO-167 configuration the first paragraph names the work order and the scope; under the WO-166 configuration the rendered text is byte-identical to today's.
+5. `tests/premium_research/test_carry.py` — tests 1-4 below.
+6. `tests/premium_research/test_report_and_verify.py` — tests 5-8 below.
+7. `research/premium_poc/results_wo167/carry_v0.json`
+8. `research/premium_poc/results_wo167/carry_v1.json`
+9. `research/premium_poc/results_wo167/vrp.json`
+10. `research/premium_poc/results_wo167/report.md`
+11. `docs/POLYMARKET_CODEX_WORK_ORDERS.md` — this entry, its calibration row, and a dated cross-reference inserted at the end of WO-166's Rejected-periods paragraph and its G3 row: "Amendment 2026-09-13 (WO-167): WO-167 registers a narrower `unverifiable_scope = \"perp\"` for its own pass; this definition remains the `\"either\"` default under which WO-166's committed results verify."
+12. `docs/POLYMARKET_QUANT_MODE_CHARTER.md` — the dated record of the outcome.
+13. `docs/EXPERIMENT_REGISTRY.md` — one dated sentence appended to the WO-166 paragraph: "Amendment 2026-09-13 (WO-167; effective only if merged): this paragraph also covers WO-167, one further pass on WO-166's committed inputs under a narrower G3 completeness definition; no new data, span, family, or evidence class."
+
+`research/premium_poc/data/`, `manifest.json`, and `results/` (WO-166) are not touched.
+
+### Enumerated offline tests (S8/A10); each confirmed to FAIL with its guard reverted, caches purged
+
+1. `test_boundary_table_flags_each_leg_separately` — a spot-only absent hour at a boundary sets `spot_close_missing`, not `perp_close_missing`, and `close_missing`; a perpetual-only absent hour the reverse.
+2. `test_spot_only_gap_is_rejected_but_verifiable_under_perp_scope` — boundary 5's spot close absent with the position open: under `"either"` `unverifiable_open` reads `[1, 1]` on rows 5 and 6 (sum 2); under `"perp"` it reads 0 on both; the week is ineligible under both; funding and wealth are identical under both.
+3. `test_perp_gap_is_unverifiable_under_both_scopes` — a 6-high period at row 9 gives 1 under both scopes; removing the perpetual bar that ends at boundary 5 gives 2 under both scopes — row 5 because that bar is its 8th high, row 6 because its start boundary has no perpetual close; a NaN perpetual close with the high left present (unreachable from fetched data) gives 2 under `"either"` and 1 under `"perp"`.
+4. `test_unknown_scope_aborts` — `unverifiable_scope="spot"` raises before any period is simulated.
+5. `test_wo166_results_still_verify_under_the_default_scope` — on the committed research tree (an integration test on committed inputs, about 5 s), `verify_results(root)` returns `[]`.
+6. `test_wo167_config_writes_its_own_results_directory_and_records_the_scope` — on a synthetic tree with one dropped spot boundary hour, the WO-166 config yields `unverifiable_open_periods = 2` (the merged boundary and the one it merges into) and G3 False in `results/`; the WO-167 config yields 0 and G3 True in `results_wo167/`, with `work_order = "WO-167"` and `unverifiable_scope = "perp"` in the JSON, `results/` untouched, and every G1/G2/G4 quantity byte-identical between the two runs.
+7. `test_run_refuses_a_second_wo167_pass` — an existing `results_wo167/` refuses `run` without `--force`.
+8. `test_verify_results_selector_recomputes_under_the_right_scope` — `verify_results(root, work_order="WO-167")` passes on the WO-167 tree and reports a byte difference if the WO-166 scope is used against it.
+
+### Day-after check
+
+In a fresh clone of the branch: `verify-manifest`, `verify-results` (WO-166, `"either"`), and
+`verify-results --work-order WO-167` all pass; `results_wo167/carry_v0.json` records
+`work_order = "WO-167"`, `unverifiable_scope = "perp"`, the same `manifest_sha256` as WO-166's
+results; and its G1, G2 and G4 quantities equal WO-166's to the last digit. The charter carries
+the dated record whichever way the verdict fell.
+
+**Not authorised by this text:** any merge, any registration of a primary, any collector, any
+prospective window, any paper or live evidence, any change to WO-67's P1-P5, any change to
+WO-166's committed results, and any use of the sandbox result as verification of record. A GO
+here triggers only what the registry's evidence policy and WO-166 paragraph already provide: a future
+pre-observation amendment with a fresh out-of-sample window.

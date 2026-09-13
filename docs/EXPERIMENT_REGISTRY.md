@@ -341,4 +341,7 @@ exactly as that section provides, and is not itself registration; a NO-GO
 result closes the family it tested. The freeze paragraph's "no
 promotion-oriented modelling or agent time without amendment" applies to
 these families; if merged, this paragraph is that amendment for WO-166's
-scope only.
+scope only. Amendment 2026-09-13 (WO-167; effective only if merged): this
+paragraph also covers WO-167, one further pass on WO-166's committed inputs
+under a narrower G3 completeness definition; no new data, span, family, or
+evidence class.

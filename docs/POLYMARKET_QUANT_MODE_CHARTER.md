@@ -2029,14 +2029,27 @@ with the hurdle's own construction (a compounding riskless yield plus a spread) 
 
 The premium has also decayed. From the committed ledgers, by era, on the gated basis:
 
-| window | eligible weeks | annualised | after haircut |
-|---|---|---|---|
-| 2020-2021 | 100 | 23.17% | 21.17% |
-| 2022-2026 | 243 | 4.57% | 2.57% |
-| last 104 eligible weeks | 104 | 4.37% | 2.37% |
-| last 52 eligible weeks (2025-W36 to 2026-W35) | 52 | 2.29% | 0.29% |
+| window | eligible weeks | annualised | after haircut | clears the 6.0% hurdle before the haircut? |
+|---|---|---|---|---|
+| 2020-2021 | 100 | 23.17% | 21.17% | yes |
+| 2022-2026 | 243 | 4.57% | 2.57% | no |
+| 2023-2026 | 191 | 5.46% | 3.46% | no |
+| 2024-2026 | 139 | 6.13% | 4.13% | **yes** |
+| calendar 2024 alone | 52 | 10.83% | 8.83% | **yes** |
+| last 104 eligible weeks | 104 | 4.37% | 2.37% | no |
+| last 52 eligible weeks (2025-W36 to 2026-W35) | 52 | 2.29% | 0.29% | no |
 
-The rolling 52-week series the artifact publishes runs from 1.14% to 32.40% and ends at 2.29%.
+**Correction, same day.** An earlier version of this record said "every post-2021 subsample fails
+G2 before the haircut". That is false and the table above is why: calendar 2024 reads 10.83% and
+the trailing 2024-2026 cut reads 6.13%, both above the 6.0% hurdle. The true statement is narrower
+and is the one this record now makes: **every multi-year cut the artifact publishes that reaches
+2026 fails the hurdle before the haircut except 2024-2026, and the two most recent cuts, the last
+104 and last 52 eligible weeks, fail it by wide margins.** The decay is real and the direction of
+the finding is unchanged; the universal quantifier was not earned. The error was found by the S8
+gate on the follow-up work order, which recomputed the yearly figures from this same artifact.
+
+The rolling 52-week series the artifact publishes runs from 1.14% to 32.40% and ends at 2.29%,
+which is the shape that matters: the premium is not absent after 2021, it is intermittent.
 The regime cut in the same file reads 15.6% annualised in weeks with BTC above its 200-day SMA
 against 1.81% below it, with 39% of eligible weeks below. Lane B has decayed on the same shape:
 pooled mean variance risk premium by window-start year runs +3272, +2462, +581, +549, **-168**,
@@ -2060,6 +2073,8 @@ gives 16 unverifiable periods, G3 False and Lane A NO-GO, with every other leaf 
 clears G2 by 1.99 pp only on the inception-capital denominator; and the point estimate blends
 100 weeks at 23.17% with 243 weeks at 4.57%, a composition effect of 5.4 pp a year against a
 declared haircut of 2.0 pp that names sample composition as one of the six channels it covers.
+(2024 is the exception that keeps the reading honest: at 10.83% it clears the hurdle on its own,
+so the claim is decay and intermittency, not disappearance.)
 
 Also unestablished: capacity (the study is unit-normalised and bounds no size), survivorship
 (BTC and ETH are the only symbols in the tree, so the asset-selection channel cannot be sized

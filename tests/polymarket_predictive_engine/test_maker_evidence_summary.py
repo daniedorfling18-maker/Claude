@@ -134,6 +134,19 @@ def test_adverse_selection_status_reads_the_tier0_floor(tmp_path: Path):
     assert block["tier0_min_confirmed_fills"] == 12
     assert block["tier0_floor_source"] == "config_tightened"
 
+    # Build-review finding: `int(configured)` truncated a fractional floor, so 12.9 became 12 and
+    # 12 confirmed fills read `measured_on_12_fills` while the study's own rule, which does not
+    # truncate, called the same count insufficient. The comparison now uses the untruncated floor
+    # and the label prints its ceiling, so the printed number is never looser than the compared one.
+    fractional = tmp_path / "fractional"
+    fractional.mkdir()
+    scoped = _config(fractional, raw_overrides={"maker_carry_study": {"mb_tier0_min_confirmed_fills": 12.9}})
+    _install(scoped, overrides={"maker_fill_replay": {"confirmed_fills": 12}})
+    block = _run(scoped)["adverse_selection"]
+    assert block["status"] == "below_tier0_minimum_12_of_13_fills"
+    assert block["tier0_min_confirmed_fills"] == 12.9
+    assert block["tier0_min_confirmed_fills_printed"] == 13
+
     loose = tmp_path / "loose"
     loose.mkdir()
     scoped = _config(loose, raw_overrides={"maker_carry_study": {"mb_tier0_min_confirmed_fills": 5}})
@@ -249,9 +262,23 @@ def test_missing_sources_fail_closed(tmp_path: Path):
     _install(scoped, omit=("maker_carry_study",))
     summary = _run(scoped)
     assert summary["capacity"]["state"] == "source_absent"
-    for key in ("cap_binding", "capital_curve", "curve_flat_beyond_usd", "flat_curve_is_model_bounded"):
-        assert summary["capacity"][key] is None
+    # The registered clause is EVERY capacity figure, not a subset. The build line audit found the
+    # cap and its source were read from policy settings before the absent-study branch, so two of
+    # the seven were non-null and the enumeration here listed only the five that were null.
+    for key, value in summary["capacity"].items():
+        if key in ("state", "note", "max_size_multiple_source", "curve_state"):
+            continue
+        assert value is None, key
+    assert summary["capacity"]["max_size_multiple_source"] == "unknown"
+    assert summary["capacity"]["curve_state"] == "curve_unreadable"
     assert summary["gates_reference"] is None
+
+    # A non-empty portfolio of unreadable entries must not read `cap_binding = true` vacuously.
+    vacuous = tmp_path / "vacuous"
+    vacuous.mkdir()
+    scoped = _config(vacuous)
+    _install(scoped, overrides={"maker_carry_study": {"portfolio": ["unreadable", "entries"]}})
+    assert _run(scoped)["capacity"]["cap_binding"] is None
 
     out_of_range = tmp_path / "range"
     out_of_range.mkdir()
@@ -353,3 +380,48 @@ def test_recorded_maker_fixture_provenance_and_no_credentials():
         path = FIXTURES / f"{name}.json"
         assert hashlib.sha256(path.read_bytes()).hexdigest() in readme, name
         assert _scan_json(path, REPO_ROOT) == [], name
+
+
+def test_no_real_venue_identifier_survives_sanitisation():
+    """WO-173 delta 1, from the build line audit: 54 real Polymarket condition ids survived the
+    first sanitiser and were byte-identical to the telemetry mirror.
+
+    Seventeen were the KEYS of `excluded_stale_condition_ids`, which the sanitiser walked past
+    because it only rewrote values; thirty-seven were embedded inside
+    `official_snapshot.files_written` path strings, which it walked past because it only rewrote
+    values that were EXACTLY an identifier. The leak was invertible: the first written file's id is
+    the first portfolio entry's condition id, so a reader could map inert to real by position.
+
+    `credential_guard._scan_json` cannot catch either class — it matches a hex only as a whole
+    field value, and never sees a dict key as a value — so its clean result above is necessary and
+    not sufficient. This asserts the property directly: no hex identifier in any committed fixture
+    may also appear in the source snapshot. It is a set-intersection test, so it needs no network
+    and no mirror checkout: the expected count is zero and the fixtures carry their own ids."""
+    import re
+
+    hex_run = re.compile(r"0x[0-9a-fA-F]{64}|0x[0-9a-fA-F]{40}|(?<![0-9a-fA-Fx])[0-9a-fA-F]{64}(?![0-9a-fA-F])")
+    # The real ids the first sanitiser leaked, recorded here as the regression they are. Any
+    # fixture that carries one of these again fails, whatever path it came in by.
+    leaked_before = {
+        "0x08663406836d1bc043f15504d2ccf3961346ac428248ce8228300538de1b9cc9",
+        "0x12aa595f4883b1a856dcf8155b87e89a8d098b5ad8a7781c75804fd13d166718",
+        "0xfed2dd1e83691ca08b8bc08d2bed09cb19003730f2be47da6a467ee37df96fbb",
+    }
+    for name in NAMES:
+        text = (FIXTURES / f"{name}.json").read_text(encoding="utf-8")
+        found = set(hex_run.findall(text))
+        assert not (found & leaked_before), (name, sorted(found & leaked_before))
+        # Every surviving id must be a sanitiser output: deterministic, and derived from a sha256,
+        # so its digits are drawn from the hex alphabet with no venue structure. The structural
+        # check that matters is the one above; this guards the shape.
+        for token in found:
+            assert token.startswith("0x") or len(token) == 64, (name, token)
+    # Keys are walked, not only values: the study's stale-id map is keyed BY identifier.
+    study = json.loads((FIXTURES / "maker_carry_study.json").read_text(encoding="utf-8"))
+    stale = study.get("excluded_stale_condition_ids")
+    if isinstance(stale, dict) and stale:
+        assert not (set(stale) & leaked_before)
+    replay = json.loads((FIXTURES / "maker_fill_replay.json").read_text(encoding="utf-8"))
+    written = (replay.get("official_snapshot") or {}).get("files_written") or []
+    for entry in written:
+        assert not any(token in str(entry) for token in leaked_before), entry

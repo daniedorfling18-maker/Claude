@@ -276,3 +276,84 @@ def test_recorded_coverage_fixture_provenance_and_no_credentials():
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         assert digest in readme, name
         assert _scan_json(path, REPO_ROOT) == [], name
+
+
+def test_fills_seen_with_none_scored_is_a_coverage_limitation_not_a_measured_negative(tmp_path, monkeypatch):
+    """WO-172 delta 1, from the build line audit: `measured_negative` was reachable on two paths
+    the register does not register it for, once with a null scope.
+
+    "5,000 fills seen, none scored" is "input rows exist but none could be used" — the registered
+    definition of a coverage limitation. Reading it as a measured negative would publish the H3
+    lane as evidence of no edge on the day its collector finally runs and every row is skipped,
+    which is the exact reading this work order exists to prevent."""
+    cfg = _config(tmp_path)
+    _install(cfg, overrides={"smart_flow_clv.json": {"fills_seen": 5000, "fills_scored": 0}})
+    entry = _by_artifact(_report(cfg, monkeypatch))["polymarket_model_governance/smart_flow_clv.json"]
+    assert entry["classification"] == "coverage_limitation"
+    assert entry["evidence_rule"] == "absence of evidence: untested"
+
+    # A measured negative must always carry its scope; the guard is asserted at the one place
+    # every entry passes through.
+    with pytest.raises(ValueError, match="must carry its scope"):
+        dcr._entry(
+            artifact="x", fields_read=[], producer=None, producer_state="scheduled", cadence=None,
+            payload={}, lane=None, run_clock=RUN_CLOCK, classification="measured_negative", scope=None,
+        )
+    scoped_ok = dcr._entry(
+        artifact="x", fields_read=[], producer=None, producer_state="scheduled", cadence=None,
+        payload={}, lane=None, run_clock=RUN_CLOCK, classification="measured_negative", scope="within 3 things",
+    )
+    assert scoped_ok["scope"] == "within 3 things"
+
+
+def test_a_manifest_entry_without_a_truncated_key_yields_no_figure(tmp_path, monkeypatch):
+    """WO-172 delta 1: `bool(None)` is False, so an entry with no `truncated` key — or an explicit
+    null — read as whole and produced a figure from a ledger whose own line counts, held in the
+    same entry, showed it was an extract."""
+    cfg = _config(tmp_path)
+    _install(cfg)
+    _ledger(cfg, _closed_rows())
+    for entry in (
+        {"path": "outputs/polymarket_shadow/shadow_positions.csv", "source_lines_after_header": 1000, "exported_lines_after_header": 200},
+        {"path": "outputs/polymarket_shadow/shadow_positions.csv", "truncated": None, "source_lines_after_header": 1000, "exported_lines_after_header": 200},
+        {"path": "outputs/polymarket_shadow/shadow_positions.csv", "truncated": False, "source_lines_after_header": 1000, "exported_lines_after_header": 200},
+    ):
+        path = tmp_path / "manifest_variant.json"
+        path.write_text(json.dumps({"files": [entry]}), encoding="utf-8")
+        block = _report(cfg, monkeypatch, export_manifest_path=path)["pnl_attribution_check"]
+        assert block["state"] == "unknown_truncated_input", entry
+        assert "closed_total_pnl_usdc" not in block
+
+    # An explicit false whose counts agree still yields the figure.
+    path = tmp_path / "whole.json"
+    path.write_text(json.dumps({"files": [{"path": "outputs/polymarket_shadow/shadow_positions.csv", "truncated": False, "source_lines_after_header": 4, "exported_lines_after_header": 4}]}), encoding="utf-8")
+    assert _report(cfg, monkeypatch, export_manifest_path=path)["pnl_attribution_check"]["state"] == "ok"
+
+
+def test_status_is_partial_when_any_path_reads_unknown(tmp_path, monkeypatch):
+    """WO-172 delta 1: `status` was an unconditional literal, so an artifact whose every path read
+    `unknown` still published `ok`."""
+    cfg = _config(tmp_path)
+    payload = _report(cfg, monkeypatch)  # nothing installed at all
+    assert payload["status"] == "partial"
+    assert len(payload["unknown_paths"]) == payload["counts_by_classification"]["unknown"] > 0
+    _install(cfg)
+    full = _report(cfg, monkeypatch)
+    assert full["status"] == "ok"
+    assert full["unknown_paths"] == []
+
+
+def test_the_configured_fills_path_is_read_not_only_the_registered_literal(tmp_path, monkeypatch):
+    """WO-172 delta 1: the reader this report cites resolves its own `fills_input` setting and
+    falls back to a path with no `inputs/` segment. Reading only the registered literal reported a
+    confident ingestion failure about a file that exists somewhere else."""
+    cfg = _config(tmp_path)
+    _install(cfg)
+    elsewhere = tmp_path / "somewhere" / "fills.csv"
+    elsewhere.parent.mkdir(parents=True, exist_ok=True)
+    write_csv(elsewhere, [{"a": 1}, {"a": 2}], fieldnames=["a"])
+    cfg.raw.setdefault("smart_flow_clv", {})["fills_input"] = str(elsewhere)
+    entry = _by_artifact(_report(cfg, monkeypatch))["inputs/polymarket/public_wallet_fills.csv"]
+    assert entry["population"] == 2
+    assert entry["classification"] == "unknown"
+    assert str(elsewhere) in entry["detail"]

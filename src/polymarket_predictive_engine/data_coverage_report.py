@@ -98,6 +98,15 @@ def _staleness(payload: dict[str, Any] | None, lane: str | None, run_clock: str)
     }
 
 
+def _assert_scoped(classification: str, scope: str | None, artifact: str) -> None:
+    """A measured negative states the population it measured, or it is not one.
+
+    Build-review finding: two paths could reach `measured_negative` with `scope = None`, which is
+    the claim "we looked and found nothing" with no statement of where we looked."""
+    if classification == MEASURED_NEGATIVE and not scope:
+        raise ValueError(f"{artifact}: a measured negative must carry its scope")
+
+
 def _entry(
     *,
     artifact: str,
@@ -116,6 +125,7 @@ def _entry(
     scope: str | None = None,
     detail: str | None = None,
 ) -> dict[str, Any]:
+    _assert_scoped(classification, scope, artifact)
     return {
         "artifact": artifact,
         "fields_read": fields_read,
@@ -137,8 +147,18 @@ def _entry(
 def _smart_flow(cfg: EngineConfig, run_clock: str) -> list[dict[str, Any]]:
     path = cfg.governance_root / "smart_flow_clv.json"
     payload = _read_json(path)
-    fills = cfg.data_root / "inputs" / "polymarket" / "public_wallet_fills.csv"
-    fills_rows = len(read_csv_rows(fills)) if Path(fills).exists() else 0
+    # Build-review finding: the reader this cites resolves `smart_flow_clv.fills_input` first and
+    # falls back to a path with no `inputs/` segment. Reading only the registered literal reported
+    # a confident ingestion failure about a file that may exist elsewhere. Both are checked, and
+    # the one actually read is recorded.
+    configured = (cfg.raw.get("smart_flow_clv", {}) or {}).get("fills_input")
+    candidates = [Path(configured)] if configured else []
+    candidates += [
+        cfg.data_root / "inputs" / "polymarket" / "public_wallet_fills.csv",
+        cfg.data_root / "polymarket" / "public_wallet_fills.csv",
+    ]
+    fills = next((path for path in candidates if path.exists()), candidates[-1])
+    fills_rows = len(read_csv_rows(fills)) if fills.exists() else 0
     seen = (payload or {}).get("fills_seen")
     if payload is None or not _finite(seen):
         classification = UNKNOWN
@@ -146,8 +166,14 @@ def _smart_flow(cfg: EngineConfig, run_clock: str) -> list[dict[str, Any]]:
         classification = INGESTION_FAILURE
     elif safe_float(seen) == 0:
         classification = COVERAGE_LIMITATION
+    elif safe_float((payload or {}).get("fills_scored")) == 0:
+        # Build-review finding: the old code read this as a measured negative. Fills seen with
+        # none scored is "input rows exist but none could be used" — the registered definition of
+        # a coverage limitation. Scoring skips rows for missing fields or no usable quote; neither
+        # is a measurement of no edge.
+        classification = COVERAGE_LIMITATION
     else:
-        classification = MEASURED_NEGATIVE if safe_float((payload or {}).get("fills_scored")) == 0 else UNKNOWN
+        classification = UNKNOWN
     return [
         _entry(
             artifact="polymarket_model_governance/smart_flow_clv.json",
@@ -176,7 +202,7 @@ def _smart_flow(cfg: EngineConfig, run_clock: str) -> list[dict[str, Any]]:
             classification=INGESTION_FAILURE if fills_rows == 0 else UNKNOWN,
             population=fills_rows,
             eligible=fills_rows,
-            detail="No collector writes this path; building one is a separate work order.",
+            detail=f"No collector writes this path; building one is a separate work order. Path read: {fills}",
         ),
     ]
 
@@ -249,8 +275,10 @@ def _implication(cfg: EngineConfig, run_clock: str) -> dict[str, Any]:
         classification = INGESTION_FAILURE
     elif safe_float(legs) == 0:
         classification = COVERAGE_LIMITATION
+    elif safe_float((payload or {}).get("flagged_deviations")) == 0:
+        classification = MEASURED_NEGATIVE
     else:
-        classification = MEASURED_NEGATIVE if safe_float((payload or {}).get("flagged_deviations")) == 0 else UNKNOWN
+        classification = UNKNOWN
     return _entry(
         artifact="implication_consistency/implication_scan.json",
         fields_read=["events_scanned", "classified_legs", "flagged_deviations"],
@@ -263,6 +291,7 @@ def _implication(cfg: EngineConfig, run_clock: str) -> dict[str, Any]:
         classification=classification,
         population=int(safe_float(scanned)) if _finite(scanned) else None,
         eligible=int(safe_float(legs)) if _finite(legs) else None,
+        scope=f"within {int(safe_float(legs))} classified legs" if _finite(legs) and safe_float(legs) > 0 else None,
         detail="Events were scanned and no leg could be classified; no implication was ever tested.",
     )
 
@@ -325,7 +354,15 @@ def _pnl_attribution_check(
         block["state"] = "unknown_no_manifest"
         block["detail"] = "no export manifest and no --ledger-source; a truncated ledger would understate every figure"
         return block
-    if basis == LEDGER_BASIS_MANIFEST and bool((entry or {}).get("truncated")):
+    # Build-review finding: `bool(None)` is False, so a manifest entry with no `truncated` key —
+    # or an explicit null — read as whole and yielded a figure from a ledger the same entry's own
+    # line counts showed was an extract. A figure is stated only on an explicit `truncated = false`
+    # whose line counts agree.
+    truncated = (entry or {}).get("truncated")
+    source_lines = safe_float((entry or {}).get("source_lines_after_header"))
+    exported_lines = safe_float((entry or {}).get("exported_lines_after_header"))
+    counts_disagree = source_lines is not None and exported_lines is not None and source_lines > exported_lines
+    if basis == LEDGER_BASIS_MANIFEST and (truncated is not False or counts_disagree):
         block["state"] = "unknown_truncated_input"
         block["source_lines_after_header"] = (entry or {}).get("source_lines_after_header")
         block["exported_lines_after_header"] = (entry or {}).get("exported_lines_after_header")
@@ -390,9 +427,13 @@ def build_data_coverage_report(
         _implication(cfg, run_clock),
         _event_group(cfg, run_clock),
     ]
+    unknown_paths = [entry["artifact"] for entry in paths if entry["classification"] == UNKNOWN]
     payload = {
         "work_order": "WO-172",
-        "status": "ok",
+        # Build-review finding: `status` was an unconditional literal, so an artifact whose every
+        # path read `unknown` still published `ok`.
+        "status": "ok" if not unknown_paths else "partial",
+        "unknown_paths": unknown_paths,
         "generated_at_utc": run_clock,
         "export_manifest_path": str(export_manifest_path) if export_manifest_path else None,
         "classification_set": list(CLASSIFICATIONS),

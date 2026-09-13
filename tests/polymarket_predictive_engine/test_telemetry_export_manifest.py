@@ -93,8 +93,7 @@ def test_manifest_records_whole_files_and_skipped_oversized(tmp_path: Path):
     assert writer.MANIFEST_NAME not in {row["path"] for row in manifest["files"]}
     assert manifest["file_count"] == len(manifest["files"])
     skipped = {row["source_path"]: row["reason"] for row in manifest["skipped"]}
-    assert skipped["outputs/polymarket_shadow/big.json"].startswith("oversized_non_csv:")
-    assert int(skipped["outputs/polymarket_shadow/big.json"].split(":")[1]) >= 400
+    assert skipped["outputs/polymarket_shadow/big.json"] == "oversized_non_csv:400"
     assert manifest["filters"]["max_file_kb"] == 300
     assert manifest["filters"]["csv_tail_lines"] == 200
     assert manifest["filters"]["name_exclusions"] == list(writer.PAYLOAD_EXCLUDED_FRAGMENTS)
@@ -144,6 +143,10 @@ def test_push_script_calls_the_writer_with_arguments_and_fails_closed():
     assert "timeout 300 python3" in text
     assert 'PUSH_STATUS="manifest_failed"' in text
     assert text.index('PUSH_STATUS="manifest_failed"') < text.index("add -f telemetry")
+    # The registered fail-closed shape is the status AND the non-zero exit, in that order, before
+    # anything is staged.
+    failure = text.index('PUSH_STATUS="manifest_failed"')
+    assert text.index("exit 1", failure) < text.index("add -f telemetry")
     # The script must still not name the heavy corpora the WO-121 guard excludes.
     for fragment in ("polymarket_training", "websocket_capture", "trade_prints_capture"):
         assert fragment not in text
@@ -167,3 +170,30 @@ def test_export_script_verifies_copies_and_never_names_the_training_corpora():
     # The rename happens after both checks, and failure deletes only this run's directory.
     assert text.index("--scan-credentials \"$TMP_DIR\"") < text.index('mv "$TMP_DIR"')
     assert 'rm -rf "$TMP_DIR"' in text
+    # Build-review finding: clearing the trap BEFORE the rename left the temporary directory
+    # behind when the rename itself failed, against "on any failure it deletes only that freshly
+    # created temporary directory". The trap must be cleared only once the rename has succeeded.
+    assert text.index('mv "$TMP_DIR"') < text.index("trap - EXIT")
+
+
+def test_a_vanished_source_is_unproven_not_whole(tmp_path: Path):
+    """WO-172 delta 1, from the build line audit: a source that disappeared between the copy and
+    the manifest walk read `truncated = false`, so `--mode full`'s "truncated false on every entry,
+    asserted" passed on an entry whose completeness nothing could demonstrate."""
+    _write(tmp_path / "snap" / "telemetry" / "outputs" / "polymarket_shadow" / "gone.csv", _csv(10))
+    manifest = _build(tmp_path)
+    entry = _entry(manifest, "outputs/polymarket_shadow/gone.csv")
+    assert entry["truncation_rule"] == "source_absent"
+    assert entry["truncated"] is None
+    with pytest.raises(RuntimeError, match="readable source"):
+        _build(tmp_path, mode=writer.MODE_FULL)
+
+
+def test_a_readable_file_absent_from_the_snapshot_is_not_called_size_unreadable(tmp_path: Path):
+    """WO-172 delta 1: the skip reason said the size could not be read after a successful stat."""
+    _write(tmp_path / "repo" / "outputs" / "polymarket_shadow" / "tiny.json", json.dumps({"k": 1}))
+    _write(tmp_path / "snap" / "telemetry" / "outputs" / "polymarket_shadow" / "kept.csv", _csv(2))
+    _write(tmp_path / "repo" / "outputs" / "polymarket_shadow" / "kept.csv", _csv(2))
+    skipped = {row["source_path"]: row["reason"] for row in _build(tmp_path)["skipped"]}
+    assert skipped["outputs/polymarket_shadow/tiny.json"].startswith("absent_from_snapshot:")
+    assert "size_unreadable" not in skipped.values()

@@ -99,6 +99,6 @@ three. The hashes below are of the committed (sanitised) files, not of the origi
 
 | file | source `generated_at_utc` | sha256 (sanitised) |
 |---|---|---|
-| `maker_carry_study.json` | `2026-08-20T10:46:56Z` | `8dd78772a835ae8aa2fbd4415eacc05124cc5b3fbde416859d4b1c71323abc9f` |
-| `maker_fill_replay.json` | `2026-08-21T01:42:15Z` | `7a6f4fa878177288b570178d863a30a4f49d0da85e60d763341141be89df1622` |
+| `maker_carry_study.json` | `2026-08-20T10:46:56Z` | `907962c4fe0119cff3f2c61d10d537423cf285904b7172f1687ac15bd34c2fe1` |
+| `maker_fill_replay.json` | `2026-08-21T01:42:15Z` | `fffc068f3d90b71c3071b2622cf06db4ec4de93c989bca0f144b2eb77164e08e` |
 | `maker_live_test.json` | `2026-08-21T01:41:31Z` | `f2d22696d9913d69b648ffee8a404474114d6e4c068850607464ce2637cdd18d` |

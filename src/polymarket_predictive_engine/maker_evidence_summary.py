@@ -151,12 +151,16 @@ def _hypothetical_fills(replay: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def _tier0_floor(cfg: EngineConfig) -> tuple[int, str]:
+def _tier0_floor(cfg: EngineConfig) -> tuple[float, str]:
     """Tighten-only, mirroring the study's own rule: a config may raise the floor, never lower it."""
     configured = _number((cfg.raw.get("maker_carry_study", {}) or {}).get("mb_tier0_min_confirmed_fills"))
     if configured is None or configured < 0:
         return MB_TIER0_MIN_CONFIRMED_FILLS, "registered"
-    floor = max(MB_TIER0_MIN_CONFIRMED_FILLS, int(configured))
+    # Build-review finding: `int(configured)` truncated a fractional floor, so a config of 12.9
+    # gave a floor of 12 and 12 confirmed fills read `measured_on_12_fills` while the study's own
+    # `_mb_tighter_min` — which does not truncate — called the same count insufficient. That is
+    # exactly the favourable channel this block's A11 claims to have removed.
+    floor = max(float(MB_TIER0_MIN_CONFIRMED_FILLS), float(configured))
     return floor, "config_tightened" if floor > MB_TIER0_MIN_CONFIRMED_FILLS else "registered"
 
 
@@ -164,6 +168,7 @@ def _adverse_selection(cfg: EngineConfig, replay: dict[str, Any] | None) -> dict
     floor, source = _tier0_floor(cfg)
     block: dict[str, Any] = {
         "tier0_min_confirmed_fills": floor,
+        "tier0_min_confirmed_fills_printed": int(math.ceil(floor)),
         "tier0_floor_source": source,
         "tier0_sentence": TIER0_SENTENCE,
     }
@@ -180,10 +185,13 @@ def _adverse_selection(cfg: EngineConfig, replay: dict[str, Any] | None) -> dict
         )
         return block
     confirmed = _integral(replay.get("confirmed_fills"))
+    # The comparison uses the untruncated floor; the label prints its ceiling, so a fractional
+    # floor can never be printed looser than the number actually compared against.
+    printed_floor = int(math.ceil(floor))
     if confirmed is None or confirmed < 1:
         status = "unmeasured"
     elif confirmed < floor:
-        status = f"below_tier0_minimum_{confirmed}_of_{floor}_fills"
+        status = f"below_tier0_minimum_{confirmed}_of_{printed_floor}_fills"
     else:
         status = f"measured_on_{confirmed}_fills"
     markouts = replay.get("markout_per_fill") if isinstance(replay.get("markout_per_fill"), dict) else {}
@@ -240,19 +248,17 @@ def _realized(live: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _capacity(cfg: EngineConfig, study: dict[str, Any] | None) -> dict[str, Any]:
-    settings = maker_policy_settings(cfg)
-    cap = _integral(settings.get("max_size_multiple"))
-    if cap is not None and cap < 1:
-        cap = None
-    block: dict[str, Any] = {
-        "max_size_multiple": cap,
-        "max_size_multiple_source": "policy_settings" if cap is not None else "unknown",
-        "note": CAPACITY_NOTE,
-    }
+    block: dict[str, Any] = {"note": CAPACITY_NOTE}
     if study is None:
+        # Build-review finding: the cap and its source were read from policy settings BEFORE this
+        # branch, so "the study file absent → every capacity figure null" was false of two of the
+        # seven, and the test enumerated only the five that were null. With no study there is no
+        # portfolio and no curve, so the cap bounds nothing and is not reported as a capacity fact.
         block.update(
             {
                 "state": SOURCE_ABSENT,
+                "max_size_multiple": None,
+                "max_size_multiple_source": "unknown",
                 "curve_state": CURVE_UNREADABLE,
                 "cap_binding": None,
                 "capital_curve": None,
@@ -261,13 +267,23 @@ def _capacity(cfg: EngineConfig, study: dict[str, Any] | None) -> dict[str, Any]
             }
         )
         return block
+    settings = maker_policy_settings(cfg)
+    cap = _integral(settings.get("max_size_multiple"))
+    if cap is not None and cap < 1:
+        cap = None
+    block["max_size_multiple"] = cap
+    block["max_size_multiple_source"] = "policy_settings" if cap is not None else "unknown"
     block["state"] = PRESENT
 
     portfolio = study.get("portfolio") if isinstance(study.get("portfolio"), list) else []
-    if not portfolio or cap is None:
+    readable_entries = [entry for entry in portfolio if isinstance(entry, dict) and _integral(entry.get("size_multiple")) is not None]
+    if not portfolio or cap is None or len(readable_entries) != len(portfolio):
+        # Build-review finding: `all(... for e in portfolio if isinstance(e, dict))` was vacuously
+        # True on a non-empty list of unreadable entries, asserting that the cap binds on data that
+        # says nothing. An unreadable portfolio reads null.
         block["cap_binding"] = None
     else:
-        block["cap_binding"] = all(_integral(entry.get("size_multiple")) == cap for entry in portfolio if isinstance(entry, dict))
+        block["cap_binding"] = all(_integral(entry.get("size_multiple")) == cap for entry in readable_entries)
 
     curve = study.get("capital_curve") if isinstance(study.get("capital_curve"), list) else []
     block["capital_curve"] = curve

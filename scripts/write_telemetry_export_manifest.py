@@ -157,7 +157,9 @@ def build_manifest(
             entry["source_sha256"] = None
             entry["source_mtime_utc"] = None
             entry["source_lines_after_header"] = None
-            entry["truncated"] = False
+            # A source that vanished between the copy and this walk: the export is real bytes but
+            # nothing can be said about completeness, so `--mode full` must refuse it too.
+            entry["truncated"] = None
             entry["truncation_rule"] = "source_absent"
         files.append(entry)
 
@@ -174,12 +176,18 @@ def build_manifest(
         if source.suffix != ".csv" and size_kb > max_file_kb:
             skipped.append({"source_path": source_relative, "reason": f"oversized_non_csv:{size_kb}"})
         else:
-            skipped.append({"source_path": source_relative, "reason": "size_unreadable"})
+            # Build-review finding: the old code said "size_unreadable" here after a SUCCESSFUL
+            # stat(), which is false. A file whose size read fine but which is absent from the
+            # snapshot was not skipped for its size; it appeared between the copy loop and this
+            # walk, or the copier's own filter (a symlink, say) excluded it.
+            skipped.append({"source_path": source_relative, "reason": f"absent_from_snapshot:{size_kb}"})
 
     if mode == MODE_FULL:
-        truncated = [entry["path"] for entry in files if entry["truncated"]]
-        if truncated:
-            raise RuntimeError(f"--mode full requires whole files; truncated: {truncated}")
+        # `truncated is not False` catches both a real truncation and a source that vanished, so
+        # a full-mode export cannot claim completeness it cannot demonstrate.
+        unproven = [entry["path"] for entry in files if entry["truncated"] is not False]
+        if unproven:
+            raise RuntimeError(f"--mode full requires whole files with a readable source; unproven: {unproven}")
 
     return {
         "work_order": "WO-172",

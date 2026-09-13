@@ -66,16 +66,23 @@ for rel in $LEDGERS; do
   copy_verified "$rel"
 done
 
+# The filter values are passed so the manifest records what this export actually did, not the
+# writer's defaults; a full export applies no cap and no tail, and says so.
 python3 "$REPO_DIR/scripts/write_telemetry_export_manifest.py" \
   --snapshot-dir "$TMP_DIR" \
   --repo-root "$REPO_DIR" \
   --as-of "$STAMP" \
+  --max-file-kb 0 \
+  --csv-tail-lines 0 \
   --mode full
 
 python3 "$REPO_DIR/scripts/write_telemetry_export_manifest.py" \
   --scan-credentials "$TMP_DIR" \
   --repo-root "$REPO_DIR"
 
-trap - EXIT
+# Build-review finding: clearing the trap before the rename left the temporary directory behind
+# when the rename itself failed, against "on any failure it deletes only that freshly created
+# temporary directory". The trap is cleared only after the rename has succeeded.
 mv "$TMP_DIR" "$OUT_ROOT/$STAMP"
+trap - EXIT
 echo "$STAMP research export complete at $OUT_ROOT/$STAMP"

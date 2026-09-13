@@ -2005,8 +2005,8 @@ async function load() {
         ["External ready","external_presentation_ready", v=>v ? "yes" : "no"]
       ]);
     document.getElementById("edgeSearch").innerHTML = table(data.edge_strategy_search?.top_rules || [], [
-      ["Rule","rule_value"], ["Promotable","promotable"], ["Holdout ROI","holdout_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
-      ["Dev ROI","dev_roi", v=>fmtNum(Number(v) * 100, 2) + "%"], ["Holdout rows","holdout_rows"],
+      ["Rule","rule_value"], ["Promotable","promotable"], ["Validation ROI (net of fees)","holdout_roi", v=>fmtNum(Number(v) * 100, 2) + "%"],
+      ["Train ROI (net of fees)","dev_roi", v=>fmtNum(Number(v) * 100, 2) + "%"], ["Validation rows","holdout_rows"],
       ["Markets","markets"], ["Reason","promotion_reason"]
     ]);
     document.getElementById("promotedRuleShadow").innerHTML = table(data.promoted_rule_shadow?.scans || [], [

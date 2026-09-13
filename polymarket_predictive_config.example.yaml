@@ -1405,7 +1405,19 @@ longshot_bias:
   max_candidates: 25
 edge_strategy_search:
   enabled: true
+  # WO-171: the split is a literal 50/25/25 by market, chronologically; holdout_fraction is
+  # ignored and reported under settings.ignored_keys. Where a new key and its old name are
+  # both present the NEW key wins; the old names below still work for a runtime config that
+  # has not been updated.
   holdout_fraction: 0.25
+  min_train_rows: 20
+  min_train_markets: 5
+  min_validation_rows: 6
+  min_validation_markets: 4
+  min_train_roi: 0.02
+  min_validation_roi: 0.02
+  min_validation_roi_ci_lower_bound: 0.0
+  min_avg_entry_price: 0.05
   min_rows: 20
   min_markets: 5
   min_holdout_rows: 6

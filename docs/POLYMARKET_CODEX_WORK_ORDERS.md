@@ -18241,3 +18241,164 @@ gate, and a promotable rule remains a shadow candidate only.
 On the VPS after the next paper-loop iteration that runs the search: `edge_strategy_search_summary.json` has `status = "computed"`, `family_size ≥ ranked_rules`, `bh_rejections`, `final_period_reads` and `ledger_status` present, `settings.split_fractions = [0.5, 0.25, 0.25]`, `availability_basis = "venue_resolution_time_else_close_time"`; `edge_strategy_search_family.csv` row count equals `family_size`; `promoted_rule_shadow_summary.json` still reports its `promoted_rules` count without error.
 
 **Not authorised by this text:** any promotion beyond a shadow candidate, any change to a registered gate or to H1-H3's evaluators, any change to a binding contract document, any paper or live evidence, any merge.
+
+## WO-172 — Telemetry export manifest with truncation accounting, a complete research-ledger export, and a data-coverage report that classifies every starved input path — `admitted` (2026-09-13; S8 ADMISSIBLE after three delta passes (18 → 10 → 1 → 0 defects); `registered-ancestry: a790e51 ancestor-of <build-sha> PASS` to be recorded at dispatch; class M; touches `scripts/push_vps_telemetry.sh` (a VPS cron path), two new scripts, one new engine module, the CLI, tests and recorded fixtures, this register → orchestrator-mergeable after line-audit unless the owner routes it; `registered-ancestry:` to be recorded at dispatch against the `origin/main` tip, `a790e51` at drafting. **Disclosure.** This work order exists because an external review received on 2026-09-13 and the owner's same-day instruction to the drafting agent (relayed in session, not recorded in the repository; it authorises neither build nor merge — authorization lives at the merge) found that the telemetry mirror caps CSVs at 200 rows without any per-file marker, so the −$218.01 "across 200 closed positions" in the charter is an extract; and that four input paths (wallet fills, sharp-anchor joins, calibration joins, implication legs) were empty or unusable in every snapshot without a record of whether that is ingestion failure, coverage limitation, staleness, or a measured negative. Everything here is measurement and labelling; nothing changes a gate, a collector's behaviour, or the mirror's whitelist. WO numbers 168-173 are reserved by the drafts of this cycle; their register entries land in one register commit, and each build is its own branch and PR.)
+
+### The changes, exactly
+
+1. **Per-file export manifest (`scripts/write_telemetry_export_manifest.py`, new; called by
+   `push_vps_telemetry.sh` after the `copy_capped` loop and the `manifest.json` copy (line 188) and
+   before the `git add -f telemetry` (line 192), so the manifest enters the staged tree).** The script passes what it knows as arguments — `--snapshot-dir "$SNAP"
+   --repo-root "$REPO_DIR" --as-of "$STAMP" --max-file-kb "$MAX_FILE_KB" --csv-tail-lines
+   "$CSV_TAIL_LINES"` and one `--whitelist-dir` per line of `TELEMETRY_DIRS` — so the manifest
+   records the values in effect (env overrides included), not the script defaults; the writer imports
+   `credential_guard.PAYLOAD_EXCLUDED_FRAGMENTS` and mirrors the copier's `-maxdepth 2` walk to
+   discover files the copier skipped. It runs under `timeout 300` (wall-clock; basis: the
+   scheduler's existing per-job timeout precedent at `run_vps_ops_scheduler.sh:444`). For every
+   file under the snapshot's `telemetry/` except itself: `source_path`, `source_bytes`,
+   `source_lines_after_header` (newline-delimited lines after the first, the unit `tail -n`
+   truncates by; `null` for non-CSV), `exported_lines_after_header`, `truncated :=
+   source_lines_after_header > exported_lines_after_header`, `truncation_rule := "whole"` iff
+   `exported_sha256 == source_sha256` else `"header_plus_tail:<N>"` (derived from the snapshot alone,
+   never from a size boundary), `source_mtime_utc` (`st_mtime` normalised to UTC), `source_sha256`,
+   `exported_sha256`, `schema_sha256` (CSV: sha256 of the header line; JSON: sha256 of the sorted
+   top-level key list), `snapshot_utc` (= `--as-of`, the one clock the commit message uses).
+   `telemetry/manifest.json` is listed with `source_path = outputs/performance/vps_telemetry_manifest.json`.
+   Files the copier skipped are listed under `skipped` with `reason` ∈ {`"oversized_non_csv:<kb>"`,
+   `"size_unreadable"`} (files beyond depth 2 are out of the copier's scope and out of this
+   manifest's). The `filters` block records the five argument values and the two name exclusions.
+   Written to `telemetry/export_manifest.json` atomically (temp + rename). **On any failure or
+   timeout the script sets `PUSH_STATUS="manifest_failed"` and exits 1**, so the existing EXIT trap
+   stamps `telemetry_push_status.json` with that status and nothing is pushed (fail-closed: no
+   unlabelled extract); the existing watchdog rule `bad_bridge = age > PUSH_STATUS_MAX_SECONDS or
+   status != "ok"` (`degraded_state_watchdog.py:1359`) then fires `publication_bridge_unhealthy` on
+   its next cycle — no new registration is needed. The lock is released by the existing `cleanup`
+   trap. The push script's guard tests (`tests/test_polymarket_vps_docker.py:769`,
+   `tests/polymarket_predictive_engine/test_wo73_controls.py:229`,
+   `tests/polymarket_predictive_engine/test_push_status_stamps.py:120`) stay green: one parentless
+   commit, no Actions trigger, guard before archive before copy, and no mention of the heavy corpora
+   directories in the script text.
+2. **Complete research-ledger export (`scripts/export_research_ledgers.sh`, new; VPS-only; no
+   cadence; no push; owner-run).** Copies, whole, the ledgers named in a literal list in that
+   script — `outputs/polymarket_shadow/shadow_positions.csv`,
+   `outputs/polymarket_model_governance/closing_line_final_history.csv`,
+   `outputs/polymarket_model_governance/closing_line_value_positions.csv`,
+   `outputs/maker_carry/maker_carry_history.csv`, `outputs/maker_carry/maker_live_test_history.csv`,
+   `outputs/polymarket_model_governance/edge_strategy_search.csv` (producer: `run_edge_strategy_search`,
+   manual CLI and the paper loop) — into
+   `outputs/research_exports/.<UTC stamp>.tmp/`, verifies each copy (`source_sha256 ==
+   exported_sha256` and equal line counts, retried once: `maker_live_test_history.csv` is append-only
+   (`ledger_anchor.py:68`) and can be torn mid-copy, while the other five are rewritten atomically by
+   `utils.write_csv` and a copy sees old-or-new), writes the manifest with the same writer in `--mode full` (`truncated = false` on
+   every entry, asserted), runs `credential_guard._scan_csv(path, repo_root, tail_rows=None)` and
+   `_scan_json` on every file including the manifest (a `--scan-credentials DIR` mode of the manifest
+   writer, touched file 2, invoked by the export script), and renames the directory to
+   `outputs/research_exports/<stamp>/` only when every check passes; on any failure it deletes only
+   that freshly created temporary directory. The resolution corpus is **not** exported: the charter's
+   2026-07-11 record keeps the training corpora on the VPS. This is how a complete ledger reaches an
+   off-box analysis: the owner copies the directory; the mirror never carries it.
+3. **Data-coverage report (`src/polymarket_predictive_engine/data_coverage_report.py`, new; CLI
+   `data-coverage-report`).** Reads, read-only, with the producer of each named: `smart_flow_clv.json`
+   (producer: the manual CLI `smart-flow-clv` only; `refresh_governance.py:244` records no scheduled
+   producer), `inputs/polymarket/public_wallet_fills.csv` (no producer is registered anywhere in the
+   repository; its only reference is the reader `smart_flow_clv.py:243`), `sharp_anchor_coverage.json`
+   and `family_calibration_scorecard.json` (producer: `refresh-governance`, every 21,600 s),
+   `implication_scan.json` and `event_group_scan.json` (producer: the `trade_prints` job, every 900 s),
+   `shadow_positions.csv` (producer: the paper loop), `shadow_signal_cohort_pnl.json` (producer:
+   `write_signal_cohort_pnl`), and the export manifest — on the VPS absent (it lives only in the push's temporary snapshot); on a mirror checkout read from `--export-manifest PATH`, recorded in the artifact as `export_manifest_path`, else absent. Writes
+   `outputs/polymarket_model_governance/data_coverage_report.json` with `utils.write_json` (atomic;
+   the directory is also written by `governance_refresh` and read every 30 minutes by the push
+   script's `find`/`cp`, which copies whole files, so the only interleaving is a stale-or-fresh copy).
+   Per path: the artifact and fields read, `producer`, `producer_cadence_seconds` (`null` when none),
+   `population`, `eligible`, `excluded` (with the source's own reason histogram where it exposes
+   one), `missing_outcomes`, the source's `generated_at_utc`, `age_seconds` against the run clock,
+   and one `classification`, first match wins in this order:
+   - `unknown` — the artifact is absent, unparseable, unreadable, or a required field is missing or
+     non-finite (fail-closed; never a measured negative);
+   - `ingestion_failure` — the producer's input is absent or has zero rows (`fills_seen = 0` with the
+     fills file absent or empty);
+   - `coverage_limitation` — input rows exist but none could be used (`total_rows_fetched > 0`,
+     `total_rows_joined = 0`; or `events_scanned > 0`, `classified_legs = 0`);
+   - `join_failure` — joins were attempted and every one was rejected (`rejected_join_rows > 0`,
+     `clean_settled_joined_rows = 0`);
+   - `measured_negative` — complete inputs were scanned and the scan found zero
+     (`groups_with_complete_ask_side > 0`, `flagged_deviations = 0`), stated with its scope
+     ("within 67 complete-ask groups").
+   `stale` is a second flag, never a classification: `true` when `age_seconds` exceeds the producing
+   lane's registered ceiling in `degraded_state_watchdog.REGISTERED_JOB_FRESHNESS_MAX_SECONDS` —
+   `governance_refresh` (sharp-anchor, calibration, and, having no lane of its own, smart-flow) and
+   `trade_prints` (implication, event-group) — read from that table, not re-typed (the table holds
+   25,200 s and 1,200 s respectively at drafting); an unparseable or
+   missing `generated_at_utc` → `stale = true`, `age_seconds = null`; `producer_state ∈ {scheduled,
+   manual_only, no_producer_registered}` per path. Each path carries `evidence_rule`: `"absence of
+   evidence: untested"` for `ingestion_failure`, `coverage_limitation` and `join_failure`;
+   `"measured negative within stated scope"` for `measured_negative`. A `pnl_attribution_check` block
+   groups the shadow ledger's **closed** rows (`status == "closed"`, the ledger's column) by its own
+   `signal_cohort` column; a closed row whose `realised_pnl_usdc` is blank or non-finite →
+   `state = "unknown_malformed_row"` with the row count and no figure: `closed_total_pnl_usdc`,
+   `attributed_by_cohort` (non-blank cohorts), `unattributed_pnl_usdc` (rows with a blank cohort),
+   and, under a distinct name with `comparable = false`, the cohort file's
+   `cohorts[].shadow_total_pnl_usdc` sum (realised plus unrealised at mark, `shadow_cohort.py:765-769`).
+   `ledger_completeness_basis` ∈ {`manifest`, `vps`, `unknown`}: the block reads a figure only when
+   the manifest marks `shadow_positions.csv` `truncated = false`, or when the CLI is run with
+   `--ledger-source vps` (recorded in the artifact); a manifest marking it truncated →
+   `state = "unknown_truncated_input"` with both line counts; no manifest and no flag →
+   `state = "unknown_no_manifest"`, no figure. Every artifact states `paper_trading_invoked = false`
+   and `live_trading_invoked = false`.
+4. **Recorded fixtures.** The five JSONs from the committed telemetry snapshot `origin/vps-telemetry`
+   `fcebaa2` (2026-08-21T02:00:09Z), verbatim (they contain no identifiers to sanitise — lists are
+   empty or sport names; `credential_guard._scan_json` finds nothing), under
+   `tests/fixtures/recorded/coverage_2026-08-21/` with README provenance per convention; the
+   synthetic manifests the tests need are built in `tmp_path`, never committed as recorded fixtures.
+
+### A11 — bias-direction disclosure
+
+Labelling cannot move a number. The classification set is closed, `unknown` is first-match, and a
+missing artifact cannot read as a measured negative. Stale ceilings are read from the registered
+table of the producing lane, so they cannot be set looser than the watchdog's own; a looser ceiling
+would push `stale` toward `false`, the favourable direction, which is why they are not literals here.
+A truncated or unmanifested ledger yields no attribution figure.
+
+### Fail-safe sentence (S5)
+
+A manifest-writer failure or timeout stamps `manifest_failed` and pushes nothing; a research export
+whose copy, manifest, or credential scan fails is deleted from its temporary directory and nothing
+is renamed into place; every artifact is written atomically; every missing, unparseable, unreadable,
+non-finite or absent field classifies `unknown`; an unparseable timestamp is stale with a null age;
+a truncated or unmanifested ledger yields no attribution figure; the coverage report reads and never
+writes any producer's artifact.
+
+### Touch ONLY these files (10 paths)
+
+1. `scripts/push_vps_telemetry.sh` — the writer call with its arguments and timeout, the `manifest_failed` status and exit.
+2. `scripts/write_telemetry_export_manifest.py` (new).
+3. `scripts/export_research_ledgers.sh` (new).
+4. `src/polymarket_predictive_engine/data_coverage_report.py` (new).
+5. `src/polymarket_predictive_engine/cli.py` — the `data-coverage-report` command in `COMMANDS`.
+6. `tests/polymarket_predictive_engine/test_telemetry_export_manifest.py` (new) — tests 1-4.
+7. `tests/polymarket_predictive_engine/test_data_coverage_report.py` (new) — tests 5-11.
+8. `tests/fixtures/recorded/coverage_2026-08-21/` — five JSONs (one path entry).
+9. `tests/fixtures/recorded/README.md` — the provenance entry.
+10. `docs/POLYMARKET_CODEX_WORK_ORDERS.md` — this entry and its calibration row.
+
+Not touched: the whitelist, `MAX_FILE_KB`, `CSV_TAIL_LINES`, the credential guard module, the watchdog's ceiling table, the scheduler (scheduling the coverage report with its own ceiling is a deployment decision named in the day-after check, not built here), the resolution corpus.
+
+### Enumerated offline tests (S8/A10); each confirmed to FAIL with its guard reverted, caches purged
+
+1. `test_manifest_records_truncation_for_a_capped_csv` — a 1,000-line-after-header CSV copied as header + last 200: `source_lines_after_header = 1000`, `exported_lines_after_header = 200`, `truncated = true`, `truncation_rule = "header_plus_tail:200"`, both sha256 values equal the files' digests.
+2. `test_manifest_records_whole_files_and_skipped_oversized` — a 10-line CSV: `truncated = false`, `rule = "whole"`; a 400 KB JSON absent from the snapshot appears under `skipped` with `oversized_non_csv:400`; a > 300 KB CSV with 150 lines, which the copier passes through header + tail, reads `truncation_rule = "header_plus_tail:200"` and `truncated = false`; the manifest lists `telemetry/manifest.json` with its performance-directory source and excludes itself.
+3. `test_schema_sha256_changes_only_when_the_header_changes` — two CSVs with the same header and different rows share `schema_sha256`; a renamed column changes it; the value contains the fragment `sha` in its key so `credential_guard._inspect_field` exempts it (asserted by scanning a manifest built in `tmp_path`).
+4. `test_push_script_calls_the_writer_with_arguments_and_fails_closed` — static: the script text calls the writer after `copy_capped` and before `add -f telemetry` (`text.index("write_telemetry_export_manifest.py") < text.index("add -f telemetry")`) with the five arguments and `--whitelist-dir`, under `timeout 300`, sets `PUSH_STATUS="manifest_failed"` and `exit 1` on failure; the three existing guard tests pass unchanged.
+5. `test_smart_flow_classifies_ingestion_failure_on_the_recorded_fixture` — `fills_seen = 0` and no fills file → `ingestion_failure`, `producer_state = "manual_only"`, the fills path `producer_state = "no_producer_registered"`, evidence rule "absence of evidence: untested".
+6. `test_sharp_anchor_classifies_coverage_limitation` — `total_rows_fetched = 30`, `total_rows_joined = 0`, `total_stale_rows = 30` → `coverage_limitation` with `population = 30`, `eligible = 0`, `producer = "refresh-governance"`, `producer_cadence_seconds = 21600`.
+7. `test_calibration_classifies_join_failure` — `rejected_join_rows = 17420`, `clean_settled_joined_rows = 0` → `join_failure`, `population = 17420`.
+8. `test_implication_is_coverage_limitation_and_event_group_is_measured_negative` — `events_scanned = 300`, `classified_legs = 0` → `coverage_limitation`; `groups_with_complete_ask_side = 67`, `flagged_deviations = 0` → `measured_negative` with scope "within 67 complete-ask groups".
+9. `test_missing_or_non_finite_reads_unknown_and_stale_is_a_second_flag` — an absent artifact → `unknown`; `fills_seen = "nan"` → `unknown`; an unparseable `generated_at_utc` → `stale = true`, `age_seconds = null`; clock-advance on both lanes reading the registered table: a governance-lane fixture dated 6 h before the run clock reads `stale = false` and 8 h reads `true`; a trade-prints-lane fixture 15 min before reads `false` and 25 min reads `true`; classifications unchanged by the flag.
+10. `test_pnl_attribution_check_uses_the_ledger_and_refuses_a_truncated_one` — a synthetic manifest marking `shadow_positions.csv` truncated (source 1,000, exported 200) → `unknown_truncated_input` with both counts and no figure; with `truncated = false`, closed rows summing to −218.01 of which rows with a blank `signal_cohort` sum to −18.01 → `closed_total_pnl_usdc = −218.01`, `unattributed_pnl_usdc = −18.01`, `attributed_by_cohort` summing to −200.00; the cohort file's sum is reported under its own name with `comparable = false`.
+11. `test_no_manifest_means_no_figure_unless_the_source_is_declared` — the same ledger with no manifest → `unknown_no_manifest`; with `--ledger-source vps` → the figures above and `ledger_completeness_basis = "vps"`.
+
+### Day-after check
+
+After deployment, `origin/vps-telemetry` carries `telemetry/export_manifest.json` with one entry per mirrored file (its own excluded), `shadow_positions.csv` marked `truncated = true` with both line counts; `outputs/performance/telemetry_push_status.json` reads `ok` and `outputs/ops_scheduler/degraded_state_watchdog.json` reads `evaluations[registration_id="publication_bridge_unhealthy"].bridges[bridge="telemetry"].status = "ok"` (on a writer failure: `"manifest_failed"` and `state = "incident"`). The coverage report is not production-checkable until it is scheduled: the owner runs `data-coverage-report` once and reads `outputs/polymarket_model_governance/data_coverage_report.json` with the five classifications and `pnl_attribution_check.ledger_completeness_basis = "vps"`; scheduling it with a ceiling is a deployment decision.
+
+**Not authorised by this text:** any change to what the mirror publishes, any collector change, any export of the training corpora, any gate, any paper or live evidence, any merge.

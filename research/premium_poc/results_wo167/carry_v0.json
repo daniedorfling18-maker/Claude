@@ -1,5 +1,5 @@
 {
-  "code_revision": "bf14aa3c382b782421e315b9e10dc1c0f5b388f9",
+  "code_revision": "bd560fbe40c380c61239fe3dec76a1c69b8a050e",
   "deribit_cross_check": {
     "BTC": {
       "eligible_weeks": 359,
@@ -49,7 +49,7 @@
     "G4_positive_in_enough_qualifying_years": true,
     "lane_a_go": true
   },
-  "generated_at": "2026-09-13T05:27:07Z",
+  "generated_at": "2026-09-13T05:45:08Z",
   "inputs": {
     "data/binance/BTCUSDT_funding_8h.csv": "9f1ad4b47a9cd52590431ed1c4e0b5247f11b9b8e8316a7979855d76ebc8e315",
     "data/binance/BTCUSDT_perp_1h.csv": "41dbc2128896b0022782b0a3afe2f802338c4f8970da06c2c3e6adfb3fa55abc",

@@ -4,7 +4,7 @@ Completeness scope for unverifiable liquidation status: **perp** — absent perp
 
 This is a historical-class result computed from the committed inputs listed in `manifest.json`. The gate in Lane A is applied to the lower bound of a bootstrap interval minus a haircut of 2.0% per year for bias channels this data cannot measure (slippage beyond the taker fee, the intra-hour liquidation path, venue operational frictions, and selection). **That haircut is a declared assumption, not a measurement.** Unfavourable channels (VIP0 taker fees with no rebate, zero collateral yield, capital at 1.5x notional, no re-leveraging) are not credited back. Nothing here is verification of record, registers a primary, or authorises capital.
 
-Generated at 2026-09-13T05:27:07Z from code revision `bf14aa3c382b782421e315b9e10dc1c0f5b388f9`; manifest sha256 `2152b1b4e3fd1a6ffc8f9881c1a7663d33a24e27b8205824d98438c95df2ea50`.
+Generated at 2026-09-13T05:45:08Z from code revision `bd560fbe40c380c61239fe3dec76a1c69b8a050e`; manifest sha256 `2152b1b4e3fd1a6ffc8f9881c1a7663d33a24e27b8205824d98438c95df2ea50`.
 
 ## Verdicts
 

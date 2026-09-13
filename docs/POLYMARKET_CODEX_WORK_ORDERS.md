@@ -18075,3 +18075,169 @@ reconciliation and by the day-after check.
 In a fresh clone of the branch: `verify-manifest`; `verify-results`; `verify-results --work-order WO-167`; `verify-results --work-order WO-170` all pass; `results_wo170/reconciliation.json` lists every differing leaf with a reason; `results_wo170/carry_v0.json` records `work_order = "WO-170"`, `drawdown_basis = "nav"`, `rv_alignment = "return_intervals"`, the same `manifest_sha256` as WO-166's results, and G1, G2, G4 quantities equal to WO-167's to the last digit; the four ledger CSVs satisfy `nav = cash + margin + spot_value` row by row (a reader can check any row with a calculator); `vrp.json` shows 66 accepted windows per currency with `valid_hours` one above `valid_hours_wo166_alignment` on every window; the charter carries the dated record whichever way the verdict fell.
 
 **Not authorised by this text:** any merge, any registration of a primary or a lane, any collector, any prospective window, any paper or live evidence, any change to WO-67's P1-P5, any change to WO-166's or WO-167's committed results, any threshold change, and any use of the sandbox result as verification of record.
+
+## WO-171 — Strategy search: chronological train / validation / untouched final split with label-availability purging, a complete tested-variant registry, family-wise correction, fee-net returns, a benchmark and hurdle, and a monitoring ledger — `admitted` (2026-09-13; S8 ADMISSIBLE after two delta passes (19 → 7 → 0 defects); `registered-ancestry: a790e51 ancestor-of <build-sha> PASS` to be recorded at dispatch; class M: a diagnostic module whose `promotable` output yields at most a shadow candidate (read by the shadow scan, `run_promoted_rule_shadow_scan.py:442,657`, which sets `rule_scope = "promoted"`, and by the liquidity-discovery queue, `run_polymarket_liquidity_discovery.py:660-666`, as a recommendation string only); no registered gate, threshold, primary, or H1-H3 evaluator is touched; touches `src/`, the example config, tests, and this register → orchestrator-mergeable after line-audit unless the owner routes it; `registered-ancestry:` to be recorded at dispatch against the `origin/main` tip, `a790e51` at drafting. **Disclosure.** This work order exists because an external review received on 2026-09-13 and the owner's same-day instruction to the drafting agent (relayed in session, not recorded in the repository; it authorises neither build nor merge — authorization lives at the merge) found that the search ranks candidates by their holdout results and confidence bounds, so the holdout is selection data and cannot also confirm; that no multiple-comparison correction is applied although the registry specifies BH-FDR at 10% elsewhere; that only the top `max_ranked_rules = 100` variants are written, so the tested family is not recorded; and that rows' `_profit_per_usdc` is gross of the venue taker fee. Every gate below is at least as strict as its existing counterpart and two are new; because the selection segment moves from the last 25% of markets to the middle 25%, a given rule's promotability can change in either direction.)
+
+**Why this exists.** `strategy_search.py:142-153` splits markets chronologically into development and
+holdout; `:284-295` sets the gate literals and `:296-345` sets `promotable` and ranks by
+`holdout_roi_ci_low` and `holdout_roi`; `:348` truncates the written family to 100; `:126` defines
+profit as `target / price − 1` with no fee. On the 2026-07-13 mirror: 724 joined rows, 80 markets,
+60 development / 20 holdout, 100 ranked of an unrecorded family, 0 promotable. A rule selected on
+the holdout and then reported with the holdout's confidence bound is reported with a bound that
+does not account for the selection.
+
+### The changes, exactly
+
+1. **Three-way chronological split by market (`strategy_search.py`).** Markets are ordered by their
+   latest `prediction_timestamp` (UTC via `utils.parse_timestamp`; a row whose timestamp does not
+   parse is dropped and counted as `dropped_unparseable_timestamp`). With `n` markets after dropping those
+   with no availability time (item 2's first step) and rows with unparseable timestamps: `train = int(round(0.5 n))`, `validation = int(round(0.25 n))`, `final = n − train −
+   validation` (Python's round-half-to-even applies; the earliest markets are train, the latest final;
+   literals 0.5 / 0.25 / 0.25 with basis: the registry's H3 protocol uses a 60/40 discovery/validation
+   split, the directive requires a third untouched segment, and 25% of the 80-market mirror is 20
+   markets, above the 4-market floor). The two overlap purges of item 2 run after the split, remove markets from their
+   segment without re-splitting, and cannot change `n`. Any segment with fewer than 1 market at the
+   split or empty after the purges → `status = "insufficient_markets"`, no rule evaluated, and both
+   CSVs written empty (as the `disabled` branch at `:262` does), so no stale file survives; the
+   smallest workable `n` is therefore 4.
+2. **Purge by label availability (`strategy_search.py`).** A second pass over `labels.csv` (producer: `labels.build_labels`, `labels.py:183`; absent → `status = "no_labels"`) restricted to
+   `horizon == "all_valid"` rows builds `market_id → availability_time` = the maximum parsed
+   `resolution_time`, else the maximum parsed `close_time`, else `None`; the index is keyed on the
+   same `market_id` the search uses as `_market_key` (`:118`) and is passed into the split function,
+   so every comparison happens at the split site on values it holds. A market with `None` is dropped
+   from every segment (fail-closed; `purged_no_availability_time`). A train market whose availability
+   time is at or after the earliest `prediction_timestamp` of any validation market is purged from
+   train (`purged_train_overlaps_validation`); a validation market whose availability time is at or
+   after the earliest final `prediction_timestamp` is purged from validation
+   (`purged_validation_overlaps_final`). No embargo constant: the embargo is the availability time.
+   The summary records `availability_basis = "venue_resolution_time_else_close_time"`; both are
+   earlier than the collector's observation time, so this rule purges fewer train markets than an
+   observation-time rule would (named in A11).
+3. **Selection on train and validation only; final evaluated, never selected on.** Per-rule schema
+   (every existing key kept as a labelled alias for one release, so every consumer reads what it
+   reads today — `dev_rows = train_rows`, `dev_markets = train_markets`, `dev_roi = train_roi`,
+   `dev_profit_usdc_per_1_stake`, `dev_win_rate`, `holdout_rows = validation_rows`,
+   `holdout_markets = validation_markets`, `holdout_roi = validation_roi`,
+   `holdout_profit_usdc_per_1_stake`, `holdout_win_rate`, `holdout_roi_ci_low =
+   validation_roi_ci_low`, `holdout_roi_ci_high = validation_roi_ci_high`; new keys `train_*`,
+   `validation_*`, `validation_p_value`, `bh_significant`, `benchmark_buy_all_roi`,
+   `excess_over_buy_all`, `turnover_rows_per_market_day`, `max_drawdown_net_per_stake`,
+   `cost_sensitivity_2x_validation_roi`, and the flattened `final_rows`, `final_markets`,
+   `final_roi`, `final_roi_ci_low`, `final_roi_ci_high`, `final_evidence_class`). Floors, literal:
+   train `min_rows` 20, `min_markets` 5, `min_train_roi` 0.02 (the existing `min_dev_roi`);
+   validation `min_validation_rows` 6, `min_validation_markets` 4, `min_avg_entry_price` 0.05 (price-
+   based, outcome-independent, applied to the mean `_price` of the rule's **validation** rows so the
+   final segment never enters family membership; the all-rows `avg_entry_price` key stays for display
+   only); gates: `min_validation_roi` 0.02 and validation ROI bootstrap lower
+   bound ≥ 0.0 (the existing `min_holdout_roi_ci_lower_bound`) — all the existing literals at
+   `:284-295` under their new names, old names read as fallbacks (new key wins when both exist), and
+   the VPS runtime config's old keys keep working; `split_fractions` is literal-only (0.5, 0.25, 0.25,
+   echoed under `settings.split_fractions`), and the old `holdout_fraction` key is ignored and
+   recorded under `settings.ignored_keys`. `promotable` = every floor **and** every gate
+   **and** item 5's `bh_significant`. Ranking uses validation only. For each promotable rule the
+   `final` segment is evaluated and written under the `final_*` keys with `final_evidence_class =
+   "retrospective"` and the literal note "a final-period read is confirmation of a rule selected
+   elsewhere; it feeds no selection and no gate"; the `final_*` keys never enter `promotable`,
+   `promotion_reason`, or the ranking key.
+4. **Complete tested-variant registry.** `cfg.governance_root / edge_strategy_search_family.csv`
+   records **every** `(rule_family, rule_value)` evaluated, including those failing any floor, with
+   the schema of item 3 (empty final columns for non-promotable rules); `family_size` and
+   `family_tested_size` in the summary. `max_ranked_rules` truncates `top_rules` and
+   `edge_strategy_search.csv` only; the family file is written before them.
+5. **Family-wise correction (Benjamini-Hochberg, q = 0.10, the registry's rate).** The tested family
+   is every rule at or above the validation floors (`min_validation_rows`, `min_validation_markets`,
+   `min_avg_entry_price`) — never a ROI or interval condition, so membership cannot shrink on
+   outcomes; `m = family_tested_size`. Each such rule's one-sided p-value is the share of the 2,000
+   market-cluster bootstrap resamples (seed 20260625, the existing literal) whose validation ROI ≤
+   the hurdle 0.02, floored at `1 / 2000 = 0.0005`; a non-finite p-value counts in `m` with `p = 1.0`
+   (never excluded). BH over the family; `bh_significant` per rule; `bh_rejections` in the summary.
+   Consequence, stated: the floor 0.0005 exceeds `q / m` once `m > 200`, so a lone rule at the floor cannot
+   be rejected once `m > 200`, and `k` rules at the floor are rejected only when `k ≥ m / 200` —
+   conservative by construction. Rules below the floors are
+   `untested_insufficient_sample` and outside the family.
+6. **Fee-net returns.** `_profit_per_usdc` becomes net of the canonical WO-94 taker fee at entry:
+   `fee_per_dollar = polymarket_common.fees.taker_fee_per_share(price=p, schedule=
+   polymarket_common.fees.resolve_taker_fee_schedule(row)) / p`, which is `rate × (1 − p)` when fees
+   are enabled and `0.0` otherwise; the schedule resolver reads the joined row's `fee_schedule_rate`,
+   `fees_enabled`, `fee_type`, `category` and `fee_schedule_exponent` and applies its own documented
+   fallbacks (blank metadata → the category default in `CATEGORY_TAKER_FEE_RATES`, unknown category →
+   "other"; `fees_enabled = false` with no rate → 0.0; malformed rate → the conservative maximum of
+   the category default and 0.07). A win at entry 0.5 with rate 0.05 yields `(1 − 0.5) / 0.5 − 0.025
+   = 0.975` per dollar and a loss yields `−1 − 0.025 = −1.025` (the fee is paid either way).
+   `cost_sensitivity_2x_validation_roi` repeats the validation ROI at double the fee.
+7. **Benchmark and hurdle.** `benchmark_buy_all`: the validation ROI and clustered interval of buying
+   every validation row; per rule, `excess_over_buy_all`. The hurdle is the existing 0.02 validation
+   ROI floor, with its basis written into the summary: "half a typical 1-2c spread on a 50c contract
+   (1-2%); the taker fee is already netted in every ROI".
+8. **Reporting per rule (clock = `prediction_timestamp`; data-relative replay of recorded rows, stated
+   in the docstring per S1):** rows, markets, validation ROI with interval, turnover = validation rows
+   per market-day where a market-day is a distinct (`_market_key`, UTC date), maximum drawdown of
+   the cumulative fee-net profit per 1 USDC stake over validation rows ordered by
+   (`prediction_timestamp`, `_market_key`, `token_id`), win rate, and the cost sensitivity.
+9. **Monitoring ledger.** `cfg.governance_root / edge_strategy_search_final_period_ledger.csv`,
+   append-only via `utils.append_csv_rows` with the fixed column list `run_utc, rule_family,
+   rule_value, final_rows, final_markets, final_roi, final_roi_ci_low, final_roi_ci_high`, where
+   `run_utc` is the summary's `generated_at_utc` (one clock per run); no promotable rules → nothing
+   appended, `ledger_status = "ok"`, `final_period_reads` = the existing row count (0 when the file
+   is absent); a header
+   mismatch (`append_csv_rows` raises `ValueError`) → `ledger_status = "schema_mismatch"`, no append,
+   `final_period_reads = null`; otherwise `final_period_reads` = the ledger's row count after this
+   run's append. The summary's `inference_note` states: "validation statistics are recomputed on
+   every run over a growing corpus and the family-wise correction applies per run; each run is a
+   further look; final-period reads are listed in the ledger and their count is `final_period_reads`".
+10. **Consumers (A9, each read verified at the site).** `scripts/run_promoted_rule_shadow_scan.py:472-474,
+    708-716` (`dev_rows`, `dev_markets`, `dev_roi`, `holdout_rows`), `scripts/run_polymarket_liquidity_discovery.py:641,693`
+    (`holdout_rows`, `promotable`), `src/polymarket_predictive_engine/dashboard.py:2009` (`dev_*`,
+    `holdout_*`), `scripts/run_polymarket_live_paper_loop.py:1294-1298,1336` (`status`,
+    `promotable_rules`, `top_rules`), `scripts/run_polymarket_local_live_loop.py:858` (the schedule
+    key) — all keys kept; `polymarket_predictive_config.example.yaml:1406-1415` gains the new keys
+    beside the old with a comment naming the precedence.
+
+### A11 — bias-direction disclosure
+
+Selection on validation with a family-wise correction and a separate untouched final segment
+removes the favourable channel (selection reported with an unadjusted bound). Purging removes a
+favourable channel (labels visible before their availability), but the availability basis is the
+venue's resolution time, else close time — both earlier than the collector's observation time —
+so the purge is weaker than an observation-time rule and that residual is favourable. Fee-netting
+lowers every ROI. The buy-all benchmark can only make a rule look less special. The BH floor can
+only reduce rejections. One further favourable residual: the final segment is re-read on every run,
+so its "untouched" status decays with the number of runs — recorded by the ledger, not corrected.
+
+### Fail-safe sentence (S5)
+
+A market without an availability time is dropped from every segment; a row with an unparseable
+timestamp is dropped and counted; any segment below 1 market after the purge, or a missing
+`labels.csv`, yields `insufficient_markets` / `no_labels` with no rule evaluated and both CSVs
+written empty; a non-finite interval makes a rule not promotable; a non-finite p-value is 1.0 and
+stays in the family; the family file is written before `top_rules`; every write is atomic; the
+ledger is append-only and a schema mismatch appends nothing; nothing here changes any registered
+gate, and a promotable rule remains a shadow candidate only.
+
+### Touch ONLY these files (5 paths)
+
+1. `src/polymarket_predictive_engine/strategy_search.py`
+2. `tests/polymarket_predictive_engine/test_strategy_search_gate.py` — tests 1-11 (existing tests amended to the validation names).
+3. `src/polymarket_predictive_engine/dashboard.py` — the alias label only.
+4. `polymarket_predictive_config.example.yaml` — the new keys beside the old, lines 1406-1415.
+5. `docs/POLYMARKET_CODEX_WORK_ORDERS.md` — this entry and its calibration row.
+
+### Enumerated offline tests (S8/A10); each confirmed to FAIL with its guard reverted, caches purged
+
+1. `test_three_way_split_is_chronological_by_market` — 12 markets with distinct latest timestamps: train = the earliest 6, validation = the next 3, final = the last 3; with 3 markets the status is `insufficient_markets` (final would be 0) and both CSVs are written empty.
+2. `test_train_market_whose_label_arrives_after_validation_starts_is_purged` — a train market with `resolution_time` one second after the earliest validation timestamp is purged and counted; one second before is kept; a market with neither time is dropped from every segment; a market with only `close_time` uses it.
+3. `test_selection_reads_validation_only_and_final_never_feeds_promotable` — fixture: 30 train rows over 6 markets with train ROI 0.10, 6 validation rows over 4 markets all wins at entry 0.5 (validation ROI 0.975, interval lower bound above 0.02), and a final segment where the same rule loses every row: the rule is promotable with `final_roi < 0`; a second rule that loses on validation and wins every final row is not promotable; swapping the two rules' final rows changes no `promotable` and no ranking position.
+4. `test_family_file_records_every_variant_beyond_max_ranked` — 150 distinct rule values with `max_ranked_rules = 100`: the family file has 150 rows and `family_size = 150`; `top_rules` has at most 10 and the ranked CSV 100.
+5. `test_bh_fdr_hand_example` — `_bh_significant([0.001, 0.02, 0.04, 0.5], q=0.10)`: thresholds `0.025, 0.05, 0.075, 0.10`, three rejections; with the third p at 0.08 the rejections are two (`0.02 ≤ 0.05`; `0.08 > 0.075`); a non-finite p is treated as 1.0 and counted in `m`.
+6. `test_bootstrap_p_value_is_one_sided_against_the_hurdle_and_floored` — resamples all above 0.02 give `p = 0.0005`; all at or below give `p = 1.0`.
+7. `test_profit_is_net_of_the_taker_fee` — `_fee_net_profit_per_usdc(row)` at entry 0.5 with `fee_schedule_rate = 0.05`, `fees_enabled = true`: `fee_per_dollar = 0.025`; win `0.975`, loss `−1.025`; at double the fee `0.95` and `−1.05`; with `fees_enabled = false` and no rate, `0.0` fee.
+8. `test_benchmark_and_excess` — validation rows with buy-all ROI 0.10 and a rule at 0.25: `excess_over_buy_all = 0.15`.
+9. `test_final_period_ledger_appends_one_row_per_promotable_rule_per_run` — two runs append two rows for one promotable rule; `final_period_reads` reads 2 after the second run; a pre-existing ledger with a different header yields `ledger_status = "schema_mismatch"`, no append, `final_period_reads = null`.
+10. `test_consumers_read_the_same_keys` — a summary from the new code carries every alias key (`dev_rows`, `dev_markets`, `dev_roi`, `dev_profit_usdc_per_1_stake`, `dev_win_rate`, `holdout_rows`, `holdout_markets`, `holdout_roi`, `holdout_profit_usdc_per_1_stake`, `holdout_win_rate`, `holdout_roi_ci_low`, `holdout_roi_ci_high`) with values equal to their `train_*`/`validation_*` twins; the reader functions of the shadow-scan and liquidity-discovery scripts (imported, not the loops) return the same selections on the new summary as on an equivalent old-shaped one.
+11. `test_turnover_and_drawdown_use_the_prediction_timestamp_clock` — validation rows across 2 markets on 3 UTC dates (5 market-days) with 10 rows: turnover `2.0`; profits `+1, −1.025, −1.025, +1` in timestamp order give `max_drawdown_net_per_stake = −2.05`; a row with an unparseable timestamp is dropped and counted.
+
+### Day-after check
+
+On the VPS after the next paper-loop iteration that runs the search: `edge_strategy_search_summary.json` has `status = "computed"`, `family_size ≥ ranked_rules`, `bh_rejections`, `final_period_reads` and `ledger_status` present, `settings.split_fractions = [0.5, 0.25, 0.25]`, `availability_basis = "venue_resolution_time_else_close_time"`; `edge_strategy_search_family.csv` row count equals `family_size`; `promoted_rule_shadow_summary.json` still reports its `promoted_rules` count without error.
+
+**Not authorised by this text:** any promotion beyond a shadow candidate, any change to a registered gate or to H1-H3's evaluators, any change to a binding contract document, any paper or live evidence, any merge.

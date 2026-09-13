@@ -17371,7 +17371,7 @@ paid data. That is recorded as an open owner decision, not solved here.
   (before the data-pull commit; found by the build red-team):** the first
   build compared the signed value against `+0.20`, a comparison that could
   never fail; the sign convention is now stated here, applied with `abs`,
-  labelled in the report, and tested (test 53).
+  labelled in the report, and tested (test 53). Amendment 2026-09-13 (WO-170): WO-170 registers `drawdown_basis = "nav"` (the ledger's own NAV path over every boundary) and `rv_alignment = "return_intervals"` (721 closes, 720 intervals) for its own pass; WO-166's definitions (`compounded_weekly`, `open_time_in_window`) remain the defaults under which WO-166's and WO-167's committed results verify.
 - **Descriptive cuts, fixed here and not extended:** per underlying; per ISO
   year; weeks with BTC spot at the week's start above versus below its
   200-day simple moving average of daily 00:00 UTC closes (weeks without 200
@@ -17383,7 +17383,7 @@ paid data. That is recorded as an open owner decision, not solved here.
   labelled coin-margined, funding-only, no basis, no liquidation model, and
   never pooled with Binance.
 - **Reused code.** `quant_lab/risk.py` `max_drawdown_from_returns`,
-  `conditional_var`. Annualisation: 1,095 periods and 52 weeks per year.
+  `conditional_var`. Annualisation: 1,095 periods and 52 weeks per year. Amendment 2026-09-13 (WO-170): WO-170 registers `drawdown_basis = "nav"` (the ledger's own NAV path over every boundary) and `rv_alignment = "return_intervals"` (721 closes, 720 intervals) for its own pass; WO-166's definitions (`compounded_weekly`, `open_time_in_window`) remain the defaults under which WO-166's and WO-167's committed results verify.
 
 ### Lane B estimator, fixed before the pull
 
@@ -17395,7 +17395,7 @@ paid data. That is recorded as an open owner decision, not solved here.
   00:00 UTC of day `t`, multiplied by `8760 / n` where `n` is the count of
   valid hourly returns (a return spanning more than one hour is not valid);
   a window with `n < 700` is rejected and counted, never interpolated; a
-  window whose start day has no DVOL candle is rejected and counted.
+  window whose start day has no DVOL candle is rejected and counted. Amendment 2026-09-13 (WO-170): WO-170 registers `drawdown_basis = "nav"` (the ledger's own NAV path over every boundary) and `rv_alignment = "return_intervals"` (721 closes, 720 intervals) for its own pass; WO-166's definitions (`compounded_weekly`, `open_time_in_window`) remain the defaults under which WO-166's and WO-167's committed results verify.
 - **Independent unit.** One non-overlapping 30-day window, starting
   2021-03-24 and stepping 30 days while the window ends on or before
   2026-08-31 (66 windows). The pooled value of a window is the **mean of the
@@ -17478,7 +17478,7 @@ non-finite.
 |---|---|---|
 | G1 | `52 × q̂_min − 0.020 > 0` — the annualised 0.025-quantile lower bound (minimum of the two bootstraps), minus the haircut, is positive | the estimator's own uncertainty, one-sided 2.5% per lane |
 | G2 | `52 × μ̂ − 0.020 ≥ 0.060` — the annualised point estimate minus the haircut clears 6.0% | an assumed 4.0% riskless USD yield plus 2.0 pp compensation for venue and basis risk; changed only by a dated amendment to this WO landed before the data-pull commit |
-| G3 | maximum drawdown of the pooled weekly series **≤ 0.20**, forced liquidations **= 0** across both underlyings, and no open position inside a flagged period (`unverifiable_open_periods = 0`). Amendment 2026-09-13 (WO-167): WO-167 registers a narrower `unverifiable_scope = "perp"` for its own pass; this definition remains the `"either"` default under which WO-166's committed results verify. | the drawdown a live system's kill switch would sit below |
+| G3 | maximum drawdown of the pooled weekly series **≤ 0.20**, forced liquidations **= 0** across both underlyings, and no open position inside a flagged period (`unverifiable_open_periods = 0`). Amendment 2026-09-13 (WO-167): WO-167 registers a narrower `unverifiable_scope = "perp"` for its own pass; this definition remains the `"either"` default under which WO-166's committed results verify. Amendment 2026-09-13 (WO-170): WO-170 registers `drawdown_basis = "nav"` (the ledger's own NAV path over every boundary) and `rv_alignment = "return_intervals"` (721 closes, 720 intervals) for its own pass; WO-166's definitions (`compounded_weekly`, `open_time_in_window`) remain the defaults under which WO-166's and WO-167's committed results verify. | the drawdown a live system's kill switch would sit below |
 | G4 | pooled net return positive in **≥ 4 of the 6** ISO years 2020-2025, each with ≥ 45 eligible weeks | persistence across one full cycle |
 | G5 (Lane B) | the 0.025-quantile lower bound (minimum of the two bootstraps) of mean pooled window VRP **> 0**, and the pooled yearly mean positive in **≥ 3 of the 4** calendar years 2022-2025, each with ≥ 10 accepted windows | existence, with persistence |
 
@@ -17699,7 +17699,7 @@ was broader than the check it protects.
   byte-for-byte; `"perp"` is this definition. Any other value aborts. Under the WO-167 configuration the results JSON
   carries `unverifiable_scope = "perp"` and `work_order = "WO-167"` and the report's first
   paragraph names both; under the WO-166 configuration neither the JSON nor the report gains a
-  byte, so the committed WO-166 files verify unchanged (test 5).
+  byte, so the committed WO-166 files verify unchanged (test 5). WO-170 inherits this scope for its own pass (amendment 2026-09-13).
 
 ### A11 — bias-direction disclosure
 
@@ -17810,3 +17810,268 @@ prospective window, any paper or live evidence, any change to WO-67's P1-P5, any
 WO-166's committed results, and any use of the sandbox result as verification of record. A GO
 here triggers only what the registry's evidence policy and WO-166 paragraph already provide: a future
 pre-observation amendment with a fresh out-of-sample window.
+
+## WO-170 — Funding-carry ledger reconciliation: NAV-path risk statistics, an exported cash-flow ledger, explicit price bases, recent-period stability, the realised-variance window alignment, and one corrected pass on the committed inputs — `admitted` (2026-09-13; S8 ADMISSIBLE after two delta passes (20 → 9 → 0 defects); `registered-ancestry: a790e51 ancestor-of <build-sha> PASS` to be recorded at dispatch against the `origin/main` tip, with the pre-merge disclosure token `acc5f76 ancestor-of <build-sha>` beside it, per the stacking disclosure below; class F: it changes the definition of one G3 input, the drawdown, from a compounded weekly-increment curve to the ledger's own NAV path; every threshold, span, return estimator for G1, G2, G4 and G5, bootstrap, seed, and cut stays as WO-166 registered; historical-class diagnostic covered by the registry's WO-166 paragraph only through the dated extension this WO carries (path 20, `docs/EXPERIMENT_REGISTRY.md`, effective only if merged); touches `src/premium_research/`, its tests, a new results directory, this register, the charter, and the registry → OWNER MERGE after line-audit; no primary added. **Stacking disclosure (GLOBAL RULE; AGENTS.md "one work order per branch and PR"):** WO-170 is stacked on WO-167's unmerged branch because `research/premium_poc/results_wo167/` and the `"perp"` scope exist only there (WO-167 is not yet squash-merged; the required gate's runner is offline). This deviates from AGENTS.md's one-work-order-per-branch rule and is disclosed here for the owner's decision at merge; nothing in this text authorises the deviation. WO-170 counts as registered only after WO-167's squash-merge lands on `main` and the build branch is rebased so that the new `origin/main` tip — which then contains `research/premium_poc/results_wo167/` — is an ancestor of the build head, recorded as the standard `registered-ancestry:` token; until then a pre-merge token against WO-167's results commit `acc5f76` is recorded as a disclosure only and is superseded by that rebase. **Disclosure:** this work order exists because the 2026-09-13 owner directive found that WO-166's drawdown compounds P&L increments normalised to inception capital as if they were periodic NAV returns, that the results carry no per-boundary ledger from which the cash flows can be identified, that price bases are not labelled in the artifact, and that Lane B's realised variance is computed over 719 return intervals of a 720-hour window. It is drafted after WO-167's GO is known. WO-166's and WO-167's results stay on record unchanged; this pass writes its own results directory.)
+
+**Why this exists.** WO-166 registered `μ̂` as the mean eligible weekly net return on inception
+capital, `Â = 52 μ̂`, "simple, not compounded" — and registered the drawdown as
+`quant_lab.risk.max_drawdown_from_returns` on the pooled weekly series, which "compounds
+`(1 + r).cumprod()`". Those two definitions are inconsistent with each other: the weekly `r` is
+`ΔW / 1.5`, an increment on the *inception* capital, so compounding it builds a curve that is
+neither the ledger's wealth path nor a chain of periodic returns. On a ledger whose NAV has
+grown, that curve overstates ratio drawdowns (a loss of `x` in inception-capital units reads as
+`x`, not `x × 1.5 / W_t`); reading week ends only understates any trough inside a week. The
+ledger itself (`carry.py`: `wealth = q × spot + margin + cash`, funding credited to margin, fees
+charged to cash, marks at every boundary) is self-financing and correct; what is missing is that
+the risk statistics do not read it, that it is not exported, that the artifact does not say which
+price is a mark and which a trade, and that no recent-period cut exists. Lane B's
+`realised_variance` selects the closes whose `open_time` lies in `[start, start + 720h)`: 720
+closes, hence 719 adjacent returns, and the hour from `start` to `start + 1h` is never covered.
+
+### Switches, and what each configuration writes
+
+- `Config.drawdown_basis ∈ {"compounded_weekly", "nav"}`, default `"compounded_weekly"` (WO-166's);
+  `Config.rv_alignment ∈ {"open_time_in_window", "return_intervals"}`, default
+  `"open_time_in_window"` (WO-166's); any other value of either aborts before any period or window
+  is computed.
+- `Config.discloses_bases = drawdown_basis != "compounded_weekly" or rv_alignment != "open_time_in_window"`.
+  It is True for `WO170_CONFIG` only among `CONFIGS`. **Every addition this WO makes to a results
+  JSON or a report is keyed on `discloses_bases`, never on `discloses_scope`** (which is True for
+  WO-167 and would break its byte identity): `drawdown_basis`, `rv_alignment`, `return_basis`,
+  `bases`, `max_drawdown_nav`, `cagr_nav`, `total_return_on_capital_simple`,
+  `mean_weekly_return_on_nav`, `annualised_return_on_nav`, `pooled.recent_period`, `ledger_files`, the
+  per-window Lane B table, and every report section named below. Under WO-166's and WO-167's
+  configurations no JSON gains or loses a byte, no report gains a line, and no results directory
+  gains or loses a file (tests 5 and 17).
+- `Config.result_files` defaults to WO-166's four files; `WO170_CONFIG = Config(unverifiable_scope=
+  "perp", work_order="WO-170", results_dir="results_wo170", drawdown_basis="nav",
+  rv_alignment="return_intervals", result_files=RESULT_FILES + ("reconciliation.json",
+  "ledger_BTCUSDT_V0.csv", "ledger_ETHUSDT_V0.csv", "ledger_BTCUSDT_V1.csv", "ledger_ETHUSDT_V1.csv"))`.
+  `run` writes exactly `result_files` atomically; `verify-results` recomputes and byte-compares
+  exactly `result_files`, reporting any absent, extra, or differing file. The 2x fee-sensitivity
+  run's ledger is not exported. Selectors: `run --work-order WO-170`, `verify-results --work-order
+  WO-170` (choices from `CONFIGS`). WO-170 inherits WO-167's `"perp"` completeness scope and its
+  `rejected_open_periods` disclosure and says so in its report.
+
+### The changes, exactly
+
+1. **Ledger export (carry.py).** `Ledger` records, at every boundary, `cash`, `margin`, `spot_qty`,
+   `spot_mark`, `perp_mark` and `marks_carried_forward` beside `wealth`. **Entry row:** the accounts
+   recorded are the pre-trade accounts — `cash = capital`, `margin = 0`, `spot_qty = 0`, marks = the
+   entry closes — so `nav = wealth = capital` there and the entry fee falls inside the first period,
+   exactly as WO-166's 2026-09-12 amendment places it. **Merged boundary (close missing):** the
+   marks are the last marked closes carried forward (`marks_carried_forward = True`), which is
+   what `wealth` already reads at `carry.py` (`position.wealth(position.last_spot)`); the accounts
+   are those of the position, open or flat (flat: `cash = wealth`, `margin = 0`, `spot_qty = 0`,
+   marks carried forward). `ledger_frame` adds `spot_value = spot_qty × spot_mark`,
+   `nav = cash + margin + spot_value`, and asserts `|nav − wealth| ≤ 1e-12` at every row, aborting
+   otherwise (basis: both sums are the same three float64 terms in a different association order,
+   so the true difference is at most a few units of 2.2 × 10⁻¹⁶ on O(1) values; 1e-12 leaves a
+   10³ margin). `period_return_on_nav = Δnav / nav_{t−1}`, `0.0` at the entry row (mirroring
+   `period_return_on_capital`'s `diff().fillna(0.0)`), NaN when `nav_{t−1}` is non-finite or ≤ 0. `weekly_returns` adds `return_on_nav = Π(1 + period_return_on_nav) − 1` over the week's
+   periods (NaN if any period is NaN) and `nav_end`. Money is in units of the inception notional
+   `N = 1`; the report's ledger column table states the unit of every column. The ledger is written
+   only under configurations whose `result_files` list it (WO-170's) as `ledger_<SYMBOL>_<VARIANT>.csv`
+   with columns `boundary_ms, boundary_iso, position_open, marks_carried_forward, spot_qty,
+   spot_mark, perp_mark, spot_value, margin, cash, nav, funding_received, fees_paid,
+   traded_notional, period_return_on_capital, period_return_on_nav, flagged, rebalances,
+   forced_liquidations, unverifiable_open, rejected_open`, written by `to_csv(index=False,
+   lineterminator="\n")` with floats in Python `repr` and `boundary_iso` as `%Y-%m-%dT%H:%M:%SZ`, so
+   `verify-results` byte-compares a defined encoding. Under WO-170 each carry JSON carries
+   `ledger_files = {name: sha256}` for the two ledgers of its variant.
+2. **NAV-path risk statistics (runner.py).** `max_drawdown_nav = min_t (nav_t / max_{s≤t} nav_s − 1)`
+   over **every boundary** of the span, entry boundary included, flagged or not, per asset; the
+   pooled figure uses the summed NAV of the two assets (capital `3.0`); NaN if any NAV in the path
+   is non-finite. Under `drawdown_basis = "nav"` **G3 reads the pooled `|max_drawdown_nav| ≤ 0.20`**
+   (the literal 0.20 unchanged; WO-166's basis) and reads False when it is NaN. The WO-166
+   quantity keeps its key `max_drawdown_all_weeks` with its value unchanged under every
+   configuration (so `fee_sensitivity_2x.max_drawdown_all_weeks` is unchanged too), and the
+   report's G3 label moves from that row to the NAV row, the legacy row being relabelled
+   "compounded weekly-increment curve (WO-166 basis; not read by G3 under this configuration)".
+   Descriptive, never gated, under WO-170 only: `cagr_nav = (nav_T / nav_0)^(1/years) − 1`,
+   `total_return_on_capital_simple = (nav_T − nav_0) / nav_0`, `mean_weekly_return_on_nav` (over
+   eligible weeks) and `annualised_return_on_nav = 52 ×` that mean. Levels: per asset, `max_drawdown_nav`
+   and `cagr_nav` only; pooled, `max_drawdown_nav`, `cagr_nav`, `total_return_on_capital_simple`,
+   `mean_weekly_return_on_nav` and `annualised_return_on_nav`. The pooled weekly `return_on_nav` is
+   `nav_end_pooled / nav_start_pooled − 1` on the summed NAV of the two assets (not the mean of the
+   two assets' weekly NAV returns), over eligible weeks.
+3. **G1, G2, G4 unchanged.** `μ̂` remains the mean eligible weekly `ΔW / 1.5`; `Â = 52 μ̂`; both
+   bootstraps, the seed, the 0.025-quantile minimum rule, the haircut and the hurdle are as
+   registered. The JSON gains `return_basis = "simple_on_inception_capital"` under WO-170 only.
+   Callers of the changed functions (A9): `ledger_frame` and `weekly_returns` are called from
+   `lane_a` (three times per configuration: V0, V1, and the 2x fee-sensitivity V0);
+   `realised_variance` from `vrp_series` from `lane_b`; `max_drawdown_from_returns` from
+   `_asset_summary` and from `lane_a`'s pooled block. None of the added columns is read by the
+   eligible-week filter, `return_on_capital`, the bootstraps, the yearly sums, or G5, so G1, G2,
+   G4 and G5 read exactly the series they read today. **Expected outcome, stated so it can fail:**
+   every G1, G2 and G4 leaf equals WO-167's to the last digit; G3 True with the pooled
+   `|max_drawdown_nav|` below 0.01; Lane A GO. If any G1, G2 or G4 leaf differs from
+   `results_wo167/`, the run is a defect, not a result.
+4. **Bases block (runner.py, report.py; WO-170 only).** `bases`, literal: `mark_price = "Binance 1h
+   kline close of the hour ending at the boundary (last traded price), not the venue mark price"`;
+   `execution_price = "the same close plus taker fees (spot 10 bps, perpetual 5 bps); no spread, no
+   slippage, no market impact — a favourable channel, covered only by the declared haircut"`;
+   `funding_notional = "position size × that close; the venue settles on mark-price notional (WO-166
+   A8 bound: ≤ 1 × 10⁻⁵ of notional per period, direction indeterminate)"`; `liquidation_check =
+   "kline high of the last traded price against the period-start margin ratio; the venue liquidates
+   on the mark price, which is smoothed, so the last-price high triggers at least as often — a
+   conservative channel"`; `collateral = "margin 0.5 × notional in USDT; cash and spot earn zero; no
+   cross-margin netting — an unfavourable channel"`; `haircut = "2.0 pp per year, a declared
+   assumption; it is not a measured bound on venue, stablecoin-depeg or liquidation risk and this WO
+   measures none of them"`. The report renders the block as a table "What the prices and cash flows
+   are".
+5. **Recent-period stability (runner.py, report.py; WO-170 only; descriptive, never gated; the
+   window lengths are fixed here, before the run).** `pooled.recent_period.last_52` and `pooled.recent_period.last_104`
+   (basis: one and two years at `WEEKS_PER_YEAR = 52`), each over the last `L` eligible pooled
+   weeks: `weeks`, `mean_weekly_return_on_capital`, `annualised_simple = 52 ×` that mean, the
+   week-cluster 90% interval (same draws and seed), `sharpe_weekly_annualised`, and
+   `max_drawdown_nav` over the contiguous boundary span from the first boundary of the earliest of
+   those `L` weeks to the last boundary of the latest, every boundary in between included (the NAV
+   path is real across ineligible weeks). `pooled.recent_period.rolling_52`: over every window of 52
+   consecutive eligible weeks, the annualised simple return's `min`, `max` and `last` (no
+   share-positive statistic: overlapping windows are not independent units and a share would
+   overstate persistence). Per cut, fewer than `L` eligible weeks → every field of that cut NaN and
+   `state = "insufficient_weeks"`; `rolling_52` needs ≥ 52. Labelled "retrospective diagnostic; not
+   a prospective validation" in the JSON and the report.
+6. **Realised-variance window alignment (vrp.py).** Under `rv_alignment = "return_intervals"`, the
+   window `[start, start + 720h)` is covered by the **721 closes** of the bars whose `open_time`
+   lies in `[start − 1h, start + 719h]` — the close at `start` through the close at `start + 720h`
+   — giving **720 return intervals**; a return is valid only when its two closes are exactly one
+   hour apart; `n_valid ≥ 700` of 720 accepts, otherwise the window is rejected and counted;
+   annualisation `8760 / n_valid` as registered; an absent close at `start` simply makes the first
+   interval invalid. DVOL alignment, the 30-day step, the pooling rule, G5 and its years are
+   unchanged. Exactly, with `S` the old sum of squared valid returns, `n` the old valid count and
+   `r` the added first-hour return (when valid): `RV_new − RV_old = (8760 r² − RV_old) / (n + 1)`,
+   so `|ΔVRP| ≤ max(8760 r², RV_old) / (n + 1)` per currency; the denominator term lowers RV
+   deterministically (favourable to VRP) and the `8760 r²` term raises it; since `E[8760 r²] ≈
+   RV_old`, the expected net change is about zero and the direction is indeterminate per window.
+   Under WO-170 `vrp.json` gains, per currency, `windows`: a list of `{window_start_ms, valid_hours,
+   valid_hours_wo166_alignment, implied_variance, realised_variance, vrp, rejected, rejected_reason}` so the alignment is
+   observable. **Expected outcome, stated so it can fail:** `windows_accepted` 66 of 66 per currency
+   and pooled, `rejection_reasons` empty, every `windows[i].valid_hours` equal to its WO-167 count
+   plus one (verified against a WO-167-alignment recomputation inside the run, written as
+   `windows[i].valid_hours_wo166_alignment`), `mean_realised_variance` per currency changed, G5
+   unchanged (GO with the same three positive years). A window count other than 66 is a defect.
+7. **Reconciliation artifact (runner.py; WO-170 only).** The results directory carries
+   `reconciliation.json`. Inputs: the committed `results_wo167/carry_v0.json`, `carry_v1.json`,
+   `vrp.json` — any of them absent or unparseable at the acting site aborts the run before any file
+   is written. Leaves are addressed by dotted path with list indexes (`pooled.bootstrap.cluster.
+   intervals.0.90.0`). Two NaN leaves compare equal; a leaf NaN in one file and finite in the other
+   differs. For each file, every differing leaf, and every leaf present in WO-167's file and absent
+   from WO-170's (which **aborts**), is matched against a literal per-file table whose entries are
+   an exact path or a prefix ending in `.`; a leaf must match exactly one entry (exact first, then
+   the longest prefix); zero matches aborts before any file is written. The tables, literal:
+   - `carry_v0.json` and `carry_v1.json`: `code_revision`, `generated_at` → `clock_or_revision`;
+     `work_order` → `work_order_label`; `drawdown_basis`, `rv_alignment`, `return_basis` →
+     `configuration_switch`; `bases.` → `bases_block`; `gates.G3_drawdown_bounded_and_no_forced_liquidation`,
+     `gates.lane_a_go`, `pooled.max_drawdown_nav`, `per_asset.BTCUSDT.max_drawdown_nav`,
+     `per_asset.ETHUSDT.max_drawdown_nav` → `drawdown_basis`; `pooled.cagr_nav`,
+     `pooled.total_return_on_capital_simple`, `pooled.mean_weekly_return_on_nav`,
+     `pooled.annualised_return_on_nav`, `per_asset.BTCUSDT.cagr_nav`, `per_asset.ETHUSDT.cagr_nav` →
+     `new_descriptive_field`; `pooled.recent_period.` → `recent_period_cut`; `ledger_files.` →
+     `ledger_export`. Every G1/G2/G4 leaf (`pooled.mean_weekly_return_on_capital`,
+     `pooled.annualised_return_on_capital`, `pooled.annualised_after_haircut`,
+     `pooled.annualised_lower_bound`, `pooled.annualised_lower_bound_after_haircut`,
+     `pooled.bootstrap.`, `pooled.lower_bound_gate_level.`, `pooled.yearly_return_on_capital.`,
+     `pooled.year_check.`, `gates.G1_lower_bound_after_haircut_positive`,
+     `gates.G2_point_after_haircut_at_least_hurdle`, `gates.G4_positive_in_enough_qualifying_years`,
+     `pooled.eligible_weeks`, `pooled.max_drawdown_all_weeks`, `fee_sensitivity_2x.`) has no
+     entry, so a change there aborts.
+   - `vrp.json`: `code_revision`, `generated_at` → `clock_or_revision`; `work_order` →
+     `work_order_label`; `drawdown_basis`, `rv_alignment`, `return_basis` → `configuration_switch`;
+     `bases.` → `bases_block`; `per_currency.BTC.windows.`, `per_currency.ETH.windows.` →
+     `rv_alignment`; and, also → `rv_alignment`, exactly these numeric leaves: `pooled.mean_vrp`,
+     `pooled.mean_vrp_points`, `pooled.bootstrap.`, `pooled.lower_bound_gate_level.`,
+     `pooled.yearly_mean_vrp.`, `pooled.year_check.`, and per currency `mean_realised_variance`,
+     `mean_vrp`, `mean_vrp_points`, `share_of_windows_positive`, `yearly_mean_vrp.`. Carved out (no
+     entry, so a change aborts): `gates.`, `pooled.positive_complete_years`, `pooled.windows_accepted`,
+     `pooled.windows_total`, `per_currency.*.windows_accepted`, `per_currency.*.windows_total`,
+     `per_currency.*.rejection_reasons.`. Any leaf the build finds that matches no entry is a defect in
+     this table, not in the run; the fix is a dated amendment to this entry, passed through S8 and
+     landed before the run — never an edit made during the build.
+   The report gains "Reconciliation against WO-167" (every numeric change with its reason) and
+   "Reconciliation against WO-166" (naming WO-167's two changes by reference to WO-167's record).
+
+### A11 — bias-direction disclosure
+
+- Drawdown basis: on a ledger whose NAV has grown, the compounded weekly-increment curve
+  overstates ratio drawdowns (unfavourable channel removed by this change), while week-end
+  sampling understates intra-week troughs (favourable channel removed by this change); reading
+  every boundary of the NAV path removes both. The net direction on this data is not known before
+  the run and is reported either way; G3's literal threshold is about 60 times the WO-167 figure
+  (0.20 against 0.0032), so no plausible net effect changes G3.
+- Return basis for the gates: unchanged; no channel.
+- Realised-variance alignment: two components with opposite signs per item 6; expected net about
+  zero; per-window direction indeterminate; bounded as stated.
+- Recent-period cuts: two fixed lengths chosen here before the run, never gated, so they cannot
+  be selected on outcome; a reader who prefers a different length is reading a new diagnostic.
+  The rolling statistics use overlapping windows and are reported only as min/max/last.
+- Bases block: disclosure only; changes no number.
+- Haircut: unchanged; restated as an assumption, not evidence. Channels WO-166 and WO-167 listed
+  remain as recorded; this WO adds none.
+
+### Fail-safe sentence (S5)
+
+Every fail branch ends in no verdict. An unknown `drawdown_basis` or `rv_alignment` aborts
+before any period or window is computed; a NAV identity violation at any boundary aborts; a
+non-finite NAV anywhere in the pooled path reads G3 False; `results_wo167/` absent or unparseable,
+a differing or removed leaf matching no entry, or two entries of the same precedence (two exact
+paths, or two prefixes of equal length), aborts before any file is written — otherwise an exact path
+beats a prefix and the longest prefix wins; the results directory is written atomically or not at all and a
+second `run` for WO-170 is refused without `--force`; `run` refuses a dirty `src/premium_research`
+tree (WO-167 delta 2); `verify-results --work-order WO-170` recomputes every file in `result_files`
+and reports FAIL on any absent, extra, or byte-different file; recent-period cuts with fewer than
+`L` eligible weeks read NaN and `insufficient_weeks`; the verdict lines are generated from the gate
+booleans. WO-166's and WO-167's committed files are never written; WO-167's are read only by the
+reconciliation and by the day-after check.
+
+### Touch ONLY these files (20 paths)
+
+1. `src/premium_research/carry.py` — ledger fields, entry-row and merged-boundary accounts, `nav`, the identity assertion, `period_return_on_nav`, `return_on_nav`, `nav_end`.
+2. `src/premium_research/runner.py` — the switches, `discloses_bases`, `result_files`, `WO170_CONFIG`, `max_drawdown_nav`, the NAV descriptives, `return_basis`, `bases`, `recent_period`, `ledger_files`, the ledger writer, the per-window Lane B table, the reconciliation writer and its tables, per-config file lists in `run_all` and `verify_results`.
+3. `src/premium_research/vrp.py` — `rv_alignment`.
+4. `src/premium_research/report.py` — the bases table, the G3 label move, the recent-period section, the reconciliation sections, the ledger column table; byte-identical output under the WO-166 and WO-167 configurations.
+5. `src/premium_research/cli.py` — the selector help text names WO-170; nothing else.
+6. `tests/premium_research/test_carry.py` — tests 1-4, 13, 14.
+7. `tests/premium_research/test_vrp.py` — tests 8-9.
+8. `tests/premium_research/test_report_and_verify.py` — tests 5-7, 10-12, 15-17.
+9. `research/premium_poc/results_wo170/carry_v0.json`
+10. `research/premium_poc/results_wo170/carry_v1.json`
+11. `research/premium_poc/results_wo170/vrp.json`
+12. `research/premium_poc/results_wo170/report.md`
+13. `research/premium_poc/results_wo170/reconciliation.json`
+14. `research/premium_poc/results_wo170/ledger_BTCUSDT_V0.csv`
+15. `research/premium_poc/results_wo170/ledger_ETHUSDT_V0.csv`
+16. `research/premium_poc/results_wo170/ledger_BTCUSDT_V1.csv`
+17. `research/premium_poc/results_wo170/ledger_ETHUSDT_V1.csv`
+18. `docs/POLYMARKET_CODEX_WORK_ORDERS.md` — this entry, its calibration row, and the dated cross-reference "Amendment 2026-09-13 (WO-170): WO-170 registers `drawdown_basis = "nav"` (the ledger's own NAV path over every boundary) and `rv_alignment = "return_intervals"` (721 closes, 720 intervals) for its own pass; WO-166's definitions (`compounded_weekly`, `open_time_in_window`) remain the defaults under which WO-166's and WO-167's committed results verify." appended to WO-166's "Drawdown" bullet, its G3 row in the thresholds table, its "Reused code" bullet, and its Lane B `RV²_t` bullet; and the sentence "WO-170 inherits this scope for its own pass" appended to WO-167's scope-switch paragraph.
+19. `docs/POLYMARKET_QUANT_MODE_CHARTER.md` — the dated record of the outcome.
+20. `docs/EXPERIMENT_REGISTRY.md` — one dated sentence appended to the WO-166 paragraph: "Amendment 2026-09-13 (WO-170; effective only if merged): this paragraph also covers WO-170, one corrected pass on WO-166's committed inputs with NAV-path risk statistics, an exported ledger, explicit price bases, fixed recent-period cuts, and the realised-variance window aligned to 720 return intervals; no new data, span, family, or evidence class."
+
+`research/premium_poc/data/`, `manifest.json`, `results/` (WO-166) and `results_wo167/` (WO-167) are not touched.
+
+### Enumerated offline tests (S8/A10); each confirmed to FAIL with its guard reverted, caches purged
+
+1. `test_nav_identity_holds_at_every_boundary` — on the constant-funding, flat-price, 1,095-period synthetic of WO-166 test 18 (`f = 0.0001`, `S = P = 100`), `nav == cash + margin + spot_value` at every row within `1e-12`, equals `wealth`, the entry row reads `cash = 1.5, margin = 0, spot_qty = 0, nav = 1.5`, and the final NAV is `1.5 + 0.1095 − 0.0015 − 0.0015 = 1.6065` to four decimals.
+2. `test_hand_calculated_cash_flows_three_periods` — spot closes `100, 110, 99`, perpetual closes `101, 111, 100`, intra-period highs equal to the perpetual closes (no liquidation check fires), rates `0.001` at each boundary, V0 from boundary 0 to boundary 2: entry row `nav = 1.5`; the trade at boundary 0 sets `q = 0.01`, entry fees `0.001505`, margin `0.505`, cash `−0.006505`; at boundary 1 margin `0.505 − 0.1 + 0.00111 = 0.40611`, spot value `1.1`, nav `1.499605`, margin ratio `0.40611 / 1.11 = 0.36586` (no resize); at boundary 2 margin `0.40611 + 0.11 + 0.001 = 0.51711`, exit fees `0.00149`, cash `0.99 + 0.51711 − 0.006505 − 0.00149 = 1.499115`, nav `1.499115`; funding total `0.00211`, fees total `0.002995`, hedge mark-to-market `q × [(99 − 100) − (100 − 101)] = 0` (the price difference `perp − spot` is `1` at entry and at exit), so `nav_T − nav_0 = −0.000885`; all to `1e-9`.
+3. `test_period_return_on_nav_compounds_to_the_nav_path` — `nav_0 × Π(1 + period_return_on_nav) == nav_T` within `1e-12` on the test-2 ledger and on a 30-period random-walk ledger with seed 7.
+4. `test_nav_drawdown_differs_from_compounded_weekly_on_a_grown_ledger` — a hand-built series whose NAV rises from `1.5` to `3.0` then loses `0.15` inside one week and recovers `0.10` by that week's end: `max_drawdown_all_weeks` reads `−0.0333` (`−0.05 / 1.5` on the week-end increment), `max_drawdown_nav` reads `−0.05` (`−0.15 / 3.0` at the intra-week trough); and on a series that loses `0.15` at week end without recovery, the legacy figure reads `−0.10`, the NAV figure `−0.05`.
+5. `test_wo166_and_wo167_results_still_verify_under_their_defaults` — on the committed tree, `verify_results(root)` and `verify_results(root, config=WO167_CONFIG)` both return `[]` (integration, about 10 s).
+6. `test_wo170_config_differs_from_wo167_only_where_the_tables_allow` — on a synthetic tree with one spot boundary gap, run WO-167 then WO-170: every differing leaf across the three JSONs matches exactly one table entry; every carved-out leaf (the G1/G2/G4 set and the Lane B carve-outs) is identical; `reconciliation.json` lists each differing leaf with its reason and nothing else.
+7. `test_reconciliation_aborts_on_an_unexplained_leaf` — monkeypatching `lane_a` to emit one extra pooled key under WO-170 makes `run_all` raise `RuntimeError` naming the key, and the results directory does not exist afterwards; the same for a pooled key removed.
+8. `test_rv_window_uses_721_closes_and_720_intervals` — 721 consecutive hourly closes where every return is zero except the first (`ln 2` from the close at `start` to the close at `start + 1h`): under `"open_time_in_window"` `n_valid = 719` and `rv = 0`; under `"return_intervals"` `n_valid = 720` and `rv = (ln 2)² × 8760 / 720 = 5.8455` to four decimals.
+9. `test_rv_alignment_missing_start_close_only_loses_one_interval` — the same series without the bar ending at `start`: `n_valid = 719` under `"return_intervals"` and the window is accepted; an unknown alignment string raises before any window is read.
+10. `test_recent_period_cuts_use_the_last_eligible_weeks_only` — 60 eligible weeks of return `c = 0.002` with two ineligible weeks interleaved: `last_52.mean_weekly_return_on_capital = 0.002`, `annualised_simple = 0.104`, `rolling_52` min = max = last = `0.104`; `last_104.state = "insufficient_weeks"` with every field NaN; with only 40 eligible weeks both cuts and `rolling_52` read `insufficient_weeks`.
+11. `test_bases_block_and_return_basis_present_under_wo170_only` — the six literal `bases` strings, `return_basis`, `drawdown_basis`, `rv_alignment` are present under `WO170_CONFIG` and absent under `small_config()` and under the WO-167 configuration; the WO-170 report contains "What the prices and cash flows are" and the G3 label on the NAV row; the WO-166 and WO-167 reports contain neither.
+12. `test_result_files_are_per_config_and_verified` — under `WO170_CONFIG` the results directory contains exactly the nine files and `carry_v0.json.ledger_files` holds the two V0 ledgers' sha256; deleting one ledger makes `verify_results` report it absent; an extra file is reported; the WO-166 configuration still writes exactly four.
+13. `test_pooled_nav_drawdown_uses_the_summed_nav` — asset A's NAV path `1.5 → 1.6 → 1.5` and asset B's `1.5 → 1.4 → 1.5` in the same periods: `max_drawdown_nav` is `−0.0625` for A (`1.5 / 1.6 − 1`), `−0.0667` for B (`1.4 / 1.5 − 1`), and `0.0` pooled (`3.0 → 3.0 → 3.0`).
+14. `test_merged_boundary_carries_marks_forward_and_keeps_the_identity` — with the spot close absent at boundary 5 while open: row 5 has `marks_carried_forward = True`, `spot_mark` equal to row 4's, `nav == wealth` within `1e-12`, and `period_return_on_nav` finite; the entry row has `marks_carried_forward = False`.
+15. `test_reconciliation_aborts_when_wo167_results_are_absent` — with `results_wo167/` missing, `run_all` under `WO170_CONFIG` raises before writing, and the directory does not exist afterwards.
+16. `test_reconciliation_nan_and_removed_leaves` — two NaN leaves compare equal; a leaf NaN in WO-167 and finite in WO-170 needs a table entry (it is under `pooled.recent_period.` in the test) and a NaN in a carved-out leaf aborts.
+17. `test_wo167_bytes_unchanged_by_the_new_switches_on_a_synthetic_tree` — running `WO167_CONFIG` on a synthetic tree at this revision writes exactly the files and bytes the pre-WO-170 code wrote (recorded in the test as the expected sha256 of each file computed once on the same synthetic tree and clock at `acc5f76`), so the switches change nothing under their defaults.
+
+### Day-after check
+
+In a fresh clone of the branch: `verify-manifest`; `verify-results`; `verify-results --work-order WO-167`; `verify-results --work-order WO-170` all pass; `results_wo170/reconciliation.json` lists every differing leaf with a reason; `results_wo170/carry_v0.json` records `work_order = "WO-170"`, `drawdown_basis = "nav"`, `rv_alignment = "return_intervals"`, the same `manifest_sha256` as WO-166's results, and G1, G2, G4 quantities equal to WO-167's to the last digit; the four ledger CSVs satisfy `nav = cash + margin + spot_value` row by row (a reader can check any row with a calculator); `vrp.json` shows 66 accepted windows per currency with `valid_hours` one above `valid_hours_wo166_alignment` on every window; the charter carries the dated record whichever way the verdict fell.
+
+**Not authorised by this text:** any merge, any registration of a primary or a lane, any collector, any prospective window, any paper or live evidence, any change to WO-67's P1-P5, any change to WO-166's or WO-167's committed results, any threshold change, and any use of the sandbox result as verification of record.

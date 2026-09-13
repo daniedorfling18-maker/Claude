@@ -333,23 +333,34 @@ decision.
 
 ### Offline premium proof-of-concept (2026-09-12; WO-166; historical-class diagnostic; effective only if merged)
 
-WO-166 in `docs/POLYMARKET_CODEX_WORK_ORDERS.md` is a diagnostic under this
-section. It tests two parked families — perpetual funding carry and the
-variance risk premium — on committed public historical data, with its
-estimator, its go/no-go thresholds, and its bias-direction disclosure fixed
-in the WO text before the data-pull commit. It is not a fourth primary; it
-adds no `## H` heading; it confers no evidence class above *historical*
-("Multiple-testing and evidence policy" above); a GO result is the trigger
-for a future pre-observation amendment with a fresh out-of-sample window,
-exactly as that section provides, and is not itself registration; a NO-GO
-result closes the family it tested. The freeze paragraph's "no
-promotion-oriented modelling or agent time without amendment" applies to
-these families; if merged, this paragraph is that amendment for WO-166's
-scope only. Amendment 2026-09-13 (WO-167; effective only if merged): this
-paragraph also covers WO-167, one further pass on WO-166's committed inputs
-under a narrower G3 completeness definition; no new data, span, family, or
-evidence class. Amendment 2026-09-13 (WO-170; effective only if merged): this
-paragraph also covers WO-170, one corrected pass on WO-166's committed inputs with NAV-path
-risk statistics, an exported ledger, explicit price bases, fixed recent-period cuts, and the
-realised-variance window aligned to 720 return intervals; no new data, span, family, or evidence
-class.
+WO-166 in `docs/POLYMARKET_CODEX_WORK_ORDERS.md` is a diagnostic under
+this section. It tests two parked families — perpetual funding carry and
+the variance risk premium — on committed public historical data, with
+its estimator, its go/no-go thresholds, and its bias-direction
+disclosure fixed in the WO text before the data-pull commit. It is not a
+fourth primary; it adds no `## H` heading; it confers no evidence class
+above *historical* ("Multiple-testing and evidence policy" above); a GO
+result is the trigger for a future pre-observation amendment with a
+fresh out-of-sample window, exactly as that section provides, and is not
+itself registration; a NO-GO result closes the family it tested. The
+freeze paragraph's "no promotion-oriented modelling or agent time
+without amendment" applies to these families; if merged, this paragraph
+is that amendment for WO-166's scope only. Amendment 2026-09-13 (WO-167;
+effective only if merged): this paragraph also covers WO-167, one
+further pass on WO-166's committed inputs under a narrower G3
+completeness definition; no new data, span, family, or evidence class.
+Amendment 2026-09-13 (WO-170; effective only if merged): this paragraph
+also covers WO-170, one corrected pass on WO-166's committed inputs with
+NAV-path risk statistics, an exported ledger, explicit price bases,
+fixed recent-period cuts, and the realised-variance window aligned to
+720 return intervals; no new data, span, family, or evidence class.
+Amendment 2026-09-13 (dated addition, no work order; effective only if
+merged): WO-167's GO and WO-170's corrected pass are full-span readings
+on inception capital that register no lane under this paragraph's rule
+that a GO is the trigger for a future pre-observation amendment and is
+not itself registration; WO-170 reproduced WO-167's gate quantities to
+the last digit, and the three return bases WO-170's artifact publishes
+disagree, one of them failing the registered 6.0% hurdle, and the
+charter's 2026-09-13 WO-170 record is the authority for every figure.
+The fresh out-of-sample window this paragraph provides for remains
+undrafted.

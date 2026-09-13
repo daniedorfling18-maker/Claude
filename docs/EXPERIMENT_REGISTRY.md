@@ -344,4 +344,8 @@ these families; if merged, this paragraph is that amendment for WO-166's
 scope only. Amendment 2026-09-13 (WO-167; effective only if merged): this
 paragraph also covers WO-167, one further pass on WO-166's committed inputs
 under a narrower G3 completeness definition; no new data, span, family, or
-evidence class.
+evidence class. Amendment 2026-09-13 (WO-170; effective only if merged): this
+paragraph also covers WO-170, one corrected pass on WO-166's committed inputs with NAV-path
+risk statistics, an exported ledger, explicit price bases, fixed recent-period cuts, and the
+realised-variance window aligned to 720 return intervals; no new data, span, family, or evidence
+class.

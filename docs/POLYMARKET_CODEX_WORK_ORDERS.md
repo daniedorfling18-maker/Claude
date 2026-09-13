@@ -8957,6 +8957,7 @@ before that date predate this log and are not retroactively reopened. Seeded 202
 | WO-171 | M | Opus draft, Opus admission gate x3 to ADMISSIBLE, Opus build, Opus line-audit | ~122k reviewer | 19 → 7 → 0 | 8 major + 8 minor. Three code defects: the final segment was read for EVERY variant (publishing its ROI for every rule and under-counting the read ledger), the availability fallback was per label row rather than per market, and a blank `horizon` was read as `all_valid`. Five test defects, all of the same class: a test that could not fail. Registered test 3 asserted neither `promotable` nor a rank; test 4's truncation never fired; test 8 asserted the line that computes its own field; test 10's consumer clause was never built; `_availability_index` and `dropped_unparseable_timestamp` had no assertions at all. | 0 — all fixed in delta 1; 23 mutation checks now detected, including two the first harness had wrongly reported as detected | pending the VPS: the day-after reads `edge_strategy_search_summary.json` after the next paper-loop run |
 | WO-172 | M | Opus draft, Opus admission gate x4 to ADMISSIBLE, Opus build | ~0 reviewer so far (line-audit not yet dispatched) | 18 → 10 → 1 → 0 | pending | 0 so far — 19 mutation checks all detected after three tests were strengthened rather than three findings dropped (a truncation rule asserted on a file under the size cap, a self-exclusion asserted against a snapshot with no manifest, and a credential scan asserted by substring that a renamed flag satisfied) | pending the VPS: the day-after reads `telemetry/export_manifest.json` on the mirror and one manual `data-coverage-report` run |
 | WO-173 | M | Opus draft, Opus admission gate x3 to ADMISSIBLE, Opus build | ~0 reviewer so far (line-audit not yet dispatched) | 3 rounds to 0 | pending | 0 so far — 15 of 16 mutation checks detected; the sixteenth is not isolable by any mutation because the conjunct it guards is implied by the source check, recorded at the site and in the status line rather than dropped | pending the VPS: the day-after reads `maker_evidence_summary.json` after one run |
+| WO-168 | M | Opus draft, Opus admission gate x13 to ADMISSIBLE | ~1.9M reviewer tokens across 13 passes | 13 rounds to 0 | pending (not yet built) | pending | pending: the day-after greps the three retracted figures in `README.md`, counts `docs/archive`, and runs the two hygiene test files |
 
 **Reading of the 2026-08-02 rows — the tiering held, the review shape did not.**
 Three class-F/M builds went Sonnet-built and Opus-reviewed and produced **zero
@@ -18768,3 +18769,276 @@ Not touched: the dashboard, operating state, IPS renderer, cost ledger, `artifac
 On the VPS, after the first dashboard payload render following deployment (the artifact's only writer), `outputs/polymarket_model_governance/profit_verdict.json` carries `measurement_v2` with `binding = false`, `state = "ok"`, `population.closing_rows = population.eligible_finals + Σ tier-one exclusions`, `population.eligible_finals = gates.A_edge_exists.settled_finals_total`, and `settlement_join` reported with `positions_checked = closing_line_value.final_line_positions` and `unverified_by_reason` present; `gates.A_edge_exists` reads `independent_market_units = 55`, `settled_finals_total = 70`, `unit_mean_net_settlement_return_per_dollar = −0.013943`, `units_settled_profitable = 22`, `sign_test_p = 0.947605` (the ledger is unchanged since 2026-08-21 while the VPS is offline); `closing_line_final_history.csv`'s header gains exactly `line_basis`, every pre-deployment row carries `""` there, and the row count is unchanged (90 at `fcebaa2`); `closing_line_value_positions.csv` carries `line_basis` on every row (`""` for rows recovered from pre-deployment ledger rows). `settlement_verified_finals > 0` needs the prerequisite collector work order and is not this WO's check. Remaining dependencies: the VPS deployment; that prerequisite for corpus coverage.
 
 **Not authorised by this text:** any change to the binding Gate A/B/C metric, thresholds, alpha, floors, or the terminal verdict; any change to the frozen fail-open recorded above; any merge; any paper or live evidence; any change to WO-67's P1-P5; any registration; and any use of a sandbox computation as verification of record.
+
+## WO-168 — Front-page and documentation reconciliation: a README that states the research objective, the evidence and its limits, retracted figures corrected, an exhaustive classification of every document, and superseded material archived with references — `draft` (2026-09-13, revised after the first S8 pass and eleven times after delta passes. The fourth delta pass found that the entry defeated its own test 2, because the backticked placeholders its text must write are not paths and the test resolved them as paths; the fifth found that the fix for that pass's scoping minor had made a sentence about inbound references false; and the sixth found three defects all created by the fifth's own fixes, and that this entry was three separable work orders bound into one against `AGENTS.md:244`, with a different one of the three failing almost every pass. **The launcher removal is therefore split out as WO-168a**, which is gated independently; nothing in this entry depends on its verdict; what remains here is the front page, the evidence document, the classification and the archive; class M, not D: class D is docs/register only, and this work order adds `tests/test_repository_hygiene.py`, so it needs an Engineer; touches `README.md`, one link in `README_DOCKER_MONITOR.md`, a new `docs/EVIDENCE_STATE_2026-09-13.md`, `docs/archive/`, the moved documents, one new test file, and this register → OWNER MERGE (`README.md` is a canonical front door and the register is a frozen surface); `registered-ancestry: <origin-main-sha> ancestor-of <build-sha> PASS` to be recorded at dispatch in the full token form; both halves are placeholders, because registering this entry advances `main`, so the tip at dispatch cannot be `a790e51`, the tip at drafting. **Disclosure.** This work order exists because an external review received on 2026-09-13 found that the README still prints an adverse-selection figure of $63.62/day and a net of −$60.60/day that the charter retracted on 2026-08-23, that the front page does not say what the repository is now trying to establish or what evidence exists and with what limits, and that superseded documents and launchers sit beside canonical ones with nothing marking which is which. The dependency-scan history of drafts one to three, and the scan itself, move with the launcher removal to WO-168a. Nothing here changes a gate, a threshold, a result, or any registered number; the only registered text it changes is this entry and its calibration row, which is why it routes to OWNER MERGE; every move is a `git mv` and is recoverable from Git history.)
+
+### The changes, exactly
+
+1. **README (`README.md`), rewritten in full. Its eight sections are `##`-level markdown headings, in this order and with exactly these heading texts, no trailing punctuation: `## What this repository is for`, `## Generated state`, `## State of the evidence`, `## Retracted figures`, `## Supported workflows`, `## Known limitations`, `## Governance in one paragraph`, `## Documents`. No other `##` heading appears on the page, so "the next heading of the same level" is well defined for every section and the last section's region runs to end of file.** The three
+   sentences below are kept verbatim and are newly pinned by test 1, which compares these three sentences and the objective paragraph after normalising whitespace — every run of whitespace collapsed to a single space — because the README wraps all five; the same normalisation applies to the close-out guard sentence in *Supported workflows*, which is 92 characters normalised and wraps for the same reason. (The existing
+   `tests/test_vps_only_operating_docs.py::test_canonical_front_doors_are_vps_only` does not pin
+   them: for `README.md` it asserts only that "VPS only" or "VPS-only" appears and "local-first"
+   does not; its literal sentence assertions are about `AGENTS.md` and
+   `docs/POLYMARKET_CURRENT_STATE.md`.) The sentences, placed in *Supported workflows*: "Production and verification are VPS-only. Do not run Python engines, tests,
+   Docker, dashboards, scheduled tasks, collectors, model training, brokers, or watchdogs on the
+   local workstation. Local work is limited to code inspection and editing, Git/GitHub operations,
+   and SSH control." The rewritten page must clear **all eight** of `_DRIFT_PATTERNS`
+   (`src/polymarket_predictive_engine/operating_state.py:60-69`), which
+   `front_door_drift_violations` scans over the WHOLE file, and must carry the literal
+   `performance/operating_state.md` pointer the same function requires; item 1's *Generated state*
+   section supplies the pointer, and test 1 asserts all eight patterns are absent rather than the
+   single one an earlier draft named.
+   - *What this repository is for.* First, the objective paragraph. Its text: "This repository
+     is a research engine for one question: can a pre-registered, fail-closed, paper-only process
+     tell a profitable, executable strategy apart from a historical premium, an accounting error,
+     an overfit result, or insufficient evidence? A defensible negative result is a successful
+     outcome." Then one paragraph naming the Polymarket engine as the principal system and the
+     SuperBru score engine as ancillary.
+   - *Generated state.* Second, keeping the pointer
+     `outputs/performance/operating_state.md` (and `outputs/performance/operating_state.json`)
+     that `operating_state.py:533-558` requires README.md to carry and
+     `tests/polymarket_predictive_engine/test_operating_state.py::test_front_door_repo_docs_only_point_to_generated_state`
+     asserts against the real repository. The current README carries it only under "Start with
+     generated state", which this rewrite replaces, so without this section that existing test
+     fails. The dashboard is named by `PM_DASHBOARD_PUBLIC_URL`, never by the bare IP the current
+     README prints, which already contradicts AGENTS.md's Tailscale-only rule, and the rewritten page prints no bare-IPv4 URL anywhere.
+   - *State of the evidence.* README carries **no live or dynamic figure from a producer's artifact** — a rule whose only mechanical enforcement is the eight `_DRIFT_PATTERNS`, which are narrower than the rule, so the patterns are its registered proxy, and nothing else asserts it beyond test 1's pinning of the three retracted tokens (dates, pull-request numbers
+     and registered constants are not dynamic values): one paragraph naming
+     the evidence classes and a link. (The three retracted figures below and the 2.0 pp haircut
+     constant are not dynamic values — they are a withdrawal notice and a registered constant — and
+     the drift rule at `docs/OPERATING_STATE.md:59` does not reach them.) The paragraph links to `docs/EVIDENCE_STATE_2026-09-13.md` (new, item 4) beside the
+     generated-state pointer, which stays a fenced literal and **not** a markdown link, because
+     `outputs/performance/` is not in the repository and test 2 resolves every relative link;
+     written as a link it would add a second miss and the entry would fail its own test. `docs/OPERATING_STATE.md:59` reads "README.md and AGENTS.md may point
+     here or to the generated files, but must not restate dynamic values", and that document is
+     not in this WO's touch list, so the table cannot live on the front page. Moving it is the
+     smaller change than amending a canonical document.
+
+   - *Retracted figures.* "Until 2026-09-13 this page printed adverse selection at $63.62/day, a net
+     of −$60.60/day, and a gross of $3.02/day. The charter's correction of 2026-08-23 withdrew the
+     section that asserted them; none of the three appears in any artifact on the telemetry mirror.
+     The recorded readings and their evidence classes are in `docs/EVIDENCE_STATE_2026-09-13.md`, linked under "State of the evidence" above." This is the one section of `README.md` in which
+     those three tokens may appear, and test 1 pins each to it.
+   - *Supported workflows.* VPS production (Paths A and B, by reference to `AGENTS.md`); the offline
+     `pytest` suite in an ephemeral sandbox (2026-07-27 amendment); offline historical research from
+     the two named public sources under `research/` (2026-09-12 amendment), with the reproduction
+     commands `python -m premium_research.cli verify-manifest` and `verify-results`, which exist
+     on `main` today. The `--work-order` selector does not: `git show origin/main:src/premium_research/cli.py`
+     has no such argument, and `results_wo167/` and `results_wo170/` exist only on the build
+     branch. The two commands, spelled exactly `verify-results --work-order WO-167` and `verify-results --work-order WO-170`, are therefore printed only under the same close-out guard as the WO-170 row, together with the literal sentence "These two selectors land with
+     WO-167's and WO-170's merges and do not exist on `main` today.", which is the sentence test 1
+     asserts, stated here because a test may not demand a literal the specification does not
+     mandate. The fourth supported workflow is reading the telemetry mirror
+     `origin/vps-telemetry`, whose JSON is complete while its CSVs are the last 200 rows; a
+     per-file manifest is WO-172, admitted, and not registered under the GLOBAL RULE until its
+     squash-merge lands.
+   - *Known limitations.* The self-hosted runner has accepted no job since 2026-08-23T12:36Z and the
+     VPS has been offline since 2026-08-21 (`docs/VPS_OUTAGE_2026-08-21.md`); two merges have landed
+     since (#452 on 2026-08-22, #454 on 2026-09-12), #454 carrying no completed required-gate run (runs 627
+     cancelled and 628 queued, `docs/VPS_OUTAGE_2026-08-21.md`); whether #452 was gated before the
+     runner stopped is not established by any artifact in this repository, which itself records
+     that its evidence cannot distinguish a host down from 2026-08-21T02:00 from one degraded on
+     08-21 and unresponsive by 08-23; telemetry CSVs are truncated; the Gate A unit defect (WO-169, admitted; not registered under the GLOBAL RULE until its squash-merge lands); the strategy search selects on its holdout (WO-171, admitted; not
+     registered under the GLOBAL RULE until its squash-merge lands); maker capacity is
+     model-bounded; the funding-carry haircut of 2.0 pp is an assumption.
+   - *Governance in one paragraph.* One work order per PR; S8 admission; the GLOBAL RULE; owner
+     merge for frozen and registered surfaces; no live order path; the evidence classes.
+   - *Documents.* The README prints the canonical table in full and, below it, one line per remaining class giving the class name and its count, counted as test 4 counts it, over members under `docs/`; the membership lists live only in the test file, so the front page carries no list that can go stale silently, and test 1 asserts that each class line's printed count equals the count the classification gives for that class, so a printed count cannot drift from the dictionary either — without that assertion the page would carry eight unpinned numbers, which is the channel this work order exists to close. Every file under `docs/` (recursive) except `docs/archive/README.md` appears in exactly one class, and the
+     README's table names the first class in full as markdown links:
+     - **canonical** (17 rows, each a link; 13 of them under `docs/`, and the partition sum below
+       counts only those 13): `README.md` — one of the five documents
+       `docs/OPERATING_STATE.md:62-76` names authoritative, and the row test 4 checks for —
+       `docs/EVIDENCE_STATE_2026-09-13.md` (new, item 4; a dated evidence record, not a front
+       door, which is why the drift rule does not reach it), `AGENTS.md`, `docs/ENGINEERING_STANDARDS.md`,
+       `docs/EXPERIMENT_REGISTRY.md`, `docs/POLYMARKET_CODEX_WORK_ORDERS.md`,
+       `docs/POLYMARKET_QUANT_MODE_CHARTER.md`, `docs/POLYMARKET_QUANT_TRADING_CONTRACT.md`,
+       `docs/OPERATING_STATE.md`, `docs/ORACLE_VPS_SETUP.md`, `docs/POLYMARKET_DOCKER_SAFETY_AUDIT.md`,
+       `docs/POLYMARKET_EDGE_STRATEGY_RESET.md`, `docs/VPS_OUTAGE_2026-08-21.md`,
+       `docs/POLYMARKET_SHARP_ANCHOR.md` (sharp-odds anchor sourcing: the `fetch-sharp-odds` and
+       `build-sharp-anchor` CLI subcommands; its overlay section describes the refuted directional
+       lane), `docs/SYSTEM_MAP.md` — one of the five documents `docs/OPERATING_STATE.md:62-76`
+       names authoritative, so it is canonical rather than merely cross-referenced —
+       `src/polymarket_predictive_engine/cli.py`,
+       `src/superbru_score_engine` — the last two so every row of `AGENTS.md`'s "Stable references"
+       table and of the current README's table is present;
+     - **owner-surface** (5): `docs/OWNER_AMENDMENT_MB1_TIER0_COVERAGE.md`,
+       `docs/OWNER_AMENDMENT_SHARP_LINKING_EVALUATOR.md`, `docs/OWNER_DECISION_FUNDING_GOVERNANCE.md`,
+       `docs/KEY_CUSTODY_DESIGN_WO67_P5.md`, `docs/OWNER_CHECKS.md`. The class name records where these
+       sit in the governance chain, not a Git authorship claim: every file in it was last touched by
+       the owner-account squash merge that the register itself warns never says who wrote what;
+     - **draft template, unsigned, not in force** (1): `docs/DRAFT_OWNER_AMENDMENT_WO67.md`, whose own
+       header reads "UNSIGNED TEMPLATE. NOT IN EFFECT. This file authorizes nothing";
+     - **referenced by code or tests** (12, kept where they are): `A1_WITHDRAWAL_AND_EXIT_RAIL_RUNBOOK`,
+       `EXECUTOR_SUB_ACCOUNT_AND_CREDENTIAL_DRILL`, `HUMAN_STAGE1_OPERATOR_RUNBOOK`, `MICRO_DRILL_RUNBOOK`,
+       `POLYMARKET_ACTUARIAL_MODEL_GOVERNANCE`, `POLYMARKET_API_ASSIMILATION`, `POLYMARKET_DATA_QUALITY_STANDARD`,
+       `POLYMARKET_LIVE_TRADING_APPROVAL_CHECKLIST`, `POLYMARKET_MODEL_VALIDATION_STANDARD`,
+       `POLYMARKET_PIPELINE_MAP`, `POLYMARKET_RISK_CONTROL_STANDARD`, `RESTORE`;
+     - **retired in place with a loud notice** (6): the five pinned by
+       `test_legacy_local_runbooks_are_loudly_archived` (`POLYMARKET_SHADOW_RESEARCH_RUNBOOK`,
+       `POLYMARKET_RESEARCH_README`, `POLYMARKET_PAPER_TRADING_LOOP`, `RUNNING_LEAN`,
+       `POLYMARKET_RUNTIME_CONTEXT_20260628`) and `POLYMARKET_CURRENT_STATE` (pinned by
+       `test_canonical_front_doors_are_vps_only`);
+     - **kept by cross-reference** (10, each with its actual referrer named in the classification and
+       asserted by test 4 to contain the token): `DRAFT_RISK_PREMIUM_HYPOTHESES` (the register),
+       `EXECUTOR_LIVE_OPS_CONTROL_PLANE` (`docs/OPERATING_STATE.md`), `EXECUTOR_REPLAY_CERTIFICATION`
+       (`docs/EXECUTOR_SUB_ACCOUNT_AND_CREDENTIAL_DRILL.md`, itself a code-referenced runbook, which is
+       why the class is "kept by cross-reference" and not "from a governing document"),
+       `MAKER_PICKOFF_SCALING_EXPERIMENT` (the charter), `QUANT_CURRICULUM` (the charter),
+       `MARKET_MAKING_MODELS_RESEARCH` (the register), `POLYMARKET_STRATEGY_OPTIONS` (the register),
+       `WO69_CI_ENFORCEMENT` (the register) — one referrer each, never a disjunction, because a
+       disjunction cannot be a literal dictionary value —
+       `POLYMARKET_VPS_DOCKER_RUNBOOK` (`ORACLE_VPS_SETUP`), and `ACTUARIAL_AUDIT_PREDICTIVE_VALUE`
+       (`POLYMARKET_RESEARCH_README`) — a dated 2026-06-24 audit whose own scope line covers the
+       Polymarket engine as well as the score engine, so it is not SuperBru ancillary. Its referrer
+       is itself in the retired-in-place class, the same situation as `EXECUTOR_REPLAY_CERTIFICATION`'s
+       and admissible for the same reason: a retired-in-place document stays in the tree under a
+       loud notice and is pinned by `test_legacy_local_runbooks_are_loudly_archived`, so it cannot
+       vanish and leave an orphan behind it, and test 4 asserts it still contains the token;
+     - **SuperBru ancillary** (9, enumerated): `backtest_validation`, `chaser_points_inference`,
+       `leader_defence_workflow`, `predictive_value_controls`, `round_summary_behaviour`,
+       `smartbet_grid_calibration`, `superbru-automation-context`, `validation_layer`,
+       `SUPERBRU_CLV_VS_CLOSE_EXPERIMENT`;
+     - **incident records** (1, kept): the literal path
+       `docs/incidents/2026-07-13-wo73-append-only-ledger-migration.md`, not a glob, so the class
+       has the same form as every other;
+     - **archived** (15, item 2).
+     The classification is the literal dictionary in `tests/test_repository_hygiene.py`, and test 4
+     asserts it is an exhaustive partition of `docs/**/*.md` **on the post-change tree**, which is
+     the only tree the test ever runs against. It is: 13 canonical files under `docs/` (the 17 table
+     rows less `README.md`, `AGENTS.md`, `cli.py` and `src/superbru_score_engine`, none of which is
+     under `docs/`) + 5
+     owner-surface + 1 unsigned draft + 12 code-referenced + 6 retired in place + 10 kept by
+     cross-reference + 9 SuperBru ancillary + 1 incident record + 15 archived = **72**. Today's tree
+     holds 71 files under `docs/**/*.md`; the change adds `docs/EVIDENCE_STATE_2026-09-13.md` and
+     moves 15 into `docs/archive/`, so the post-change tree holds **57** outside the archive and 15
+     inside it, and `docs/archive/README.md` is excluded from the domain. The archived class keys its
+     15 entries at `docs/archive/<name>.md`, their post-move paths, so "every listed path exists"
+     holds.
+2. **Archive (`docs/archive/`).** `git mv` of exactly these 15 files. On the pre-registration tree exactly two inbound
+   references exist repository-wide and both are repointed by this work order; no other file in any
+   scan root references any of them (verified against every git-tracked file on `a790e51`). Registering this
+   entry adds the 15 names to `docs/POLYMARKET_CODEX_WORK_ORDERS.md`, which is inside the `docs/`
+   scan root, as bare basenames and deliberately not as paths or links, so the enumeration itself creates no reference test 2 resolves. The entry does write `docs/archive/...` and `docs/EVIDENCE_STATE_2026-09-13.md` tokens, and every one of them is a post-change path: they resolve on the build tree and are inert at registration, because `tests/test_repository_hygiene.py` lands with this work order's build rather than with its registration. No count of them is given, deliberately. An earlier draft stated one and it was wrong within a pass, because the sentence counts the entry that contains it and every later edit moves it; the property is what matters and the property does not go stale. The 15: `POLYMARKET_ACTUARIAL_GRADE_GAP_ASSESSMENT_20260628.md`,
+   `POLYMARKET_ENGINE_APPLY_NOTES.md`, `POLYMARKET_LIVE_LEARNING_SYSTEM_DESIGN.md`,
+   `POLYMARKET_MISPRICING_BOT.md`, `POLYMARKET_PAPER_PROFIT_AUDIT.md`,
+   `POLYMARKET_PREDICTIVE_POWER_ROADMAP.md`, `POLYMARKET_STRATEGY_V2.md`,
+   `POLYMARKET_STRATEGY_V2_QUICKSTART.md`, `POLYMARKET_VPS_DOCKER_DRY_RUN.md`,
+   `VPS_DOCKER_DRY_RUN_MONITOR.md`, `VPS_RESTART_FORENSICS_2026-07-12.md`, `VENTURE_THESIS.md`,
+   `LIVE_DUTCH_ARB_DOCKER.md`, `POLYMARKET_RESOLUTION_COLLECTOR.md` (882 bytes; superseded by `src/polymarket_predictive_engine/resolution_collector.py`), and
+   `handoff/polymarket_overnight_governance_20260625.md`, which lands flattened at
+   `docs/archive/polymarket_overnight_governance_20260625.md` (no nested `handoff/` directory), so
+   `ls docs/archive | wc -l` reads 16. The one cross-reference between moved files
+   (`LIVE_DUTCH_ARB_DOCKER.md:170` → `POLYMARKET_MISPRICING_BOT.md`) is updated to the new path,
+   and so is the one from outside `docs/`: `README_DOCKER_MONITOR.md:56` names the same moved file,
+   which the second draft's claim of "no non-archived document references any moved file" missed
+   because neither its scan roots nor test 2's scan set included repository-root markdown. Both now
+   do. Outbound references from archived files to files that stay are left as they are. `docs/archive/README.md` lists every
+   archived file with `reason` ∈ {`dated snapshot`, `superseded by <canonical file>`, `legacy local
+   design; VPS-only rule`} and the canonical replacement, or the literal `none` where no canonical file replaces it. Each row is `| file | reason | replacement |`, one data row per archived file and no others; `replacement` is the path named after `superseded by ` when that is the reason, and the literal `none` for every other reason. Its first line records the command used: "Moved here by `git mv`; every file is recoverable from Git history." — stated here because a test may not demand of a document what the document's own specification does not mandate.
+3. **Regression guard (`tests/test_repository_hygiene.py`, new).** **Tests 1-5 below** — all of
+   them, and the count is stated here because item 3 is what creates the file, so a builder who
+   follows it literally must write every test the entry enumerates. Anchored off `__file__` (A3),
+   each scan asserting a non-zero visit count; the literal classification of item 1 lives in this
+   file.
+
+4. **`docs/EVIDENCE_STATE_2026-09-13.md` (new).** A dated, non-front-door document, outside the
+   scope of the front-door drift rule, holding the table: one row per line with the columns
+   `line`, `evidence class`, `reading`, `what it rests on`, `where recorded`, every figure
+   traceable to a named artifact on the telemetry mirror `origin/vps-telemetry` at `fcebaa2`
+   (2026-08-21) or to a committed file. Its header, the text above the first table row, carries the literal `2026-08-21` and the literal sentence
+   "These are readings of the 2026-08-21 snapshot, not current state.", and states that current
+   state lives in the generated files. Each row is `| line | evidence class | reading | what it rests on | where recorded |`. The first two cells are given literally here, and the remaining prose of the bullet fills `reading`, `what it rests on` and `where recorded` at the builder's discretion, in that order, with no prose left out, and each `line` cell is written exactly as backticked here, capitalisation included. Of the six class words, `modeled` names a registered evidence class and `historical-class diagnostic` names a registered class qualifier; the other four — `unread`, `untested`, `terminal`, `existence observed` — are reading states, not registered classes, and none of them relabels a lane upward: `H1 sharp-anchor maker carry` / `modeled`; `H2 dutch-book` / `unread`; `H3 smart-flow` / `untested`; `The legacy $100/month verdict engine` / `terminal`; `Perpetual funding carry` / `historical-class diagnostic`; `Variance risk premium` / `existence observed`. An earlier draft gave these cells twice in different capitalisations, once here and once as the opening words of the bullets below, and the test pinned the other one. No guarded row names an artifact or field of an unlanded work order either: `annualised_simple` and `carry_v0.json` do not appear in this document. On the three guarded rows — `The legacy $100/month verdict engine`, `Perpetual funding carry` and `Variance risk premium` — no numeric token appears other than `$100/month`, `−0.013943`, `55`, `2026-08-19` and the work-order numbers `WO-166`, `WO-167`, `WO-169` and `WO-170`: distributing the bullet's prose adds none, and none may be added. The clause "results committed on the build branch, not yet recorded in the charter or the register" falls entirely inside one cell, because test 5 matches it as a contiguous literal over a row that carries `|` separators. Two earlier drafts derived these cells from the prose instead, first by splitting at semicolons and then at the second em-dash, and neither rule is applicable: three of the six rows carry fewer than two em-dashes, and one splits into a cell that contradicts its own closing clause.
+   Test 5's row-scoped assertions are evaluated over the whole table row. Rows:
+     - H1 sharp-anchor maker carry — modeled — `insufficient_evidence` (`maker_carry_study.json`
+       `maker_gates.maker_verdict`), with the three gate states printed as the artifact writes them:
+       M-A `pending`, M-B `pending`, M-C `pass_by_construction`; modelled net carry
+       +$1.68/day against the $3.33/day target (`portfolio_net_carry_usd_per_day`,
+       `target_net_usd_per_day`) is a simulation whose adverse-selection charge rests on 3
+       replay-confirmed hypothetical fills (`maker_fill_replay.json` `confirmed_fills`) with 77.5% of
+       opportunities lacking contemporaneous book state (`no_contemporaneous_state_rate`); realized
+       wallet rewards $0 (`maker_live_test.json` `rewards_usd_total`); capacity bounded by the sizing
+       model, not measured (WO-173, admitted; not registered under the GLOBAL RULE until its
+       squash-merge lands).
+     - H2 dutch-book — no deviation found in the 2026-08-21 scan, which is **not** the verdict —
+       `implication_scan.json` `events_scanned = 300`, `flagged_deviations = 0`;
+       `event_group_scan.json` `groups_with_complete_ask_side = 67`, `flagged_deviations = 0`,
+       `max_executable_basket_usd = 0.0`. `docs/VPS_OUTAGE_2026-08-21.md` records that
+       `outputs/h2_dutch/h2_evaluation.json` is the only artifact permitted to state H2's verdict
+       and that a zero-flag scan reading is an inference from the scan, not the verdict; that file
+       has not been read since the host went offline, so H2's evidence class is **unread**.
+     - H3 smart-flow — untested — `smart_flow_clv.json` `fills_seen = 0`, last generated
+       2026-07-17; in the charter's recorded words, "its input was never collected and its job
+       stopped running". An ingestion failure, not a negative result.
+     - The legacy $100/month verdict engine — terminal `no_for_tested_edge_classes` on the registered
+       clock (2026-08-19; `profit_verdict.json`); its binding Gate A metric is a per-share price
+       difference labelled per dollar (−0.013943 on 55 units, `unit_mean_net_settlement_return_per_dollar`);
+       the corrected per-dollar reading is WO-169: results committed on the build branch, not yet recorded in the charter or the register, and no figure from it is
+       printed on this row.
+     - Perpetual funding carry (crypto; historical-class diagnostic; not verification of record):
+       WO-166 NO-GO on its completeness rule, which is the one reading of the three that has an
+       artifact of record on `main` today. WO-167's refined completeness rule: results committed on the build branch, not yet recorded in the charter or the register.
+       WO-170's corrected pass: results committed on the build branch, not yet recorded in the charter or the register. Neither WO-167 nor WO-170 prints a figure on this row.
+     - Variance risk premium — existence observed, in the merged, charter-recorded WO-166
+       artifact `research/premium_poc/results/vrp.json`; parked; no tradeable claim. WO-170's
+       realignment of that lane: results committed on the build branch, not yet recorded in the charter or the register, and no figure from it is printed on this row.
+
+### A11 — bias-direction disclosure
+
+**Why the close-out guard is unconditional.** **The guard is unconditional, and that is deliberate.** An earlier draft made it conditional on each work order's status line reading `built-and-run`, which an offline test can only evaluate against the working tree; on the build branch that condition is already satisfied, so the guard would have imposed nothing exactly where it is meant to bite, and its result would have flipped with the merge order of unrelated work orders. Written unconditionally it is hermetic and test 5 can assert it. A favourable verdict gets no weaker a guard than an unfavourable one, which is why WO-170's corrected pass is guarded alongside WO-169's unfavourable correction. Lifting these three rows once their close-outs land on `main` is a dated follow-up work order, not a condition inside this one.
+
+No estimator; no number changes. But the direction is **favourable**, and naming it is the point of
+this section. The page being replaced prints adverse selection at $63.62/day and a net of
+−$60.60/day and treats H1 as closed; the replacement records `insufficient_evidence` and a modelled +$1.68/day in `docs/EVIDENCE_STATE_2026-09-13.md`, not on the page, which under item 1 carries no figure from a producer's artifact. That is a strictly more favourable reading of the maker lane. It is defensible only
+because it is the charter's own correction of 2026-08-23, which checked those figures against the
+telemetry mirror and found the $63.62 appears in no artifact — not because a page rewrite may soften
+a verdict. Three channels point the other way and are stated for balance: every figure carries its
+evidence class, no figure is printed from a work order whose close-out has not landed, and the
+retracted figures stay on the page under their own heading rather than disappearing. The residual
+favourable channel is that a reader who saw only the old page will read the maker lane as improved
+when what improved is the measurement, not the lane. A second residual, disclosed rather than
+repaired: the rewritten page names WO-167, WO-169, WO-170, WO-171 and WO-172, and the new evidence document adds WO-173, none of which appears in `main`'s register or charter today, so a reader on `main` cannot resolve any of the six.
+Each is qualified in place, either as admitted and not registered under the GLOBAL RULE until its squash-merge lands, or, for WO-167, WO-169 and WO-170, by the close-out guard sentence, which is the honest form of an unresolvable reference; omitting them instead
+would print a state of the evidence the branch knows to be stale.
+
+### Fail-safe sentence (S5)
+
+A moved file whose old path is still referenced from a non-archived document, as a markdown link or
+a backtick `docs/<name>.md` token, fails test 2 — where a token containing `*`, `<` or `>` is a
+form rather than a path and is skipped, without which this register entry's own placeholders would
+fail the test it enumerates; an archived file without a README row fails test 3; a README that
+regains a retracted figure fails test 1; a document that is in no class or in two fails test 4;
+an evidence row among the three that name a work order with results on a build branch, printing a figure from a work order whose close-out has not landed, fails test 5; no runtime path reads any file this work order touches, because it touches only
+documents, one link, and a new test file.
+
+### Touch ONLY these files (7 entries)
+
+1. `README.md`
+2. `docs/archive/README.md` (new).
+3. `tests/test_repository_hygiene.py` (new).
+4. `docs/POLYMARKET_CODEX_WORK_ORDERS.md` — this entry and its calibration row.
+5. The 15 files moved into `docs/archive/` (item 2), one path each; `LIVE_DUTCH_ARB_DOCKER.md`
+   additionally has its one link at `:170` repointed, so it is the one moved file whose content
+   also changes.
+6. `README_DOCKER_MONITOR.md` — its one link at `:56` repointed to `docs/archive/POLYMARKET_MISPRICING_BOT.md`.
+7. `docs/EVIDENCE_STATE_2026-09-13.md` (new, item 4).
+`AGENTS.md` and every file under `scripts/` are **not** touched by this work order; they move with
+the launcher removal to WO-168a.
+
+### Enumerated offline tests (S8/A10); each to be confirmed to FAIL with its guard reverted before the pull request is opened
+
+1. `test_readme_carries_the_retraction_and_the_evidence_pointer` — one escape, stated: a retracted figure re-entered in a different spelling, such as `$63.62 per day`, is not caught, because only the three literal tokens are pinned; each of `63.62`, `60.60` and `3.02/day` occurs **exactly once** in `README.md`, and that occurrence is on a line between the "Retracted figures" heading and the next heading of the same level, so a retracted figure cannot be quoted anywhere else on the page; each class line in *Documents* prints a count equal to the classification's count for that class; `README.md` carries exactly eight `##` headings, and all eight section headings are present, in item 1's order — "What this repository is for", "Generated state", "State of the evidence", "Retracted figures", "Supported workflows", "Known limitations", "Governance in one paragraph", "Documents" — because an earlier draft pinned four of the eight and left "Supported workflows" and "Governance in one paragraph" anchored by nothing; the objective paragraph's two sentences and the three VPS-only sentences present after the same whitespace normalisation item 1 states, where a `##` heading line is one whose first three characters are exactly `## `, regions are extracted from the unnormalised text first and each region is then normalised on its own so the collapse never crosses a blank line, because the README wraps all five; none of the eight `_DRIFT_PATTERNS` regexes in
+   `src/polymarket_predictive_engine/operating_state.py:60-69` matches anywhere in `README.md`; the
+   literal `performance/operating_state.md` pointer is present; and, one escape stated: a selector spelled another way, such as `--work-order=WO-167`, does not trip the guard's antecedent and the sentence is then not required; and no bare IPv4 URL matching
+   `https?://\d{1,3}(?:\.\d{1,3}){3}` appears in `README.md`, which pins the one defect item 1
+   names and nothing else would catch — `README.md:19` prints `http://129.151.178.42:8765/` today,
+   against AGENTS.md's Tailscale-only rule. The literal `docs/EVIDENCE_STATE_2026-09-13.md` appears between the "State of the evidence" heading and the next heading of the same level, so the work order's central new document cannot be orphaned by a README that names its section and links nothing. And if either of the literals `verify-results --work-order WO-167` or `verify-results --work-order WO-170` appears in `README.md`, the literal sentence "These two selectors land with WO-167's and WO-170's merges and do not exist on `main` today." appears, on the same whitespace-normalised text, between the "Supported workflows" heading and the next heading of the same level — a second close-out guard that was prose only until the eighth pass, on commands a reader of `main` cannot run.
+2. `test_every_reference_to_a_doc_resolves` — every `](<target>)` relative link and every backtick `docs/<name>.md` token in **every repository-root `*.md` file** (which is `README.md`, `AGENTS.md`, `CLAUDE.md`, `BACKTESTING_README.md`, `DAILY_AUTOMATION_README.md`, `README_DOCKER_MONITOR.md`) and every markdown file under `docs/`, recursively, outside `docs/archive/`, resolves to an existing **path** (`src/superbru_score_engine` is a directory), subject to one skip rule and one allowlist entry. A backticked span is a token only when its **entire** content matches `docs/` followed by a path ending in `.md`. A span carrying a line or range suffix (`….md:59`, `….md:62-76`) is a citation, not a path, and is not a token; neither is a bare directory span, nor the allowlist tuple quoted below. Without this shape rule the five line-suffixed citations already in this register from earlier work orders, and the six this entry adds, would each be read as a stale reference — eleven further misses, and pass-5's blocker rebuilt under a looser reading. An implementation that does not return exactly 126 tokens and one miss on `a790e51` is not this rule. **Skip rule: a token containing `*`, `<` or `>` is a form, not a path, and is not resolved.** It is load-bearing, not cosmetic. This register entry lands in `docs/POLYMARKET_CODEX_WORK_ORDERS.md`, which is inside the scanned domain, at registration and therefore before dispatch, and its text writes the forms `docs/**/*.md`, `docs/<name>.md`, `docs/archive/<name>.md` and `](<target>)`. Without the skip rule the test would read those as stale references to files that cannot exist and would fail on a correct post-change tree: the entry would defeat its own test, which is the same self-blinding this work order closes for test 4 by excluding `docs/archive/README.md` from the classified domain. The link metavariable is written `](<target>)`, with angle brackets, precisely so that the one skip rule covers the link form as well; spelled with a bare word inside the parentheses it would not be skipped, and the test would resolve that word as a path and report it missing. **Allowlist: the single literal entry** `("docs/POLYMARKET_CODEX_WORK_ORDERS.md", "docs/VPS_PAPER_RUNBOOK.md")` — historical register text this WO may not edit, naming a file that no longer exists — **and the test asserts that entry is the ONLY miss**, so a new stale reference fails. Verified by running the rule over `a790e51`: 126 tokens visited, exactly one miss, and it is that entry. At least **100** such tokens visited — 126 on `a790e51`, the declared ancestry (86 in `docs/**`, 18 in `README.md`, 19 in `AGENTS.md`, 1 in `CLAUDE.md`, 2 in `README_DOCKER_MONITOR.md`, 0 in the other two), 142 on `c6530a9`, the current branch tip **before** this work order's changes, and not fewer than 161 on the build branch it produces, all recomputed independently. The floor is 100 and not 120 because it must be a floor on the repository rather than on this entry: the post-change tree loses the 8 tokens that leave the non-archived domain when `LIVE_DUTCH_ARB_DOCKER.md` moves into `docs/archive/`, taking `docs/**` from 86 to 78 on `a790e51` and from 102 to 94 on `c6530a9`, the floor being set from the `a790e51` figure so that it stays a floor if the build re-bases, and `README.md` is rewritten wholesale, so the part of the count this work order does not author is 78 plus the 22 in `AGENTS.md`, `CLAUDE.md` and `README_DOCKER_MONITOR.md`, which is exactly 100 with the rewritten README counted as zero. Repository-root markdown is in the scan set, which is how `README_DOCKER_MONITOR.md:56` is caught. A file in the scan set that cannot be read or decoded fails this test rather than being skipped, because a silent skip would be fail-open for exactly the stale reference the test exists to catch. One limit, stated rather than hidden: the scan set is markdown only, so a reference to a moved document from a `.py`, `.yml` or `.sh` file would escape it. Every git-tracked file was scanned by hand on 2026-09-13 and no such reference exists today. **Why the register stays in the domain,** although excluding it would delete the allowlist, the only miss, the eleven line-suffixed citations and the whole self-defeat class at once: the register is the document every work order edits, so it is where a new stale reference is most likely to appear, and excluding it would blind the test exactly where the churn is. The historical misses it carries are bounded by a literal allowlist the test asserts is exactly one entry, so that set cannot grow silently; the cost of keeping it is the shape rule and the skip rule, both stated above. On the pre-registration tree exactly two non-archived documents reference a file item 2 moves, both to `POLYMARKET_MISPRICING_BOT` — `README_DOCKER_MONITOR.md:56` and `docs/LIVE_DUTCH_ARB_DOCKER.md:170` — and both are repointed by this work order (touch-list entries 6 and 5); no third exists (verified against every git-tracked file on `a790e51`). This entry then names all 15, as bare basenames — `handoff/polymarket_overnight_governance_20260625.md` with its source subdirectory, which is still not a `docs/`-prefixed path — and deliberately not as paths or links, so it adds no token this test resolves.
+3. `test_archive_readme_lists_every_archived_file` — every file under `docs/archive/` except `README.md` has a row in `docs/archive/README.md` Each row is `| file | reason | replacement |`, one row per archived file and no other rows, with a reason from the closed set, where `superseded by ` is matched as a prefix and the remainder must be a path that exists, that path is also the `replacement` cell, and `replacement` is the literal `none` for every other reason; the row count equals the file count (15); one escape, stated: the row-to-replacement mapping is not pinned, only its shape, so a wrong-but-existing replacement passes; and `docs/archive/README.md` contains the literal string `git mv` anywhere in the file, which is a substring check rather than a sentence check and is stated as such; it is what pins item 2's requirement that the file record the move command used. The launcher removal and its workflow caveat are recorded in WO-168a, which performs them; this work order records neither, so neither merge order can make this file state something that has not happened.
+4. `test_docs_classification_is_an_exhaustive_partition` — the classification keys the 15 archived files at `docs/archive/<name>.md`, so every listed path exists after the move; `docs/archive/README.md` is excluded from the domain; every one of the **57** files under `docs/**/*.md` outside `docs/archive/` appears in exactly one of the eight non-archived classes; counting only class members under `docs/`, the **nine** class counts sum to **72**, which equals those 57 plus the 15 archived; an earlier draft asserted 71 against a post-move domain and could not have passed; test 4 also asserts that the five documents `docs/OPERATING_STATE.md:62-76` names authoritative all fall in the canonical class; the README's documents table names every canonical row as a link; every file in `AGENTS.md`'s "Stable references" table appears in the canonical class; and for each of the 10 entries in the cross-reference class, the file named as its referrer exists and contains the referenced file's name, so a renamed or deleted referrer fails rather than leaving an orphan classed as referenced; and the nine class sizes, counting only members under `docs/`, are literally 13 (of 17 canonical rows, the other four being `README.md`, `AGENTS.md`, `cli.py` and `src/superbru_score_engine`), 5, 1, 12, 6, 10, 9, 1 and 15, so the dictionary cannot drift away from the counts this entry prints without failing. One escape, stated: a swap of two files between two classes preserves every count and every membership check, so test 4 would not catch it; what it does catch is any file entering, leaving, or being double-counted.
+5. `test_evidence_state_rows_carry_a_class_and_respect_the_close_out_guard` — the test item 4 had none, which matters because two of the three A11 counter-channels are enforced by prose alone without it, and printing WO-170's favourable corrected pass before its close-out lands is the highest-value mutation in this work order. `docs/EVIDENCE_STATE_2026-09-13.md` exists; its header contains the whole literal sentence "These are readings of the 2026-08-21 snapshot, not current state.", not merely the fragment `not current state`, which a header reading "this is not current state" would also satisfy; and it carries one row for each of the six lines item 4 enumerates, each **paired** with its own class rather than merely containing some class word, because a swap between rows is an upward relabel and membership alone would pass it: `H1 sharp-anchor maker carry` with `modeled`, `H2 dutch-book` with `unread`, `H3 smart-flow` with `untested`, `The legacy $100/month verdict engine` with `terminal`, `Perpetual funding carry` with `historical-class diagnostic`, and `Variance risk premium` with `existence observed` — each `line` cell written exactly as item 4 backticks it, so the test and the specification pin one literal rather than two. And the close-out guard is asserted unconditionally: each of the three guarded rows, named by item 4's own line cells — `The legacy $100/month verdict engine`, `Perpetual funding carry` and `Variance risk premium`, which are the three rows that name a work order whose results are committed on a build branch; the H1 row names WO-173, which has no results to print, and is therefore not guarded — contains the literal sentence "results committed on the build branch, not yet recorded in the charter or the register", and on those three rows the only numeric tokens permitted are the literals `$100/month`, `−0.013943`, `55` and `2026-08-19`, which are already of record on `main`, together with the work-order numbers `WO-166`, `WO-167`, `WO-169` and `WO-170`; every other `%`-suffixed figure, `$`-prefixed figure and bare decimal number, and each of `annualised_simple` and `carry_v0.json`, is forbidden. The guard therefore fails the moment a figure is printed ahead of its close-out, in the favourable direction as readily as the unfavourable one, and it reads the document alone, so no merge order can flip it. One escape, stated: a figure from an unlanded work order printed on the H1, H2 or H3 row is not caught, because the numeric restriction is scoped to the three guarded rows.
+
+### Day-after check
+
+Not a runtime change. Owner-runnable on `main` after merge: `grep -o -F '63.62' README.md | wc -l`, and the same for `60.60` and `3.02/day`, each print 1 — counting occurrences as test 1 does rather than lines, and matching literally, since `63.62` and `3.02` are regexes — and `grep -n -F` places each under the "Retracted figures" heading; `ls docs/archive | wc -l` prints 16 (15 files plus the README); the sandbox run of `tests/test_vps_only_operating_docs.py` and `tests/test_repository_hygiene.py`, the second of which is where all five enumerated tests live, is stated in the PR per the 2026-07-27 amendment, and the required gate re-runs them when its runner returns (no date can be given for that).
+
+**Not authorised by this text:** any change to a gate, threshold, result, or evidence class; any change to registered text other than this entry and its calibration row; any merge; the removal of any file that a scan at dispatch finds referenced. The launcher removal and `AGENTS.md`'s closing sentence belong to WO-168a and are not authorised here either; the three legacy compose files are retired by neither work order and stay where they are.

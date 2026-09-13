@@ -8958,6 +8958,7 @@ before that date predate this log and are not retroactively reopened. Seeded 202
 | WO-172 | M | Opus draft, Opus admission gate x4 to ADMISSIBLE, Opus build | ~0 reviewer so far (line-audit not yet dispatched) | 18 → 10 → 1 → 0 | pending | 0 so far — 19 mutation checks all detected after three tests were strengthened rather than three findings dropped (a truncation rule asserted on a file under the size cap, a self-exclusion asserted against a snapshot with no manifest, and a credential scan asserted by substring that a renamed flag satisfied) | pending the VPS: the day-after reads `telemetry/export_manifest.json` on the mirror and one manual `data-coverage-report` run |
 | WO-173 | M | Opus draft, Opus admission gate x3 to ADMISSIBLE, Opus build | ~0 reviewer so far (line-audit not yet dispatched) | 3 rounds to 0 | pending | 0 so far — 15 of 16 mutation checks detected; the sixteenth is not isolable by any mutation because the conjunct it guards is implied by the source check, recorded at the site and in the status line rather than dropped | pending the VPS: the day-after reads `maker_evidence_summary.json` after one run |
 | WO-168 | M | Opus draft, Opus admission gate x13 to ADMISSIBLE | ~1.9M reviewer tokens across 13 passes | 13 rounds to 0 | pending (not yet built) | pending | pending: the day-after greps the three retracted figures in `README.md`, counts `docs/archive`, and runs the two hygiene test files |
+| WO-168a | M | Opus draft, Opus admission gate x10 to ADMISSIBLE | ~1.7M reviewer tokens across 10 passes | 10 rounds to 0 | pending (not yet built) | pending | pending: the day-after tests 18 paths absent and 7 present, greps the added `AGENTS.md` sentence collapsed, and runs the launcher hygiene test file |
 
 **Reading of the 2026-08-02 rows — the tiering held, the review shape did not.**
 Three class-F/M builds went Sonnet-built and Opus-reviewed and produced **zero
@@ -19042,3 +19043,227 @@ the launcher removal to WO-168a.
 Not a runtime change. Owner-runnable on `main` after merge: `grep -o -F '63.62' README.md | wc -l`, and the same for `60.60` and `3.02/day`, each print 1 — counting occurrences as test 1 does rather than lines, and matching literally, since `63.62` and `3.02` are regexes — and `grep -n -F` places each under the "Retracted figures" heading; `ls docs/archive | wc -l` prints 16 (15 files plus the README); the sandbox run of `tests/test_vps_only_operating_docs.py` and `tests/test_repository_hygiene.py`, the second of which is where all five enumerated tests live, is stated in the PR per the 2026-07-27 amendment, and the required gate re-runs them when its runner returns (no date can be given for that).
 
 **Not authorised by this text:** any change to a gate, threshold, result, or evidence class; any change to registered text other than this entry and its calibration row; any merge; the removal of any file that a scan at dispatch finds referenced. The launcher removal and `AGENTS.md`'s closing sentence belong to WO-168a and are not authorised here either; the three legacy compose files are retired by neither work order and stay where they are.
+
+## WO-168a — Unreferenced legacy launchers removed after a recorded dependency scan — `draft` (2026-09-13, the number of completed gate passes on this entry is the rejection ledger's row count, stated there and nowhere else, and no surface carries a draft ordinal for this entry, derived or written; the WO-168 draft ordinals in item 1 are the sibling's, historical, and fixed at the split; split out of WO-168 on WO-168's seventh S8 pass; class M, not D: it removes 18 files under `scripts/` and adds a test file, so it needs an Engineer; touches `scripts/` (18 removals), two passages of `AGENTS.md` — the first sentence of its two-sentence closing paragraph, and a new three-sentence passage in "Work-order and Git discipline" — a new `tests/test_repository_hygiene_launchers.py` and this register → OWNER MERGE, because `AGENTS.md` is the canonical instruction file; `registered-ancestry: <origin-main-sha> ancestor-of <build-sha> PASS` to be recorded at dispatch in the full token form, both halves placeholders because registering this entry advances `main`. **Why this is its own work order.** `AGENTS.md:244` requires one work order per branch and per pull request. WO-168 bundled three separable changes — the front-page rewrite, the documentation classification and archive, and this launcher removal — and failed seven consecutive S8 passes up to the split, with a different one of the three failing almost every time. The scan, the closure and every count below are re-derived from the commit at each gate pass and again at dispatch; nothing in this entry rests on an earlier pass having checked them. It is separated so that the part that is ready is not held by the parts that are not. **Disclosure.** This work order exists because an external review received on 2026-09-13 found that superseded launchers sit beside canonical ones with nothing marking which is which. No owner instruction is cited; none exists in the repository. It authorises no run, no pass, no build, no merge, and no capital. Nothing here changes a gate, a threshold, a result, or any registered number; the only registered text it changes is the first sentence of `AGENTS.md`'s closing paragraph, the three sentences added to `AGENTS.md`'s "Work-order and Git discipline" section, and this register entry and its calibration row, which is why it routes to OWNER MERGE. Every removal is recoverable from Git history.)
+
+### The changes, exactly
+
+1. **Launchers removed (`scripts/`).** Scan roots, literal and exhaustive: the directories, each scanned recursively,
+ `src/`, `scripts/`, `tests/`, `.github/`, `docs/` (recursive, including any `docs/archive/` a later work order creates),
+ `analysis/`, `research/`, `examples/`, `notebooks/`, `config/`, `calibration/`,
+ **plus every repository-root file matching `*.md`, `*.yml`, `*.yaml`, `*.toml`, `*.ini`,
+ `*.cmd` or `Dockerfile*`**; git-tracked files only — a generated or gitignored file under a scan root, today the six under
+ `src/superbru_score_engine.egg-info/` and `config/polymarket_live_approval.yaml`, is not a
+ referrer, so the scan is reproducible from the commit rather than from a built working tree —
+ `__pycache__` excluded, and an unreadable or undecodable file is
+ not a referrer. That rule is fail-closed for test 1 and, by the same token, fail-open for the
+ removal decision: an unreadable file that did reference a launcher could not save it. It is
+ inert today — on `c6530a9` the only git-tracked files under these roots that fail to decode as UTF-8 are
+ `research/premium_poc/data/deribit/BTC_funding_1h.csv.gz` and its `ETH` twin, neither of which
+ can reference a script — and the build re-checks that the skipped set is still those two. `.claude/` is deliberately NOT a
+ scan root: it is agent-configuration space the lifecycle companion itself calls
+ non-register-reviewed, and the repository's own A3-sensitive scans exclude it, so no file's
+ survival may depend on it. Also outside the roots, with the reason stated because WO-168's third draft's defect was exactly an unstated omission: `data/`, `inputs/` and `outputs/` are generated
+ or input state and hold no code reference; `.git/`, `.pytest_cache/` and `.ruff_cache/` are Git
+ internals and untracked tool caches; and the repository-root files that match none of the
+ seven patterns — `.env.example`, `.env.vps-paper.example`, `.dockerignore`, `.gitignore`,
+ `.gitattributes` and `polymarket_local_live_fix_git.patch` — were checked by hand at `c6530a9` and name none of the 18. WO-168's third draft named a hand-listed root set that omitted `BACKTESTING_README.md`,
+ `DAILY_AUTOMATION_README.md`, `README_DOCKER_MONITOR.md`, `start_polymarket_bot.cmd`,
+ `config.yaml`, `config.example.yaml`, `calibration_profiles.yaml`, `pytest.ini`, and four
+ directories — which is the A3 defect class itself. `DAILY_AUTOMATION_README.md:19` names
+ `run_daily_superbru_local.ps1`, so that file and the six reachable only through it were on
+ the removal list wrongly. **Excluded from the referrer set, at dispatch and in test 1:** **two**
+ files, because each must name the removed launchers in order to record or assert their
+ removal — `tests/test_repository_hygiene_launchers.py`, and **this register,
+ `docs/POLYMARKET_CODEX_WORK_ORDERS.md`**, which enumerates all eighteen basenames below and
+ lands on `main` at registration, before dispatch. An earlier version of this list carried a
+ third, the archive README that WO-168 creates under `docs/archive/`, named here without a path
+ so it adds no token that work order's reference test resolves; this work order neither creates nor touches it, and nothing here writes a launcher name into it — and WO-168's registered test 3 records that neither work order writes a launcher name into that file in either merge order — so excluding it would never have been load-bearing. Without both
+ exclusions the record
+ blinds the scan it is recorded in: every removed basename would have a referrer inside the
+ roots, a builder following this text literally would remove nothing and would report eighteen
+ files as "gained a reference", and test 1 would be permanently defeated for exactly those
+ names. The dispatch-time re-scan runs against the pre-change tree with these two excluded. **Matching rule, corrected in WO-168's third draft after its first S8
+ delta pass.** A reference is the basename as a substring, or — for a `.py` script — an import of its
+ stem: `^\s*from <stem> import`, `^\s*import <stem>\b`, or the dotted form `scripts.<stem>` followed by a non-word character. WO-168's second draft said "the stem as a whole word" for `.py` files, which is not an import: under it
+ `config_check.py` read as referenced by an unrelated `config_check` subparser and function,
+ `run_defensive_model.py` by an unrelated `run_defensive_model` function, and
+ `check_superbru_fixtures.py` by the workflow FILENAME `check_superbru_fixtures.yml` at
+ `.github/workflows/ci.yml:51,74,124`, `.github/SECRETS.md:43` and `tests/test_required_pr_gate.py:263` — three files that same draft listed for removal. Under the corrected rule all three are at zero referrers.
+ **The removal set is the transitive closure, computed to a fixpoint:** removing a launcher removes
+ it as a referrer, so scripts whose only referrers were removed become unreferenced in turn. Under
+ the exhaustive roots the fixpoint is **18 files in three waves** and is stable (a fourth wave
+ finds nothing). **141 files under `scripts/` at `c6530a9`, 123 after removal** — the earlier
+ 139 and 121 were true at `a790e51` and went stale when `export_research_ledgers.sh` and
+ `write_telemetry_export_manifest.py` landed, which is why the count is anchored to a commit
+ rather than to "today" and is re-derived at dispatch. Exactly these 18 are removed, by `git rm` of each path, subject to the fail-safe sentence below, which this entry records rather than deferring to a file it does not
+ touch:
+ - wave 1 (12, no referrer at all): `check_superbru_fixtures.py`, `config_check.py`,
+ `install_daily_superbru_task.ps1`, `install_polymarket_local_live_task.ps1`,
+ `log_strategy_v2_persistence.ps1`, `predict_latest_cached.ps1`, `run_daily_oddspedia_overlay.ps1`,
+ `run_daily_superbru_scheduled.ps1`, `run_data_inventory_local.ps1`, `run_defensive_model.py`,
+ `run_probability_converter_loop.sh`, `wc_grid_validation.py`;
+ - wave 2 (4, referred to only by wave 1): `audit_oddspedia_available_data_cdp_session.py`,
+ `audit_superbru_available_data_cdp_session.py`, `build_data_inventory_summary.py`,
+ `scrape_oddspedia_cdp_session.py`;
+ - wave 3 (2, referred to only by waves 1-2): `enhance_superbru_fixture_coverage.py`,
+ `filter_oddspedia_high_value_market_paths.py`.
+ **Kept, and why:** `run_daily_superbru_local.ps1` is named by `DAILY_AUTOMATION_README.md:19`,
+ so it and the six scripts reachable only through it — `archive_oddspedia_snapshot.py`,
+ `compare_oddspedia_movement.py`, `notify_daily_superbru_action_items.py`,
+ `scrape_superbru_pool_cdp_session.py`, `scrape_superbru_pool_picks_cdp_session.py`,
+ `scrape_superbru_results_cdp_session.py` — all stay.
+ **Kept, with the referrer recorded:** the nine `command:` targets of the legacy compose files,
+ which **five** files carry, not three. Seven are kept by one compose file each —
+ `run_dutch_arb_monitor.sh`, `run_live_mispricing_loop.sh` and `run_sharp_anchor_loop.sh` by
+ `docker-compose.live.yml`; `run_long_short_loop.sh` by `docker-compose.monitor.yml`;
+ `run_long_short_loop.py`, `run_market_making_eval_loop.py` and `run_probability_converter_loop.py`
+ by `docker-compose.polymarket-fixed.yml`. The other two are referenced more widely and would
+ survive those three files' retirement: `polymarket_mispricing_bot.py` from
+ `docker-compose.monitor.yml`, `docker-compose.polymarket-fixed.yml`,
+ `docker-compose.polymarket-wide-raw.yml`, `docs/POLYMARKET_PIPELINE_MAP.md`,
+ `LIVE_DUTCH_ARB_DOCKER.md` and `POLYMARKET_MISPRICING_BOT.md` under `docs/` — named as bare
+ basenames deliberately, because WO-168 may move both into `docs/archive/` and its
+ reference-resolution test scans this register, so a `docs/`-prefixed path written here would
+ fail that test in one merge order —
+ `tests/polymarket_predictive_engine/test_taker_fees.py`, and six scripts that import its stem
+ — `polymarket_long_short_engine.py`, `run_polymarket_liquidity_discovery.py`,
+ `run_polymarket_live_paper_loop.py`, `run_polymarket_local_live_loop.py`,
+ `run_polymarket_pipeline.py` and `run_promoted_rule_shadow_scan.py`, each carrying
+ `import polymarket_mispricing_bot` — and `tests/test_polymarket_public_search_discovery.py`,
+ fourteen referrers in all;
+ `polymarket_ml_collector.py` from `docker-compose.polymarket-collector.yml`,
+ `docker-compose.polymarket-fixed.yml`, `docker-compose.polymarket-wide-raw.yml` and
+ `docs/POLYMARKET_PIPELINE_MAP.md`. Also kept: `exact_chase.py`, `ev_contrarian.py` and
+ `differentiation_overlay.py`, each named independently by `analysis/README.md`, so none depends
+ on the others for survival. Retiring the three legacy compose files — `docker-compose.live.yml`,
+ `docker-compose.monitor.yml` and `docker-compose.polymarket-fixed.yml` — is a separate
+ decision and would orphan only the seven. One consequence of the removal is recorded here
+ because nothing else records it: `.github/workflows/check_superbru_fixtures.yml` is kept, and
+ it is named for `check_superbru_fixtures.py`, which this work order deletes. The workflow is
+ `workflow_dispatch`-only and its single step echoes and exits 1 under the workflow name "Superbru Fixture Checker (Manual Only - Disabled Pending Auto Pick
+ Hardening)", so it never invokes the script and removal is safe today;
+ re-enabling it would mean re-implementing the script from Git history. `.github/SECRETS.md:43` still describes that workflow as scheduled daily; that line is stale and sits outside this work order's touch list. Separately, `README.md:148-149` carries the claim this work order is amending in `AGENTS.md`, in different words, and about the scripts rather than about that workflow — "Legacy local scripts remain for history and regression coverage only. Their presence is not an active run instruction." — and this work order does not touch `README.md`: WO-168 rewrites that page in full and none of its eight registered sections carries the sentence, so it is not expected to survive that rewrite, although WO-168 pins no assertion of its absence. In the order where this entry merges first the line is stale on `main` until WO-168 lands, and is named here for that reason. The build re-runs the scan at dispatch, against the pre-change
+ tree and with **both** record-keeping files excluded as above —
+ `tests/test_repository_hygiene_launchers.py` and `docs/POLYMARKET_CODEX_WORK_ORDERS.md`, this register,
+ which enumerates all eighteen basenames and sits inside the `docs/` scan root — and removes only files still at zero references, subject to the fail-safe sentence below; any file that has gained a reference is left and named in the status line.
+ `AGENTS.md`'s closing paragraph becomes the following in full. Only its first sentence changes; its second sentence, "Their presence is not permission to run them locally.", is unchanged and is quoted inside the replacement only so the builder copies a finished paragraph rather than reconstructing one. The replaced sentence names the scan roots rather than a short list of file kinds, because an earlier draft listed "a test, workflow, compose file, script, or document", which is narrower than the rule this work order registers and would have gone false silently the first time a survivor's only referrer was a root `Dockerfile`, `.cmd` or `.toml`, three of which are already live referrers today: "Legacy local launchers and runbooks remain only where another file under the repository's scan roots still references them, as the rule in "Work-order and Git discipline" defines them; the 18 unreferenced ones were removed under WO-168a and remain in Git history. Their presence is not permission
+ to run them locally."
+
+2. **Regression guard (`tests/test_repository_hygiene_launchers.py`, new).** Tests 1-2
+ below, anchored off `__file__` (A3), each scan asserting a non-zero visit count; the literal scan roots of item 1 live in this file. The git-tracked set is obtained by `git ls-files` run against the repository root derived from `__file__`, and a non-zero exit, a missing `git`, or an empty enumeration each fail the test rather than skip it. The registered rule binds every file under `scripts/` while the test enforces over the git-tracked ones; the divergence is deliberate and is the safe direction, since an untracked file cannot be shipped.
+
+**What test 1 registers, stated because it outlives this cleanup.** Test 1 is not a one-off check
+on the removal; it is a standing repository invariant, that every file under `scripts/` must be named by at least one other file under the eleven directory roots or the repository-root files matching the seven patterns of item 1, twenty-two of them at `c6530a9`, counting neither the enforcing test file nor this register.
+Two things follow and are registered here rather than discovered by the next author. First, the
+invariant is weak evidence of life: a basename inside a comment satisfies it, two dead scripts naming each other survive the fixpoint permanently, and it proves nothing about reachability. Second, it is a real constraint on future work: on the post-removal
+tree 38 of the 123 surviving scripts have exactly one referrer (re-derived at `c6530a9` under this item's own matching rule, over git-tracked files, with both record-keeping files excluded; an earlier draft printed 41, which is this same rule counted over all 141 scripts on the pre-removal tree rather than over the 123 survivors on the post-removal one), so a pull request that adds a
+script before its caller, or that deletes a document or a test, can turn the suite red without
+touching `scripts/` at all. **The invariant this work order therefore registers, in `AGENTS.md` rather than here because it
+binds every future pull request and outlives this entry: every file under `scripts/` must be named by at least one **other** file under the scan roots, counting neither the enforcing test file nor this register, in both directions — a pull request that adds
+a script acquires its referrer in the same pull request, and a pull request that removes a script's last referrer, whatever kind of file it is, another script included, either keeps a referrer or removes the script.** There is no allowlist and no escape hatch, deliberately; a
+script that genuinely needs neither is a script that needs a registered reason, which is a work
+order and not a test exemption. The deletion direction is the one that will bite first: 38 of
+the 123 survivors have exactly one referrer, and deleting `DAILY_AUTOMATION_README.md` alone
+would orphan seven scripts in a single step. The three sentences added to `AGENTS.md`'s "Work-order and Git discipline" section are quoted verbatim here, in full, so the builder copies rather than authors registered text. They are one passage and must be added whole, as a single standalone paragraph rather than as bullets, because collapsed a single paragraph matches the literal while three bullets do not, the list separators landing inside the string, and deliberately without a dated `### Amendment` heading of its own: the literal is pinned character for character by test 2, and a dated heading would have to be pinned with it, so the provenance lives in this entry and in the closing paragraph instead; dropping the third sentence, "There is no allowlist.", would fail test 2's in-full-and-exactly-once check and print 0 in the day-after check: "Every file under `scripts/`, at any depth, must be named by at least one **other** file under the repository's scan roots, as `tests/test_repository_hygiene_launchers.py` defines them — its basename appearing in that other file, or, for a `.py` script, an import of its stem — and neither that test file nor `docs/POLYMARKET_CODEX_WORK_ORDERS.md` counts as a referrer. A pull request that adds a script acquires its referrer in the same pull request; a pull request that removes a script's last referrer either keeps a referrer or removes the script. There is no allowlist."
+
+
+### Rejection ledger
+
+**The discipline.** This entry is redrafted after every gate pass. Before each re-gate a row is
+added here for the pass just completed, so the row count equals the number of passes completed, and the heading carries no ordinal of its own — an earlier draft derived one from this row count, which the sibling work order's gate showed relocates the maintenance burden rather than removing it, since the derivation reads as satisfied while both the ledger and the ordinal are wrong. A gate that finds this ledger short by one row has
+found the defect the ledger exists to prevent, and that is a blocking finding rather than a stale
+count. No surface other than this ledger carries a count of the passes on this entry or a claim about what they found; the WO-168 figures in the preamble and in item 1 are historical, fixed at the split, and cannot move; an
+earlier draft kept an inline tally and a character count, and both went stale in consecutive passes.
+1. Five blockers in the lift out of WO-168: the script counts were stale at the commit they named;
+   the sentence written into `AGENTS.md` carried the wrong work-order number; a stale item reference
+   and two post-move paths that do not exist on this entry's tree; a promised record in a file this
+   entry does not touch, which created a two-way merge-order dependency with the sibling; and an
+   exclusion set of three where only two are load-bearing here.
+2. Five blockers: the previous pass's exclusion-count fix was applied at two of four sites and still
+   named the sibling's file as a resolvable token; the figure justifying a standing repository rule
+   was 41 where the rule yields 38; the registered rule was narrower than the invariant the test
+   creates and belonged in `AGENTS.md`; the absence assertion could never fire, because the
+   superseded sentence is line-wrapped between two words; and the referrer-file count was a
+   working-tree artifact that counted gitignored build output inside a scan root.
+3. Three blockers, all in the `AGENTS.md` material: the preamble understated the change at two
+   sites; the registered sentence was not the invariant test 1 asserts and was vacuous as worded,
+   because the enforcing test file lists every surviving basename and sits under a scan root; and
+   the presence check had no whitespace collapse, so it could never pass against a hard-wrapped
+   file.
+4. Four blockers: the passage called one sentence at six sites is three; the whole-file collapse
+   destroyed the structure two checks require; the sentence pinned two counts that nothing
+   maintains and misdescribed the file it points at; and item 1 and the fail-safe prescribed
+   opposite behaviour for the same dispatch condition.
+5. Two blockers and four majors: the bias summary declared one channel both open and closed; the
+   README disclosure was false under either reading of the claim it meant; the character count was
+   stale, because the previous pass's own fixes lengthened the passage; the provenance and tally
+   were stale by one; the closing-paragraph instruction would have duplicated a sentence; and the
+   exclusion delegation left a rename hole that would have made the invariant vacuous in silence.
+6. Two blockers, three majors and ten minors: test 2's first check was ambiguous, one reading
+   failing a compliant build and the other leaving a registered sentence deletable in silence; the
+   absence check's scope was unstated and the consequence claimed for it was false under the
+   entry's own scoping rule; the character count went stale a second consecutive pass and is now
+   removed rather than corrected; the provenance and tally were stale again and misattributed the
+   previous pass; and the exclusion-set parse had no shape rule, the natural one returning three
+   paths rather than two.
+7. Two blockers, four majors and ten minors: this ledger's first written row miscounted the pass that forced it into existence, saying nine minors where ten were issued; the ledger's own scope rule — that no other surface carries a per-pass count or a completeness claim — was false at a preamble sentence that counted gate passes on the sibling and claimed what they found; the dismissal of the earlier 41 figure as unproducible was itself wrong, since 41 is this same rule counted over the pre-removal tree; the not-authorised clause named `AGENTS.md`'s closing sentence, which is the sentence that does not change, so read literally it forbade the change item 1 mandates; test 2's escape sentence attached the absence check's justification to the exactly-once check, leaving the absence check without its own; and the collapse rule claimed never to cross a blank line, which is false of the section region one check uses.
+8. One blocker, one major and six minors: the preamble derived a draft ordinal from the ledger's row count and it was off by one, because the rows count gated drafts and the draft under gate has no row yet — the derived form reading as satisfied while wrong, which is verbatim the failure mode the ledger two lines later says was removed; the narrowed scope rule was still false at one live site in the day-after check, which claimed what a pass on this entry had closed; and six minors — a dangling antecedent in the collapse rule, test 2's four checks not being enumerable as written, an unnamed A10 escape where the scan-root list is pinned by nothing, unqualified draft ordinals in item 1, the `AGENTS.md` passage carrying no provenance, and the dispatch paragraph not repeating the fail-safe subordination.
+9. Two blockers, two majors and eight minors, one blocker of which was not a defect: the ledger's last two rows were appended out of order, so rows 7 and 8 reported each other's passes; the preamble's "no surface carries a draft ordinal at all" was false against four of the sibling's ordinals in item 1; the day-after check's replacement collapse reason was false in a new way, since the sentence it greps for is not in the file today at all; and eight minors. The second blocker, that the pass-7 row overstated its blocker count, was not a defect in this entry: the dispatch brief for that pass gave the gate the sequence 5, 5, 3, 4, 2, 2, 1, 1 where the true sequence is 5, 5, 3, 4, 2, 2, 2, 1, and the gate reasoned correctly from wrong input. The row is left as written and the error is recorded here, because a finding that rests on the drafter's own bad brief must not be allowed to change correct text.
+
+### A11 — bias-direction disclosure
+
+No estimator; no number changes; no gate reads anything this work order writes. **First channel:**
+**the removal decision itself is fail-open in one direction and fail-closed in the other.** An
+unreadable or undecodable file is not a referrer, so a launcher it referenced would still be
+removed; that is the favourable-to-removal direction and it is disclosed rather than argued away.
+It is inert today, because the only files under the scan roots that fail to decode as UTF-8 are
+two gzip archives that can reference nothing. In the other direction the rule is conservative: a
+basename appearing anywhere in any file under the roots, even inside a comment, keeps a launcher
+alive, so the removal set is the smallest the evidence supports rather than the largest.
+**Second channel: the scan-root boundary itself.** A launcher referenced only from outside the
+roots — `data/`, `inputs/`, `outputs/`, `.claude/`, or the six root files matching none of the seven
+patterns — is not seen, so it too is favourable to removal. Checked by hand at `c6530a9`: none of the 18 is named in any of them, and that check is re-run against the dispatch commit alongside the scan. `.pytest_cache/` and
+`.ruff_cache/` are excluded separately and for a different reason: they are regenerated caches
+whose contents are lists of the paths last linted, not references, and `.ruff_cache` does name
+ten of the 18 for exactly that reason. Nothing survives on a lint cache.
+**Third channel, disclosed:** the two record-keeping files excluded from the referrer set are
+excluded because each enumerates the removal candidates for audit, and without the exclusion the
+record would blind the scan it is recorded in. That exclusion makes removal easier, not harder,
+and it is bounded to exactly two named files. Of the three, one is closed by a rule and two are left open in principle: the undecodable-file rule is closed by the fail-safe sentence below, which stops the build on any file it cannot read or decode outside the two recorded archives; the scan-root boundary is inert at `c6530a9` and re-checked at dispatch rather than closed by a rule; and the record-keeping exclusion is bounded to exactly two named files. All three point the same way, towards removing more rather than less, and that is stated rather than argued away; the conservative matching rule is what bounds them.
+
+### Fail-safe sentence (S5)
+
+A launcher that has gained a reference anywhere under the scan roots is not removed; the scan is
+re-run at dispatch against the pre-change tree and only the fixpoint it computes is removed. If the dispatch scan's fixpoint differs from the 18 recorded here, no file outside the intersection is removed, the differing files are named in the status line, and the entry is amended before any further removal; the recorded set is never forced, and the build stops with no pull request opened until the entry is amended. A file under the scan roots that cannot be read or decoded is not a
+referrer, which is fail-open for the removal decision; the dispatch scan therefore stops the build if it meets any file it cannot read or decode, other than the two recorded gzip archives
+`research/premium_poc/data/deribit/BTC_funding_1h.csv.gz` and its `ETH` twin, so the malformed
+branch is stop-and-amend rather than remove-anyway. No runtime path reads any file this work order touches: every compose file and image entrypoint on the VPS path —
+`docker-compose.vps-paper.yml`, `docker-compose.yml`, the `Dockerfile` CMD and
+`Dockerfile.monitor` — together with `scripts/run_vps_ops_scheduler.sh` and every file under
+`.github/workflows/`, names none of the 18; the single CI artifact affected is
+`check_superbru_fixtures.yml`, which is named for a removed script but never invokes it, and the nine legacy compose targets and
+the three independently-referenced analysis scripts are kept, not removed.
+
+### Touch ONLY these files (4 entries)
+
+1. The 18 launchers removed (item 1), one path each.
+2. `AGENTS.md` — the first sentence of the closing paragraph, and a three-sentence passage added to "Work-order and Git discipline".
+3. `tests/test_repository_hygiene_launchers.py` (new).
+4. `docs/POLYMARKET_CODEX_WORK_ORDERS.md` — this entry and its calibration row.
+
+### Enumerated offline tests (S8/A10); each to be confirmed to FAIL with its guard reverted before the pull request is opened
+
+1. `test_every_script_is_referenced` — every path returned by `git ls-files -- scripts/`, recursively and at any depth, is referenced from at least one file under the literal scan roots other than itself, under item 1's corrected matching rule (basename substring, or for a `.py` script an import of its stem); at least 100 scripts visited (141 at `c6530a9`, 123 after removal); the 18 removed names are absent from `scripts/`; the two exclusion paths are parsed from the registered `AGENTS.md` passage by test 2's fourth check rather than restated here, and this test asserts there are exactly two such spans, that both exist in the repository, and that one is this test file's own path relative to the repository root; exactly **two** files are excluded from the referrer set — this test file and `docs/POLYMARKET_CODEX_WORK_ORDERS.md`, the register that enumerates all eighteen basenames — and the test asserts the exclusion set has exactly two members, so recording a removal cannot hide it and the set cannot grow silently; an unreadable or undecodable file is not a referrer (fail-closed: it cannot keep a launcher alive). The test computes the same fixpoint item 1 records and asserts it is empty on the post-removal tree, so a newly orphaned launcher fails it. Four further assertions, because an empty fixpoint alone is satisfied by over-removal as readily as by correct removal: the test carries the literal list of the 123 surviving basenames and asserts every one of them is present under `scripts/`, which subsumes `run_daily_superbru_local.ps1` and the six scripts reachable only through it and the nine legacy compose targets; the count is therefore **at least 123** rather than exactly 123, so a later work order that adds a referenced script need not edit the literal, while deleting any recorded survivor fails. An earlier draft asserted an exact count of 123 plus seven named files, which a builder could satisfy while also deleting `exact_chase.py` and adding one referenced script of their own; at least **400** referrer files are visited (721 git-tracked files at `c6530a9`, 719 of them decoding as UTF-8, and 704 and 702 on the post-change tree; a built working tree also carries seven generated files under the roots, which the rule excludes); and the root list the scan uses is exactly the eleven directories and seven root patterns of item 1, asserted literally — the assertion carries its own copy of the list rather than comparing the constant to itself, so narrowing a root takes two edits in the same file; unlike the exclusion set, that pin is not in registered text, and one pull request editing both would silently narrow the `AGENTS.md` rule, which delegates the roots to this file, because without it dropping `src/`, `.github/`, `examples/`, `notebooks/`, `config/` or `calibration/`, or any of the `*.yaml`, `*.toml`, `*.ini`, `*.cmd` and `Dockerfile*` root patterns, leaves the fixpoint empty and every other assertion green, while `research/` alone among the unused roots is caught, by the UTF-8 set below; and the set of files under the roots that fail to decode as UTF-8 is exactly `{research/premium_poc/data/deribit/BTC_funding_1h.csv.gz, research/premium_poc/data/deribit/ETH_funding_1h.csv.gz}`, which is the assertion A11's inertness claim rests on and which nothing else checks. A second standing constraint follows and is registered rather than discovered: test 1 pins that set to exactly those two archives, so a pull request that adds any file that does not decode as UTF-8, a raster diagram in `docs/` included, must amend the literal in the same pull request.
+2. `test_agents_md_carries_both_registered_amendments` (an earlier draft named this `test_agents_closing_sentence_names_the_removal`, which covered only two of its four checks) — the collapsed last non-empty block of `AGENTS.md` is, character for character, the whole two-sentence replacement paragraph quoted in item 1, so a builder who deleted the closing paragraph and inserted the new sentence anywhere fails, and so does a builder who keeps the new sentence but drops "Their presence is not permission to run them locally.". An earlier draft asserted only that the amended sentence was **present in** the last block, under which that second sentence was pinned by nothing and could be deleted from the canonical instruction file with every check green; the file is first split into blocks on blank lines, and headings are recognised on lines whose first three characters are exactly `## ` or `### `; each check then runs against the block or section it names, with every run of whitespace inside that region collapsed to a single space and the collapsed region then stripped of leading and trailing whitespace, so a block's collapse never crosses a blank line and a section's is bounded by its own heading lines; the two regions the checks name — "the last non-empty block" and "the span from the `## Work-order and Git discipline` line to the first line beginning `### ` after it" — are each well defined. An earlier draft collapsed the whole file at once, which left no paragraphs and no line starts and so destroyed the structure two of these four checks need. The literal "remain only for repository history and regression coverage" appears in no block of the file, each block collapsed separately — the collapse is load-bearing here, because the superseded sentence is line-wrapped between "and" and "regression" in the file as it stands, so an uncollapsed literal check could never fire and would be vacuously true before the change as well as after; the check is over the whole of `AGENTS.md` and not only its last block, which is what fails a builder who appends the new paragraph without deleting the old one; and the three-sentence passage added to "Work-order and Git discipline" is present in full and exactly once — one escape, stated: that check is bounded to the section, so a second copy of the passage placed outside it is not counted — between the `## Work-order and Git discipline` line and the first line beginning `### ` after it, which is tighter than "the next heading of the same level" and excludes that section's two dated amendments. And the two paths test 1 excludes from the referrer set are read out of the registered `AGENTS.md` passage rather than restated in the test file. The passage carries four backticked spans — `scripts/`, `tests/test_repository_hygiene_launchers.py`, `.py` and `docs/POLYMARKET_CODEX_WORK_ORDERS.md`; the two paths are exactly those spans whose content contains a `/` and ends in `.py` or `.md`, and the fourth check parses the passage's backticked spans and hands test 1 the two exclusion paths, test 1 asserting there are exactly two such spans, because the natural shape rule of "ends in `.py` or `.md`" returns three. So widening the exclusion set in the test alone fails: the rule and its guard cannot be moved together by one edit. One seam remains between the two delegations and is closed here: test 1 asserts that both paths parsed out of the passage exist in the repository and that one of them is this test file's own path relative to the repository root, so a rename or move of the test file that does not amend `AGENTS.md` fails loudly instead of leaving the renamed file unexcluded, where — carrying the literal list of all 123 survivors — it would become a referrer for every script and make the invariant vacuous in silence. The collapse is load-bearing for this assertion too: the passage is hard-wrapped across several lines in `AGENTS.md`, so an uncollapsed presence check could never pass, and a builder would resolve it either by putting the whole passage on one unwrapped line in the canonical instruction file or by silently editing registered text.
+
+### Day-after check
+
+Not a runtime change. Owner-runnable on `main` after merge: `test -e scripts/<name>` is false for
+each of the 18 removed names, and true for `scripts/run_daily_superbru_local.ps1` and the six
+scripts reachable only through it; the sandbox run of
+`tests/test_repository_hygiene_launchers.py` is stated in the PR per the 2026-07-27 amendment, and
+the required gate re-runs it when its runner returns (no date can be given for that). The two `AGENTS.md` changes are checked too, because a standing rule binding every future contributor is this work order's most consequential change and nothing else makes it owner-visible: `tr -s '[:space:]' ' ' < AGENTS.md | grep -c -F 'There is no allowlist.'` prints 1, collapsed for the reason test 2 collapses the passage region: the builder hard-wraps the added paragraph, so this sentence may land split across two lines and an uncollapsed literal check would miss a correct build, and `tail -8 AGENTS.md` shows the amended closing paragraph, the extra lines allowing for the builder's wrap width.
+
+**Not authorised by this text:** any change to a gate, threshold, result, or evidence class; any change to registered text other than the first sentence of `AGENTS.md`'s closing paragraph, the three sentences added to `AGENTS.md`'s "Work-order and Git discipline" section, and this entry and its calibration row; any merge; the removal of any file that the scan at dispatch finds referenced; the
+retirement of the legacy compose files.

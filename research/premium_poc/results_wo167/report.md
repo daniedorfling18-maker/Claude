@@ -4,7 +4,7 @@ Completeness scope for unverifiable liquidation status: **perp** — absent perp
 
 This is a historical-class result computed from the committed inputs listed in `manifest.json`. The gate in Lane A is applied to the lower bound of a bootstrap interval minus a haircut of 2.0% per year for bias channels this data cannot measure (slippage beyond the taker fee, the intra-hour liquidation path, venue operational frictions, and selection). **That haircut is a declared assumption, not a measurement.** Unfavourable channels (VIP0 taker fees with no rebate, zero collateral yield, capital at 1.5x notional, no re-leveraging) are not credited back. Nothing here is verification of record, registers a primary, or authorises capital.
 
-Generated at 2026-09-13T04:52:49Z from code revision `6f6634d0d018d15593624dd13fc844d962ffb658`; manifest sha256 `2152b1b4e3fd1a6ffc8f9881c1a7663d33a24e27b8205824d98438c95df2ea50`.
+Generated at 2026-09-13T05:27:07Z from code revision `bf14aa3c382b782421e315b9e10dc1c0f5b388f9`; manifest sha256 `2152b1b4e3fd1a6ffc8f9881c1a7663d33a24e27b8205824d98438c95df2ea50`.
 
 ## Verdicts
 
@@ -32,7 +32,8 @@ Entry boundary 2020-01-06T00:00:00Z, exit boundary 2026-08-31T00:00:00Z (6.65 ye
 | max drawdown, all weeks (peak-to-trough, negative; G3 reads its magnitude) | -0.32% |
 | CVaR 95% weekly (mean loss magnitude in the worst 5% of weeks) | 0.05% |
 | forced liquidations | 0 |
-| open-position periods with missing bars (liquidation unverifiable; G3 requires 0) | 0 |
+| open-position periods with perpetual-side data absent (liquidation unverifiable; G3 requires 0) | 0 |
+| open-position periods rejected for an absent bar on either leg (excluded from every estimator; the WO-166 either-scope count; not read by G3 under the perp scope) | 16 |
 | rebalances | 26 |
 | complete ISO years positive (a year needs >= 45 eligible weeks) | 6 of 6 |
 
@@ -81,7 +82,8 @@ Annualised net on capital 9.91%, point after haircut 7.91%, lower bound after ha
 | max drawdown, all weeks (peak-to-trough, negative) | -5.56% |
 | CVaR 95% weekly (mean loss magnitude in the worst 5% of weeks) | 0.27% |
 | forced liquidations | 0 |
-| open-position periods with missing bars (liquidation unverifiable) | 0 |
+| open-position periods with perpetual-side data absent (liquidation unverifiable) | 0 |
+| open-position periods rejected for an absent bar on either leg (excluded from every estimator; the WO-166 either-scope count; not read by G3 under the perp scope) | 14 |
 | rebalances | 59 |
 | complete ISO years positive (a year needs >= 45 eligible weeks) | 5 of 6 |
 

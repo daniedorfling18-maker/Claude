@@ -1,5 +1,5 @@
 {
-  "code_revision": "6f6634d0d018d15593624dd13fc844d962ffb658",
+  "code_revision": "bf14aa3c382b782421e315b9e10dc1c0f5b388f9",
   "deribit_cross_check": {
     "BTC": {
       "eligible_weeks": 359,
@@ -49,7 +49,7 @@
     "G4_positive_in_enough_qualifying_years": true,
     "lane_a_go": true
   },
-  "generated_at": "2026-09-13T04:52:49Z",
+  "generated_at": "2026-09-13T05:27:07Z",
   "inputs": {
     "data/binance/BTCUSDT_funding_8h.csv": "9f1ad4b47a9cd52590431ed1c4e0b5247f11b9b8e8316a7979855d76ebc8e315",
     "data/binance/BTCUSDT_perp_1h.csv": "41dbc2128896b0022782b0a3afe2f802338c4f8970da06c2c3e6adfb3fa55abc",
@@ -108,6 +108,7 @@
       "max_drawdown_all_weeks": -0.004848993016451919,
       "mean_weekly_return_on_capital": 0.0017473604403462578,
       "rebalances": 11,
+      "rejected_open_periods": 8,
       "share_of_weeks_with_mostly_negative_funding": 0.09221902017291066,
       "sharpe_weekly_annualised": 4.159641430306082,
       "turnover_notional_per_year": 1.0152080302032207,
@@ -145,6 +146,7 @@
       "max_drawdown_all_weeks": -0.007064456959843368,
       "mean_weekly_return_on_capital": 0.0020965850956692618,
       "rebalances": 15,
+      "rejected_open_periods": 8,
       "share_of_weeks_with_mostly_negative_funding": 0.08357348703170028,
       "sharpe_weekly_annualised": 3.7182062709213177,
       "turnover_notional_per_year": 1.1844756466716928,
@@ -251,6 +253,7 @@
         "weeks": 27
       }
     },
+    "rejected_open_periods": 16,
     "sharpe_weekly_annualised": 3.9549811967482076,
     "unverifiable_open_periods": 0,
     "weeks_total": 347,

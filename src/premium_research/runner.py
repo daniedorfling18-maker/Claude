@@ -80,6 +80,11 @@ class Config:
     def gate_level(self) -> float:
         return 1.0 - 2.0 * self.gate_quantile
 
+    @property
+    def discloses_scope(self) -> bool:
+        """True for every configuration other than WO-166's own: the results JSON then names the scope and the rejected-open count."""
+        return self.work_order != WORK_ORDER or self.unverifiable_scope != "either"
+
     def __post_init__(self) -> None:
         if self.unverifiable_scope not in carry.UNVERIFIABLE_SCOPES:
             raise ValueError(f"unknown unverifiable_scope {self.unverifiable_scope!r}")
@@ -234,9 +239,11 @@ def _sma_regime(btc_spot: pd.DataFrame, weekly: pd.DataFrame, *, sma_days: int) 
     return pd.Series(regimes, index=weekly.index)
 
 
-def _asset_summary(weekly: pd.DataFrame, frame: pd.DataFrame, *, years: float) -> dict[str, Any]:
+def _asset_summary(weekly: pd.DataFrame, frame: pd.DataFrame, *, years: float, disclose_scope: bool = False) -> dict[str, Any]:
     eligible = weekly[weekly["eligible"]]
+    extra = {"rejected_open_periods": int(frame["rejected_open"].sum())} if disclose_scope else {}
     return {
+        **extra,
         "weeks_total": int(len(weekly)),
         "eligible_weeks": int(len(eligible)),
         "dropped_incomplete_weeks": int((weekly["periods"] != carry.PERIODS_PER_WEEK).sum()),
@@ -283,13 +290,13 @@ def lane_a(inputs: dict[str, Any], config: Config, *, variant: str, fee_mult: fl
         frame = carry.ledger_frame(ledger)
         weekly = carry.weekly_returns(frame)
         weekly_by_asset[symbol] = weekly
-        per_asset[symbol] = _asset_summary(weekly, frame, years=years)
+        per_asset[symbol] = _asset_summary(weekly, frame, years=years, disclose_scope=config.discloses_scope)
 
     keys = ["iso_year", "iso_week", "week_end_ms"]
     pooled = None
     for symbol, weekly in weekly_by_asset.items():
-        part = weekly[keys + ["return_on_capital", "eligible", "rebalances", "forced_liquidations", "unverifiable_open"]].rename(
-            columns={"return_on_capital": f"r_{symbol}", "eligible": f"e_{symbol}", "rebalances": f"rb_{symbol}", "forced_liquidations": f"fl_{symbol}", "unverifiable_open": f"uv_{symbol}"}
+        part = weekly[keys + ["return_on_capital", "eligible", "rebalances", "forced_liquidations", "unverifiable_open", "rejected_open"]].rename(
+            columns={"return_on_capital": f"r_{symbol}", "eligible": f"e_{symbol}", "rebalances": f"rb_{symbol}", "forced_liquidations": f"fl_{symbol}", "unverifiable_open": f"uv_{symbol}", "rejected_open": f"ro_{symbol}"}
         )
         pooled = part if pooled is None else pooled.merge(part, on=keys, how="inner")
     assert pooled is not None
@@ -355,6 +362,9 @@ def lane_a(inputs: dict[str, Any], config: Config, *, variant: str, fee_mult: fl
             "regime_btc_sma200": regime_cut,
         },
     }
+    if config.discloses_scope:
+        # WO-167 and later: the count G3 would have read under WO-166's "either" scope, so a narrower scope never hides a rejected open period.
+        result["pooled"]["rejected_open_periods"] = int(sum(int(pooled[f"ro_{s}"].sum()) for s in config.symbols))
     if variant == "V0":
         result["gates"] = gates  # V1 is descriptive and never gated: it carries no gate booleans
     return result
@@ -491,8 +501,8 @@ def compute_all(root: Path, *, config: Config, code_revision: str, generated_at:
         "inputs": inputs["files"],
         "parameters": _parameters(config),
     }
-    if config.work_order != WORK_ORDER:
-        # WO-167 and later name the scope in every results JSON; WO-166's committed files must not gain a byte.
+    if config.discloses_scope:
+        # Every configuration other than WO-166's own names the scope in every results JSON; WO-166's committed files must not gain a byte.
         common["unverifiable_scope"] = config.unverifiable_scope
     v0 = {**common, **lane_a(inputs, config, variant="V0")}
     sensitivity = lane_a(inputs, config, variant="V0", fee_mult=2.0)["pooled"]

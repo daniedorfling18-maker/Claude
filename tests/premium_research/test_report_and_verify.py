@@ -291,8 +291,13 @@ def test_wo167_config_writes_its_own_results_directory_and_records_the_scope(tmp
     assert b["work_order"] == "WO-167" and b["unverifiable_scope"] == "perp"
     assert a["pooled"]["unverifiable_open_periods"] == 2 and a["gates"]["G3_drawdown_bounded_and_no_forced_liquidation"] is False
     assert b["pooled"]["unverifiable_open_periods"] == 0 and b["gates"]["G3_drawdown_bounded_and_no_forced_liquidation"] is True
-    for key in ("mean_weekly_return_on_capital", "annualised_return_on_capital", "annualised_lower_bound_after_haircut", "yearly_return_on_capital", "eligible_weeks", "max_drawdown_all_weeks"):
+    for key in ("mean_weekly_return_on_capital", "annualised_return_on_capital", "annualised_after_haircut", "annualised_lower_bound", "annualised_lower_bound_after_haircut", "yearly_return_on_capital", "yearly_eligible_weeks", "eligible_weeks", "max_drawdown_all_weeks", "sharpe_weekly_annualised", "forced_liquidations"):
         assert a["pooled"][key] == b["pooled"][key], key
+    for gate in ("G1_lower_bound_after_haircut_positive", "G2_point_after_haircut_at_least_hurdle", "G4_positive_in_enough_qualifying_years"):
+        assert a["gates"][gate] == b["gates"][gate], gate
+    assert "rejected_open_periods" not in a["pooled"] and b["pooled"]["rejected_open_periods"] == 2  # the either-scope count travels with the perp-scope result
+    assert "rejected for an absent bar on either leg" in (root / "results_wo167" / "report.md").read_text(encoding="utf-8")
+    assert "perpetual-side data absent" in (root / "results_wo167" / "report.md").read_text(encoding="utf-8")
     assert sorted(p.name for p in (root / "results").iterdir()) == sorted(runner.RESULT_FILES)
     text = (root / "results_wo167" / "report.md").read_text(encoding="utf-8")
     assert text.startswith("# WO-167 proof-of-concept results") and "**perp**" in text
@@ -321,3 +326,48 @@ def test_verify_results_selector_recomputes_under_the_right_scope(tmp_path: Path
     assert failures and all(f.startswith("byte difference") for f in failures)
     with pytest.raises(ValueError, match="unknown unverifiable_scope"):
         runner.Config(unverifiable_scope="spot")
+
+
+# Differences the WO-167 pass is registered to produce against WO-166's committed results; anything else is a defect (WO-167 A11).
+WO167_PERMITTED_DIFFERENCES = {
+    "code_revision", "generated_at", "work_order", "unverifiable_scope",
+    "gates.G3_drawdown_bounded_and_no_forced_liquidation", "gates.lane_a_go",
+    "pooled.unverifiable_open_periods", "pooled.rejected_open_periods",
+    "per_asset.BTCUSDT.unverifiable_open_periods", "per_asset.ETHUSDT.unverifiable_open_periods",
+    "per_asset.BTCUSDT.rejected_open_periods", "per_asset.ETHUSDT.rejected_open_periods",
+}
+
+
+def _flatten(payload, prefix=""):
+    out = {}
+    for key, value in payload.items():
+        name = f"{prefix}{key}"
+        if isinstance(value, dict):
+            out.update(_flatten(value, name + "."))
+        else:
+            out[name] = value
+    return out
+
+
+def test_committed_wo167_results_differ_from_wo166_only_where_registered() -> None:
+    root = REPO_ROOT / "research" / "premium_poc"
+    for name in ("carry_v0.json", "carry_v1.json", "vrp.json"):
+        a = _flatten(json.loads((root / "results" / name).read_text(encoding="utf-8")))
+        b = _flatten(json.loads((root / "results_wo167" / name).read_text(encoding="utf-8")))
+        differing = {k for k in set(a) | set(b) if a.get(k, "<absent>") != b.get(k, "<absent>")}
+        assert differing <= WO167_PERMITTED_DIFFERENCES, sorted(differing - WO167_PERMITTED_DIFFERENCES)
+        assert a["manifest_sha256"] == b["manifest_sha256"]
+    v0 = json.loads((root / "results_wo167" / "carry_v0.json").read_text(encoding="utf-8"))
+    assert v0["work_order"] == "WO-167" and v0["unverifiable_scope"] == "perp"
+    assert v0["pooled"]["unverifiable_open_periods"] == 0 and v0["pooled"]["rejected_open_periods"] == 16
+
+
+def test_scope_disclosure_is_keyed_on_the_scope_not_only_the_work_order(tmp_path: Path) -> None:
+    # A Python-API configuration that narrows the scope but keeps WO-166's label must still disclose the scope.
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, funding_level=0.0006, drop_spot_hour=24 * 10 + 7)
+    odd = _scope_config(small_config(), unverifiable_scope="perp", work_order="WO-166", results_dir="results_odd")
+    assert odd.discloses_scope is True and small_config().discloses_scope is False
+    runner.run_all(root, code_revision="x", generated_at="2026-09-13T00:00:00Z", config=odd)
+    payload = json.loads((root / "results_odd" / "carry_v0.json").read_text(encoding="utf-8"))
+    assert payload["unverifiable_scope"] == "perp" and payload["pooled"]["rejected_open_periods"] == 2

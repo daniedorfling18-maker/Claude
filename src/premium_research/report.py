@@ -53,8 +53,17 @@ def _iso(ms: Any) -> str:
         return "n/a"
 
 
-def _pooled_table(pooled: dict[str, Any], *, gated: bool = True, hurdle: float | None = None) -> list[str]:
+def _pooled_table(pooled: dict[str, Any], *, gated: bool = True, hurdle: float | None = None, scope: str | None = None) -> list[str]:
     lb = pooled["lower_bound_gate_level"]
+    g3_suffix = "; G3 requires 0" if gated else ""
+    if scope == "perp":
+        unverifiable_label = f"open-position periods with perpetual-side data absent (liquidation unverifiable{g3_suffix})"
+    else:
+        unverifiable_label = f"open-position periods with missing bars (liquidation unverifiable{g3_suffix})"
+    rejected_rows: list[str] = []
+    if scope is not None:  # WO-167 and later: the WO-166 \"either\" count is always shown beside the scoped one
+        not_read = "; not read by G3 under the perp scope" if scope == "perp" else ""
+        rejected_rows = [f"| open-position periods rejected for an absent bar on either leg (excluded from every estimator; the WO-166 either-scope count{not_read}) | {pooled.get('rejected_open_periods', 'n/a')} |"]
     g1_label = "G1 quantity: that lower bound annualised minus the haircut" if gated else "lower bound annualised minus the haircut (descriptive; V1 is never gated)"
     g2_label = "G2 quantity: point estimate minus the declared" if gated else "point estimate minus the declared"
     margin_rows: list[str] = []
@@ -85,7 +94,8 @@ def _pooled_table(pooled: dict[str, Any], *, gated: bool = True, hurdle: float |
         f"| max drawdown, all weeks (peak-to-trough, negative{'; G3 reads its magnitude' if gated else ''}) | {_pct(pooled['max_drawdown_all_weeks'])} |",
         f"| CVaR 95% weekly (mean loss magnitude in the worst 5% of weeks) | {_pct(pooled['cvar_95_weekly'])} |",
         f"| forced liquidations | {pooled['forced_liquidations']} |",
-        f"| open-position periods with missing bars (liquidation unverifiable{'; G3 requires 0' if gated else ''}) | {pooled['unverifiable_open_periods']} |",
+        f"| {unverifiable_label} | {pooled['unverifiable_open_periods']} |",
+        *rejected_rows,
         f"| rebalances | {pooled['rebalances']} |",
         f"| complete ISO years positive (a year needs >= 45 eligible weeks) | {pooled['positive_complete_years']} of {len(pooled['complete_years'])} |",
     ]
@@ -133,7 +143,8 @@ def render_report(v0: dict[str, Any], v1: dict[str, Any], b: dict[str, Any]) -> 
     lines.append("")
     lines.append(f"Entry boundary {_iso(v0['span']['entry_boundary_ms'])}, exit boundary {_iso(v0['span']['exit_boundary_ms'])} ({_num(v0['span']['years'], 2)} years).")
     lines.append("")
-    lines.extend(_pooled_table(v0["pooled"], gated=True, hurdle=float(v0["parameters"]["g2_hurdle"])))
+    scope = v0.get("unverifiable_scope")
+    lines.extend(_pooled_table(v0["pooled"], gated=True, hurdle=float(v0["parameters"]["g2_hurdle"]), scope=scope))
     lines.append("")
     lines.extend(_yearly_table(v0["pooled"]["yearly_return_on_capital"], label="pooled net return on capital (eligible weeks only)"))
     lines.append("")
@@ -161,7 +172,7 @@ def render_report(v0: dict[str, Any], v1: dict[str, Any], b: dict[str, Any]) -> 
     lines.append("")
     lines.append("### V1 (conditional entry; descriptive, never gated)")
     lines.append("")
-    lines.extend(_pooled_table(v1["pooled"], gated=False))
+    lines.extend(_pooled_table(v1["pooled"], gated=False, scope=scope))
     lines.append("")
     lines.append("### Deribit cross-check (coin-margined, funding only; descriptive)")
     lines.append("")

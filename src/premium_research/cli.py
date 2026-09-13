@@ -34,7 +34,7 @@ import pandas as pd
 
 from . import binance_vision, deribit_history
 from .manifest import ManifestEntry, build_manifest, sha256_bytes, verify_manifest, write_manifest
-from .runner import BINANCE_END_MONTH, BINANCE_START_MONTH, DERIBIT_FUNDING_START_MS, DERIBIT_INSTRUMENTS, LANE_B_START_MS, SPAN_END_MS, SYMBOLS
+from .runner import BINANCE_END_MONTH, BINANCE_START_MONTH, CONFIGS, DERIBIT_FUNDING_START_MS, DERIBIT_INSTRUMENTS, LANE_B_START_MS, SPAN_END_MS, SYMBOLS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]  # src/premium_research/cli.py -> repository root (holds pyproject.toml)
 DEFAULT_ROOT = REPO_ROOT / "research" / "premium_poc"
@@ -285,10 +285,10 @@ def build_parser() -> argparse.ArgumentParser:
     verify.set_defaults(func=_cmd_verify_manifest)
     run = sub.add_parser("run", help="compute Lane A and Lane B from the committed inputs")
     run.add_argument("--force", action="store_true", help="replace an existing results directory")
-    run.add_argument("--work-order", choices=("WO-166", "WO-167"), default="WO-166", help="registered configuration to run (WO-167: perpetual-side completeness scope, results_wo167/)")
+    run.add_argument("--work-order", choices=tuple(CONFIGS), default="WO-166", help="registered configuration to run (WO-167: perpetual-side completeness scope, results_wo167/)")
     run.set_defaults(func=_cmd_run)
     verify_results_cmd = sub.add_parser("verify-results", help="recompute and byte-compare the committed results")
-    verify_results_cmd.add_argument("--work-order", choices=("WO-166", "WO-167"), default="WO-166", help="which committed results to verify, under that work order's registered configuration")
+    verify_results_cmd.add_argument("--work-order", choices=tuple(CONFIGS), default="WO-166", help="which committed results to verify, under that work order's registered configuration")
     verify_results_cmd.set_defaults(func=_cmd_verify_results)
     return parser
 

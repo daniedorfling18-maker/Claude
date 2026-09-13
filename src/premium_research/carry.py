@@ -153,8 +153,9 @@ class Ledger:
     rebalances: list[int] = field(default_factory=list)
     forced_liquidations: list[int] = field(default_factory=list)
     unverifiable_open: list[int] = field(default_factory=list)
+    rejected_open: list[int] = field(default_factory=list)  # open position inside a rejected period, under every scope (the WO-166 "either" count)
 
-    def append(self, boundary: int, wealth: float, *, funding: float = 0.0, fees: float = 0.0, traded: float = 0.0, open: bool, flagged: bool = False, rebalanced: int = 0, liquidated: int = 0, unverifiable: int = 0) -> None:
+    def append(self, boundary: int, wealth: float, *, funding: float = 0.0, fees: float = 0.0, traded: float = 0.0, open: bool, flagged: bool = False, rebalanced: int = 0, liquidated: int = 0, unverifiable: int = 0, rejected: int = 0) -> None:
         self.boundary_ms.append(int(boundary))
         self.wealth.append(float(wealth))
         self.funding_received.append(float(funding))
@@ -165,6 +166,7 @@ class Ledger:
         self.rebalances.append(int(rebalanced))
         self.forced_liquidations.append(int(liquidated))
         self.unverifiable_open.append(int(unverifiable))
+        self.rejected_open.append(int(rejected))
 
 
 def _check_prices(spot_price: float, perp_price: float) -> None:
@@ -292,17 +294,20 @@ def simulate(table: pd.DataFrame, *, variant: str, start_ms: int, end_ms: int, c
         # WO-167 scope: this period's liquidation check is unverifiable only if one of its perpetual
         # highs is absent or the perpetual close at its start boundary (the previous row) is absent.
         perp_incomplete = bool(row["high_partial"]) or prev_perp_close_missing
-        prev_perp_close_missing = bool(row.get("perp_close_missing", row["close_missing"]))
+        prev_perp_close_missing = bool(row["perp_close_missing"])  # strict: a table without the per-leg flag is not a boundary table
 
         if bool(row["close_missing"]):
             pending_rates.append(rate)
             # An open position inside a period with missing bars has unverifiable liquidation status.
             merged_unverifiable = int(open_at_start and (perp_incomplete if perp_only else True))
-            ledger.append(boundary, position.wealth(position.last_spot) if position.open else position.cash, open=position.open, flagged=True, unverifiable=merged_unverifiable)
+            ledger.append(boundary, position.wealth(position.last_spot) if position.open else position.cash, open=position.open, flagged=True, unverifiable=merged_unverifiable, rejected=int(open_at_start))
             continue
 
         flagged = pending_flag or bool(pending_rates)
         unverifiable = int(open_at_start and (perp_incomplete if perp_only else flagged))
+        rejected = int(open_at_start and flagged)
+        if open_at_start and not math.isfinite(pending_high):
+            unverifiable = 1  # no intra-period perpetual high to check against: liquidation status is unverifiable under every scope
 
         if position.open:
             m0 = position.margin_ratio(position.last_perp)
@@ -341,7 +346,7 @@ def simulate(table: pd.DataFrame, *, variant: str, start_ms: int, end_ms: int, c
         pending_rates = []
         pending_high = float("nan")
         pending_flag = False
-        ledger.append(boundary, position.wealth(spot_close), funding=funding, fees=fees, traded=traded, open=position.open, flagged=flagged, rebalanced=rebalanced, liquidated=liquidated, unverifiable=unverifiable)
+        ledger.append(boundary, position.wealth(spot_close), funding=funding, fees=fees, traded=traded, open=position.open, flagged=flagged, rebalanced=rebalanced, liquidated=liquidated, unverifiable=unverifiable, rejected=rejected)
     return ledger
 
 
@@ -361,6 +366,7 @@ def ledger_frame(ledger: Ledger, *, capital: float = CAPITAL_PER_NOTIONAL) -> pd
             "rebalances": ledger.rebalances,
             "forced_liquidations": ledger.forced_liquidations,
             "unverifiable_open": ledger.unverifiable_open,
+            "rejected_open": ledger.rejected_open,
         }
     )
     frame["period_return_on_notional"] = frame["wealth"].diff().fillna(0.0)
@@ -399,6 +405,7 @@ def weekly_returns(frame: pd.DataFrame) -> pd.DataFrame:
             rebalances=("rebalances", "sum"),
             forced_liquidations=("forced_liquidations", "sum"),
             unverifiable_open=("unverifiable_open", "sum"),
+            rejected_open=("rejected_open", "sum"),
             week_end_ms=("boundary_ms", "max"),
             negative_funding_periods=("funding_received", lambda s: int((s < 0).sum())),
         )

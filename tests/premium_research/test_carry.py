@@ -33,6 +33,8 @@ def _table(n_boundaries: int, *, rate=0.0001, perp=100.0, spot=100.0, high=None,
             "perp_high": seq(high, perp_seq),
             "high_hours": [8] * n_boundaries,
             "close_missing": [False] * n_boundaries,
+            "perp_close_missing": [False] * n_boundaries,
+            "spot_close_missing": [False] * n_boundaries,
             "high_partial": [False] * n_boundaries,
         }
     )
@@ -255,6 +257,7 @@ def test_boundary_table_flags_each_leg_separately() -> None:
     table = carry.boundary_table(funding, perp_gap, spot)
     assert table["perp_close_missing"].tolist() == [False, True, False]
     assert table["spot_close_missing"].tolist() == [False, False, False]
+    assert table["close_missing"].tolist() == [False, True, False]
     assert table["high_partial"].tolist() == [True, True, False]  # row 0 has one hour; row 1 lost one of its eight
 
 
@@ -304,3 +307,32 @@ def test_unknown_scope_aborts() -> None:
     table = _table(3)
     with pytest.raises(carry.CarryInputError, match="unknown unverifiable_scope"):
         carry.simulate(table, variant="V0", start_ms=int(table["boundary_ms"].iloc[0]), end_ms=int(table["boundary_ms"].iloc[-1]), unverifiable_scope="spot")
+
+
+def test_non_finite_high_with_open_position_is_unverifiable_under_both_scopes() -> None:
+    # Unreachable from boundary_table (a NaN high always comes with high_partial=True), but simulate is public:
+    # an open position with no intra-period high to check against must not read as verified under any scope.
+    for scope in ("either", "perp"):
+        table = _table(6)
+        table.loc[3, "perp_high"] = float("nan")
+        frame = _run(table, unverifiable_scope=scope)
+        assert frame["unverifiable_open"].tolist() == [0, 0, 0, 1, 0, 0], scope
+        assert frame["rejected_open"].sum() == 0, scope  # not a rejected period: the close is present and high_partial is False
+        assert frame["forced_liquidations"].sum() == 0
+
+
+def test_rejected_open_is_the_either_scope_count_under_every_scope() -> None:
+    table = _table(10)
+    table.loc[5, "spot_close"] = float("nan")
+    table.loc[5, "close_missing"] = True
+    table.loc[5, "spot_close_missing"] = True
+    either = _run(table, unverifiable_scope="either")
+    perp = _run(table, unverifiable_scope="perp")
+    assert either["unverifiable_open"].tolist() == perp["rejected_open"].tolist() == either["rejected_open"].tolist()
+    assert int(either["unverifiable_open"].sum()) == 2 and int(perp["unverifiable_open"].sum()) == 0
+
+
+def test_table_without_per_leg_flags_is_refused() -> None:
+    table = _table(4).drop(columns=["perp_close_missing"])
+    with pytest.raises(KeyError):
+        _run(table, unverifiable_scope="perp")

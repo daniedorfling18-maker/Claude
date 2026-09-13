@@ -1962,3 +1962,129 @@ In a fresh clone of the branch: `verify-manifest`, `verify-results` and
 `results/carry_v0.json`; its G1, G2 and G4 quantities equal WO-166's to the last digit; the
 report's verdict lines match the gate booleans; every hash cited above resolves on the branch.
 Any future artifact citing this GO must name WO-167 and the results directory as regenerated at `acc5f76` (first pass `bf14aa3`; disclosure regeneration `2131825`), whose recorded `code_revision` `bd560fb` reproduces the files.
+
+## 2026-09-13 — Registered result (historical class): WO-170's corrected funding-carry pass — Lane A GO on the registered basis, and why that GO is weaker than it reads
+
+WO-170 was registered to correct how the funding-carry research measures itself, not to re-run
+the experiment. It exported the ledger's own cash, collateral, inventory and NAV path at every
+8-hour boundary; moved G3's drawdown onto that path; stated the price and return bases in the
+artifact instead of leaving them implicit; added fixed recent-period cuts; fixed the realised-
+variance window (721 closes give 720 return intervals, not 719); and reconciled every leaf of
+the new results against WO-167's committed files, aborting on any difference no registered rule
+explains. One pass was run. `research/premium_poc/results_wo170/` holds nine files.
+
+### The result
+
+**Lane A (V0, always on): GO** — G1 3.93%, G2 7.99%, G3 pass, G4 6 of 6. Every gate quantity is
+identical to WO-167's to the last digit; the reconciliation matched 49, 49 and 1,112 differing
+leaves across the three files to a registered reason and found nothing unexplained.
+**Lane B: GO** (existence only), with 66 of 66 windows accepted per currency and every window
+gaining exactly the one return interval the realignment predicted.
+
+The correction changed the risk reading, not the return reading:
+
+| quantity | WO-166/167 basis | WO-170 NAV basis |
+|---|---|---|
+| max drawdown, pooled | 0.322% (weekly increments on inception capital) | **0.488%** (the ledger's own NAV path) |
+| max drawdown, BTCUSDT | 0.48% | 0.85% |
+| max drawdown, ETHUSDT | 0.71% | 0.52% |
+
+The NAV-path figure is **larger**, not smaller, and it reverses the per-asset ordering. The
+correction made G3 stricter. The A11 disclosure said the direction was not known before the run;
+it is now recorded, and it ran against the drafting intuition.
+
+### What the corrected artifact says about the headline return
+
+The return basis is `simple_on_inception_capital`: weekly P&L divided by the fixed 1.5 units of
+capital committed at inception, annualised by multiplying the mean weekly figure by 52. WO-170
+registered that basis explicitly and computed two others beside it. They do not agree, and the
+disagreement is the size of the margin:
+
+| basis | annualised | after the declared 2.0 pp haircut | against the 6.0% hurdle |
+|---|---|---|---|
+| 52 x mean weekly return on inception capital (the gated basis) | 9.99% | 7.99% | clears by 1.99 pp |
+| CAGR of the ledger's NAV path | 8.02% | 6.02% | clears by 2.3 basis points |
+| 52 x mean weekly return on NAV | 7.65% | 5.65% | **fails** |
+
+Pooled NAV runs from 3.0 to 5.014 over the span, a time-average of 4.374 against the 3.0 the
+gate divides by. The gated basis is the registered one and it was not changed after the fact —
+but the 1.99 pp margin is a property of the denominator, and on the only basis commensurable
+with the hurdle's own construction (a compounding riskless yield plus a spread) the margin is
+2.3 basis points.
+
+The premium has also decayed. From the committed ledgers, by era, on the gated basis:
+
+| window | eligible weeks | annualised | after haircut |
+|---|---|---|---|
+| 2020-2021 | 100 | 23.17% | 21.17% |
+| 2022-2026 | 243 | 4.57% | 2.57% |
+| last 104 eligible weeks | 104 | 4.37% | 2.37% |
+| last 52 eligible weeks (2025-W36 to 2026-W35) | 52 | 2.29% | 0.29% |
+
+The rolling 52-week series the artifact publishes runs from 1.14% to 32.40% and ends at 2.29%.
+The regime cut in the same file reads 15.6% annualised in weeks with BTC above its 200-day SMA
+against 1.81% below it, with 39% of eligible weeks below. Lane B has decayed on the same shape:
+pooled mean variance risk premium by window-start year runs +3272, +2462, +581, +549, **-168**,
++9 for 2021 through 2026, and G5 passes at exactly its 3-of-4 minimum.
+
+### What this record establishes, and what it does not
+
+It establishes that a funding-carry premium existed on Binance BTC and ETH perpetuals over
+2020-01 to 2026-08, that the ledger accounting is sound (every change in NAV is explained by
+mark-to-market, funding received and fees paid, to 3e-15 over 7,288 boundaries per ledger), that
+the committed results reproduce byte-for-byte from a fresh clone, and that the four registered
+gates pass on the registered basis.
+
+It does not establish that the premium is present now. The defensible reading of this artifact
+is: **a funding-carry premium existed on these two symbols in 2020-2021 and in bull regimes, and
+has decayed towards cash-like levels by 2025-2026.** "9.99% a year, GO" is the full-span number
+and is not, on its own, a forward claim. Three choices all point the same way and are recorded
+here together: the GO survives G3 only under WO-167's completeness rule, which was narrowed
+after that same gate failed (running WO-170's exact configuration with WO-166's `"either"` scope
+gives 16 unverifiable periods, G3 False and Lane A NO-GO, with every other leaf identical); it
+clears G2 by 1.99 pp only on the inception-capital denominator; and the point estimate blends
+100 weeks at 23.17% with 243 weeks at 4.57%, a composition effect of 5.4 pp a year against a
+declared haircut of 2.0 pp that names sample composition as one of the six channels it covers.
+
+Also unestablished: capacity (the study is unit-normalised and bounds no size), survivorship
+(BTC and ETH are the only symbols in the tree, so the asset-selection channel cannot be sized
+from it), and the simulated structure's fidelity — retained margin profit re-levers the notional
+from 1.0 to as much as 1.88, so capital per notional sits below the registered 1.5 on 20.5% of
+BTC boundaries and the median margin ratio is 0.88 rather than 0.50. The zero-forced-liquidation
+result is therefore a statement about a heavily over-collateralised account. No paper or live
+evidence exists. WO-67's P1-P5 are untouched and funding remains closed.
+
+### Build delta 1, applied after the independent reviews
+
+The line audit found that replacing G3's basis selector with a constant left all 91 tests and
+`verify-results` green, because both bases pass on this data: the WO's one behavioural change was
+pinned by nothing. The red team found that the registered NAV identity is an algebraic tautology
+(`nav = cash + margin + spot_value` and `wealth = q x spot + margin + cash` are the same three
+terms reassociated) and demonstrated a single-site credit of phantom collateral yield inside the
+state machine that raised the annualised return from 7.10% to 11.46% with the check silent; and
+that a spot close of 0.0 or -1.0 passed every input guard, fabricated a 14.1-point NAV drawdown
+that G3 absorbed, and left the annualised return bit-identical, because weekly return on capital
+is a telescoping sum and any corruption that reverses inside the week is invisible to G1, G2 and
+G4. Four guards were added, all fail-closed and none able to admit data or raise a gate reading:
+the registered test 4 that was missing, a test that puts the G3 threshold between the two
+drawdown magnitudes so the gate must flip with the basis, an asserted self-financing identity
+with the phantom-yield mutation as its test, and a strict-positivity check on price columns with
+signed columns exempt. All three committed result sets still verify byte-for-byte, so no number
+in this record moved. The remaining findings — the return denominator, the era decay, the
+inherited completeness rule and the re-levering — are conclusion findings, not defects; changing
+a registered estimator after results exist would be snooping, so they are recorded here and are
+the subject of a separate work order, not of an edit to this one.
+
+### Day-after check
+
+In a fresh clone of the branch: `verify-manifest`, `verify-results`, `verify-results --work-order
+WO-167` and `verify-results --work-order WO-170` all pass; `results_wo170/carry_v0.json` records
+`work_order = "WO-170"`, `drawdown_basis = "nav"`, `rv_alignment = "return_intervals"`, the six
+`bases` strings and the same `manifest_sha256` as `results/carry_v0.json`; `reconciliation.json`
+lists every differing leaf with a registered reason and no unexplained leaf; the four ledger CSVs
+satisfy both the NAV identity and the self-financing identity. As of 2026-09-13 the required
+gate's self-hosted runner is still offline, with the branch's last gate run and an owner-dispatched
+VPS paper deploy on `main` both queued since 2026-09-12. Under the GLOBAL RULE, WO-170 counts as
+registered only when that gate runs and its squash-merge lands; until then this is a sandbox
+result and not verification of record. Nothing here authorises paper trading, live trading, or
+capital. `paper_trading_invoked=false`, `live_trading_invoked=false`.

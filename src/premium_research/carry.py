@@ -59,7 +59,10 @@ CAPITAL_PER_NOTIONAL = 1.0 + MARGIN_FRACTION
 MAINTENANCE_MARGIN = 0.005
 REBALANCE_MARGIN_RATIO = 0.25
 
-NAV_IDENTITY_TOLERANCE = 1e-12  # WO-170: nav and wealth are the same three float64 terms in a different association order (true gap <= a few x 2.2e-16 on O(1) values)
+NAV_IDENTITY_TOLERANCE = 1e-12
+# WO-170 delta 1: the conservation check runs on absolute USD-per-notional flows, so its
+# floor is float64 rounding accumulated over a period, not the NAV identity's exact reassociation.
+SELF_FINANCING_TOLERANCE = 1e-9  # WO-170: nav and wealth are the same three float64 terms in a different association order (true gap <= a few x 2.2e-16 on O(1) values)
 
 V1_LOOKBACK = 3
 V1_ENTRY_ANNUALISED = 0.08
@@ -402,6 +405,7 @@ def ledger_frame(ledger: Ledger, *, capital: float = CAPITAL_PER_NOTIONAL) -> pd
     if not bool(np.all(gap <= NAV_IDENTITY_TOLERANCE)):
         worst = int(np.nanargmax(np.where(np.isfinite(gap), gap, np.inf)))
         raise CarryInputError(f"NAV identity violated at boundary {int(frame['boundary_ms'].iloc[worst])}: nav {frame['nav'].iloc[worst]!r} vs wealth {frame['wealth'].iloc[worst]!r}")
+    _assert_self_financing(frame)
     nav = frame["nav"].to_numpy(dtype=float)
     prev = np.concatenate(([float("nan")], nav[:-1]))
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -410,6 +414,53 @@ def ledger_frame(ledger: Ledger, *, capital: float = CAPITAL_PER_NOTIONAL) -> pd
     ret[0] = 0.0  # the entry row carries no period, mirroring period_return_on_capital's diff().fillna(0.0)
     frame["period_return_on_nav"] = ret
     return frame
+
+
+def _assert_self_financing(frame: pd.DataFrame) -> None:
+    """WO-170 delta 1: the identity the NAV check could not see.
+
+    ``nav = cash + margin + spot_qty x spot_mark`` and ``wealth = q x spot + margin
+    + cash`` are the same three terms reassociated, so the NAV assertion is an
+    algebraic tautology: it fires only if the exported ledger is mutated after the
+    fact. The build review demonstrated a single-site credit of phantom collateral
+    yield inside the state machine that raised the annualised return from 7.10% to
+    11.46% with the NAV check silent. This asserts CONSERVATION instead — every
+    change in NAV must be explained by the position's mark-to-market, the funding it
+    received and the fees it paid, with no unexplained source of value:
+
+        dNAV_t = q_{t-1} x [(S_t - S_{t-1}) - (P_t - P_{t-1})] + funding_t - fees_t
+
+    Two kinds of transition are skipped. Where either mark is absent or carried
+    forward, the ledger has no price at which to state the mark-to-market, and those
+    periods are excluded from every estimator anyway. Where either endpoint traded
+    (entry, exit or a resize), the fee is booked to the row that decided the trade
+    while its NAV effect lands on the next, so the one-step form does not apply; on
+    the committed ledgers that is 22 transitions out of 7,288 per ledger, and the
+    identity is asserted on every other one.
+    """
+    qty = frame["spot_qty"].to_numpy(dtype=float)
+    spot = frame["spot_mark"].to_numpy(dtype=float)
+    perp = frame["perp_mark"].to_numpy(dtype=float)
+    nav = frame["nav"].to_numpy(dtype=float)
+    funding = frame["funding_received"].to_numpy(dtype=float)
+    fees = frame["fees_paid"].to_numpy(dtype=float)
+    carried = frame["marks_carried_forward"].to_numpy(dtype=bool)
+    traded = frame["traded_notional"].to_numpy(dtype=float) != 0.0
+    if nav.size < 2:
+        return
+    held = qty[:-1]
+    priced = np.isfinite(spot[:-1]) & np.isfinite(spot[1:]) & np.isfinite(perp[:-1]) & np.isfinite(perp[1:])
+    checkable = priced & ~carried[1:] & ~carried[:-1] & ~traded[1:] & ~traded[:-1]
+    expected = held * ((spot[1:] - spot[:-1]) - (perp[1:] - perp[:-1])) + funding[1:] - fees[1:]
+    gap = np.abs((nav[1:] - nav[:-1]) - expected)
+    gap = np.where(checkable, gap, 0.0)
+    if not bool(np.all(gap <= SELF_FINANCING_TOLERANCE)):
+        worst = int(np.argmax(gap))
+        boundary = int(frame["boundary_ms"].iloc[worst + 1])
+        raise CarryInputError(
+            f"self-financing identity violated at boundary {boundary}: NAV moved by "
+            f"{nav[worst + 1] - nav[worst]!r} but mark-to-market, funding and fees explain {expected[worst]!r}"
+        )
 
 
 def _compound(series: pd.Series) -> float:

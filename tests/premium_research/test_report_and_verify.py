@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -618,3 +619,112 @@ def test_wo167_bytes_unchanged_by_the_new_switches_on_a_synthetic_tree(tmp_path:
     assert {p.name: _sha(p) for p in (root / "results_wo167").iterdir()} == WO167_SYNTHETIC_SHA256
     runner.run_all(root, code_revision="x", generated_at=CLOCK, config=small_config())
     assert {p.name: _sha(p) for p in (root / "results").iterdir()} == WO166_SYNTHETIC_SHA256
+
+
+def test_g3_reads_the_nav_path_under_the_nav_basis(tmp_path: Path) -> None:
+    """WO-170's single behavioural change, pinned so it can fail.
+
+    Added after the build line audit found that replacing the basis selector with
+    a constant left all 91 tests and `verify-results` green: on the committed data
+    both bases pass, so no artifact could show the gate had ever read the ledger's
+    NAV path. Here the threshold sits BETWEEN the two magnitudes, so G3 must flip
+    with the basis and only with the basis."""
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root)
+    base = small_config()
+    inputs = runner.load_inputs(root, runner.Config(**{**base.__dict__, "work_order": "WO-170", "drawdown_basis": "nav", "rv_alignment": "return_intervals", "results_dir": "results_g3", "result_files": tuple(runner.WO170_RESULT_FILES)}))
+
+    def lane_a(basis: str, threshold: float) -> dict:
+        config = runner.Config(**{
+            **base.__dict__,
+            "work_order": "WO-170",
+            "drawdown_basis": basis,
+            "rv_alignment": "return_intervals",
+            "results_dir": "results_g3",
+            "result_files": tuple(runner.WO170_RESULT_FILES),
+            "g3_max_drawdown": threshold,
+        })
+        return runner._lane_a_full(inputs, config, variant="V0")[0]
+
+    loose = lane_a("nav", 0.20)
+    legacy_dd = abs(float(loose["pooled"]["max_drawdown_all_weeks"]))
+    nav_dd = abs(float(loose["pooled"]["max_drawdown_nav"]))
+    # The premise of the test: on this tree the NAV path draws down and the
+    # week-end increments do not, so a threshold between them separates the bases.
+    assert legacy_dd < 0.0005 < nav_dd < 0.20
+    assert loose["pooled"]["forced_liquidations"] == 0 and loose["pooled"]["unverifiable_open_periods"] == 0
+
+    strict_nav = lane_a("nav", 0.0005)
+    strict_legacy = lane_a("compounded_weekly", 0.0005)
+    assert strict_nav["gates"]["G3_drawdown_bounded_and_no_forced_liquidation"] is False
+    assert strict_legacy["gates"]["G3_drawdown_bounded_and_no_forced_liquidation"] is True
+    assert loose["gates"]["G3_drawdown_bounded_and_no_forced_liquidation"] is True
+    # Nothing but G3 moves with the basis.
+    for key in ("G1_lower_bound_after_haircut_positive", "G2_point_after_haircut_at_least_hurdle", "G4_positive_in_enough_qualifying_years"):
+        assert strict_nav["gates"][key] == strict_legacy["gates"][key]
+    assert strict_nav["pooled"]["max_drawdown_all_weeks"] == strict_legacy["pooled"]["max_drawdown_all_weeks"]
+    assert strict_nav["pooled"]["max_drawdown_nav"] == strict_legacy["pooled"]["max_drawdown_nav"]
+
+
+def test_unknown_drawdown_basis_aborts_before_any_period_is_computed() -> None:
+    """WO-170 fail-safe: the switch is validated at construction, not at first use."""
+    base = small_config()
+    with pytest.raises(ValueError, match="drawdown_basis"):
+        runner.Config(**{**base.__dict__, "drawdown_basis": "nav_path"})
+    with pytest.raises(ValueError, match="rv_alignment"):
+        runner.Config(**{**base.__dict__, "rv_alignment": "window_open_times"})
+
+
+def test_reconciliation_match_precedence_rules() -> None:
+    """WO-170 item 7: exact beats prefix, the longest prefix wins, and two entries of
+    the same precedence abort. The registered tables contain no overlap today, so
+    without this the rules are inert and a future table amendment could silently
+    change which reason a leaf is attributed to."""
+    exact_and_prefix = [("exact", "a.b.c", "exact reason"), ("prefix", "a.b.", "prefix reason")]
+    assert runner._match_reason("a.b.c", exact_and_prefix) == "exact reason"
+    assert runner._match_reason("a.b.d", exact_and_prefix) == "prefix reason"
+    nested = [("prefix", "a.", "short prefix"), ("prefix", "a.b.", "long prefix")]
+    assert runner._match_reason("a.b.c", nested) == "long prefix"
+    assert runner._match_reason("a.z", nested) == "short prefix"
+    with pytest.raises(RuntimeError, match="unexplained difference"):
+        runner._match_reason("zzz", nested)
+    with pytest.raises(RuntimeError, match="two exact entries"):
+        runner._match_reason("a.b.c", [("exact", "a.b.c", "one"), ("exact", "a.b.c", "two")])
+    with pytest.raises(RuntimeError, match="two prefixes of equal length"):
+        runner._match_reason("a.b.c", [("prefix", "a.b", "one"), ("prefix", "a.c", "two"), ("prefix", "a.x", "three"), ("prefix", "a.b", "four")])
+    # The registered tables must contain no such overlap today.
+    for table in runner._reconciliation_tables(runner.WO170_CONFIG).values():
+        exacts = [key for kind, key, _ in table if kind == "exact"]
+        prefixes = [key for kind, key, _ in table if kind == "prefix"]
+        assert len(exacts) == len(set(exacts))
+        assert len(prefixes) == len(set(prefixes))
+
+
+def test_non_positive_price_is_refused_before_any_period_is_computed(tmp_path: Path) -> None:
+    """WO-170 delta 1: finite is not enough.
+
+    The build review set one BTCUSDT spot close at a boundary hour to 0.0 and then to
+    -1.0. Both passed every guard, fabricated a 14.1-point NAV drawdown that G3
+    absorbed without comment, and left the annualised return bit-identical, because
+    weekly `return_on_capital` is a telescoping sum of wealth increments: a boundary
+    corruption that reverses inside the week is invisible to G1, G2 and G4. Prices are
+    positive by definition, so the loader now refuses them."""
+    for bad in (0.0, -1.0):
+        root = tmp_path / f"tree_{bad}"
+        build_synthetic_root(root)
+        path = root / "data" / "binance" / "BTCUSDT_spot_1h.csv"
+        frame = pd.read_csv(path)
+        frame.loc[24, "close"] = bad
+        payload = frame.to_csv(index=False, lineterminator="\n").encode("utf-8")
+        path.write_bytes(payload)
+        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+        for entry in manifest["entries"]:
+            if entry["path"].endswith("BTCUSDT_spot_1h.csv"):
+                entry["sha256"] = hashlib.sha256(payload).hexdigest()
+        (root / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        with pytest.raises(RuntimeError, match="non-positive price"):
+            runner.load_inputs(root, small_config())
+    # Signed columns are untouched: a negative funding rate is ordinary data.
+    root = tmp_path / "negative_funding"
+    build_synthetic_root(root, funding_level=-0.0002)
+    assert runner.load_inputs(root, small_config())["files"]

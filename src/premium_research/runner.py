@@ -153,6 +153,11 @@ def _find(root: Path, relative: str) -> Path:
     raise FileNotFoundError(f"committed input missing: {relative}")
 
 
+# WO-170 delta 1: columns that carry a price or an index level, which must be strictly
+# positive. Funding rates, interest and returns are deliberately absent: they are signed.
+PRICE_COLUMNS = frozenset({"open", "high", "low", "close", "index_price", "prev_index_price", "mark_price"})
+
+
 def _validate_series(frame: pd.DataFrame, column: str, *, label: str, grid_ms: int | None = None) -> None:
     """Committed inputs are re-checked at run time: unique, sorted timestamps; a gap-free grid when one is registered."""
     if frame.empty or column not in frame.columns:
@@ -172,8 +177,20 @@ def _validate_series(frame: pd.DataFrame, column: str, *, label: str, grid_ms: i
         if name.endswith("_iso") or name == column or name == "calc_time_raw":
             continue
         numeric = pd.to_numeric(frame[name], errors="coerce")
-        if not np.isfinite(numeric.to_numpy(dtype=float)).all():
+        array = numeric.to_numpy(dtype=float)
+        if not np.isfinite(array).all():
             raise RuntimeError(f"{label}: non-finite or non-numeric value in {name}")
+        # WO-170 delta 1: finite is not enough. The build review set one BTCUSDT spot
+        # close at a boundary hour to 0.0 and then to -1.0; both passed every guard in
+        # the chain, fabricated a 14.1-point NAV drawdown, and G3 still read True while
+        # the annualised return stayed bit-identical (weekly return_on_capital is a
+        # telescoping sum, so any corruption that reverses inside the week is invisible
+        # to G1, G2 and G4). A price or an index level is positive by definition; funding
+        # rates and returns may legitimately be negative or zero, so only the price
+        # columns are checked. Fail-closed: this can only reject data, never admit it.
+        if name in PRICE_COLUMNS and not bool((array > 0.0).all()):
+            worst = int(np.argmin(array))
+            raise RuntimeError(f"{label}: non-positive price {array[worst]!r} in {name} at row {worst}")
 
 
 def load_inputs(root: Path, config: Config) -> dict[str, Any]:

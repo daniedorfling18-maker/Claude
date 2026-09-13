@@ -414,3 +414,58 @@ def test_nav_identity_violation_aborts() -> None:
     ledger.cash[1] += 1e-6
     with pytest.raises(carry.CarryInputError, match="NAV identity violated"):
         carry.ledger_frame(ledger)
+
+
+def test_nav_drawdown_differs_from_compounded_weekly_on_a_grown_ledger() -> None:
+    """WO-170 test 4: the two bases disagree once the ledger has grown, and they
+    disagree in both directions.
+
+    The legacy basis compounds weekly P&L increments normalised to INCEPTION
+    capital, so it cannot see a trough inside a week and it divides a late loss by
+    a stale denominator. The NAV basis reads the ledger's own path at every
+    boundary. Neither is a relabelling of the other."""
+    from quant_lab.risk import max_drawdown_from_returns
+
+    from premium_research.runner import _max_drawdown_nav
+
+    # NAV 1.5 -> 3.0, then -0.15 inside the week with +0.10 recovered by its end.
+    intra_week = np.array([1.5, 3.0, 2.85, 2.95])
+    week_end_returns = pd.Series([(3.0 - 1.5) / 1.5, (2.95 - 3.0) / 1.5])
+    assert abs(max_drawdown_from_returns(week_end_returns) - (-0.05 / 1.5)) < 1e-9
+    assert abs(max_drawdown_from_returns(week_end_returns) + 0.0333) < 1e-4
+    assert abs(_max_drawdown_nav(intra_week) - (-0.15 / 3.0)) < 1e-12
+    assert abs(_max_drawdown_nav(intra_week) + 0.05) < 1e-12
+    # Here the legacy basis UNDERSTATES: it never sees the 0.15 trough.
+    assert abs(_max_drawdown_nav(intra_week)) > abs(max_drawdown_from_returns(week_end_returns))
+
+    # The same 0.15 lost at the week's end with no recovery: now the legacy basis
+    # OVERSTATES, because it divides by 1.5 while the ledger stands at 3.0.
+    no_recovery = np.array([1.5, 3.0, 2.85])
+    held_returns = pd.Series([(3.0 - 1.5) / 1.5, (2.85 - 3.0) / 1.5])
+    assert abs(max_drawdown_from_returns(held_returns) + 0.10) < 1e-9
+    assert abs(_max_drawdown_nav(no_recovery) + 0.05) < 1e-12
+    assert abs(max_drawdown_from_returns(held_returns)) > abs(_max_drawdown_nav(no_recovery))
+
+
+def test_phantom_collateral_yield_trips_the_self_financing_guard() -> None:
+    """WO-170 delta 1: the check the NAV identity could not be.
+
+    `nav = cash + margin + spot_value` and `wealth = q*spot + margin + cash` are the
+    same terms reassociated, so the NAV assertion fires only on a ledger mutated
+    after `simulate` returns. The build review credited 1 bp of phantom collateral
+    yield to `margin` inside the state machine with no cash flow recorded: the
+    annualised return rose from 7.10% to 11.46% and the NAV check stayed silent.
+    Conservation catches it, because the extra value has no source."""
+    table = _table(40, rate=0.0001, perp=100.0, spot=100.0)
+    start, end = int(table["boundary_ms"].iloc[0]), int(table["boundary_ms"].iloc[-1])
+    clean = carry.ledger_frame(carry.simulate(table, variant="V0", start_ms=start, end_ms=end))
+    assert clean["nav"].iloc[-1] > 1.5  # funding was earned, so the ledger did grow
+
+    tampered = carry.simulate(table, variant="V0", start_ms=start, end_ms=end)
+    for index in range(2, len(tampered.margin) - 1):
+        if tampered.position_open[index] and tampered.traded_notional[index] == 0.0:
+            credit = 0.0001 * (tampered.margin[index] + tampered.cash[index])
+            tampered.margin[index] += credit
+            tampered.wealth[index] += credit  # the NAV identity stays satisfied: both sides move together
+    with pytest.raises(carry.CarryInputError, match="self-financing identity violated"):
+        carry.ledger_frame(tampered)

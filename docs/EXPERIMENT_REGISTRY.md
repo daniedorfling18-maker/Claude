@@ -315,6 +315,10 @@ to say what the metric is, and a separately-registered diagnostic — true
 pre-event CLV against the last in-band [0.05, 0.95] price at or before
 close_time − 6h — is reported alongside. The diagnostic feeds no gate in
 this study; every verdict rendering carries the settlement-return caveat.
+Amendment 2026-09-13 (WO-169; effective only if merged): the graded quantity is
+the per-share difference `line_price − entry_price`, not a per-dollar return; the
+per-dollar figure is reported beside it and binds nothing until a further owner
+decision.
 
 ## Diagnostic / parked surface
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
 from .config import EngineConfig
@@ -19,7 +20,7 @@ from .runtime_lock import runtime_lock
 from .shadow_cohort import update_shadow_cohort_evidence
 from .storage import connect_db
 from .strategy import generate_signals
-from .utils import now_utc, safe_float, write_json
+from .utils import now_utc, read_json, safe_float, write_json
 
 
 def _persist_predictions(cfg: EngineConfig, predictions: list[dict[str, Any]]) -> None:
@@ -66,16 +67,81 @@ def _persist_predictions(cfg: EngineConfig, predictions: list[dict[str, Any]]) -
         con.close()
 
 
+_LIVE_SUMMARY_FILENAME = "mispricing_alpha_live_summary.json"
+
+
+def _mispricing_alpha_overlay_enabled(cfg: EngineConfig) -> bool:
+    return bool((cfg.raw.get("mispricing_alpha", {}) or {}).get("enabled", True))
+
+
+def _live_summary_generated_at(cfg: EngineConfig) -> str:
+    payload = read_json(cfg.governance_root / _LIVE_SUMMARY_FILENAME, default={}) or {}
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("generated_at_utc") or "")
+
+
+_SCOPES = {"full", "scoring_only"}
+
+
+def _cycle_report_path(cfg: EngineConfig, scope: str) -> Path:
+    """WO-143: a scoring-only cycle must never write (or be mistaken for)
+    ``forward_paper_cycle.json``. The deployed live loop merges and re-stamps
+    that artifact every ~30s tick (``run_polymarket_local_live_loop.py``
+    :762-778) and ``readiness.py``:118-122 reads it as the forward-evidence
+    summary; a scheduled write there would be republished as fresh forever.
+    """
+    filename = "forward_paper_cycle.json" if scope == "full" else "scheduled_paper_cycle_report.json"
+    return cfg.governance_root / filename
+
+
 def run_paper_cycle(
     cfg: EngineConfig,
     *,
     source: str = "raw_snapshot",
+    scope: str = "full",
 ) -> dict[str, Any]:
-    """Canonical forward paper cycle: features -> predictions -> signals -> broker."""
+    """Canonical forward paper cycle: features -> predictions -> signals -> broker.
+
+    ``scope="full"`` (the default) is byte-identical to the pre-WO-143
+    behaviour on every path. ``scope="scoring_only"`` (WO-143) is a scheduled
+    owner slot that runs everything through signal generation but skips the
+    writes the deployed live container already owns every tick -- shadow-
+    cohort maintenance, the paper broker and profit-target tracker,
+    signal-cohort P&L, the dashboard, and the agent-runtime bundle -- and
+    redirects its cycle report to ``scheduled_paper_cycle_report.json``
+    instead of ``forward_paper_cycle.json``.
+    """
+    if scope not in _SCOPES:
+        # An unrecognised scope must never silently fall through to the full
+        # cycle, so this is validated before the lock is even considered.
+        raise ValueError(f"run_paper_cycle: unrecognised scope {scope!r}; expected one of {sorted(_SCOPES)}")
+
+    report_path = _cycle_report_path(cfg, scope)
+    scoring_only = scope == "scoring_only"
     report: dict[str, Any] = {
         "generated_at_utc": now_utc(),
         "source": source,
+        "scope": scope,
         "live_trading": False,
+        # WO-143.7(a): AGENTS.md L131-135 requires every new artifact to state
+        # both invocation literals. `scheduled_paper_cycle_report.json` is a new
+        # artifact, and this dict is the base that EVERY writing path (the
+        # trading-mode block, the feature/model-load block, the lock-skip block,
+        # and the happy path) builds on, so stating them once here covers them
+        # all. The lock-skip branch below re-states them explicitly; that
+        # re-statement is deliberately left in place rather than relied upon.
+        #
+        # Registered exception to §143.1 (amended 2026-08-01): this dict is
+        # shared by BOTH scopes, so the two keys also land in
+        # `forward_paper_cycle.json` on full-scope paths, which §143.1's
+        # "byte-identical on every path" clause would otherwise forbid. The two
+        # requirements cannot both hold literally; AGENTS.md L131-135 wins and
+        # §143.1 now reads "byte-identical except for the two invocation flags,
+        # which every artifact must carry". Resolving this by skipping the flags
+        # on the full path is explicitly forbidden by the amendment.
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
     }
     if cfg.trading_mode not in {"paper", "backtest"}:
         report.update(
@@ -84,8 +150,12 @@ def run_paper_cycle(
                 "blockers": [f"trading.mode is {cfg.trading_mode}, expected paper or backtest"],
             }
         )
-        write_json(cfg.governance_root / "forward_paper_cycle.json", report)
-        write_agent_runtime_bundle(cfg, cycle_report=report)
+        if scoring_only:
+            report["agent_runtime"] = {"status": "skipped_scoring_only"}
+            write_json(report_path, report)
+        else:
+            write_json(report_path, report)
+            write_agent_runtime_bundle(cfg, cycle_report=report)
         return report
 
     lock_settings = cfg.raw.get("runtime_resource_guard", {}) or {}
@@ -101,25 +171,36 @@ def run_paper_cycle(
                     "live_trading_invoked": False,
                 }
             )
-            write_json(cfg.governance_root / "forward_paper_cycle.json", report)
-            write_agent_runtime_bundle(cfg, cycle_report=report)
+            if scoring_only:
+                report["agent_runtime"] = {"status": "skipped_scoring_only"}
+                write_json(report_path, report)
+            else:
+                write_json(report_path, report)
+                write_agent_runtime_bundle(cfg, cycle_report=report)
             return report
-        return _run_paper_cycle_unlocked(cfg, source=source, report=report)
+        return _run_paper_cycle_unlocked(cfg, source=source, scope=scope, report=report, report_path=report_path)
 
 
 def _run_paper_cycle_unlocked(
     cfg: EngineConfig,
     *,
     source: str,
+    scope: str,
     report: dict[str, Any],
+    report_path: Path,
 ) -> dict[str, Any]:
+    scoring_only = scope == "scoring_only"
     try:
         features = build_features_v2(cfg, source=source, require_clean_labels=False)
         global_model, category_models = load_prediction_models(cfg)
     except Exception as exc:
         report.update({"status": "blocked", "blockers": [str(exc)]})
-        write_json(cfg.governance_root / "forward_paper_cycle.json", report)
-        write_agent_runtime_bundle(cfg, cycle_report=report)
+        if scoring_only:
+            report["agent_runtime"] = {"status": "skipped_scoring_only"}
+            write_json(report_path, report)
+        else:
+            write_json(report_path, report)
+            write_agent_runtime_bundle(cfg, cycle_report=report)
         return report
 
     prediction_path = cfg.output_root / "polymarket_predictions" / "predictions.csv"
@@ -130,40 +211,102 @@ def _run_paper_cycle_unlocked(
         category_models=category_models,
         training_cutoff=str(global_model.get("trained_at", "")),
     )
+    # WO-143.7(c): capture the live-summary stamp BEFORE apply_mispricing_alpha
+    # so a disabled-or-unrefreshed overlay is detectable BEFORE generate_signals
+    # is ever called. apply_mispricing_alpha's ONLY early return (the
+    # `enabled` check) skips its live-summary write, so comparing the stamp
+    # across this call detects the disabled overlay here -- rather than in the
+    # scheduled wrapper, which only learns of it AFTER generate_signals has
+    # already written trade_signals.csv, too late for its exit 1 to retract.
+    #
+    # Why publishing anyway would be a loosening, not merely noise: with the
+    # overlay absent generate_signals drops THREE named alpha-dependent gates.
+    # `alpha_edge` is None (write_predictions emits no `edge_lower_bound`
+    # column) so the alpha-candidate rejection at strategy.py:426-438 cannot
+    # fire; `require_same_category_labels` (:221-224) and
+    # `require_positive_cohort` (:228-230) are both `alpha_enabled and ...`
+    # -> False, disabling the gates at :456-470 and :471-485. Only
+    # `risk_decision` survives, and the rows are stamped
+    # "predictive_directional" at :303 -- signals published past gates that
+    # would otherwise have rejected them, which "do not loosen ... controls to
+    # manufacture activity" forbids.
+    #
+    # Scoped to scoring_only: §143.1 requires scope="full" to stay
+    # byte-identical (bar the two invocation flags), and the live container's
+    # full-scope behaviour with a disabled overlay is pre-existing behaviour
+    # this WO does not touch.
+    live_summary_before = _live_summary_generated_at(cfg) if scoring_only else ""
     predictions = apply_mispricing_alpha(cfg, predictions, output_path=str(prediction_path))
+    overlay_blocked = False
+    if scoring_only:
+        live_summary_after = _live_summary_generated_at(cfg)
+        overlay_refreshed = bool(live_summary_after and live_summary_after != live_summary_before)
+        overlay_blocked = not _mispricing_alpha_overlay_enabled(cfg) or not overlay_refreshed
     _persist_predictions(cfg, predictions)
     longshot_scan = build_longshot_bias_scan(cfg, emit_shadow=False)
     longshot_candidates = [
         row for row in longshot_scan.get("candidate_rows", []) if isinstance(row, dict)
     ]
-    shadow_cohort = update_shadow_cohort_evidence(cfg, predictions + longshot_candidates)
-    con = connect_db(cfg.database_path)
-    try:
-        cohort_pnl = write_signal_cohort_pnl(con, cfg)
-    finally:
-        con.close()
+    if scoring_only:
+        # WO-143: the deployed live container remains the SOLE writer of the
+        # shadow ledgers. The naive design would add a second cross-container
+        # writer to the anchor-enrolled shadow_fills.csv (see the WO-143
+        # registration's provenance note; WO-143b independently serialises
+        # update_shadow_cohort_evidence's own writes, but this scheduled slot
+        # still must not forward candidates into it).
+        shadow_cohort: dict[str, Any] = {"status": "skipped_scoring_only"}
+    else:
+        shadow_cohort = update_shadow_cohort_evidence(cfg, predictions + longshot_candidates)
+
+    if scoring_only:
+        # The live loop and broker recompute cohort P&L deterministically
+        # every tick; a second writer here is redundant, not additive.
+        cohort_pnl: dict[str, Any] = {"status": "skipped_scoring_only"}
+    else:
+        con = connect_db(cfg.database_path)
+        try:
+            cohort_pnl = write_signal_cohort_pnl(con, cfg)
+        finally:
+            con.close()
+
     gate = paper_trade_readiness(cfg)
-    approved, rejected = generate_signals(cfg, readiness=gate)
-    broker = paper_trade(cfg)
-    target_monthly_profit = float(cfg.raw.get("mispricing_alpha", {}).get("target_monthly_profit_usdc", 100.0))
-    filled_orders = broker.get("filled_orders", []) if isinstance(broker, dict) else []
-    expected_cycle_profit = sum(
-        safe_float(order.get("expected_lower_bound_profit_usdc")) or 0.0
-        for order in filled_orders
-        if isinstance(order, dict)
-    )
-    cycles_needed = target_monthly_profit / expected_cycle_profit if expected_cycle_profit > 0 else None
-    monthly_target = {
-        "target_monthly_profit_usdc": target_monthly_profit,
-        "risk_approved_signals": len(approved),
-        "paper_filled_orders": int(broker.get("orders_filled", 0)) if isinstance(broker, dict) else 0,
-        "broker_rejected_orders": int(broker.get("orders_rejected", 0)) if isinstance(broker, dict) else 0,
-        "expected_lower_bound_profit_per_cycle_usdc": expected_cycle_profit,
-        "cycles_needed_for_target_at_current_approved_rate": cycles_needed,
-        "on_pace_if_daily_cycle": bool(cycles_needed is not None and cycles_needed <= 30),
-        "status": "on_pace" if cycles_needed is not None and cycles_needed <= 30 else "not_on_pace",
-    }
-    actual_profit_target = write_profit_target_tracker(cfg, broker if isinstance(broker, dict) else {})
+    if overlay_blocked:
+        # WO-143.7(c): publish no approved-signal file on this path. Do not
+        # call generate_signals at all, so trade_signals.csv (and its sibling
+        # rejected_signals.csv) are left byte-unchanged rather than rewritten
+        # from a disabled-or-unrefreshed overlay's ungated predictions.
+        approved, rejected = [], []
+    else:
+        approved, rejected = generate_signals(cfg, readiness=gate)
+
+    if scoring_only:
+        # The live container remains the sole broker/profit-target writer;
+        # a second scheduled writer would race paper_fills.csv. Never compute
+        # a pace figure from an empty/absent broker dict.
+        broker: dict[str, Any] = {"status": "skipped_scoring_only"}
+        monthly_target: dict[str, Any] = {"status": "skipped_scoring_only"}
+        actual_profit_target: dict[str, Any] = {"status": "skipped_scoring_only"}
+    else:
+        broker = paper_trade(cfg)
+        target_monthly_profit = float(cfg.raw.get("mispricing_alpha", {}).get("target_monthly_profit_usdc", 100.0))
+        filled_orders = broker.get("filled_orders", []) if isinstance(broker, dict) else []
+        expected_cycle_profit = sum(
+            safe_float(order.get("expected_lower_bound_profit_usdc")) or 0.0
+            for order in filled_orders
+            if isinstance(order, dict)
+        )
+        cycles_needed = target_monthly_profit / expected_cycle_profit if expected_cycle_profit > 0 else None
+        monthly_target = {
+            "target_monthly_profit_usdc": target_monthly_profit,
+            "risk_approved_signals": len(approved),
+            "paper_filled_orders": int(broker.get("orders_filled", 0)) if isinstance(broker, dict) else 0,
+            "broker_rejected_orders": int(broker.get("orders_rejected", 0)) if isinstance(broker, dict) else 0,
+            "expected_lower_bound_profit_per_cycle_usdc": expected_cycle_profit,
+            "cycles_needed_for_target_at_current_approved_rate": cycles_needed,
+            "on_pace_if_daily_cycle": bool(cycles_needed is not None and cycles_needed <= 30),
+            "status": "on_pace" if cycles_needed is not None and cycles_needed <= 30 else "not_on_pace",
+        }
+        actual_profit_target = write_profit_target_tracker(cfg, broker if isinstance(broker, dict) else {})
     report.update(
         {
             "status": "ran" if gate.get("approved_for_paper_trading") else "blocked",
@@ -180,7 +323,17 @@ def _run_paper_cycle_unlocked(
                 "candidate_cohorts": longshot_scan.get("candidate_cohorts", {}),
                 "decision_use": longshot_scan.get("decision_use"),
                 "emit_shadow_positions": False,
-                "shadow_candidates_forwarded": len(longshot_candidates),
+                # WO-143.7(f): under scoring_only the shadow update above is
+                # skipped, so nothing was forwarded -- report 0 rather than the
+                # size of what would have been passed in. `shadow_cohort`
+                # carries "skipped_scoring_only" alongside this field in the
+                # same report, so the skip is visible rather than inferred from
+                # a bare zero. The general caller-honesty contract (derive the
+                # count from update_shadow_cohort_evidence's returned status,
+                # covering the lock-held skip) is §143b.1 and lands on the
+                # WO-143b branch; the merged predicate becomes
+                # "0 if scoring_only or status startswith skipped_".
+                "shadow_candidates_forwarded": 0 if scoring_only else len(longshot_candidates),
             },
             "cohort_pnl": cohort_pnl,
             "readiness": gate,
@@ -188,13 +341,19 @@ def _run_paper_cycle_unlocked(
             "prediction_file": str(prediction_path),
         }
     )
-    try:
-        report["agent_runtime"] = write_agent_runtime_bundle(cfg, cycle_report=report, broker_summary=broker if isinstance(broker, dict) else {})
-    except Exception as exc:  # noqa: BLE001 - observability failure must not stop paper trading
-        report["agent_runtime"] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
-    try:
-        report["dashboard"] = render_dashboard(cfg, report)
-    except Exception as exc:  # noqa: BLE001 - dashboard failure must not stop paper trading
-        report["dashboard"] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
-    write_json(cfg.governance_root / "forward_paper_cycle.json", report)
+    if scoring_only:
+        report["agent_runtime"] = {"status": "skipped_scoring_only"}
+    else:
+        try:
+            report["agent_runtime"] = write_agent_runtime_bundle(cfg, cycle_report=report, broker_summary=broker if isinstance(broker, dict) else {})
+        except Exception as exc:  # noqa: BLE001 - observability failure must not stop paper trading
+            report["agent_runtime"] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+    if scoring_only:
+        report["dashboard"] = {"status": "skipped_scoring_only"}
+    else:
+        try:
+            report["dashboard"] = render_dashboard(cfg, report)
+        except Exception as exc:  # noqa: BLE001 - dashboard failure must not stop paper trading
+            report["dashboard"] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+    write_json(report_path, report)
     return report

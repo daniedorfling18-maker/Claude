@@ -99,6 +99,7 @@ from .data_coverage_report import build_data_coverage_report
 from .maker_evidence_summary import run_maker_evidence_summary
 from .resolution_collector import collect_resolutions
 from .runtime_lock import runtime_lock
+from .scheduled_paper_cycle import run_scheduled_paper_cycle
 from .sharp_anchor import build_sharp_anchor
 from .sharp_odds_fetch import fetch_sharp_odds
 from .profit_verdict import run_verdict_reconcile
@@ -241,6 +242,7 @@ COMMANDS = [
     "collection-only",
     "ingest-scanner-snapshot",
     "paper-cycle",
+    "scheduled-paper-cycle",
     "portfolio",
     "reconciliation-report",
     "governance-report",
@@ -825,6 +827,11 @@ def main(argv: list[str] | None = None) -> int:
             _print(ingest_scanner_snapshot(cfg, snapshot_path=args.snapshot_input))
         elif args.command == "paper-cycle":
             _print(run_paper_cycle(cfg, source=args.paper_source))
+        elif args.command == "scheduled-paper-cycle":
+            receipt = run_scheduled_paper_cycle(cfg, source=args.paper_source)
+            _print(receipt)
+            if receipt.get("exit_code"):
+                return int(receipt["exit_code"])
         elif args.command == "portfolio":
             _print(portfolio_snapshot(cfg))
         elif args.command == "reconciliation-report":

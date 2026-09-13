@@ -18531,3 +18531,231 @@ writes are atomic; nothing is written to any producer's artifact.
 On the VPS after one run of `maker-evidence-summary`: `outputs/maker_carry/maker_evidence_summary.json` exists with `status = "ok"`, `sources.*.state = "present"` and `age_seconds` non-null for all three, `modelled.evidence_class = "modeled"`, `realized.rewards_usd_total` equal to the scoreboard's value, `adverse_selection.status` naming the confirmed-fill count against the floor, and `capacity.flat_curve_is_model_bounded` present; readable off-box at `origin/vps-telemetry:telemetry/outputs/maker_carry/maker_evidence_summary.json` (the directory is whitelisted). Scheduling it beside the study is a deployment step named here, not built.
 
 **Not authorised by this text:** any change to M-A/M-B/M-C, the study, the replay, the scoreboard, any gate, any paper or live evidence, any merge.
+
+## WO-169 — Units and settlement grading in the closing-line and verdict chain: explicit per-share and per-dollar fields, verified settlement separated from the last quote, cluster-bootstrap inference beside the sign test, population accounting, and a recomputation command whose run of record is the VPS — `admitted` (2026-09-13; S8 ADMISSIBLE after four delta passes (17 → 14 → 4 → 1 → 0 defects); `registered-ancestry: a790e51 ancestor-of <build-sha> PASS` to be recorded at dispatch; class F: it touches `profit_verdict.py`, the registered legacy verdict engine, by ADDING a non-binding measurement block; the binding Gate A/B/C rules, thresholds, alpha, floors, field names and verdict logic are unchanged, per the owner's WO-87 decision of 2026-07-14 that the binding metric is not swapped mid-study; frozen surface → OWNER MERGE after line-audit; `registered-ancestry:` to be recorded at dispatch against the `origin/main` tip, `a790e51` at drafting. **Disclosure.** This work order exists because an external review received on 2026-09-13 and the owner's same-day instruction to the drafting agent (relayed in session, not recorded in the repository; it authorises neither build nor merge — authorization lives at the merge) found that `clv = line_price − entry_price` (a per-share price difference) is consumed by `profit_verdict.py` as "net settlement return per dollar", that a last observed quote is graded as if it were a settlement payout, and that the sign test tests win frequency, not expectancy. **The figures in this entry were computed by the drafting agent in an agent sandbox on 2026-09-13 from `git show origin/vps-telemetry:telemetry/outputs/polymarket_model_governance/closing_line_final_history.csv` at `fcebaa2` (snapshot 2026-08-21T02:00:09Z; sha256 `4b66d07f1050125dbe01d39220fafc1261929291090b9e565abba4d6b4b17b33`), a committed repository snapshot, not a VPS or `paths.output_root` path; no amendment in force permits computing on production telemetry in a sandbox; the figures are diagnostic and not verification of record.** The corrected measurement is unfavourable to the tested strategy on that ledger (−8.65% per dollar against −1.39% per share) and cannot produce a YES; whether it should REPLACE the binding metric is an owner decision this text does not make. **Recorded for the owner, not touched (frozen surface):** on the binding path `utils.safe_float("nan")` returns NaN, a `clv = "nan"` row passes the Gate A filter at `profit_verdict.py:362-364`, a NaN unit mean makes `mean <= 0` read False at `:622-625`, and Gate A can then reach `pass` on the sign test alone at `:633` — a fail-open of the A2 class on a frozen surface; the mirrored ledger contains no such row.)
+
+**Why this exists.** `closing_line.py:242` and `:370` compute `clv = line_price − entry_price`
+in probability points per share and also emit `clv_pct = clv / entry_price`, the return per
+dollar staked; `profit_verdict.py:362` reads `clv` as `settlement_return` and every rule string,
+docstring and JSON label (`:13`, `:92`, `:182`, `:187`, `:330`) calls it "net settlement return
+per dollar"; Gate B (`:389-392`, `:663-666`) subtracts a per-dollar taker fee `rate × (1 − p)`
+and per-dollar haircuts from that per-share figure. A two-cent gain on a ten-cent purchase is a
+20% return, not 2%. On the snapshot named above (90 rows) the engine's own clustering gives 55
+units and a per-share unit mean of −0.013943 (the recorded figure); dividing each final by its
+entry price under the same clustering gives −0.086501 per dollar. 21 of the 70 eligible finals
+have a `line_price` strictly inside (0.01, 0.99): they are the last price-history observation at
+or before `close_time`, not a settlement payout, and no field says so. WO-87 found in July that
+the graded quantity was settlement return rather than closing-line value and the owner chose
+"relabel, don't swap"; WO-169 finds that the relabel named the wrong unit. The sign test (`:268`,
+exact binomial under `p = 0.5` on the count of positive units) tests whether more than half the
+units were profitable; a strategy can be profitable with fewer than half its units winning and
+unprofitable with more, and dividing by a positive entry price changes no sign, so the corrected
+mean's p-value is the same 0.947605 while the mean itself changes six-fold.
+
+### The changes, exactly
+
+1. **Explicit units on every scored row (`closing_line.py`).** Two field lists. `LEDGER_FIELDS` is
+   today's `POSITION_FIELDS` plus exactly `line_basis` — a point-in-time fact fixed at grading (which
+   path produced the final), written once when the final is first recorded, restored by
+   `_load_final_history`, and `""` on every row recorded before this change, never guessed —
+   and `closing_line_final_history.csv` is written with it, so the append-only ledger gains that one
+   column and no recorded value is rewritten (its docstring's "nothing is backfilled or re-estimated"
+   holds); the five run-dependent `settlement_*` columns stay out of the ledger. `POSITION_FIELDS` (the per-run
+   `closing_line_value_positions.csv`) gains `clv_per_share` (identical value to `clv`),
+   `return_per_dollar` (identical value to `clv_pct`; `""` when `entry_price` is not in (0, 1)),
+   `line_basis` ∈ {`"last_quote_before_close"` (the quote path, `line_kind == "closing"`),
+   `"official_price_history_close"` (`_price_history_final_row`), `"latest_provisional"`, and `""`
+   for every row recovered from a ledger row written before this change}, `settlement_payout` ∈
+   {`0`, `1`, `""`}, `settlement_source` (`""` or `"resolution_corpus_v1"`), `settlement_reason`
+   (`""` when verified, else one of the reasons in item 2), `settlement_return_per_share`
+   (`payout − entry_price`, `""` when unverified) and `settlement_return_per_dollar`
+   (`payout / entry_price − 1`, `""` when unverified); on a verified row whose `entry_price` is not in
+   (0, 1) both returns are `""` and `settlement_reason = "invalid_entry_price"`. Row builders
+   (`position_clv_row`, `_price_history_final_row`) emit every `settlement_*` field as `""`; the join
+   in `build_closing_line_value` fills them for `line_kind == "closing"` rows only, so
+   `settlement_join.positions_checked == final_line_positions` by construction, and a provisional row
+   carries `settlement_reason = "not_final"`. `clv`, `clv_pct`, `beat_close`, `line_kind` and every existing column
+   keep their names and values. `evidence_semantics` in `closing_line_value.json` gains one literal
+   entry per new field. Consumers (A9, every one a key-based read, none pinning the field set;
+   `artifact_contracts.py` has no closing-line or verdict entry): `closing_line_value.json` —
+   `profit_verdict.py:574`, `promotion_review.py:185`, `research_focus.py:1345`, `dashboard.py:5458`,
+   `evidence_history.py:120`, `scripts/audit_polymarket_local_history.py:454`;
+   `closing_line_value_positions.csv` — `profit_verdict.py:672`, `edge_attribution.py:188`;
+   `closing_line_final_history.csv` — `profit_verdict.py:338`, `price_history_collector.py:135`;
+   `profit_verdict.json` — `operating_state.py:676`; `build_profit_verdict` — single caller
+   `dashboard.py:5740` (there is no `profit-verdict` CLI command), which embeds the whole payload,
+   so the dashboard payload grows by `measurement_v2` and the artifact refreshes on dashboard payload
+   render; `_clustered_focus_finals` — single caller `profit_verdict.py:594`;
+   `position_clv_row` and `_bootstrap_mean_ci` — imported by `smart_flow_clv.py:20-27`, whose
+   `write_csv(..., fieldnames=SMART_FLOW_POSITION_FIELDS)` drops the added keys
+   (`extrasaction="ignore"`), so its output is unchanged.
+2. **Verified settlement from the WO-101 resolution corpus (`closing_line.py`; best-effort join
+   with its coverage stated).** Producer: the three resolution collectors (`resolution_collector`,
+   `websocket_resolution_collector`, `historical_backfill`) append to
+   `cfg.output_root / polymarket_training / resolution_corpus_v1.csv`; none of them selects markets
+   from the closing-line ledger today, so coverage of the shadow cohort's tokens is not guaranteed
+   and `settlement_verified_finals` may legitimately read 0. The producer-side change that would
+   guarantee coverage — `collect-resolutions` enqueuing every `market_slug` in
+   `closing_line_final_history.csv` within `max_markets`, the `price_history_collector._priority_final_rows`
+   template — is a named prerequisite work order, not yet drafted (its number is assigned at its registration), not built here; until it lands the join is
+   best-effort and every unverified row carries its reason. The corpus is read in one streaming
+   pass filtered on the graded token ids (no per-position fan-out; the pre-event diagnostic at
+   `profit_verdict.py:428-446` is the template); an `OSError` or a missing file → every row
+   `settlement_source = ""`, `settlement_reason = "resolution_corpus_unavailable"`, summary
+   `settlement_join.state = "resolution_corpus_unavailable"`. A position is settlement-verified when
+   the corpus holds at least one observation with its exact non-empty `token_id`,
+   `resolution_quality == "clean_settlement"` (the literal the collectors write), and a non-empty
+   `winning_token_id`; `payout = 1` if `winning_token_id == token_id` else `0`. Reasons, the corpus-join subset that
+   populates `settlement_join.unverified_by_reason`, closed: `missing_token_id`, `token_not_in_corpus`,
+   `conflicting_observations`, `resolution_corpus_unavailable`, and any other `resolution_quality`
+   string verbatim; the two row-level reasons defined in item 1 — `not_final` (never counted, since
+   the join runs over closing rows only) and `invalid_entry_price` (on a verified row) — complete the
+   set of values `settlement_reason` can take. `settlement_join` reports `positions_checked`, `verified`, `unverified_by_reason`.
+   The join writes `closing_line_value_positions.csv` and the JSON only.
+3. **Non-binding `measurement_v2` block in `profit_verdict.json` (`profit_verdict.py`).** The only
+   edits to `build_profit_verdict` are one call to a new `_build_measurement_v2(final_history_path, positions_path, clusters,
+   cluster_rows, clustering_coverage, settings, diagnostic_substrings)` — `build_profit_verdict`
+   passes its two governance-root paths — and one payload key.
+   `_clustered_focus_finals`, `_sign_test_p`, `_fixture_tags`, `_entries_per_day`,
+   `_build_pre_event_clv_diagnostic`, the Gate A/B/C branches, and the `gates`, `verdict` and
+   `extension_resolution` construction are unchanged (verified by the line audit's diff, not by a
+   test). The block carries `"binding": false` and the literal note "Informational under WO-87's
+   owner decision of 2026-07-14: the binding Gate A metric is the per-share figure above; replacing
+   it requires a dated owner amendment". Contents, with `state ∈ {ok, unavailable, accounting_mismatch}`:
+   - `population`, two tiers, from a second `read_csv_rows` of the same ledger inside the new
+     function: `final_history_rows` (all rows; an absent or empty ledger → `state = "unavailable"`),
+     `closing_rows`; tier one applies Gate A's four filters in Gate A's order —
+     `excluded_by_reason.diagnostic_cohort`, `missing_return` (`safe_float(clv) is None`),
+     `missing_unit_key` — so `closing_rows = eligible_finals + Σ tier-one exclusions` and
+     `eligible_finals == clustering_coverage.eligible_finals` and `units == len(clusters)`; tier two:
+     `per_dollar_eligible_finals = eligible_finals − invalid_entry_price − non_finite_return`
+     (`entry_price` not in (0, 1); `clv` non-finite), with `per_dollar_units` the count of units with
+     at least one per-dollar-eligible final. Both identities asserted; a failure reads
+     `state = "accounting_mismatch"`.
+   - `by_line_basis`: counts of eligible finals per `line_basis` value including the `""` bucket for
+     rows recovered from pre-deployment ledger rows, `line_price_strictly_inside_0_01_0_99` (the
+     count with `0.01 < line_price < 0.99`; basis: the coarsest venue tick, 0.01, from either bound),
+     `line_price_strictly_inside_0_10_0_90` (WO-87's near-settled convention, for continuity),
+     `line_price_unparseable` (missing or non-finite, never counted as inside), and
+     `settlement_verified_finals` (from `closing_line_value_positions.csv`'s `settlement_payout`,
+     joined by `shadow_position_id`; 0 when that file is absent);
+   - `per_share` (the binding basis): unit mean, units positive, sign-test p — Gate A's numbers,
+     repeated for the side-by-side; `null` and `units = 0` when there are no eligible finals;
+     `unit_mean` and `sign_test_p` `null` with `reason = "non_finite_unit_mean"` whenever Gate A's
+     mean is not finite, the frozen Gate A field being left exactly as the binding path emits it;
+   - `per_dollar`: `unit_mean` = unit mean of `clv / entry_price` over per-dollar-eligible finals
+     (`null` when none; the last-quote basis), `settlement_unit_mean` = unit mean of
+     `settlement_return_per_dollar` over settlement-verified finals only, joined from
+     `closing_line_value_positions.csv` by `shadow_position_id` like `settlement_verified_finals`
+     (`null` when that file is absent or no row is verified),
+     `units_positive`,
+     `mean_taker_fee_per_dollar` (the same fee tuple Gate B reads), `net_after_costs` = unit mean
+     − the registered exit and adverse-selection haircuts − the mean fee;
+   - `inference`: market-cluster percentile bootstrap of the per-dollar unit mean — **1,000 draws**
+     (basis: `closing_line.py:456`'s `bootstrap_iterations` default), **seed 20260913**, each draw
+     resampling the unit means, taken in `sorted(cluster_rows)` order, with replacement, `n_units` per
+     draw; interval `[m[49], m[949]]` of the 1,000 sorted resampled means (the 5th and 95th
+     percentiles by that index convention; basis: the registry's H2/H3 90% clustered-interval
+     convention); `null` with fewer than **3** units (basis: 3 is the smallest `n` at which the
+     probability that every draw hits the minimum unit, `n^−n`, falls below 0.05 — `2^−2 = 0.25`,
+     `3^−3 = 0.037` — so the `m[49]` bound no longer collapses to the unit minimum); the cluster
+     standard error `sd(unit means, ddof = 1) / √n_units`, `null` when `n_units < 2`; and the sentence "the sign test compares
+     the count of positive units with a fair coin; it is not a test of expected profit and is
+     unchanged by the unit correction";
+   - `would_bind`: Gate A's four branches in Gate A's order on the per-dollar basis —
+     `clustering_coverage.state != "sufficient"` → `pending`; `per_dollar_units < minimum_final_samples` →
+     `pending`; per-dollar unit mean `null` or ≤ 0 → `fail`; the sign test on per-dollar-positive
+     units out of `per_dollar_units` (equal to `units` on the fixture, 55 = 55) with p ≤ alpha → `pass`,
+     else `pending` —
+     and `would_bind.gate_b = "not_evaluated"` unless `would_bind.gate_a == "pass"`, then `pass`
+     iff `net_after_costs > 0`; labelled informational.
+   Every comparison reads False on a missing or non-finite operand; the block never touches
+   `verdict`, `extension_resolution` or `gates`.
+4. **Recomputation command (`cli.py`).** `profit-verdict-reconcile --final-history PATH --output-dir
+   DIR [--positions PATH] [--force]` runs item 3's arithmetic on any final-history CSV with no
+   config (the `load_config` exemption at `cli.py:344` gains this command beside `config-check`), no
+   `output_root`, no network: it copies `--final-history` to `<tempdir>/closing_line_final_history.csv`
+   and `--positions`, if given, to `<tempdir>/closing_line_value_positions.csv`, calls
+   `_clustered_focus_finals(SimpleNamespace(governance_root=tempdir), ...)` unchanged, uses
+   `profit_verdict.DEFAULT_SETTINGS` (12, 0.10, 0.005, 0.005, 0.05) and
+   `closing_line.DEFAULT_DIAGNOSTIC_COHORT_SUBSTRINGS` literally, records them under `settings_used`,
+   and writes `reconciliation.json` (input sha256 and row count, the
+   legacy per-share figures, the corrected per-dollar figures, the interval, the population and
+   line-basis accounting, and a `differences` list with exactly three entries named `unit_mismatch`,
+   `settlement_unverified`, `inference_method`) and `report.md`, atomically, refusing an existing
+   output directory without `--force` (exit 2, nothing written). **The run of record is on the VPS**
+   against `outputs/polymarket_model_governance/closing_line_final_history.csv`; no sandbox run of
+   this command is committed under `research/` (the first draft proposed one; withdrawn because no
+   amendment in force permits computing on production telemetry in a sandbox).
+5. **Recorded fixture.** The snapshot named in the disclosure is committed byte-identical as
+   `tests/fixtures/recorded/closing_line_final_history_2026-08-21.csv` (90 rows). Its `market_id`
+   values are 0x-prefixed 64-hex condition ids and its `token_id` values are public on-chain token
+   ids; they are retained verbatim — departing from the README's sanitisation convention and the
+   `vps_discovery_starvation_2026-07-16.json` precedent — because byte identity with `fcebaa2` is
+   the provenance proof and the market and fixture clustering must reproduce 55 units; the README
+   entry says so, and test 10 runs the key-aware scanner `credential_guard._scan_csv`, which exempts
+   public-identifier keys, and asserts no finding. Running tests on a committed recorded fixture is
+   within the 2026-07-27 amendment.
+
+### A11 — bias-direction disclosure, one line per channel
+
+- Per-dollar re-weighting: data-dependent (a final at entry 0.05 and line 0.999 reads +18.98 per
+  dollar against +0.949 per share); on this ledger it is unfavourable to the strategy (−8.65%
+  against −1.39%); structurally the direction is unknown.
+- Settlement-verified subset: selected by collector coverage, not by outcome; its mean can differ
+  from the full set in either direction; direction unknown.
+- Percentile bootstrap on a distribution bounded at −1 and unbounded above (unit SD 0.875, n = 55):
+  the interval's coverage error is unstated; the interval is reported as descriptive uncertainty.
+- Sign test: invariant to the unit correction; no channel.
+- A later owner decision to swap the binding metric would be post-hoc regardless of direction, and
+  is recorded as such.
+
+### Fail-safe sentence (S5)
+
+Every fail branch ends in no change to the verdict. `measurement_v2` never writes `verdict`,
+`gates` or `extension_resolution`; an absent or empty final-history file leaves the block
+`state = "unavailable"`; a missing or unreadable resolution corpus (`OSError` caught) leaves every
+settlement field empty with the reason recorded; an empty `token_id` → `missing_token_id`; a token
+absent from the corpus → `token_not_in_corpus`; a non-finite or out-of-range entry price excludes
+the final from the per-dollar figures with its reason counted and is never divided; a missing or
+non-finite `line_price` is counted under `line_price_unparseable`, never as inside; zero eligible
+finals → every mean and p-value `null`, `units = 0`, and `would_bind.gate_a` not `pass`; a
+population identity failure reads `state = "accounting_mismatch"`; fewer than 3 units gives a
+`null` interval; the reconcile command refuses an existing output directory without `--force` and
+writes atomically; the ledger is written with `LEDGER_FIELDS` — today's list plus exactly `line_basis` — and no recorded value is rewritten; the new positions-file
+columns are `""` wherever a value is not known.
+
+### Touch ONLY these files (11 paths)
+
+1. `src/polymarket_predictive_engine/closing_line.py` — items 1-2.
+2. `src/polymarket_predictive_engine/profit_verdict.py` — item 3 (additive; the functions and branches named in item 3 unchanged, verified by the line audit's diff).
+3. `src/polymarket_predictive_engine/cli.py` — the `profit-verdict-reconcile` command in `COMMANDS` and the `load_config` exemption at `:344` (item 4).
+4. `tests/polymarket_predictive_engine/test_closing_line.py` — tests 1-3.
+5. `tests/polymarket_predictive_engine/test_profit_verdict.py` — tests 4-8.
+6. `tests/polymarket_predictive_engine/test_verdict_reconcile.py` (new) — tests 9-10.
+7. `tests/fixtures/recorded/closing_line_final_history_2026-08-21.csv` (new).
+8. `tests/fixtures/recorded/README.md` — provenance entry (branch, commit, snapshot time, sha256, the identifier-retention departure and its reason).
+9. `docs/POLYMARKET_CODEX_WORK_ORDERS.md` — this entry, its calibration row, and a dated cross-reference at the end of WO-87's DECIDED paragraph: "Amendment 2026-09-13 (WO-169; effective only if merged): WO-169 finds that the relabel named the wrong unit — `clv` is per share; the per-dollar figure is reported beside it, non-binding, pending the owner's decision."
+10. `docs/POLYMARKET_QUANT_MODE_CHARTER.md` — the dated record with the legacy-versus-corrected table computed by test 4 on the recorded fixture, carrying the disclosure sentence from this status line verbatim and the label "diagnostic; not verification of record".
+11. `docs/EXPERIMENT_REGISTRY.md` — one dated sentence appended to the "Semantics clarification" paragraph: "Amendment 2026-09-13 (WO-169; effective only if merged): the graded quantity is the per-share difference `line_price − entry_price`, not a per-dollar return; the per-dollar figure is reported beside it and binds nothing until a further owner decision."
+
+Not touched: the dashboard, operating state, IPS renderer, cost ledger, `artifact_contracts.py`, the three resolution collectors (the prerequisite work order), and every frozen gate.
+
+### Enumerated offline tests (S8/A10); each confirmed to FAIL with its guard reverted, caches purged
+
+1. `test_units_two_cent_gain_on_ten_cent_entry` — `position_clv_row` with entry 0.10 and a closing quote at 0.12: `clv = clv_per_share = 0.02`, `clv_pct = return_per_dollar = 0.2`, `line_basis = "last_quote_before_close"`.
+2. `test_a_near_one_last_price_is_not_settlement_and_the_ledger_keeps_its_columns` — through `build_closing_line_value` with `_fetch_price_history_close_line` monkeypatched to return a line at 0.999 and no corpus file: the positions row reads `line_basis = "official_price_history_close"`, `settlement_payout = ""`, `settlement_reason = "resolution_corpus_unavailable"`; `_price_history_final_row` itself emits every `settlement_*` field as `""`; a provisional row reads `"latest_provisional"` with `settlement_reason = "not_final"`; after `build_closing_line_value` the ledger's header equals today's list plus exactly `line_basis`, a freshly graded final's `line_basis` is recorded in the ledger and restored on the next run, and a row recovered from a ledger row recorded before this change carries `line_basis = ""` in both files.
+3. `test_settlement_join_from_the_resolution_corpus` — a corpus with `clean_settlement` and `winning_token_id` equal to the position's token gives `settlement_payout = 1`, `settlement_return_per_share = 1 − 0.4 = 0.6`, `settlement_return_per_dollar = 1 / 0.4 − 1 = 1.5`; a losing token gives `0`, `−0.4`, `−1.0`; quality `unresolved_active` → unverified with that reason; two clean observations naming different winners → `conflicting_observations`; a token absent from the corpus → `token_not_in_corpus`; an empty position token → `missing_token_id`; a missing corpus file → `settlement_join.state = "resolution_corpus_unavailable"`; a recovered row with `entry_price = 0` and a verified payout → `settlement_return_per_share = ""`, `settlement_return_per_dollar = ""`, `settlement_reason = "invalid_entry_price"`.
+4. `test_measurement_v2_population_accounting_on_the_recorded_fixture` — on the recorded fixture: `final_history_rows = 90`, `closing_rows = 90`, `excluded_by_reason.diagnostic_cohort = 20`, `eligible_finals = 70 = clustering_coverage.eligible_finals`, `units = 55 = len(clusters)`, `per_dollar_eligible_finals = 70`, `per_share.unit_mean = −0.013943`, `per_dollar.unit_mean = −0.086501`, `per_dollar.units_positive = 22`, `per_dollar.mean_taker_fee_per_dollar = 0.026809`, `per_dollar.net_after_costs = −0.12331` (= −0.086501 − 0.005 − 0.005 − 0.026809), `line_price_strictly_inside_0_01_0_99 = 21`, `by_line_basis[""] = 70`, `settlement_verified_finals = 0`, `inference.cluster_standard_error = 0.118009` (sample SD 0.875175 / √55), `would_bind.gate_a = "fail"`, `would_bind.gate_b = "not_evaluated"`; both identities hold and `state = "ok"`.
+5. `test_legacy_gate_a_values_unchanged_on_the_recorded_fixture` — `gates.A_edge_exists` reads `independent_market_units = 55`, `settled_finals_total = 70`, `unit_mean_net_settlement_return_per_dollar = −0.013943`, `units_settled_profitable = 22`, `sign_test_p = 0.947605` (the values at `fcebaa2`), the three `registered_rule` strings equal the module's literals, and `verdict` is the same with and without `measurement_v2` present.
+6. `test_per_dollar_bootstrap_is_seeded_and_reproducible` — two calls give identical intervals; on the fixture the interval is `[−0.281562, 0.114739]` (unit means in `sorted(cluster_rows)` order) and `lower < unit_mean < upper`; with 2 units the interval is `null`.
+7. `test_would_bind_mirrors_gate_a_in_order` — a fixture whose per-dollar mean is positive with 12 of 12 units positive reads `would_bind.gate_a = "pass"` (sign-test p = 0.000244) and `would_bind.gate_b` evaluated, while `gates.A_edge_exists.state` is whatever the per-share basis gives; with `clustering_coverage.state` forced to insufficient, `would_bind.gate_a = "pending"` before any mean is read; the block carries `binding: false` and the sign-test sentence.
+8. `test_two_tier_accounting_on_non_finite_inputs` — a two-final ledger with `entry_price = 0` on one and `clv = "nan"` on the other: Gate A reads `pending` on the unit floor (2 < 12) with `settled_finals_total = 2`; `measurement_v2` reads `eligible_finals = 2` (tier one includes both, as Gate A does), `per_dollar_eligible_finals = 0` with `invalid_entry_price = 1` and `non_finite_return = 1`, `per_dollar.unit_mean = null`, `per_share.unit_mean = null` with `reason = "non_finite_unit_mean"` while the frozen `gates.A_edge_exists.unit_mean_net_settlement_return_per_dollar` is non-finite (the fail-open recorded above, observed and not fixed), both identities hold, and nothing is divided.
+9. `test_reconcile_cli_writes_versioned_artifacts_without_config` — `"profit-verdict-reconcile" in COMMANDS`; the command on the fixture into `tmp_path` with `--config /nonexistent/config.yaml` and an empty cwd exits 0 and writes `reconciliation.json` with the input sha256 `4b66d07f…b33`, `legacy.per_share_unit_mean = −0.013943`, `corrected.per_dollar_unit_mean = −0.086501`, the three `differences` names, and `report.md`; `reconciliation.json.settings_used` equals `DEFAULT_SETTINGS`' five values and the default diagnostic substrings; `cli.load_config` monkeypatched to raise is never called; `read_csv_rows` monkeypatched to record paths opens only the `--final-history` path and paths under the command's own temporary staging directory, nothing under `tmp_path / "outputs"` and no `polymarket_predictive_config.example.yaml`, and without `--positions` no positions path; a second run without `--force` exits 2 and changes nothing.
+10. `test_recorded_fixture_provenance_and_no_credentials` — the README entry names `origin/vps-telemetry`, `fcebaa2`, `2026-08-21T02:00:09Z` and a sha256 line equal to the file's sha256; `credential_guard._scan_csv(path, repo_root, tail_rows=None)` returns `[]`.
+
+### Day-after check
+
+On the VPS, after the first dashboard payload render following deployment (the artifact's only writer), `outputs/polymarket_model_governance/profit_verdict.json` carries `measurement_v2` with `binding = false`, `state = "ok"`, `population.closing_rows = population.eligible_finals + Σ tier-one exclusions`, `population.eligible_finals = gates.A_edge_exists.settled_finals_total`, and `settlement_join` reported with `positions_checked = closing_line_value.final_line_positions` and `unverified_by_reason` present; `gates.A_edge_exists` reads `independent_market_units = 55`, `settled_finals_total = 70`, `unit_mean_net_settlement_return_per_dollar = −0.013943`, `units_settled_profitable = 22`, `sign_test_p = 0.947605` (the ledger is unchanged since 2026-08-21 while the VPS is offline); `closing_line_final_history.csv`'s header gains exactly `line_basis`, every pre-deployment row carries `""` there, and the row count is unchanged (90 at `fcebaa2`); `closing_line_value_positions.csv` carries `line_basis` on every row (`""` for rows recovered from pre-deployment ledger rows). `settlement_verified_finals > 0` needs the prerequisite collector work order and is not this WO's check. Remaining dependencies: the VPS deployment; that prerequisite for corpus coverage.
+
+**Not authorised by this text:** any change to the binding Gate A/B/C metric, thresholds, alpha, floors, or the terminal verdict; any change to the frozen fail-open recorded above; any merge; any paper or live evidence; any change to WO-67's P1-P5; any registration; and any use of a sandbox computation as verification of record.

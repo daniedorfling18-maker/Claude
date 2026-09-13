@@ -310,7 +310,7 @@ def test_unknown_scope_aborts() -> None:
 
 
 def test_non_finite_high_with_open_position_is_unverifiable_under_both_scopes() -> None:
-    # Unreachable from boundary_table (a NaN high always comes with high_partial=True), but simulate is public:
+    # Unreachable through the runner (load_inputs rejects a non-finite high before boundary_table runs), but simulate is public:
     # an open position with no intra-period high to check against must not read as verified under any scope.
     for scope in ("either", "perp"):
         table = _table(6)

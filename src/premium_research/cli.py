@@ -59,6 +59,17 @@ def git_revision(cwd: Path) -> str:
     return out.stdout.strip() if out.returncode == 0 and out.stdout.strip() else "unknown"
 
 
+def uncommitted_paths(cwd: Path, subtree: str) -> list[str] | None:
+    """Paths under ``subtree`` with uncommitted changes (staged, unstaged, or untracked); ``None`` when git cannot answer."""
+    try:
+        out = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all", "--", subtree], cwd=str(cwd), capture_output=True, text=True, check=False, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return [line[3:] for line in out.stdout.splitlines() if line.strip()]
+
+
 def _csv_bytes(frame: pd.DataFrame) -> bytes:
     buffer = io.StringIO()
     frame.to_csv(buffer, index=False, lineterminator="\n")
@@ -254,6 +265,14 @@ def _cmd_verify_manifest(args: argparse.Namespace) -> int:
 def _cmd_run(args: argparse.Namespace) -> int:
     from .runner import CONFIGS, run_all
 
+    # The results record code_revision = HEAD and verify-results recomputes with the stored string, so a
+    # pass from a tree whose estimator code differs from HEAD would record a revision that cannot reproduce
+    # it (WO-167 delta 2). Fail closed: no result from a dirty estimator tree.
+    dirty = uncommitted_paths(REPO_ROOT, "src/premium_research")
+    if dirty is None or dirty:
+        detail = "git status unavailable" if dirty is None else ", ".join(dirty[:5])
+        print(f"RUN ABORTED: src/premium_research has uncommitted changes ({detail}); the recorded code_revision would not reproduce the results", file=sys.stderr)
+        return 2
     try:
         summary = run_all(Path(args.root), code_revision=git_revision(REPO_ROOT), generated_at=utc_now_iso(), force=args.force, config=CONFIGS[args.work_order])
     except (ValueError, RuntimeError, FileNotFoundError) as exc:

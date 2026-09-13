@@ -371,3 +371,25 @@ def test_scope_disclosure_is_keyed_on_the_scope_not_only_the_work_order(tmp_path
     runner.run_all(root, code_revision="x", generated_at="2026-09-13T00:00:00Z", config=odd)
     payload = json.loads((root / "results_odd" / "carry_v0.json").read_text(encoding="utf-8"))
     assert payload["unverifiable_scope"] == "perp" and payload["pooled"]["rejected_open_periods"] == 2
+
+
+def test_run_refuses_a_dirty_estimator_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    import subprocess
+
+    from premium_research import cli
+
+    repo = tmp_path / "repo"
+    (repo / "src" / "premium_research").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "base"], check=True)
+    assert cli.uncommitted_paths(repo, "src/premium_research") == []
+    (repo / "src" / "premium_research" / "carry.py").write_text("x = 1\n", encoding="utf-8")
+    assert cli.uncommitted_paths(repo, "src/premium_research") == ["src/premium_research/carry.py"]
+    monkeypatch.setattr(cli, "REPO_ROOT", repo)
+    calls: list[str] = []
+    monkeypatch.setattr("premium_research.runner.run_all", lambda *a, **k: calls.append("ran"))
+    assert cli.main(["--root", str(tmp_path / "nowhere"), "run"]) == 2
+    assert "uncommitted changes" in capsys.readouterr().err and calls == []
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "clean"], check=True)
+    assert cli.uncommitted_paths(repo, "src/premium_research") == []

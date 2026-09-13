@@ -12,3 +12,7 @@ Dockerfile text eol=lf
 .gitignore text eol=lf
 *.ps1 text eol=crlf
 *.bat text eol=crlf
+
+# WO-169: the recorded governance-ledger fixture is committed byte-identical to its
+# telemetry source (CRLF terminators included); its sha256 is the provenance proof.
+tests/fixtures/recorded/closing_line_final_history_2026-08-21.csv -text

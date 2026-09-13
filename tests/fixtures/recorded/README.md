@@ -48,3 +48,20 @@ these four files as the only fetched payloads written outside `research/`.
 - `deribit_dvol_BTC_2026-09-12.json`: one page (92 daily candles) of
   `public/get_volatility_index_data` for BTC at `resolution=86400`, span 2024-01-01 to 2024-04-01,
   preserving the `[timestamp, open, high, low, close]` row shape and the `continuation` field.
+
+## Governance ledger snapshot (WO-169, committed 2026-09-13)
+
+- `closing_line_final_history_2026-08-21.csv`: the append-only closing-line ledger as it stood at
+  the last telemetry push before the VPS outage, taken verbatim from
+  `origin/vps-telemetry:telemetry/outputs/polymarket_model_governance/closing_line_final_history.csv`
+  at commit `fcebaa2` (snapshot `2026-08-21T02:00:09Z`), 90 rows,
+  sha256 `4b66d07f1050125dbe01d39220fafc1261929291090b9e565abba4d6b4b17b33`.
+  **Identifier-retention departure.** Unlike every fixture above, its `market_id` values (0x-prefixed
+  64-hex condition ids) and `token_id` values (public on-chain token ids) are retained verbatim rather
+  than replaced with inert values. Byte identity with `fcebaa2` is the provenance proof for the
+  WO-169 correction, and the market and fixture clustering must reproduce the recorded 55 independent
+  units; substituted identifiers would change the clustering and break both. Every retained value is
+  public on-chain or public-API data. No credentials, wallet keys, account identifiers, request
+  headers or `.env` values are present, and `credential_guard._scan_csv` (which exempts
+  public-identifier keys) returns no finding — asserted by
+  `tests/polymarket_predictive_engine/test_verdict_reconcile.py`.

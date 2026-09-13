@@ -99,6 +99,7 @@ from .resolution_collector import collect_resolutions
 from .runtime_lock import runtime_lock
 from .sharp_anchor import build_sharp_anchor
 from .sharp_odds_fetch import fetch_sharp_odds
+from .profit_verdict import run_verdict_reconcile
 from .smart_flow_clv import build_smart_flow_clv
 from .snapshot_ingest import ingest_scanner_snapshot
 from .snapshot_label_collector import collect_snapshot_labels
@@ -119,6 +120,7 @@ from .utils import read_json, write_json
 
 COMMANDS = [
     "config-check",
+    "profit-verdict-reconcile",
     "pipeline-inventory",
     "pipeline-health",
     "inventory",
@@ -288,6 +290,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--websocket-seconds", type=int, default=60)
     parser.add_argument("--websocket-input", default=None)
     parser.add_argument("--fills-input", default=None, help="smart-flow-clv: public wallet fills CSV input")
+    parser.add_argument("--final-history", default=None, help="profit-verdict-reconcile: a closing_line_final_history.csv to measure (no config, no output root)")
+    parser.add_argument("--positions", default=None, help="profit-verdict-reconcile: optional closing_line_value_positions.csv for settlement fields")
+    parser.add_argument("--output-dir", default=None, help="profit-verdict-reconcile: directory for reconciliation.json and report.md")
+    parser.add_argument("--force", action="store_true", help="profit-verdict-reconcile: replace an existing output directory")
     parser.add_argument(
         "--strategy",
         default=None,
@@ -341,9 +347,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        cfg = load_config(args.config) if args.command != "config-check" else None
+        cfg = load_config(args.config) if args.command not in ("config-check", "profit-verdict-reconcile") else None
         if args.command == "config-check":
             _print(config_check(args.config))
+        elif args.command == "profit-verdict-reconcile":
+            if not args.final_history or not args.output_dir:
+                raise RuntimeError("profit-verdict-reconcile needs --final-history and --output-dir")
+            _print(run_verdict_reconcile(args.final_history, args.output_dir, positions=args.positions, force=args.force))
         elif args.command == "pipeline-inventory":
             _print({"rows": len(pipeline_inventory(cfg))})
         elif args.command == "pipeline-health":

@@ -1909,7 +1909,7 @@ the G3 count changes. The rule was registered as a scope switch (`unverifiable_s
 beside WO-166's `"either"` default, so WO-166's committed results still verify byte-for-byte.
 Commit order on the branch: register text (`3ea7811`, S8 ADMISSIBLE after one delta pass) →
 build (`6f6634d`; 68 tests, 11 of 11 guard mutations detected) → results (`bf14aa3`) →
-build-review delta (`2131825`; line audit CONFORMS with four low findings, red team sound with two findings, every finding applied as a disclosure or a tightening, and the pass regenerated for the added disclosure keys with every figure unchanged). `verify-manifest`, `verify-results` (WO-166) and
+build-review delta (`2131825`; line audit CONFORMS with four low findings, red team sound with two findings, every finding applied as a disclosure or a tightening, and the pass regenerated for the added disclosure keys with every figure unchanged; delta re-verify CONFORMS, its one low finding — a `code_revision` recorded from a dirty tree — closed by a run-time refusal and a clean-tree regeneration at `acc5f76`). `verify-manifest`, `verify-results` (WO-166) and
 `verify-results --work-order WO-167` pass in a fresh clone of the branch at `bf14aa3` and again at `2131825`.
 
 **Lane A — funding carry (same structure, span and eligible weeks as WO-166: 343 of 347): GO.**
@@ -1961,4 +1961,4 @@ In a fresh clone of the branch: `verify-manifest`, `verify-results` and
 `work_order = "WO-167"`, `unverifiable_scope = "perp"` and the same `manifest_sha256` as
 `results/carry_v0.json`; its G1, G2 and G4 quantities equal WO-166's to the last digit; the
 report's verdict lines match the gate booleans; every hash cited above resolves on the branch.
-Any future artifact citing this GO must name WO-167 and the results commit `bf14aa3`.
+Any future artifact citing this GO must name WO-167 and the results directory as regenerated at `acc5f76` (first pass `bf14aa3`; disclosure regeneration `2131825`), whose recorded `code_revision` `bd560fb` reproduces the files.

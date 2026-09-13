@@ -405,3 +405,12 @@ def test_pooled_nav_drawdown_uses_the_summed_nav() -> None:
     assert abs(_max_drawdown_nav(b) - (1.4 / 1.5 - 1.0)) < 1e-12 and abs(_max_drawdown_nav(b) + 0.0667) < 1e-4
     assert _max_drawdown_nav(a + b) == 0.0
     assert math.isnan(_max_drawdown_nav(np.array([1.5, float("nan"), 1.5])))
+
+
+def test_nav_identity_violation_aborts() -> None:
+    # The identity holds by construction; the guard must still fire if a ledger is ever inconsistent.
+    table = _table(3, rate=0.001, perp=[101.0, 111.0, 100.0], spot=[100.0, 110.0, 99.0], high=[101.0, 111.0, 100.0])
+    ledger = carry.simulate(table, variant="V0", start_ms=int(table["boundary_ms"].iloc[0]), end_ms=int(table["boundary_ms"].iloc[-1]))
+    ledger.cash[1] += 1e-6
+    with pytest.raises(carry.CarryInputError, match="NAV identity violated"):
+        carry.ledger_frame(ledger)

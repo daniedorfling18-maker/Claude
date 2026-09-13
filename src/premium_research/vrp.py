@@ -26,6 +26,9 @@ MIN_VALID_HOURS = 700
 HOURS_PER_YEAR = 8_760
 STEP_DAYS = 30
 VARIANCE_POINTS = 10_000.0
+# WO-170: "open_time_in_window" (WO-166: the 720 closes whose bar opens inside the window, 719 intervals) or
+# "return_intervals" (the 721 closes from ``start`` to ``start + 720h``, 720 intervals covering the window exactly).
+RV_ALIGNMENTS = ("open_time_in_window", "return_intervals")
 
 
 def window_starts(start_ms: int, end_ms: int, *, step_days: int = STEP_DAYS, window_hours: int = WINDOW_HOURS) -> list[int]:
@@ -42,15 +45,21 @@ def window_starts(start_ms: int, end_ms: int, *, step_days: int = STEP_DAYS, win
     return starts
 
 
-def realised_variance(spot_1h: pd.DataFrame, start_ms: int, *, window_hours: int = WINDOW_HOURS, min_valid_hours: int = MIN_VALID_HOURS) -> tuple[float, int]:
+def realised_variance(spot_1h: pd.DataFrame, start_ms: int, *, window_hours: int = WINDOW_HOURS, min_valid_hours: int = MIN_VALID_HOURS, alignment: str = "open_time_in_window") -> tuple[float, int]:
     """Annualised realised variance over ``[start, start + window)`` from hourly closes; returns ``(rv, n_valid)``.
 
     A return spanning more than one hour (a gap) is not a valid hourly return
     and is dropped; the count of valid returns drives both the annualisation
     and the rejection rule. ``rv`` is NaN when ``n_valid < min_valid_hours``.
     """
+    if alignment not in RV_ALIGNMENTS:
+        raise ValueError(f"unknown rv_alignment {alignment!r}; registered values are {RV_ALIGNMENTS}")
     end_ms = int(start_ms) + window_hours * HOUR_MS
-    frame = spot_1h[(spot_1h["open_time"] >= int(start_ms)) & (spot_1h["open_time"] < end_ms)]
+    if alignment == "return_intervals":
+        # closes at start, start + 1h, ..., start + 720h: the bars opening in [start - 1h, start + 719h]
+        frame = spot_1h[(spot_1h["open_time"] >= int(start_ms) - HOUR_MS) & (spot_1h["open_time"] <= end_ms - HOUR_MS)]
+    else:
+        frame = spot_1h[(spot_1h["open_time"] >= int(start_ms)) & (spot_1h["open_time"] < end_ms)]
     if len(frame) < 2:
         return float("nan"), 0
     times = frame["open_time"].to_numpy(dtype=np.int64)
@@ -67,13 +76,13 @@ def realised_variance(spot_1h: pd.DataFrame, start_ms: int, *, window_hours: int
     return rv, n_valid
 
 
-def vrp_series(dvol_daily: pd.DataFrame, spot_1h: pd.DataFrame, *, start_ms: int, end_ms: int, step_days: int = STEP_DAYS) -> pd.DataFrame:
+def vrp_series(dvol_daily: pd.DataFrame, spot_1h: pd.DataFrame, *, start_ms: int, end_ms: int, step_days: int = STEP_DAYS, alignment: str = "open_time_in_window") -> pd.DataFrame:
     """One row per window: DVOL open, implied variance, realised variance, VRP, and a rejection flag with reason."""
     dvol_open = {int(ts): float(value) for ts, value in zip(dvol_daily["timestamp"], dvol_daily["open"])}
     records: list[dict[str, object]] = []
     for start in window_starts(start_ms, end_ms, step_days=step_days):
         level = dvol_open.get(start)
-        rv, n_valid = realised_variance(spot_1h, start)
+        rv, n_valid = realised_variance(spot_1h, start, alignment=alignment)
         rejected_reason = ""
         if level is None or not math.isfinite(level):
             rejected_reason = "no_dvol_candle_on_window_start"

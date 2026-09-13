@@ -92,3 +92,34 @@ def test_pooled_windows_use_one_cluster_per_window_and_reject_when_either_curren
     assert pooled["rejected"].tolist() == [False, True, True]
     assert pooled["vrp"].tolist()[0] == pytest.approx(0.20)
     assert all(math.isnan(v) for v in pooled["vrp"].tolist()[1:])
+
+
+# ---------------------------------------------------------------------------- WO-170
+
+
+def _closes(start: int, n: int, values: list[float]) -> pd.DataFrame:
+    hours = [start + i * HOUR_MS for i in range(n)]
+    return pd.DataFrame({"open_time": hours, "open": values, "high": values, "low": values, "close": values})
+
+
+def test_rv_window_uses_721_closes_and_720_intervals() -> None:
+    start = 1704067200000
+    # the bar ending at ``start`` closes at 100; every later close is 200: one ln 2 return, then zeros
+    values = [100.0] + [200.0] * 800
+    spot = _closes(start - HOUR_MS, 801, values)
+    rv_old, n_old = vrp.realised_variance(spot, start)
+    assert n_old == 719 and rv_old == 0.0
+    rv_new, n_new = vrp.realised_variance(spot, start, alignment="return_intervals")
+    assert n_new == 720
+    assert round(rv_new, 4) == round(math.log(2.0) ** 2 * 8760 / 720, 4) == 5.8455
+
+
+def test_rv_alignment_missing_start_close_only_loses_one_interval() -> None:
+    start = 1704067200000
+    spot = _closes(start, 800, [200.0] * 800)  # no bar ends at ``start``
+    rv, n_valid = vrp.realised_variance(spot, start, alignment="return_intervals")
+    assert n_valid == 719 and rv == 0.0
+    with pytest.raises(ValueError, match="unknown rv_alignment"):
+        vrp.realised_variance(spot, start, alignment="sideways")
+    series = vrp.vrp_series(pd.DataFrame({"timestamp": [start], "open": [60.0]}), spot, start_ms=start, end_ms=start + 800 * HOUR_MS, alignment="return_intervals")
+    assert not bool(series["rejected"].iloc[0]) and int(series["valid_hours"].iloc[0]) == 719

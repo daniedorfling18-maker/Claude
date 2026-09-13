@@ -304,7 +304,7 @@ def build_parser() -> argparse.ArgumentParser:
     verify.set_defaults(func=_cmd_verify_manifest)
     run = sub.add_parser("run", help="compute Lane A and Lane B from the committed inputs")
     run.add_argument("--force", action="store_true", help="replace an existing results directory")
-    run.add_argument("--work-order", choices=tuple(CONFIGS), default="WO-166", help="registered configuration to run (WO-167: perpetual-side completeness scope, results_wo167/)")
+    run.add_argument("--work-order", choices=tuple(CONFIGS), default="WO-166", help="registered configuration to run (WO-167: perpetual-side completeness scope, results_wo167/; WO-170: NAV-path drawdown, 720-interval realised variance, ledger export, results_wo170/)")
     run.set_defaults(func=_cmd_run)
     verify_results_cmd = sub.add_parser("verify-results", help="recompute and byte-compare the committed results")
     verify_results_cmd.add_argument("--work-order", choices=tuple(CONFIGS), default="WO-166", help="which committed results to verify, under that work order's registered configuration")

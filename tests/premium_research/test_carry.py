@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -336,3 +338,70 @@ def test_table_without_per_leg_flags_is_refused() -> None:
     table = _table(4).drop(columns=["perp_close_missing"])
     with pytest.raises(KeyError):
         _run(table, unverifiable_scope="perp")
+
+
+# ---------------------------------------------------------------------------- WO-170
+
+
+def test_nav_identity_holds_at_every_boundary() -> None:
+    table = _table(1096, rate=0.0001, perp=100.0, spot=100.0)
+    frame = _run(table)
+    assert (np.abs(frame["nav"] - (frame["cash"] + frame["margin"] + frame["spot_value"])) <= 1e-12).all()
+    assert (np.abs(frame["nav"] - frame["wealth"]) <= 1e-12).all()
+    entry = frame.iloc[0]
+    assert entry["cash"] == 1.5 and entry["margin"] == 0.0 and entry["spot_qty"] == 0.0 and entry["nav"] == 1.5 and not entry["marks_carried_forward"]
+    assert round(float(frame["nav"].iloc[-1]), 4) == round(1.5 + 0.1095 - 0.0015 - 0.0015, 4) == 1.6065
+
+
+def test_hand_calculated_cash_flows_three_periods() -> None:
+    table = _table(3, rate=0.001, perp=[101.0, 111.0, 100.0], spot=[100.0, 110.0, 99.0], high=[101.0, 111.0, 100.0])
+    frame = _run(table)
+    r0, r1, r2 = (frame.iloc[i] for i in range(3))
+    assert r0["nav"] == 1.5
+    assert abs(r1["spot_qty"] - 0.01) < 1e-12
+    assert abs(r1["margin"] - 0.40611) < 1e-9 and abs(r1["spot_value"] - 1.1) < 1e-9 and abs(r1["cash"] - (-0.006505)) < 1e-9
+    assert abs(r1["nav"] - 1.499605) < 1e-9
+    assert abs(r1["margin"] / (r1["spot_qty"] * r1["perp_mark"]) - 0.36586) < 1e-5 and r1["rebalances"] == 0
+    assert r2["spot_qty"] == 0.0 and r2["margin"] == 0.0 and abs(r2["cash"] - 1.499115) < 1e-9 and abs(r2["nav"] - 1.499115) < 1e-9
+    assert abs(frame["funding_received"].sum() - 0.00211) < 1e-9 and abs(frame["fees_paid"].sum() - 0.002995) < 1e-9
+    assert abs((r2["nav"] - r0["nav"]) - (-0.000885)) < 1e-9
+
+
+def test_period_return_on_nav_compounds_to_the_nav_path() -> None:
+    frame = _run(_table(3, rate=0.001, perp=[101.0, 111.0, 100.0], spot=[100.0, 110.0, 99.0], high=[101.0, 111.0, 100.0]))
+    assert frame["period_return_on_nav"].iloc[0] == 0.0
+    assert abs(frame["nav"].iloc[0] * np.prod(1.0 + frame["period_return_on_nav"].to_numpy()) - frame["nav"].iloc[-1]) < 1e-12
+    rng = np.random.default_rng(7)
+    prices = 100.0 * np.exp(np.cumsum(rng.normal(0.0, 0.01, size=31)))
+    walk = _table(31, rate=0.0002, perp=list(prices * 1.001), spot=list(prices), high=list(prices * 1.002))
+    frame = _run(walk)
+    assert abs(frame["nav"].iloc[0] * np.prod(1.0 + frame["period_return_on_nav"].to_numpy()) - frame["nav"].iloc[-1]) < 1e-12
+
+
+def test_merged_boundary_carries_marks_forward_and_keeps_the_identity() -> None:
+    table = _table(10)
+    table.loc[5, "spot_close"] = float("nan")
+    table.loc[5, "close_missing"] = True
+    table.loc[5, "spot_close_missing"] = True
+    frame = _run(table, unverifiable_scope="perp")
+    assert bool(frame["marks_carried_forward"].iloc[5]) and not bool(frame["marks_carried_forward"].iloc[0])
+    assert frame["spot_mark"].iloc[5] == frame["spot_mark"].iloc[4]
+    assert (np.abs(frame["nav"] - frame["wealth"]) <= 1e-12).all()
+    assert np.isfinite(frame["period_return_on_nav"].iloc[5])
+    # flat across a merged boundary (V1 never enters at 0.00001 per period): nothing held, cash is the wealth, marks carried
+    low = _table(10, rate=0.00001)
+    low.loc[5, "spot_close"] = float("nan")
+    low.loc[5, "close_missing"] = True
+    low.loc[5, "spot_close_missing"] = True
+    flat = _run(low, variant="V1", unverifiable_scope="perp")
+    assert flat["spot_qty"].iloc[5] == 0.0 and flat["margin"].iloc[5] == 0.0 and flat["nav"].iloc[5] == flat["cash"].iloc[5]
+
+
+def test_pooled_nav_drawdown_uses_the_summed_nav() -> None:
+    from premium_research.runner import _max_drawdown_nav
+
+    a = np.array([1.5, 1.6, 1.5]); b = np.array([1.5, 1.4, 1.5])
+    assert abs(_max_drawdown_nav(a) - (1.5 / 1.6 - 1.0)) < 1e-12 and abs(_max_drawdown_nav(a) + 0.0625) < 1e-12
+    assert abs(_max_drawdown_nav(b) - (1.4 / 1.5 - 1.0)) < 1e-12 and abs(_max_drawdown_nav(b) + 0.0667) < 1e-4
+    assert _max_drawdown_nav(a + b) == 0.0
+    assert math.isnan(_max_drawdown_nav(np.array([1.5, float("nan"), 1.5])))

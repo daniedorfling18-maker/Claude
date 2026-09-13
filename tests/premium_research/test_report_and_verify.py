@@ -393,3 +393,228 @@ def test_run_refuses_a_dirty_estimator_tree(tmp_path: Path, monkeypatch: pytest.
     subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "clean"], check=True)
     assert cli.uncommitted_paths(repo, "src/premium_research") == []
+
+
+# ---------------------------------------------------------------------------- WO-170
+
+WO170_SYNTHETIC_KWARGS = {"funding_level": 0.0006, "drop_spot_hour": 24 * 10 + 7}
+CLOCK = "2026-09-13T00:00:00Z"
+# sha256 of every file a WO-167 run and a WO-166 run write on the synthetic tree above with clock CLOCK and revision "x",
+# computed once at 70a8971 (before WO-170's switches existed) so the switches are proven to change nothing under their defaults.
+WO167_SYNTHETIC_SHA256 = {
+    "carry_v0.json": "7d17caa8316c36e7ed039bbf6a8d0df72672bc1736bd066e4bd490ddc7e4d8d0",
+    "carry_v1.json": "7617fcbff4538b7cac8d6fcc46fdf5df16609d5d2f6d34d66ac212446c025dc6",
+    "report.md": "8a197805335279b70c58df1ed7fa9b08c9a00dbe2c5475b55b29e3c2cac203c9",
+    "vrp.json": "d4f56b7376184b5f2b3c991843a98df110aebbbcaa9dbfa6861393befd63351c",
+}
+WO166_SYNTHETIC_SHA256 = {
+    "carry_v0.json": "60c0d0c20027f1eea4e59616ba598f59921447eb1229eafbfa350637bb800813",
+    "carry_v1.json": "45c93125e445f189c6917c3f8cf8395ab64a67f586b83608633b36b4b0f4a24b",
+    "report.md": "f7aa4948294c655f96a99bdd066ae52164e6f823f00e56bb66e9ba8cf1ce34ef",
+    "vrp.json": "29fdfac11b12a31fadbcd342a3448dcafe283ed6609e01fbf4f9ac78db84b27c",
+}
+G124_LEAVES = (
+    "pooled.mean_weekly_return_on_capital", "pooled.annualised_return_on_capital", "pooled.annualised_after_haircut", "pooled.annualised_lower_bound",
+    "pooled.annualised_lower_bound_after_haircut", "pooled.eligible_weeks", "pooled.max_drawdown_all_weeks",
+    "gates.G1_lower_bound_after_haircut_positive", "gates.G2_point_after_haircut_at_least_hurdle", "gates.G4_positive_in_enough_qualifying_years",
+)
+
+
+def _wo167_and_wo170(root: Path) -> tuple[runner.Config, runner.Config]:
+    wo167 = _scope_config(small_config(), unverifiable_scope="perp", work_order="WO-167", results_dir="results_wo167")
+    wo170 = _scope_config(small_config(), unverifiable_scope="perp", work_order="WO-170", results_dir="results_wo170", drawdown_basis="nav", rv_alignment="return_intervals", result_files=runner.WO170_RESULT_FILES)
+    return wo167, wo170
+
+
+def _sha(path: Path) -> str:
+    import hashlib
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_wo166_and_wo167_results_still_verify_under_their_defaults() -> None:
+    root = REPO_ROOT / "research" / "premium_poc"
+    assert runner.verify_results(root) == []
+    assert runner.verify_results(root, config=runner.WO167_CONFIG) == []
+
+
+def test_wo170_config_differs_from_wo167_only_where_the_tables_allow(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, **WO170_SYNTHETIC_KWARGS)
+    wo167, wo170 = _wo167_and_wo170(root)
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo167)
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo170)
+    recon = json.loads((root / "results_wo170" / "reconciliation.json").read_text(encoding="utf-8"))
+    tables = runner._reconciliation_tables(wo170)
+    for name in ("carry_v0.json", "carry_v1.json", "vrp.json"):
+        old = runner._flatten(json.loads((root / "results_wo167" / name).read_text(encoding="utf-8")))
+        new = runner._flatten(json.loads((root / "results_wo170" / name).read_text(encoding="utf-8")))
+        differing = sorted(k for k in set(old) | set(new) if not (k in old and k in new and runner._leaf_equal(old[k], new[k])))
+        listed = sorted(d["path"] for d in recon["files"][name]["differences"])
+        assert differing == listed, name
+        for path in differing:
+            assert runner._match_reason(path, tables[name]) == next(d["reason"] for d in recon["files"][name]["differences"] if d["path"] == path)
+        if name != "vrp.json":
+            for leaf in G124_LEAVES:
+                if leaf.startswith("gates.") and name == "carry_v1.json":
+                    continue  # V1 is descriptive and never gated
+                assert runner._leaf_equal(old[leaf], new[leaf]), leaf
+            for leaf in (k for k in old if k.startswith(("pooled.bootstrap.", "pooled.yearly_return_on_capital.", "pooled.year_check.", "fee_sensitivity_2x."))):
+                assert runner._leaf_equal(old[leaf], new[leaf]), leaf
+        else:
+            for leaf in (k for k in old if k.startswith("gates.") or k in ("pooled.positive_complete_years", "pooled.windows_accepted", "pooled.windows_total")):
+                assert runner._leaf_equal(old[leaf], new[leaf]), leaf
+    v0 = json.loads((root / "results_wo170" / "carry_v0.json").read_text(encoding="utf-8"))
+    assert v0["gates"]["G3_drawdown_bounded_and_no_forced_liquidation"] is True and v0["pooled"]["unverifiable_open_periods"] == 0
+
+
+def test_reconciliation_aborts_on_an_unexplained_leaf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, **WO170_SYNTHETIC_KWARGS)
+    wo167, wo170 = _wo167_and_wo170(root)
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo167)
+    original = runner._lane_a_full
+
+    def extra_key(*args, **kwargs):
+        result, frames = original(*args, **kwargs)
+        result["pooled"]["surprise"] = 1.0
+        return result, frames
+
+    monkeypatch.setattr(runner, "_lane_a_full", extra_key)
+    with pytest.raises(RuntimeError, match="pooled.surprise"):
+        runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo170)
+    assert not (root / "results_wo170").exists()
+
+    def removed_key(*args, **kwargs):
+        result, frames = original(*args, **kwargs)
+        result["pooled"].pop("rebalances")
+        return result, frames
+
+    monkeypatch.setattr(runner, "_lane_a_full", removed_key)
+    with pytest.raises(RuntimeError, match="absent from this pass"):
+        runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo170)
+    assert not (root / "results_wo170").exists()
+
+
+def _weekly_and_nav(n_eligible: int, *, ineligible_at: tuple[int, ...] = (), value: float = 0.002) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """A pooled weekly frame of ``n_eligible`` eligible weeks (plus ineligible ones) and a flat pooled NAV frame on the same weeks."""
+    weeks = n_eligible + len(ineligible_at)
+    monday = 1704067200000
+    rows = []
+    nav_rows = []
+    nav = 3.0
+    for i in range(weeks):
+        week_end = monday + (i + 1) * 7 * 24 * 3_600_000
+        eligible = i not in ineligible_at
+        rows.append({"iso_year": 2024 if week_end < 1735603200000 else 2025, "iso_week": i + 1, "week_end_ms": week_end, "return_on_capital": value if eligible else 0.0, "eligible": eligible})
+        for k in range(21):
+            boundary = week_end - (20 - k) * 8 * 3_600_000
+            nav_rows.append({"boundary_ms": boundary, "nav_pooled": nav, "iso_year": rows[-1]["iso_year"], "iso_week": i + 1})
+    weekly = pd.DataFrame(rows)
+    nav_frame = pd.DataFrame(nav_rows)
+    return weekly, nav_frame
+
+
+def test_recent_period_cuts_use_the_last_eligible_weeks_only() -> None:
+    weekly, nav_frame = _weekly_and_nav(60, ineligible_at=(10, 40))
+    out = runner._recent_period(weekly, nav_frame, small_config())
+    assert out["last_52"]["state"] == "ok" and out["last_52"]["weeks"] == 52
+    assert abs(out["last_52"]["mean_weekly_return_on_capital"] - 0.002) < 1e-12 and abs(out["last_52"]["annualised_simple"] - 0.104) < 1e-12
+    assert out["last_52"]["max_drawdown_nav"] == 0.0
+    assert out["rolling_52"]["state"] == "ok" and out["rolling_52"]["windows"] == 9
+    assert abs(out["rolling_52"]["min_annualised_simple"] - 0.104) < 1e-12 and abs(out["rolling_52"]["max_annualised_simple"] - 0.104) < 1e-12 and abs(out["rolling_52"]["last_annualised_simple"] - 0.104) < 1e-12
+    assert out["last_104"]["state"] == "insufficient_weeks" and math.isnan(out["last_104"]["annualised_simple"])
+    weekly, nav_frame = _weekly_and_nav(40)
+    out = runner._recent_period(weekly, nav_frame, small_config())
+    assert out["last_52"]["state"] == out["last_104"]["state"] == out["rolling_52"]["state"] == "insufficient_weeks"
+
+
+def test_bases_block_and_return_basis_present_under_wo170_only(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, **WO170_SYNTHETIC_KWARGS)
+    wo167, wo170 = _wo167_and_wo170(root)
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo167)
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo170)
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=small_config())
+    a = json.loads((root / "results" / "carry_v0.json").read_text(encoding="utf-8"))
+    b = json.loads((root / "results_wo167" / "carry_v0.json").read_text(encoding="utf-8"))
+    c = json.loads((root / "results_wo170" / "carry_v0.json").read_text(encoding="utf-8"))
+    for key in ("bases", "return_basis", "drawdown_basis", "rv_alignment"):
+        assert key not in a and key not in b and key in c, key
+    assert c["bases"] == runner.BASES and c["return_basis"] == "simple_on_inception_capital" and c["drawdown_basis"] == "nav" and c["rv_alignment"] == "return_intervals"
+    assert small_config().discloses_bases is False and wo167.discloses_bases is False and wo170.discloses_bases is True
+    text170 = (root / "results_wo170" / "report.md").read_text(encoding="utf-8")
+    assert "What the prices and cash flows are" in text170 and "NAV path over every boundary (peak-to-trough, negative; G3 reads its magnitude)" in text170
+    for name in ("results", "results_wo167"):
+        text = (root / name / "report.md").read_text(encoding="utf-8")
+        assert "What the prices and cash flows are" not in text and "NAV path" not in text
+
+
+def test_result_files_are_per_config_and_verified(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, **WO170_SYNTHETIC_KWARGS)
+    wo167, wo170 = _wo167_and_wo170(root)
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo167)
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo170)
+    assert sorted(p.name for p in (root / "results_wo170").iterdir()) == sorted(runner.WO170_RESULT_FILES) and len(runner.WO170_RESULT_FILES) == 9
+    v0 = json.loads((root / "results_wo170" / "carry_v0.json").read_text(encoding="utf-8"))
+    assert set(v0["ledger_files"]) == {"ledger_BTCUSDT_V0.csv", "ledger_ETHUSDT_V0.csv"}
+    for name, digest in v0["ledger_files"].items():
+        assert _sha(root / "results_wo170" / name) == digest
+    ledger = pd.read_csv(root / "results_wo170" / "ledger_BTCUSDT_V0.csv")
+    assert list(ledger.columns) == list(runner.LEDGER_COLUMNS)
+    assert (np.abs(ledger["nav"] - (ledger["cash"] + ledger["margin"] + ledger["spot_value"])) <= 1e-9).all()
+    assert runner.verify_results(root, config=wo170) == []
+    (root / "results_wo170" / "ledger_ETHUSDT_V1.csv").unlink()
+    assert runner.verify_results(root, config=wo170) == ["missing: ledger_ETHUSDT_V1.csv"]
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo170, force=True)
+    (root / "results_wo170" / "stray.txt").write_text("x", encoding="utf-8")
+    assert runner.verify_results(root, config=wo170) == ["extra file: stray.txt"]
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=small_config())
+    assert sorted(p.name for p in (root / "results").iterdir()) == sorted(runner.RESULT_FILES)
+
+
+def test_reconciliation_aborts_when_wo167_results_are_absent(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, **WO170_SYNTHETIC_KWARGS)
+    _, wo170 = _wo167_and_wo170(root)
+    with pytest.raises(RuntimeError, match="reconciliation input missing"):
+        runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo170)
+    assert not (root / "results_wo170").exists()
+
+
+def test_reconciliation_nan_and_removed_leaves(tmp_path: Path) -> None:
+    nan = float("nan")
+    assert runner._leaf_equal(nan, nan) and not runner._leaf_equal(nan, 1.0) and not runner._leaf_equal(1, 1.0)
+    tables = runner._reconciliation_tables(small_config())
+    assert runner._match_reason("pooled.recent_period.last_52.annualised_simple", tables["carry_v0.json"]) == "recent_period_cut"
+    assert runner._match_reason("generated_at", tables["carry_v0.json"]) == "clock_or_revision"
+    with pytest.raises(RuntimeError, match="unexplained difference"):
+        runner._match_reason("pooled.annualised_after_haircut", tables["carry_v0.json"])
+    root = tmp_path / "premium_poc"
+    (root / "results_wo167").mkdir(parents=True)
+    base = {"pooled": {"x": nan, "annualised_after_haircut": 0.1, "recent_period": {"a": nan}}, "generated_at": "t"}
+    for name in ("carry_v0.json", "carry_v1.json", "vrp.json"):
+        (root / "results_wo167" / name).write_text(json.dumps(base), encoding="utf-8")
+    same = {"carry_v0.json": {"pooled": {"x": nan, "annualised_after_haircut": 0.1, "recent_period": {"a": 0.5}}, "generated_at": "u"}}
+    same["carry_v1.json"] = same["carry_v0.json"]
+    same["vrp.json"] = {"pooled": {"x": nan, "annualised_after_haircut": 0.1, "recent_period": {"a": nan}}, "generated_at": "u"}
+    out = runner.reconcile(root, small_config(), same)
+    assert [d["path"] for d in out["files"]["carry_v0.json"]["differences"]] == ["generated_at", "pooled.recent_period.a"]
+    assert out["files"]["vrp.json"]["differing_leaves"] == 1  # only the clock; two NaN leaves compare equal
+    bad = {**same, "vrp.json": {"pooled": {"x": 1.0, "annualised_after_haircut": 0.1, "recent_period": {"a": nan}}, "generated_at": "u"}}
+    with pytest.raises(RuntimeError, match="unexplained difference at pooled.x"):
+        runner.reconcile(root, small_config(), bad)
+    removed = {**same, "vrp.json": {"pooled": {"annualised_after_haircut": 0.1, "recent_period": {"a": nan}}, "generated_at": "u"}}
+    with pytest.raises(RuntimeError, match="absent from this pass"):
+        runner.reconcile(root, small_config(), removed)
+
+
+def test_wo167_bytes_unchanged_by_the_new_switches_on_a_synthetic_tree(tmp_path: Path) -> None:
+    root = tmp_path / "premium_poc"
+    build_synthetic_root(root, **WO170_SYNTHETIC_KWARGS)
+    wo167, _ = _wo167_and_wo170(root)
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=wo167)
+    assert {p.name: _sha(p) for p in (root / "results_wo167").iterdir()} == WO167_SYNTHETIC_SHA256
+    runner.run_all(root, code_revision="x", generated_at=CLOCK, config=small_config())
+    assert {p.name: _sha(p) for p in (root / "results").iterdir()} == WO166_SYNTHETIC_SHA256

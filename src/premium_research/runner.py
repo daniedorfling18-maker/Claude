@@ -19,6 +19,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import hashlib
+import io
+import math as _math
+
 import numpy as np
 import pandas as pd
 from quant_lab.risk import conditional_var, max_drawdown_from_returns
@@ -30,6 +34,27 @@ from .report import render_report
 
 RESULT_FILES = ("carry_v0.json", "carry_v1.json", "vrp.json", "report.md")
 WORK_ORDER = "WO-166"
+
+# WO-170: the drawdown basis G3 reads. "compounded_weekly" is WO-166's registered definition (the weekly-increment curve
+# compounded by quant_lab.risk); "nav" is the ledger's own NAV path over every boundary.
+DRAWDOWN_BASES = ("compounded_weekly", "nav")
+RETURN_BASIS = "simple_on_inception_capital"
+RECENT_CUTS = (52, 104)  # one and two years at WEEKS_PER_YEAR = 52
+ROLLING_WEEKS = 52
+RECONCILIATION_AGAINST = "results_wo167"
+LEDGER_COLUMNS = (
+    "boundary_ms", "boundary_iso", "position_open", "marks_carried_forward", "spot_qty", "spot_mark", "perp_mark", "spot_value",
+    "margin", "cash", "nav", "funding_received", "fees_paid", "traded_notional", "period_return_on_capital", "period_return_on_nav",
+    "flagged", "rebalances", "forced_liquidations", "unverifiable_open", "rejected_open",
+)
+BASES = {
+    "mark_price": "Binance 1h kline close of the hour ending at the boundary (last traded price), not the venue mark price",
+    "execution_price": "the same close plus taker fees (spot 10 bps, perpetual 5 bps); no spread, no slippage, no market impact — a favourable channel, covered only by the declared haircut",
+    "funding_notional": "position size × that close; the venue settles on mark-price notional (WO-166 A8 bound: ≤ 1 × 10⁻⁵ of notional per period, direction indeterminate)",
+    "liquidation_check": "kline high of the last traded price against the period-start margin ratio; the venue liquidates on the mark price, which is smoothed, so the last-price high triggers at least as often — a conservative channel",
+    "collateral": "margin 0.5 × notional in USDT; cash and spot earn zero; no cross-margin netting — an unfavourable channel",
+    "haircut": "2.0 pp per year, a declared assumption; it is not a measured bound on venue, stablecoin-depeg or liquidation risk and this WO measures none of them",
+}
 
 # Registered spans and universe (WO-166): the single implementation site; cli.py imports them.
 SYMBOLS = ("BTCUSDT", "ETHUSDT")
@@ -75,6 +100,11 @@ class Config:
     unverifiable_scope: str = "either"
     work_order: str = WORK_ORDER
     results_dir: str = "results"
+    # WO-170: the drawdown basis G3 reads, the realised-variance window alignment, and the files a pass writes and verifies.
+    # WO-166's values stay the defaults so its and WO-167's committed results verify byte-for-byte.
+    drawdown_basis: str = "compounded_weekly"
+    rv_alignment: str = "open_time_in_window"
+    result_files: tuple[str, ...] = RESULT_FILES
 
     @property
     def gate_level(self) -> float:
@@ -85,9 +115,18 @@ class Config:
         """True for every configuration other than WO-166's own: the results JSON then names the scope and the rejected-open count."""
         return self.work_order != WORK_ORDER or self.unverifiable_scope != "either"
 
+    @property
+    def discloses_bases(self) -> bool:
+        """True only when a WO-170 switch is off its WO-166 default: every WO-170 addition to a JSON or report is keyed on this, never on discloses_scope."""
+        return self.drawdown_basis != "compounded_weekly" or self.rv_alignment != "open_time_in_window"
+
     def __post_init__(self) -> None:
         if self.unverifiable_scope not in carry.UNVERIFIABLE_SCOPES:
             raise ValueError(f"unknown unverifiable_scope {self.unverifiable_scope!r}")
+        if self.drawdown_basis not in DRAWDOWN_BASES:
+            raise ValueError(f"unknown drawdown_basis {self.drawdown_basis!r}; registered values are {DRAWDOWN_BASES}")
+        if self.rv_alignment not in vrp.RV_ALIGNMENTS:
+            raise ValueError(f"unknown rv_alignment {self.rv_alignment!r}; registered values are {vrp.RV_ALIGNMENTS}")
 
     @property
     def report_level(self) -> float:
@@ -178,6 +217,21 @@ def _sharpe(weekly: pd.Series) -> float:
     return float(weekly.mean() / weekly.std(ddof=1) * math.sqrt(carry.WEEKS_PER_YEAR))
 
 
+def _max_drawdown_nav(nav: np.ndarray) -> float:
+    """WO-170: ``min_t (nav_t / max_{s<=t} nav_s - 1)`` over every boundary; NaN if any NAV is non-finite (G3 then reads False)."""
+    values = np.asarray(nav, dtype=float)
+    if values.size == 0 or not np.isfinite(values).all() or (values <= 0).any():
+        return float("nan")
+    peak = np.maximum.accumulate(values)
+    return float(np.min(values / peak - 1.0))
+
+
+def _cagr(nav_start: float, nav_end: float, years: float) -> float:
+    if not (_finite(nav_start) and _finite(nav_end)) or nav_start <= 0 or nav_end <= 0 or years <= 0:
+        return float("nan")
+    return float((nav_end / nav_start) ** (1.0 / years) - 1.0)
+
+
 def _yearly_sums(weekly: pd.DataFrame, value: str) -> dict[str, float]:
     """Per-ISO-year sums over ELIGIBLE weeks only; ineligible weeks feed nothing but the drawdown."""
     eligible = weekly[weekly["eligible"]]
@@ -239,9 +293,13 @@ def _sma_regime(btc_spot: pd.DataFrame, weekly: pd.DataFrame, *, sma_days: int) 
     return pd.Series(regimes, index=weekly.index)
 
 
-def _asset_summary(weekly: pd.DataFrame, frame: pd.DataFrame, *, years: float, disclose_scope: bool = False) -> dict[str, Any]:
+def _asset_summary(weekly: pd.DataFrame, frame: pd.DataFrame, *, years: float, disclose_scope: bool = False, disclose_bases: bool = False) -> dict[str, Any]:
     eligible = weekly[weekly["eligible"]]
     extra = {"rejected_open_periods": int(frame["rejected_open"].sum())} if disclose_scope else {}
+    if disclose_bases:
+        nav = frame["nav"].to_numpy(dtype=float)
+        extra["max_drawdown_nav"] = _max_drawdown_nav(nav)
+        extra["cagr_nav"] = _cagr(float(nav[0]), float(nav[-1]), years)
     return {
         **extra,
         "weeks_total": int(len(weekly)),
@@ -266,7 +324,78 @@ def _asset_summary(weekly: pd.DataFrame, frame: pd.DataFrame, *, years: float, d
     }
 
 
-def lane_a(inputs: dict[str, Any], config: Config, *, variant: str, fee_mult: float = 1.0) -> dict[str, Any]:
+def _pooled_nav_frame(frames: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """WO-170: the summed NAV of the assets at every boundary (capital 3.0 for two assets); every ledger must share the boundary grid."""
+    names = list(frames)
+    base = frames[names[0]][["boundary_ms"]].copy()
+    total = np.zeros(len(base), dtype=float)
+    for name in names:
+        frame = frames[name]
+        if len(frame) != len(base) or not np.array_equal(frame["boundary_ms"].to_numpy(dtype=np.int64), base["boundary_ms"].to_numpy(dtype=np.int64)):
+            raise RuntimeError("the per-asset ledgers do not share one boundary grid; refuse to pool NAV")
+        total = total + frame["nav"].to_numpy(dtype=float)
+    base["nav_pooled"] = total
+    keys = base["boundary_ms"].map(carry.iso_week_key)
+    base["iso_year"] = keys.map(lambda key: key[0])
+    base["iso_week"] = keys.map(lambda key: key[1])
+    return base
+
+
+def _pooled_weekly_return_on_nav(pooled_weekly: pd.DataFrame, nav_frame: pd.DataFrame) -> pd.Series:
+    """WO-170: ``nav_end_pooled / nav_start_pooled - 1`` per ISO week on the summed NAV; the first week starts at the entry-row NAV."""
+    nav_at = dict(zip(nav_frame["boundary_ms"].astype(np.int64), nav_frame["nav_pooled"].astype(float)))
+    entry_nav = float(nav_frame["nav_pooled"].iloc[0])
+    ordered = pooled_weekly.sort_values("week_end_ms")
+    out: list[float] = []
+    prev_end = entry_nav
+    for week_end in ordered["week_end_ms"].astype(np.int64):
+        nav_end = nav_at.get(int(week_end), float("nan"))
+        out.append(float(nav_end / prev_end - 1.0) if _finite(nav_end) and _finite(prev_end) and prev_end > 0 else float("nan"))
+        prev_end = nav_end
+    return pd.Series(out, index=ordered.index).reindex(pooled_weekly.index)
+
+
+def _recent_period(pooled_weekly: pd.DataFrame, nav_frame: pd.DataFrame, config: Config) -> dict[str, Any]:
+    """WO-170: fixed-length trailing cuts and a rolling window over eligible weeks; descriptive, never gated."""
+    eligible = pooled_weekly[pooled_weekly["eligible"]].sort_values("week_end_ms")
+    nan = float("nan")
+    out: dict[str, Any] = {"note": "retrospective diagnostic; not a prospective validation"}
+    week_first_boundary: dict[tuple[int, int], int] = {}
+    for key, boundary in zip(zip(nav_frame["iso_year"], nav_frame["iso_week"]), nav_frame["boundary_ms"].astype(np.int64)):
+        week_first_boundary.setdefault((int(key[0]), int(key[1])), int(boundary))
+    for length in RECENT_CUTS:
+        name = f"last_{length}"
+        if len(eligible) < length:
+            out[name] = {"state": "insufficient_weeks", "weeks": int(len(eligible)), "mean_weekly_return_on_capital": nan, "annualised_simple": nan, "interval_90_week_cluster": [nan, nan], "sharpe_weekly_annualised": nan, "max_drawdown_nav": nan}
+            continue
+        tail = eligible.iloc[-length:]
+        values = tail["return_on_capital"].to_numpy(dtype=float)
+        boot = cluster_bootstrap_mean(values, n_draws=config.n_draws, seed=config.seed, levels=(config.report_level,))
+        first_key = (int(tail.iloc[0]["iso_year"]), int(tail.iloc[0]["iso_week"]))
+        start_ms = week_first_boundary.get(first_key)
+        end_ms = int(tail.iloc[-1]["week_end_ms"])
+        span = nav_frame[(nav_frame["boundary_ms"] >= (start_ms if start_ms is not None else end_ms + 1)) & (nav_frame["boundary_ms"] <= end_ms)]
+        out[name] = {
+            "state": "ok",
+            "weeks": int(length),
+            "first_week": f"{first_key[0]}-W{first_key[1]:02d}",
+            "last_week": f"{int(tail.iloc[-1]['iso_year'])}-W{int(tail.iloc[-1]['iso_week']):02d}",
+            "mean_weekly_return_on_capital": float(values.mean()),
+            "annualised_simple": float(values.mean() * carry.WEEKS_PER_YEAR),
+            "interval_90_week_cluster": list(boot["intervals"][f"{config.report_level:.2f}"]),
+            "sharpe_weekly_annualised": _sharpe(tail["return_on_capital"]),
+            "max_drawdown_nav": _max_drawdown_nav(span["nav_pooled"].to_numpy(dtype=float)) if len(span) else nan,
+        }
+    if len(eligible) < ROLLING_WEEKS:
+        out["rolling_52"] = {"state": "insufficient_weeks", "windows": 0, "min_annualised_simple": nan, "max_annualised_simple": nan, "last_annualised_simple": nan}
+    else:
+        values = eligible["return_on_capital"].to_numpy(dtype=float)
+        rolling = np.array([values[i : i + ROLLING_WEEKS].mean() * carry.WEEKS_PER_YEAR for i in range(len(values) - ROLLING_WEEKS + 1)], dtype=float)
+        out["rolling_52"] = {"state": "ok", "windows": int(len(rolling)), "min_annualised_simple": float(rolling.min()), "max_annualised_simple": float(rolling.max()), "last_annualised_simple": float(rolling[-1])}
+    return out
+
+
+def _lane_a_full(inputs: dict[str, Any], config: Config, *, variant: str, fee_mult: float = 1.0) -> tuple[dict[str, Any], dict[str, pd.DataFrame]]:
     tables: dict[str, pd.DataFrame] = {}
     entry_ms = exit_ms = None
     for symbol in config.symbols:
@@ -285,12 +414,14 @@ def lane_a(inputs: dict[str, Any], config: Config, *, variant: str, fee_mult: fl
     years = (exit_ms - entry_ms) / (365.0 * DAY_MS)
     per_asset: dict[str, Any] = {}
     weekly_by_asset: dict[str, pd.DataFrame] = {}
+    frames_by_asset: dict[str, pd.DataFrame] = {}
     for symbol, table in tables.items():
         ledger = carry.simulate(table, variant=variant, start_ms=entry_ms, end_ms=exit_ms, fee_mult=fee_mult, unverifiable_scope=config.unverifiable_scope)
         frame = carry.ledger_frame(ledger)
         weekly = carry.weekly_returns(frame)
         weekly_by_asset[symbol] = weekly
-        per_asset[symbol] = _asset_summary(weekly, frame, years=years, disclose_scope=config.discloses_scope)
+        frames_by_asset[symbol] = frame
+        per_asset[symbol] = _asset_summary(weekly, frame, years=years, disclose_scope=config.discloses_scope, disclose_bases=config.discloses_bases)
 
     keys = ["iso_year", "iso_week", "week_end_ms"]
     pooled = None
@@ -323,11 +454,19 @@ def lane_a(inputs: dict[str, Any], config: Config, *, variant: str, fee_mult: fl
         mask = (regime == label) & pooled["eligible"]
         subset = pooled.loc[mask, "return_on_capital"]
         regime_cut[label] = {"weeks": int(mask.sum()), "mean_weekly_return_on_capital": float(subset.mean()) if len(subset) else float("nan")}
+
+    # WO-170: the NAV path G3 reads under drawdown_basis = "nav"; computed only when disclosed so nothing else changes.
+    nav_frame = _pooled_nav_frame(frames_by_asset) if config.discloses_bases else None
+    max_dd_nav = _max_drawdown_nav(nav_frame["nav_pooled"].to_numpy(dtype=float)) if nav_frame is not None else float("nan")
+    if config.drawdown_basis == "nav":
+        drawdown_bounded = bool(_finite(max_dd_nav) and abs(max_dd_nav) <= config.g3_max_drawdown)
+    else:
+        # quant_lab.risk.max_drawdown_from_returns returns the most negative peak-to-trough ratio, in [-1, 0]; the gate reads its magnitude.
+        drawdown_bounded = bool(_finite(max_dd) and abs(max_dd) <= config.g3_max_drawdown)
     gates = {
         "G1_lower_bound_after_haircut_positive": bool(_finite(lower_bound_after_haircut) and lower_bound_after_haircut > 0.0),
         "G2_point_after_haircut_at_least_hurdle": bool(_finite(point_after_haircut) and point_after_haircut >= config.g2_hurdle),
-        # quant_lab.risk.max_drawdown_from_returns returns the most negative peak-to-trough ratio, in [-1, 0]; the gate reads its magnitude.
-        "G3_drawdown_bounded_and_no_forced_liquidation": bool(_finite(max_dd) and abs(max_dd) <= config.g3_max_drawdown and forced == 0 and unverifiable == 0),
+        "G3_drawdown_bounded_and_no_forced_liquidation": bool(drawdown_bounded and forced == 0 and unverifiable == 0),
         "G4_positive_in_enough_qualifying_years": bool(year_check["positive_years"] >= config.g4_min_positive_years),
     }
     gates["lane_a_go"] = bool(all(gates.values()))
@@ -365,9 +504,24 @@ def lane_a(inputs: dict[str, Any], config: Config, *, variant: str, fee_mult: fl
     if config.discloses_scope:
         # WO-167 and later: the count G3 would have read under WO-166's "either" scope, so a narrower scope never hides a rejected open period.
         result["pooled"]["rejected_open_periods"] = int(sum(int(pooled[f"ro_{s}"].sum()) for s in config.symbols))
+    if nav_frame is not None:
+        nav_pooled = nav_frame["nav_pooled"].to_numpy(dtype=float)
+        weekly_nav = _pooled_weekly_return_on_nav(pooled, nav_frame)
+        eligible_nav = weekly_nav[pooled["eligible"]].to_numpy(dtype=float)
+        mean_weekly_nav = float(eligible_nav.mean()) if len(eligible_nav) and np.isfinite(eligible_nav).all() else float("nan")
+        result["pooled"]["max_drawdown_nav"] = max_dd_nav
+        result["pooled"]["cagr_nav"] = _cagr(float(nav_pooled[0]), float(nav_pooled[-1]), years)
+        result["pooled"]["total_return_on_capital_simple"] = float((nav_pooled[-1] - nav_pooled[0]) / nav_pooled[0]) if nav_pooled[0] > 0 else float("nan")
+        result["pooled"]["mean_weekly_return_on_nav"] = mean_weekly_nav
+        result["pooled"]["annualised_return_on_nav"] = mean_weekly_nav * carry.WEEKS_PER_YEAR if _finite(mean_weekly_nav) else float("nan")
+        result["pooled"]["recent_period"] = _recent_period(pooled, nav_frame, config)
     if variant == "V0":
         result["gates"] = gates  # V1 is descriptive and never gated: it carries no gate booleans
-    return result
+    return result, frames_by_asset
+
+
+def lane_a(inputs: dict[str, Any], config: Config, *, variant: str, fee_mult: float = 1.0) -> dict[str, Any]:
+    return _lane_a_full(inputs, config, variant=variant, fee_mult=fee_mult)[0]
 
 
 def deribit_cross_check(inputs: dict[str, Any], config: Config) -> dict[str, Any]:
@@ -402,9 +556,27 @@ def lane_b(inputs: dict[str, Any], config: Config) -> dict[str, Any]:
     per_currency: dict[str, Any] = {}
     series_by_currency: dict[str, pd.DataFrame] = {}
     for currency, symbol in zip(config.currencies, config.symbols):
-        series = vrp.vrp_series(inputs[f"{currency}_dvol"], inputs[f"{symbol}_spot"], start_ms=config.lane_b_start_ms, end_ms=config.lane_b_end_ms)
+        series = vrp.vrp_series(inputs[f"{currency}_dvol"], inputs[f"{symbol}_spot"], start_ms=config.lane_b_start_ms, end_ms=config.lane_b_end_ms, alignment=config.rv_alignment)
         series_by_currency[currency] = series
         accepted = series[~series["rejected"]]
+        windows_table: list[dict[str, Any]] | None = None
+        if config.discloses_bases:
+            # WO-170: the per-window table, with the valid-hour count WO-166's alignment would have given, so the alignment is observable.
+            legacy = series if config.rv_alignment == "open_time_in_window" else vrp.vrp_series(inputs[f"{currency}_dvol"], inputs[f"{symbol}_spot"], start_ms=config.lane_b_start_ms, end_ms=config.lane_b_end_ms, alignment="open_time_in_window")
+            legacy_hours = dict(zip(legacy["window_start_ms"].astype(np.int64), legacy["valid_hours"].astype(int)))
+            windows_table = [
+                {
+                    "window_start_ms": int(row.window_start_ms),
+                    "valid_hours": int(row.valid_hours),
+                    "valid_hours_wo166_alignment": int(legacy_hours.get(int(row.window_start_ms), 0)),
+                    "implied_variance": float(row.implied_variance),
+                    "realised_variance": float(row.realised_variance),
+                    "vrp": float(row.vrp),
+                    "rejected": bool(row.rejected),
+                    "rejected_reason": str(row.rejected_reason),
+                }
+                for row in series.itertuples(index=False)
+            ]
         per_currency[currency] = {
             "windows_total": int(len(series)),
             "windows_accepted": int(len(accepted)),
@@ -417,6 +589,8 @@ def lane_b(inputs: dict[str, Any], config: Config) -> dict[str, Any]:
             "share_of_windows_positive": float((accepted["vrp"] > 0).mean()) if len(accepted) else float("nan"),
             "yearly_mean_vrp": vrp.yearly_means(series),
         }
+        if windows_table is not None:
+            per_currency[currency]["windows"] = windows_table
     pooled = vrp.pooled_windows(series_by_currency)
     accepted = pooled[~pooled["rejected"]]
     values = accepted["vrp"].to_numpy(dtype=float)
@@ -488,6 +662,115 @@ def _parameters(config: Config) -> dict[str, Any]:
     }
 
 
+def _ledger_csv_bytes(frame: pd.DataFrame) -> bytes:
+    """WO-170: the per-boundary ledger, money in units of the inception notional; a defined encoding so verify-results can byte-compare it."""
+    out = frame.copy()
+    out["boundary_iso"] = pd.to_datetime(out["boundary_ms"].astype(np.int64), unit="ms", utc=True).dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    out = out[list(LEDGER_COLUMNS)]
+    buffer = io.StringIO()
+    out.to_csv(buffer, index=False, lineterminator="\n")
+    return buffer.getvalue().encode("utf-8")
+
+
+def _flatten(payload: Any, prefix: str = "") -> dict[str, Any]:
+    """Dotted leaf paths with list indexes (``pooled.bootstrap.cluster.intervals.0.90.0``)."""
+    out: dict[str, Any] = {}
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            out.update(_flatten(value, f"{prefix}{key}."))
+    elif isinstance(payload, list):
+        for index, value in enumerate(payload):
+            out.update(_flatten(value, f"{prefix}{index}."))
+    else:
+        out[prefix[:-1]] = payload
+    return out
+
+
+def _leaf_equal(a: Any, b: Any) -> bool:
+    if isinstance(a, float) and isinstance(b, float) and _math.isnan(a) and _math.isnan(b):
+        return True  # two NaN leaves compare equal
+    return bool(a == b) and type(a) is type(b)
+
+
+def _reconciliation_tables(config: Config) -> dict[str, list[tuple[str, str, str]]]:
+    """The registered per-file tables: (kind, key, reason); kind is 'exact' or 'prefix' (a prefix ends in '.')."""
+    common = [
+        ("exact", "code_revision", "clock_or_revision"), ("exact", "generated_at", "clock_or_revision"),
+        ("exact", "work_order", "work_order_label"),
+        ("exact", "drawdown_basis", "configuration_switch"), ("exact", "rv_alignment", "configuration_switch"), ("exact", "return_basis", "configuration_switch"),
+        ("prefix", "bases.", "bases_block"),
+    ]
+    carry_table = list(common) + [
+        ("exact", "gates.G3_drawdown_bounded_and_no_forced_liquidation", "drawdown_basis"), ("exact", "gates.lane_a_go", "drawdown_basis"),
+        ("exact", "pooled.max_drawdown_nav", "drawdown_basis"),
+        ("exact", "pooled.cagr_nav", "new_descriptive_field"), ("exact", "pooled.total_return_on_capital_simple", "new_descriptive_field"),
+        ("exact", "pooled.mean_weekly_return_on_nav", "new_descriptive_field"), ("exact", "pooled.annualised_return_on_nav", "new_descriptive_field"),
+        ("prefix", "pooled.recent_period.", "recent_period_cut"), ("prefix", "ledger_files.", "ledger_export"),
+    ]
+    for symbol in config.symbols:
+        carry_table.append(("exact", f"per_asset.{symbol}.max_drawdown_nav", "drawdown_basis"))
+        carry_table.append(("exact", f"per_asset.{symbol}.cagr_nav", "new_descriptive_field"))
+    vrp_table = list(common) + [
+        ("exact", "pooled.mean_vrp", "rv_alignment"), ("exact", "pooled.mean_vrp_points", "rv_alignment"),
+        ("prefix", "pooled.bootstrap.", "rv_alignment"), ("prefix", "pooled.lower_bound_gate_level.", "rv_alignment"),
+        ("prefix", "pooled.yearly_mean_vrp.", "rv_alignment"), ("prefix", "pooled.year_check.", "rv_alignment"),
+    ]
+    for currency in config.currencies:
+        vrp_table.append(("prefix", f"per_currency.{currency}.windows.", "rv_alignment"))
+        for leaf in ("mean_realised_variance", "mean_vrp", "mean_vrp_points", "share_of_windows_positive"):
+            vrp_table.append(("exact", f"per_currency.{currency}.{leaf}", "rv_alignment"))
+        vrp_table.append(("prefix", f"per_currency.{currency}.yearly_mean_vrp.", "rv_alignment"))
+    return {"carry_v0.json": carry_table, "carry_v1.json": carry_table, "vrp.json": vrp_table}
+
+
+def _match_reason(path: str, table: list[tuple[str, str, str]]) -> str:
+    exact = [reason for kind, key, reason in table if kind == "exact" and key == path]
+    if len(exact) > 1:
+        raise RuntimeError(f"reconciliation table defect: two exact entries for {path}")
+    if exact:
+        return exact[0]
+    prefixes = [(len(key), reason) for kind, key, reason in table if kind == "prefix" and path.startswith(key)]
+    if not prefixes:
+        raise RuntimeError(f"unexplained difference at {path}: no reconciliation table entry matches; this is a defect in the registered table, not a result")
+    prefixes.sort(reverse=True)
+    if len(prefixes) > 1 and prefixes[0][0] == prefixes[1][0]:
+        raise RuntimeError(f"reconciliation table defect: two prefixes of equal length match {path}")
+    return prefixes[0][1]
+
+
+def reconcile(root: Path, config: Config, payloads: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """WO-170: every leaf that differs from the committed WO-167 files must match exactly one registered reason; anything else aborts."""
+    against = Path(root) / RECONCILIATION_AGAINST
+    tables = _reconciliation_tables(config)
+    files: dict[str, Any] = {}
+    for name, table in tables.items():
+        path = against / name
+        try:
+            reference = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"reconciliation input missing or unreadable: {path}: {exc}") from exc
+        old = _flatten(reference)
+        new = _flatten(payloads[name])
+        removed = sorted(set(old) - set(new))
+        if removed:
+            raise RuntimeError(f"{name}: leaves present in {RECONCILIATION_AGAINST} are absent from this pass: {removed[:5]}")
+        differences: list[dict[str, Any]] = []
+        for leaf in sorted(set(new)):
+            if leaf in old and _leaf_equal(old[leaf], new[leaf]):
+                continue
+            differences.append({"path": leaf, "reason": _match_reason(leaf, table), "wo167": old.get(leaf, "<absent>"), "wo170": new[leaf]})
+        files[name] = {"differing_leaves": len(differences), "identical_leaves": int(len(new) - len(differences)), "differences": differences}
+    return {
+        "against": RECONCILIATION_AGAINST,
+        "work_order": config.work_order,
+        "reason_codes": sorted({reason for table in tables.values() for _, _, reason in table}),
+        "rule": "leaves addressed by dotted path with list indexes; an exact path beats a prefix; the longest prefix wins; no match, two matches of equal precedence, or a removed leaf aborts before any file is written; two NaN leaves compare equal",
+        "files": files,
+        "paper_trading_invoked": False,
+        "live_trading_invoked": False,
+    }
+
+
 def compute_all(root: Path, *, config: Config, code_revision: str, generated_at: str) -> dict[str, bytes]:
     inputs = load_inputs(root, config)
     common = {
@@ -504,14 +787,37 @@ def compute_all(root: Path, *, config: Config, code_revision: str, generated_at:
     if config.discloses_scope:
         # Every configuration other than WO-166's own names the scope in every results JSON; WO-166's committed files must not gain a byte.
         common["unverifiable_scope"] = config.unverifiable_scope
-    v0 = {**common, **lane_a(inputs, config, variant="V0")}
+    if config.discloses_bases:
+        # WO-170: the switches, the return basis the gates read, and what every price and cash flow is.
+        common["drawdown_basis"] = config.drawdown_basis
+        common["rv_alignment"] = config.rv_alignment
+        common["return_basis"] = RETURN_BASIS
+        common["bases"] = dict(BASES)
+    v0_result, v0_frames = _lane_a_full(inputs, config, variant="V0")
+    v0 = {**common, **v0_result}
     sensitivity = lane_a(inputs, config, variant="V0", fee_mult=2.0)["pooled"]
     v0["fee_sensitivity_2x"] = {k: sensitivity[k] for k in ("annualised_return_on_capital", "annualised_after_haircut", "annualised_lower_bound_after_haircut", "max_drawdown_all_weeks")}
     v0["deribit_cross_check"] = deribit_cross_check(inputs, config)
-    v1 = {**common, **lane_a(inputs, config, variant="V1")}
+    v1_result, v1_frames = _lane_a_full(inputs, config, variant="V1")
+    v1 = {**common, **v1_result}
     b = {**common, **lane_b(inputs, config)}
-    files = {"carry_v0.json": _json_bytes(v0), "carry_v1.json": _json_bytes(v1), "vrp.json": _json_bytes(b)}
-    files["report.md"] = render_report(v0, v1, b).encode("utf-8")
+    files: dict[str, bytes] = {}
+    if config.discloses_bases:
+        for variant, frames, payload in (("V0", v0_frames, v0), ("V1", v1_frames, v1)):
+            ledger_files: dict[str, str] = {}
+            for symbol, frame in frames.items():
+                name = f"ledger_{symbol}_{variant}.csv"
+                files[name] = _ledger_csv_bytes(frame)
+                ledger_files[name] = hashlib.sha256(files[name]).hexdigest()
+            payload["ledger_files"] = ledger_files
+    files["carry_v0.json"] = _json_bytes(v0)
+    files["carry_v1.json"] = _json_bytes(v1)
+    files["vrp.json"] = _json_bytes(b)
+    reconciliation = None
+    if config.discloses_bases:
+        reconciliation = reconcile(root, config, {"carry_v0.json": v0, "carry_v1.json": v1, "vrp.json": b})
+        files["reconciliation.json"] = _json_bytes(reconciliation)
+    files["report.md"] = render_report(v0, v1, b, reconciliation=reconciliation).encode("utf-8")
     return files
 
 
@@ -522,6 +828,8 @@ def run_all(root: Path, *, code_revision: str, generated_at: str, force: bool = 
     if results_dir.exists() and not force:
         raise RuntimeError(f"{results_dir} already exists; one analysis pass is registered — pass --force only to redo a failed write")
     files = compute_all(root, config=config, code_revision=code_revision, generated_at=generated_at)
+    if set(files) != set(config.result_files):
+        raise RuntimeError(f"the pass produced {sorted(files)} but the configuration registers {sorted(config.result_files)}; nothing written")
     tmp_dir = root / f".{config.results_dir}-tmp-{os.getpid()}"
     if tmp_dir.exists():
         shutil.rmtree(tmp_dir)
@@ -541,7 +849,7 @@ def run_all(root: Path, *, code_revision: str, generated_at: str, force: bool = 
 
 
 def verify_results(root: Path, *, config: Config | None = None) -> list[str]:
-    """Recompute with the stored clock and revision and byte-compare every committed results file."""
+    """Recompute with the stored clock and revision and byte-compare every file the configuration registers."""
     root = Path(root)
     config = config or Config()
     results_dir = root / config.results_dir
@@ -556,14 +864,14 @@ def verify_results(root: Path, *, config: Config | None = None) -> list[str]:
     except Exception as exc:  # noqa: BLE001 - any recompute failure is a verification failure
         return [f"recompute failed: {exc}"]
     failures: list[str] = []
-    for name in RESULT_FILES:
+    for name in config.result_files:
         target = results_dir / name
         if not target.is_file():
             failures.append(f"missing: {name}")
             continue
         if target.read_bytes() != files[name]:
             failures.append(f"byte difference: {name}")
-    for extra in sorted(path.name for path in results_dir.iterdir() if path.name not in RESULT_FILES):
+    for extra in sorted(path.name for path in results_dir.iterdir() if path.name not in config.result_files):
         failures.append(f"extra file: {extra}")
     if not failures and stored.get("manifest_sha256") != sha256_path(root / "manifest.json"):
         failures.append("manifest_sha256 in results does not match the committed manifest")
@@ -572,4 +880,7 @@ def verify_results(root: Path, *, config: Config | None = None) -> list[str]:
 
 # WO-167: the refined completeness scope, its own work-order label and results directory. Every other literal is WO-166's.
 WO167_CONFIG = Config(unverifiable_scope="perp", work_order="WO-167", results_dir="results_wo167")
-CONFIGS: dict[str, Config] = {"WO-166": Config(), "WO-167": WO167_CONFIG}
+# WO-170: WO-167's scope, the NAV drawdown basis, the 720-interval realised-variance window, and the nine files it writes and verifies.
+WO170_RESULT_FILES = RESULT_FILES + ("reconciliation.json", "ledger_BTCUSDT_V0.csv", "ledger_ETHUSDT_V0.csv", "ledger_BTCUSDT_V1.csv", "ledger_ETHUSDT_V1.csv")
+WO170_CONFIG = Config(unverifiable_scope="perp", work_order="WO-170", results_dir="results_wo170", drawdown_basis="nav", rv_alignment="return_intervals", result_files=WO170_RESULT_FILES)
+CONFIGS: dict[str, Config] = {"WO-166": Config(), "WO-167": WO167_CONFIG, "WO-170": WO170_CONFIG}

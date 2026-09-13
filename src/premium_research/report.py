@@ -53,8 +53,17 @@ def _iso(ms: Any) -> str:
         return "n/a"
 
 
-def _pooled_table(pooled: dict[str, Any], *, gated: bool = True, hurdle: float | None = None, scope: str | None = None) -> list[str]:
+def _pooled_table(pooled: dict[str, Any], *, gated: bool = True, hurdle: float | None = None, scope: str | None = None, nav_basis: bool = False) -> list[str]:
     lb = pooled["lower_bound_gate_level"]
+    g3_reads = "; G3 reads its magnitude" if gated else ""
+    if nav_basis:
+        # WO-170: G3 reads the NAV path; the WO-166 curve stays for reconciliation and is labelled as not read.
+        drawdown_rows = [
+            f"| max drawdown, compounded weekly-increment curve (WO-166 basis; not read by G3 under this configuration) | {_pct(pooled['max_drawdown_all_weeks'])} |",
+            f"| max drawdown, NAV path over every boundary (peak-to-trough, negative{g3_reads}) | {_pct(pooled.get('max_drawdown_nav'))} |",
+        ]
+    else:
+        drawdown_rows = [f"| max drawdown, all weeks (peak-to-trough, negative{g3_reads}) | {_pct(pooled['max_drawdown_all_weeks'])} |"]
     g3_suffix = "; G3 requires 0" if gated else ""
     if scope == "perp":
         unverifiable_label = f"open-position periods with perpetual-side data absent (liquidation unverifiable{g3_suffix})"
@@ -91,7 +100,7 @@ def _pooled_table(pooled: dict[str, Any], *, gated: bool = True, hurdle: float |
         f"| {g1_label} | {_pct(pooled['annualised_lower_bound_after_haircut'])} |",
         *margin_rows,
         f"| Sharpe (weekly, annualised) | {_num(pooled['sharpe_weekly_annualised'], 2)} |",
-        f"| max drawdown, all weeks (peak-to-trough, negative{'; G3 reads its magnitude' if gated else ''}) | {_pct(pooled['max_drawdown_all_weeks'])} |",
+        *drawdown_rows,
         f"| CVaR 95% weekly (mean loss magnitude in the worst 5% of weeks) | {_pct(pooled['cvar_95_weekly'])} |",
         f"| forced liquidations | {pooled['forced_liquidations']} |",
         f"| {unverifiable_label} | {pooled['unverifiable_open_periods']} |",
@@ -108,15 +117,83 @@ def _yearly_table(yearly: dict[str, float], *, label: str, fmt=_pct) -> list[str
     return lines
 
 
-def render_report(v0: dict[str, Any], v1: dict[str, Any], b: dict[str, Any]) -> str:
+def _bases_sections(payload: dict[str, Any], *, label: str) -> list[str]:
+    """WO-170: the NAV-path descriptives and the recent-period cuts for one variant; rendered only when the JSON carries them."""
+    pooled = payload["pooled"]
+    lines = [
+        f"### NAV-path statistics ({label}; descriptive, never gated)",
+        "",
+        "| quantity | value |",
+        "|---|---|",
+        f"| compounded annual growth of the pooled NAV | {_pct(pooled.get('cagr_nav'))} |",
+        f"| total simple return on inception capital | {_pct(pooled.get('total_return_on_capital_simple'))} |",
+        f"| mean weekly return on NAV (eligible weeks) | {_pct(pooled.get('mean_weekly_return_on_nav'), 4)} |",
+        f"| annualised return on NAV (mean weekly x 52) | {_pct(pooled.get('annualised_return_on_nav'))} |",
+        "",
+        f"### Recent-period stability ({label}; retrospective diagnostic, not a prospective validation)",
+        "",
+        "| cut | state | weeks | mean weekly | annualised simple | 90% week-cluster interval (weekly) | Sharpe | NAV drawdown over the span |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    recent = pooled.get("recent_period", {})
+    for name in ("last_52", "last_104"):
+        cut = recent.get(name, {})
+        interval = cut.get("interval_90_week_cluster", [float("nan"), float("nan")])
+        lines.append(
+            f"| {name} | {cut.get('state', 'n/a')} | {cut.get('weeks', 'n/a')} | {_pct(cut.get('mean_weekly_return_on_capital'), 4)} | {_pct(cut.get('annualised_simple'))} | "
+            f"[{_pct(interval[0], 4)}, {_pct(interval[1], 4)}] | {_num(cut.get('sharpe_weekly_annualised'), 2)} | {_pct(cut.get('max_drawdown_nav'))} |"
+        )
+    rolling = recent.get("rolling_52", {})
+    lines.append("")
+    lines.append(f"Rolling 52-eligible-week annualised simple return: state {rolling.get('state', 'n/a')}, windows {rolling.get('windows', 'n/a')}, min {_pct(rolling.get('min_annualised_simple'))}, max {_pct(rolling.get('max_annualised_simple'))}, last {_pct(rolling.get('last_annualised_simple'))} (overlapping windows; no share-positive statistic is reported).")
+    lines.append("")
+    return lines
+
+
+def _reconciliation_sections(reconciliation: dict[str, Any]) -> list[str]:
+    lines = ["## Reconciliation against WO-167", "", f"Every leaf differing from the committed `{reconciliation['against']}/` files, with its registered reason; exact-path differences are listed one by one and prefix-matched groups are summarised.", ""]
+    for name, block in reconciliation["files"].items():
+        lines.append(f"### {name}: {block['differing_leaves']} differing leaves, {block['identical_leaves']} identical")
+        lines.append("")
+        lines.append("| leaf | WO-167 | WO-170 | reason |")
+        lines.append("|---|---|---|---|")
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for diff in block["differences"]:
+            path = str(diff["path"])
+            grouped = None
+            for prefix in ("bases.", "pooled.recent_period.", "ledger_files.", "pooled.bootstrap.", "pooled.lower_bound_gate_level.", "pooled.yearly_mean_vrp.", "pooled.year_check."):
+                if path.startswith(prefix):
+                    grouped = prefix
+            if ".windows." in path or ".yearly_mean_vrp." in path:
+                grouped = path.split(".windows.")[0] + ".windows." if ".windows." in path else path.rsplit(".yearly_mean_vrp.", 1)[0] + ".yearly_mean_vrp."
+            if grouped is None:
+                lines.append(f"| `{path}` | {diff['wo167']} | {diff['wo170']} | {diff['reason']} |")
+            else:
+                groups.setdefault(grouped, []).append(diff)
+        for prefix, items in groups.items():
+            lines.append(f"| `{prefix}*` ({len(items)} leaves) | — | — | {items[0]['reason']} |")
+        lines.append("")
+    lines.append("## Reconciliation against WO-166")
+    lines.append("")
+    lines.append("WO-167 changed exactly two things against WO-166's committed results, recorded in WO-167's charter entry of 2026-09-13: the completeness scope of G3's unverifiable count (`\"either\"` → `\"perp\"`, 16 → 0, with the 16 spot-rejected periods disclosed beside it) and the resulting G3 and Lane A verdict. Every other leaf was identical to the last digit. This pass reconciles against WO-167's files, so those two changes are inherited here and every further difference is listed above.")
+    lines.append("")
+    return lines
+
+
+def render_report(v0: dict[str, Any], v1: dict[str, Any], b: dict[str, Any], reconciliation: dict[str, Any] | None = None) -> str:
     lines: list[str] = []
     work_order = str(v0.get("work_order", "WO-166"))
+    nav_basis = str(v0.get("drawdown_basis", "")) == "nav"
+    bases = "bases" in v0  # WO-170 and later only; WO-166's and WO-167's rendered reports must not gain a byte
     lines.append(f"# {work_order} proof-of-concept results (historical-class diagnostic)")
     lines.append("")
     if "unverifiable_scope" in v0:  # WO-167 and later only; WO-166's rendered report must not gain a byte
         scope = str(v0["unverifiable_scope"])
         scope_text = "any absent bar on either leg (WO-166's registered rule)" if scope == "either" else "absent perpetual-side data only, the leg the liquidation check reads (WO-167's registered rule)"
         lines.append(f"Completeness scope for unverifiable liquidation status: **{scope}** — {scope_text}.")
+        lines.append("")
+    if bases:
+        lines.append(f"Drawdown basis: **{v0['drawdown_basis']}** (G3 reads the ledger's own NAV path over every boundary; the WO-166 compounded weekly-increment curve is reported for reconciliation and not read). Realised-variance alignment: **{v0['rv_alignment']}** (721 closes, 720 return intervals covering each 30-day window exactly). Return basis for G1, G2 and G4: `{v0['return_basis']}` — the mean eligible weekly change in wealth divided by the inception capital, annualised by 52, as WO-166 registered; nothing about those gates changes here. This pass inherits WO-167's completeness scope and its rejected-open disclosure.")
         lines.append("")
     lines.append(
         "This is a historical-class result computed from the committed inputs listed in `manifest.json`. "
@@ -144,7 +221,7 @@ def render_report(v0: dict[str, Any], v1: dict[str, Any], b: dict[str, Any]) -> 
     lines.append(f"Entry boundary {_iso(v0['span']['entry_boundary_ms'])}, exit boundary {_iso(v0['span']['exit_boundary_ms'])} ({_num(v0['span']['years'], 2)} years).")
     lines.append("")
     scope = v0.get("unverifiable_scope")
-    lines.extend(_pooled_table(v0["pooled"], gated=True, hurdle=float(v0["parameters"]["g2_hurdle"]), scope=scope))
+    lines.extend(_pooled_table(v0["pooled"], gated=True, hurdle=float(v0["parameters"]["g2_hurdle"]), scope=scope, nav_basis=nav_basis))
     lines.append("")
     lines.extend(_yearly_table(v0["pooled"]["yearly_return_on_capital"], label="pooled net return on capital (eligible weeks only)"))
     lines.append("")
@@ -158,6 +235,15 @@ def render_report(v0: dict[str, Any], v1: dict[str, Any], b: dict[str, Any]) -> 
             f"{_pct(stats['max_drawdown_all_weeks'])} | {stats['rebalances']} | {stats['forced_liquidations']} | {_num(stats['turnover_notional_per_year'], 2)} |"
         )
     lines.append("")
+    if bases:
+        lines.append("### What the prices and cash flows are")
+        lines.append("")
+        lines.append("| quantity | basis |")
+        lines.append("|---|---|")
+        for key, text in v0["bases"].items():
+            lines.append(f"| {key} | {text} |")
+        lines.append("")
+        lines.extend(_bases_sections(v0, label="V0"))
     lines.append("### Regime cut (BTC spot against its 200-day SMA at the week's start; descriptive)")
     lines.append("")
     lines.append("| regime | eligible weeks | mean weekly net return on capital |")
@@ -172,8 +258,35 @@ def render_report(v0: dict[str, Any], v1: dict[str, Any], b: dict[str, Any]) -> 
     lines.append("")
     lines.append("### V1 (conditional entry; descriptive, never gated)")
     lines.append("")
-    lines.extend(_pooled_table(v1["pooled"], gated=False, scope=scope))
+    lines.extend(_pooled_table(v1["pooled"], gated=False, scope=scope, nav_basis=nav_basis))
     lines.append("")
+    if bases:
+        lines.extend(_bases_sections(v1, label="V1"))
+        lines.append("### Ledger columns (money in units of the inception notional N = 1; one CSV per asset and variant)")
+        lines.append("")
+        lines.append("| column | meaning |")
+        lines.append("|---|---|")
+        for column, meaning in (
+            ("boundary_ms / boundary_iso", "the funding boundary (UTC)"),
+            ("position_open", "a position is held after this boundary's actions"),
+            ("marks_carried_forward", "true at a merged boundary whose close is absent: the marks are the last marked closes"),
+            ("spot_qty", "spot units held (also the perpetual short size)"),
+            ("spot_mark / perp_mark", "the 1h close of the hour ending at the boundary (last traded price)"),
+            ("spot_value", "spot_qty x spot_mark, 0 when nothing is held"),
+            ("margin", "the perpetual margin account, marked and credited with funding"),
+            ("cash", "everything else: the whole wealth when flat, the cumulative fees while open"),
+            ("nav", "cash + margin + spot_value; equals wealth at every row within 1e-12"),
+            ("funding_received / fees_paid / traded_notional", "this period's funding, fees and traded notional"),
+            ("period_return_on_capital", "change in nav divided by the inception capital 1.5 (the gates' basis)"),
+            ("period_return_on_nav", "change in nav divided by the previous nav (0 at the entry row)"),
+            ("flagged / rebalances / forced_liquidations / unverifiable_open / rejected_open", "the period's flags and counts"),
+        ):
+            lines.append(f"| {column} | {meaning} |")
+        lines.append("")
+        ledger_files = v0.get("ledger_files", {})
+        if ledger_files:
+            lines.append("V0 ledgers (sha256): " + ", ".join(f"`{name}` `{digest[:12]}…`" for name, digest in sorted(ledger_files.items())) + ".")
+            lines.append("")
     lines.append("### Deribit cross-check (coin-margined, funding only; descriptive)")
     lines.append("")
     lines.append("| currency | eligible weeks | gross funding on notional, annualised | net of one amortised round trip |")
@@ -203,4 +316,11 @@ def render_report(v0: dict[str, Any], v1: dict[str, Any], b: dict[str, Any]) -> 
     lines.append("")
     lines.append("Lane B answers only whether a premium exists; whether a defined-risk option structure captures it net of option spreads needs historical option quotes, which are paid data.")
     lines.append("")
+    if bases:
+        windows = {currency: stats.get("windows", []) for currency, stats in b["per_currency"].items() if isinstance(stats, dict)}
+        counts = {currency: (sum(1 for w in rows if int(w.get("valid_hours", 0)) == int(w.get("valid_hours_wo166_alignment", 0)) + 1), len(rows)) for currency, rows in windows.items()}
+        lines.append("Realised variance is computed over the 720 return intervals of each window (the closes from the window's start to its end, 721 closes); WO-166's alignment used the 720 closes whose bars open inside the window, 719 intervals. " + "; ".join(f"{currency}: {n} of {total} windows carry exactly one more valid interval than under WO-166's alignment" for currency, (n, total) in counts.items()) + ".")
+        lines.append("")
+    if reconciliation is not None:
+        lines.extend(_reconciliation_sections(reconciliation))
     return "\n".join(lines) + "\n"

@@ -8947,6 +8947,7 @@ before that date predate this log and are not retroactively reopened. Seeded 202
 | WO-146 | F | Opus spec, Sonnet build, Opus review + delta re-verify | ~360k | 0 | 2 fixed (`AttributeError` escaping the shell fallback; a test comment misstating what `main` produces), 3 recorded (§146.5, unreachable `isfinite` guards, a dead test branch) | 0 | pending deploy |
 | WO-145.1 registration | D | Opus draft, Opus registration gate **x6** | ~700k reviewer | **7 → 6 → 2 → 0 blockers**, then 3 delta rounds | not yet built | — | pending |
 | WO-166 | F | Opus draft, Opus admission gate x4 to ADMISSIBLE plus 5 delta checks on amendments, Opus build, Opus line-audit + red-team, Opus re-verify | ~1.9M reviewer (admission 346k, line-audit 435k, red-team 154k, delta checks) | 13 → 8 → 3 → 1 → 0 (rounds 1-4), then 1, 0, 1, 0 on amendments | 17 (1 HIGH: a drawdown gate that could never fail; 2 MEDIUM; 14 LOW) fixed; re-verify CONFORMS with 2 low partials closed same day | 0 — three fetches failed closed on data-contract surprises (microsecond timestamps, deadline, DVOL paging) before results existed; each became a dated amendment | verify-manifest and verify-results pass in a fresh clone at `5c26ee6`; Lane A NO-GO on G3, Lane B GO |
+| WO-167 | F | Opus draft, Opus admission gate x2 (6 → 0), Opus build, Opus line-audit + red-team, delta applied same day | ~212k reviewer (line-audit 79k, red-team 133k; admission-gate tokens not recorded before a context compaction) | 6 → 0 | 4 low (line-audit) + 2 (red-team: the charter record and calibration row outstanding at review time; a report row true only under the old scope) — all fixed in the delta `2131825`; 0 escaped | 0 — one pass, one regeneration for the added disclosure keys with every figure unchanged | fresh-clone `verify-manifest` and both `verify-results` selectors pass at `2131825`; Lane A GO with G1/G2/G4 equal to WO-166 to the last digit; charter 2026-09-13 |
 
 **Reading of the 2026-08-02 rows — the tiering held, the review shape did not.**
 Three class-F/M builds went Sonnet-built and Opus-reviewed and produced **zero
@@ -17667,7 +17668,7 @@ unchanged. `tests/test_experiment_registry.py` — unchanged and still passes.
 collector, any prospective window, any paper or live evidence, any change to
 WO-67's P1-P5, and any use of the sandbox result as verification of record.
 
-## WO-167 — Refine WO-166's completeness rule to the leg the liquidation check reads, and run one fresh pass on the committed inputs — `admitted` (2026-09-13; S8 ADMISSIBLE after one delta pass; `registered-ancestry: a790e51 ancestor-of a790e51 PASS` at dispatch, the build branch standing at `origin/main`'s tip; class F: it changes one input of gate G3; historical-class diagnostic; covered by the registry's WO-166 paragraph only through the dated extension this WO carries (touched file 13, `docs/EXPERIMENT_REGISTRY.md`, effective only if merged); touches `src/premium_research/`, its tests, a new results directory, this register, the charter, and the registry → OWNER MERGE after line-audit; no primary added; no threshold, span, return estimator, or cut changes; the single change is the definition of G3's `unverifiable_open_periods` input; `registered-ancestry:` recorded at dispatch against `origin/main` `a790e51`, the squash-merge of PR #454 that made WO-166 registered. **Disclosure:** this work order exists because WO-166's single pass returned NO-GO on G3 alone, with all 16 unverifiable periods on the spot leg; the rule change below is therefore made after seeing the outcome and is favourable by construction. WO-166's result stays on record unchanged; this pass writes its own results directory.)
+## WO-167 — Refine WO-166's completeness rule to the leg the liquidation check reads, and run one fresh pass on the committed inputs — `built-and-run` (2026-09-13; single registered pass complete: Lane A GO on all four gates with G1, G2 and G4 identical to WO-166 to the last digit and `unverifiable_open_periods` 16 → 0 (`rejected_open_periods` 16, all spot-side); Lane B unchanged; results commit `bf14aa3`, regenerated at `2131825` after the build-review delta below (disclosure keys and report rows only, every figure unchanged); `verify-manifest`, `verify-results` and `verify-results --work-order WO-167` pass in a fresh clone at `2131825`; line audit CONFORMS with four low findings and red team sound with two findings, all applied in the delta; result recorded in `docs/POLYMARKET_QUANT_MODE_CHARTER.md` under 2026-09-13; the required gate's runner is still offline, so under the GLOBAL RULE this WO cannot count as registered until that gate runs and the squash-merge lands; S8 ADMISSIBLE after one delta pass; `registered-ancestry: a790e51 ancestor-of a790e51 PASS` at dispatch, the build branch standing at `origin/main`'s tip; class F: it changes one input of gate G3; historical-class diagnostic; covered by the registry's WO-166 paragraph only through the dated extension this WO carries (touched file 13, `docs/EXPERIMENT_REGISTRY.md`, effective only if merged); touches `src/premium_research/`, its tests, a new results directory, this register, the charter, and the registry → OWNER MERGE after line-audit; no primary added; no threshold, span, return estimator, or cut changes; the single change is the definition of G3's `unverifiable_open_periods` input; `registered-ancestry:` recorded at dispatch against `origin/main` `a790e51`, the squash-merge of PR #454 that made WO-166 registered. **Disclosure:** this work order exists because WO-166's single pass returned NO-GO on G3 alone, with all 16 unverifiable periods on the spot leg; the rule change below is therefore made after seeing the outcome and is favourable by construction. WO-166's result stays on record unchanged; this pass writes its own results directory.)
 
 **Why this exists.** WO-166 registered: "A period is rejected when the 1h close of the hour
 ending at its boundary is absent for either leg, or when any of the 8 hourly highs inside it is
@@ -17744,7 +17745,7 @@ differ from WO-166's committed values is reported as a defect by the day-after c
 
 `research/premium_poc/data/`, `manifest.json`, and `results/` (WO-166) are not touched.
 
-### Enumerated offline tests (S8/A10); each confirmed to FAIL with its guard reverted, caches purged
+### Enumerated offline tests (S8/A10); each confirmed to FAIL with its guard reverted, caches purged — tests 1-8 registered at admission, 9-13 by the build-review delta
 
 1. `test_boundary_table_flags_each_leg_separately` — a spot-only absent hour at a boundary sets `spot_close_missing`, not `perp_close_missing`, and `close_missing`; a perpetual-only absent hour the reverse.
 2. `test_spot_only_gap_is_rejected_but_verifiable_under_perp_scope` — boundary 5's spot close absent with the position open: under `"either"` `unverifiable_open` reads `[1, 1]` on rows 5 and 6 (sum 2); under `"perp"` it reads 0 on both; the week is ineligible under both; funding and wealth are identical under both.
@@ -17753,7 +17754,35 @@ differ from WO-166's committed values is reported as a defect by the day-after c
 5. `test_wo166_results_still_verify_under_the_default_scope` — on the committed research tree (an integration test on committed inputs, about 5 s), `verify_results(root)` returns `[]`.
 6. `test_wo167_config_writes_its_own_results_directory_and_records_the_scope` — on a synthetic tree with one dropped spot boundary hour, the WO-166 config yields `unverifiable_open_periods = 2` (the merged boundary and the one it merges into) and G3 False in `results/`; the WO-167 config yields 0 and G3 True in `results_wo167/`, with `work_order = "WO-167"` and `unverifiable_scope = "perp"` in the JSON, `results/` untouched, and every G1/G2/G4 quantity byte-identical between the two runs.
 7. `test_run_refuses_a_second_wo167_pass` — an existing `results_wo167/` refuses `run` without `--force`.
-8. `test_verify_results_selector_recomputes_under_the_right_scope` — `verify_results(root, work_order="WO-167")` passes on the WO-167 tree and reports a byte difference if the WO-166 scope is used against it.
+8. `test_verify_results_selector_recomputes_under_the_right_scope` — `verify_results(root, config=WO167_CONFIG)` (amended 2026-09-13: the draft wrote `work_order=`; the implementation and the test pass the configuration) passes on the WO-167 tree and reports a byte difference if the WO-166 scope is used against it.
+
+9. `test_non_finite_high_with_open_position_is_unverifiable_under_both_scopes` (delta 2026-09-13) — a row whose `perp_high` is NaN with `high_partial` False and the position open reads `unverifiable_open = 1` under both scopes and `rejected_open = 0`; unreachable from `boundary_table`, guarded because `simulate` is public.
+10. `test_rejected_open_is_the_either_scope_count_under_every_scope` (delta) — with a spot-only boundary gap, `rejected_open` under `"perp"` equals `unverifiable_open` under `"either"` row for row (sum 2), while `unverifiable_open` under `"perp"` sums to 0.
+11. `test_table_without_per_leg_flags_is_refused` (delta) — a table lacking `perp_close_missing` raises instead of falling back to `close_missing`.
+12. `test_committed_wo167_results_differ_from_wo166_only_where_registered` (delta; integration on the committed tree) — for each of the three results files, the set of leaves differing between `results/` and `results_wo167/` is a subset of {`code_revision`, `generated_at`, `work_order`, `unverifiable_scope`, G3, `lane_a_go`, the per-asset and pooled `unverifiable_open_periods` and `rejected_open_periods`}; the manifest hashes are equal; the committed WO-167 file records `rejected_open_periods = 16`.
+13. `test_scope_disclosure_is_keyed_on_the_scope_not_only_the_work_order` (delta) — `Config(unverifiable_scope="perp", work_order="WO-166", results_dir="results_odd")` has `discloses_scope` True and its JSON carries the scope and `rejected_open_periods = 2`; WO-166's own configuration has it False.
+
+**Build-review delta 2026-09-13 (after the single pass; commit `2131825`).** Line audit: CONFORMS,
+four low findings. Red team: no fail-open under the `"perp"` scope (504 single-hour and 27,552
+merged-span perturbations, every read perpetual bar dropped yields a non-zero count), no scope
+leakage (nine differing leaves in `carry_v0.json`, all registered), no hidden relaxation, WO-166
+byte-identical; two findings. Applied, each a disclosure or a tightening: (1) `rejected_open_periods`,
+the count G3 reads under WO-166's `"either"` scope, is written to every results JSON and rendered
+beside the scoped count under every configuration other than WO-166's own, and the scoped row is
+labelled "perpetual-side data absent"; the pass was regenerated with `--force` at `2131825` and every
+leaf other than `generated_at`, `code_revision` and the new keys is byte-identical to the `bf14aa3`
+pass (V0 16, V1 14; the report previously read "0 open-position periods with missing bars", which was
+untrue in its plain reading under this scope). (2) The disclosure is keyed on `Config.discloses_scope`
+(scope ≠ `"either"` or work order ≠ WO-166), closing a Python-API-only path that could compute under
+`"perp"` and label the file WO-166. (3) An open position with no finite intra-period perpetual high
+reads unverifiable under both scopes. (4) The per-leg close flag is read strictly. (5) CLI work-order
+choices derive from `CONFIGS`. (6) Test 8's wording corrected. Recorded, not changed: 27 of the 31
+missing spot hours per asset fall mid-period and are flagged by no path, because spot is read only at
+boundary closes and the 8 intra-period highs are perpetual highs; the 16 rejected periods come from the
+4 boundary-hour spot gaps per asset. For each of the 8 merged spans the observed maximum perpetual
+move was between 0.27% and 6.38% against liquidation moves of 37.4% to 122.0% (minimum headroom 35.2
+pp), so the reclassification hides no near-liquidation. Touched-file list unchanged (13 paths; the
+delta touches paths 1-10). Tests 9-13 added; 5 of 5 delta guard mutations detected; 73 tests.
 
 ### Day-after check
 

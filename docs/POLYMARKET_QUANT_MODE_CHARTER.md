@@ -1889,3 +1889,76 @@ the branch; `carry_v0.json`'s `manifest_sha256` equals the sha256 of `manifest.j
 verdict lines match the gate booleans; every hash cited above resolves on the branch. If any
 future artifact cites a Lane A GO, it must name the work order that registered the refined rule
 and the fresh pass that produced it.
+
+## 2026-09-13 — Registered result (historical class): funding carry GO under WO-167's perpetual-leg completeness rule
+
+**This is a measurement result, not a policy change.** No threshold, span, estimator, cut or
+capital ceiling is altered. Nothing here authorises an order, a rung, a spend, a collector, a
+prospective window, or a registration. The evidence class is *historical* and nothing done in
+the sandbox can relabel it upward. **This GO exists because one input of gate G3 was redefined
+after WO-166's outcome was known; the redefinition is favourable by construction and is recorded
+as such (WO-167, A11 channel 11).** WO-166's NO-GO stays on record unchanged beside it.
+
+**What was run.** WO-167, one fresh pass of WO-166's registered estimator on WO-166's committed
+inputs (same `manifest.json`, sha256 `2152b1b4…2ea50`, no new data), with a single change: a
+rejected period counts as having unverifiable liquidation status only when the perpetual-side
+data the liquidation check reads is incomplete (any of its 8 hourly perpetual highs, or the
+perpetual close at its start boundary). A period with an absent spot bar is still rejected and
+its ISO week still ineligible for every estimator and gate, exactly as WO-166 registered; only
+the G3 count changes. The rule was registered as a scope switch (`unverifiable_scope = "perp"`)
+beside WO-166's `"either"` default, so WO-166's committed results still verify byte-for-byte.
+Commit order on the branch: register text (`3ea7811`, S8 ADMISSIBLE after one delta pass) →
+build (`6f6634d`; 68 tests, 11 of 11 guard mutations detected) → results (`bf14aa3`) →
+build-review delta (`2131825`; line audit CONFORMS with four low findings, red team sound with two findings, every finding applied as a disclosure or a tightening, and the pass regenerated for the added disclosure keys with every figure unchanged). `verify-manifest`, `verify-results` (WO-166) and
+`verify-results --work-order WO-167` pass in a fresh clone of the branch at `bf14aa3` and again at `2131825`.
+
+**Lane A — funding carry (same structure, span and eligible weeks as WO-166: 343 of 347): GO.**
+The verdict is generated from the gate booleans in `research/premium_poc/results_wo167/carry_v0.json`:
+
+| gate | registered criterion | measured | result |
+|---|---|---|---|
+| G1 | annualised 0.025-quantile lower bound minus the 2.0 pp haircut > 0 | **3.93%** (unchanged from WO-166) | pass |
+| G2 | annualised point estimate minus the haircut ≥ 6.0% | **7.99%** (unchanged) | pass |
+| G3 | max drawdown ≤ 20%, forced liquidations = 0, and no open position inside a period whose *perpetual-side* data is incomplete (WO-167 scope) | drawdown **0.32%**, forced liquidations **0**, unverifiable open periods **0** (WO-166 scope: 16) | pass |
+| G4 | positive in ≥ 4 of the 6 ISO years 2020-2025, each with ≥ 45 eligible weeks | **6 of 6** (unchanged) | pass |
+
+The expected outcome stated in the register so that it could fail was met exactly: every leaf
+of the three results files other than the unverifiable counts, G3, the lane verdict, the scope
+and work-order labels, the code revision and the timestamp is identical to WO-166's to the last
+digit, in V0, V1 and Lane B alike. Lane B is unchanged (GO, existence observed, selection bias
+unaddressed) and stays parked by decision.
+
+**What this does and does not say.** Under the rule that matches the check it protects, the
+funding-carry premium on BTC and ETH clears all four registered gates on 2020-01 to 2026-08
+history, under VIP0 taker fees, no collateral yield, capital at 1.5x notional and the declared
+2.0 pp haircut. What it does not say: that the rule would have been chosen this way before the
+outcome was known (it was not; that is the disclosed bias), that any forward window has been
+observed (none has), or that paper or live evidence exists (none does). The 16 reclassified
+periods stay excluded from every return figure; the GO rests on the structural argument that an
+absent spot bar carries no information about a perpetual-side liquidation, plus WO-166's NO-GO
+standing on record. WO-67's P1-P5 are untouched and funding remains closed.
+
+**What it triggers.** Only what the registry's evidence policy and its WO-166 paragraph already
+provide: a future pre-observation amendment registering the carry as a lane with a fresh
+out-of-sample window, drafted for the owner's merge and gated by S8 before it is proposed. That
+amendment, the live collectors and the paper loop are separate work orders; none is authorised
+by this record. As of 2026-09-13 the required gate's self-hosted runner is still offline: the branch's last gate run and an owner-dispatched VPS paper deploy on `main` have both sat queued since 2026-09-12. Under the GLOBAL RULE, WO-167 counts as registered only when that gate runs and its squash-merge lands; until then this is a sandbox result, verified from a fresh clone, and not verification of record.
+
+**Recorded from the red team, for the next reader.** The report's earlier row "open-position periods
+with missing bars: 0" was true only under the old scope and is replaced by two rows: 0 with
+perpetual-side data absent, and 16 rejected for an absent bar on either leg (all spot-side). Only 4
+of each spot series' 31 missing hours fall at a boundary hour; the other 27 are mid-period and are
+flagged by no path, because spot is read only at boundary closes. For each of the 8 rejected spans
+the observed maximum perpetual move (0.27% to 6.38%) sat 35 to 116 percentage points below the
+liquidation move, so the reclassification hides no near-liquidation. The `code_revision` a results
+file records is a branch-side commit; after a squash-merge it is no longer an ancestor of `main`,
+and `verify-results` passes because it recomputes with the stored string, not by resolving it.
+
+### Day-after check
+
+In a fresh clone of the branch: `verify-manifest`, `verify-results` and
+`verify-results --work-order WO-167` pass; `results_wo167/carry_v0.json` records
+`work_order = "WO-167"`, `unverifiable_scope = "perp"` and the same `manifest_sha256` as
+`results/carry_v0.json`; its G1, G2 and G4 quantities equal WO-166's to the last digit; the
+report's verdict lines match the gate booleans; every hash cited above resolves on the branch.
+Any future artifact citing this GO must name WO-167 and the results commit `bf14aa3`.

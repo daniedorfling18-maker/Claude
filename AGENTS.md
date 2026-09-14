@@ -265,6 +265,15 @@ work or capital.
   `docs/POLYMARKET_CODEX_WORK_ORDERS.md`.
 - Never use destructive Git commands to deal with runtime data.
 
+Every file under `scripts/`, at any depth, must be named by at least one **other**
+file under the repository's scan roots, as
+`tests/test_repository_hygiene_launchers.py` defines them — its basename appearing
+in that other file, or, for a `.py` script, an import of its stem — and neither that
+test file nor `docs/POLYMARKET_CODEX_WORK_ORDERS.md` counts as a referrer. A pull
+request that adds a script acquires its referrer in the same pull request; a pull
+request that removes a script's last referrer either keeps a referrer or removes the
+script. There is no allowlist.
+
 ### Amendment, 2026-08-01 — unresolved review threads block merge
 
 Binding merge precondition, in addition to every rule above: a pull request
@@ -336,5 +345,7 @@ derived from one of those defects and carries its attribution.
 | Docker safety | `docs/POLYMARKET_DOCKER_SAFETY_AUDIT.md` |
 | Engine commands | `src/polymarket_predictive_engine/cli.py` |
 
-Legacy local launchers and runbooks remain only for repository history and
-regression coverage. Their presence is not permission to run them locally.
+Legacy local launchers and runbooks remain only where another file under the
+repository's scan roots still references them, as the rule in "Work-order and Git
+discipline" defines them; the 18 unreferenced ones were removed under WO-168a and
+remain in Git history. Their presence is not permission to run them locally.

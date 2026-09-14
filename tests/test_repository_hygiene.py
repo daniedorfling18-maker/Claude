@@ -30,7 +30,6 @@ ARCHIVED = (
     "POLYMARKET_VPS_DOCKER_DRY_RUN.md",
     "VPS_DOCKER_DRY_RUN_MONITOR.md",
     "VPS_RESTART_FORENSICS_2026-07-12.md",
-    "VENTURE_THESIS.md",
     "LIVE_DUTCH_ARB_DOCKER.md",
     "POLYMARKET_RESOLUTION_COLLECTOR.md",
     "polymarket_overnight_governance_20260625.md",
@@ -40,7 +39,7 @@ ARCHIVE_REASONS: dict[str, str] = {
     "POLYMARKET_ACTUARIAL_GRADE_GAP_ASSESSMENT_20260628.md": "dated snapshot",
     "POLYMARKET_ENGINE_APPLY_NOTES.md": "legacy local design; VPS-only rule",
     "POLYMARKET_LIVE_LEARNING_SYSTEM_DESIGN.md": "legacy local design; VPS-only rule",
-    "POLYMARKET_MISPRICING_BOT.md": "legacy local design; VPS-only rule",
+    "POLYMARKET_MISPRICING_BOT.md": "superseded by `docs/POLYMARKET_VPS_DOCKER_RUNBOOK.md`",
     "POLYMARKET_PAPER_PROFIT_AUDIT.md": "superseded by `docs/POLYMARKET_QUANT_MODE_CHARTER.md`",
     "POLYMARKET_PREDICTIVE_POWER_ROADMAP.md": "superseded by `docs/POLYMARKET_EDGE_STRATEGY_RESET.md`",
     "POLYMARKET_STRATEGY_V2.md": "superseded by `docs/POLYMARKET_EDGE_STRATEGY_RESET.md`",
@@ -48,7 +47,6 @@ ARCHIVE_REASONS: dict[str, str] = {
     "POLYMARKET_VPS_DOCKER_DRY_RUN.md": "superseded by `docs/POLYMARKET_VPS_DOCKER_RUNBOOK.md`",
     "VPS_DOCKER_DRY_RUN_MONITOR.md": "superseded by `docs/POLYMARKET_VPS_DOCKER_RUNBOOK.md`",
     "VPS_RESTART_FORENSICS_2026-07-12.md": "dated snapshot",
-    "VENTURE_THESIS.md": "dated snapshot",
     "LIVE_DUTCH_ARB_DOCKER.md": "legacy local design; VPS-only rule",
     "POLYMARKET_RESOLUTION_COLLECTOR.md": (
         "superseded by `src/polymarket_predictive_engine/resolution_collector.py`"
@@ -75,6 +73,7 @@ CLASSIFICATION: dict[str, tuple[str, ...]] = {
         "docs/VPS_OUTAGE_2026-08-21.md",
         "docs/POLYMARKET_SHARP_ANCHOR.md",
         "docs/SYSTEM_MAP.md",
+        "docs/VENTURE_THESIS.md",
         "src/polymarket_predictive_engine/cli.py",
         "src/superbru_score_engine",
     ),
@@ -304,18 +303,25 @@ ROW_IDENTIFIERS: dict[str, frozenset[str]] = {
 
 ROW_REQUIRED_PHRASES: dict[str, tuple[str, ...]] = {
     "H1 sharp-anchor maker carry": (
+        "`insufficient_evidence`, with the three gate states",
+        "M-A `pending`, M-B `pending`, M-C `pass_by_construction`",
+        "capacity is bounded by the sizing model, not measured",
         "modelled net carry +$1.68/day against the $3.33/day target",
         "rests on 3 replay-confirmed hypothetical fills",
         "with 77.5% of opportunities lacking contemporaneous book state",
         "realized wallet rewards are $0",
     ),
     "H2 dutch-book": (
+        "has not been read since the host went offline",
         "the 2026-08-21 scan, which is **not** the verdict",
         "`events_scanned = 300` with `flagged_deviations = 0`",
         "`groups_with_complete_ask_side = 67` with `flagged_deviations = 0`",
         "`max_executable_basket_usd = 0.0`",
     ),
-    "H3 smart-flow": ("`fills_seen = 0`, last generated 2026-07-17",),
+    "H3 smart-flow": (
+        "`fills_seen = 0`, last generated 2026-07-17",
+        "An ingestion failure, not a negative result",
+    ),
     "The legacy $100/month verdict engine": (
         "which expired 2026-08-19",
         "(−0.013943 on 55 units,",
@@ -341,14 +347,13 @@ PROSE_PERMITTED_NUMERIC = frozenset(
     {"2026-09-13", "2026-08-21", "fcebaa2", "#455", "#454", "WO-166"}
 )
 
-ROOT_MARKDOWN = (
-    "README.md",
-    "AGENTS.md",
-    "CLAUDE.md",
-    "BACKTESTING_README.md",
-    "DAILY_AUTOMATION_README.md",
-    "README_DOCKER_MONITOR.md",
-)
+# Every repository-root `*.md` file, globbed rather than listed. The register
+# enumerates today's six in a parenthetical; that is a description of the set,
+# not the set itself, and a frozen tuple was fail-open for any root document
+# added later — a line audit dropped one carrying two stale references and the
+# suite stayed green.
+def _root_markdown() -> list[Path]:
+    return sorted(REPO_ROOT.glob("*.md"))
 
 # Historical register text this work order may not edit, naming a file that no
 # longer exists. Test 2 asserts this is the ONLY unresolved reference, so a new
@@ -483,7 +488,7 @@ def test_readme_carries_the_retraction_and_the_evidence_pointer() -> None:
 
 
 def _reference_scan_files() -> list[Path]:
-    files = [REPO_ROOT / name for name in ROOT_MARKDOWN if (REPO_ROOT / name).is_file()]
+    files = [p for p in _root_markdown() if p.is_file()]
     for path in sorted((REPO_ROOT / "docs").rglob("*.md")):
         if "archive" in path.relative_to(REPO_ROOT).parts:
             continue
@@ -546,7 +551,7 @@ def test_archive_readme_lists_every_archived_file() -> None:
     assert on_disk, "no archived files found"
 
     rows = _table_rows(text)
-    assert len(rows) == len(on_disk) == 15, (len(rows), len(on_disk))
+    assert len(rows) == len(on_disk) == 14, (len(rows), len(on_disk))
 
     listed = []
     for cells in rows:
@@ -585,7 +590,7 @@ def test_docs_classification_is_an_exhaustive_partition() -> None:
         for p in (REPO_ROOT / "docs").rglob("*.md")
         if "archive" not in p.relative_to(REPO_ROOT).parts
     }
-    assert len(domain) == 57, len(domain)
+    assert len(domain) == 58, len(domain)
 
     non_archived_classes = {k: v for k, v in CLASSIFICATION.items() if k != "archived"}
     seen: dict[str, str] = {}
@@ -602,7 +607,7 @@ def test_docs_classification_is_an_exhaustive_partition() -> None:
         for name, members in CLASSIFICATION.items()
     }
     assert sizes == {
-        "canonical": 13,
+        "canonical": 14,
         "owner-surface": 5,
         "draft template, unsigned, not in force": 1,
         "referenced by code or tests": 12,
@@ -610,7 +615,7 @@ def test_docs_classification_is_an_exhaustive_partition() -> None:
         "kept by cross-reference": 10,
         "SuperBru ancillary": 9,
         "incident records": 1,
-        "archived": 15,
+        "archived": 14,
     }, sizes
     assert sum(sizes.values()) == 72, sum(sizes.values())
 
@@ -623,7 +628,7 @@ def test_docs_classification_is_an_exhaustive_partition() -> None:
     canonical_table = _table_rows(documents)
     # The table, not the page: a second review deleted the table and re-emitted
     # the 17 links as one prose line, and a whole-file assertion passed.
-    assert len(canonical_table) == 17, len(canonical_table)
+    assert len(canonical_table) == 18, len(canonical_table)
     table_text = "\n".join(" ".join(cells) for cells in canonical_table)
     for path in CLASSIFICATION["canonical"]:
         assert f"]({path})" in table_text, path
@@ -654,7 +659,11 @@ def test_evidence_state_rows_carry_a_class_and_respect_the_close_out_guard() -> 
     assert path.is_file(), EVIDENCE_STATE
     text = path.read_text(encoding="utf-8")
 
-    header = text.split("| line |", 1)[0]
+    lines = text.splitlines()
+    first_pipe = next(i for i, ln in enumerate(lines) if ln.lstrip().startswith("|"))
+    header = "\n".join(lines[:first_pipe])
+    columns = [c.strip() for c in lines[first_pipe].strip().strip("|").split("|")]
+    assert columns == ["line", "evidence class", "reading", "what it rests on", "where recorded"], columns
     assert "2026-08-21" in header
     # The whole sentence, not the fragment: a header reading "this is not
     # current state" would satisfy the fragment and say something else.

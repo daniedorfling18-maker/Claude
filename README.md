@@ -32,12 +32,27 @@ repository.
 
 ## State of the evidence
 
-Every reading in this repository carries an evidence class, and the classes do
-not mix: historical, modeled, reconstructed, shadow, paper and
-live-real-money are separate, and promotion between them requires prospective
-out-of-sample proof rather than a better backtest. Nothing has been promoted past paper, and the binding capital
-is zero. What each registered lane currently rests on, what it was read from,
-and where that reading is recorded are in
+**The repository's primary economic thesis was answered NO.** The registered
+evidence clock for the tested edge classes expired on 2026-08-19 and the verdict
+resolved terminally as `no_for_tested_edge_classes`. Sharp-anchor maker carry is
+not an open investigation; the `$100/month` figure was a pre-registered target,
+never demonstrated performance, and it was not reached. Promotion-oriented
+research stays frozen to the three hypotheses registered in
+[`docs/EXPERIMENT_REGISTRY.md`](docs/EXPERIMENT_REGISTRY.md); no gate may be
+loosened to force trades or a `$100/month` headline.
+
+Every reading carries an evidence class or, where a lane has not been read at
+all, a stated reading state. The classes do not mix: historical, modeled,
+reconstructed, shadow, paper and live-real-money are separate, and promotion
+between them requires prospective out-of-sample proof rather than a better
+backtest. Nothing has been promoted past paper. Funding is closed: the
+registered decision policy's binding capital is exactly zero until its
+pre-registered preconditions pass on forward evidence, WO-67 is a blocked
+architecture registration, there is no approved autonomous live-order path, and
+live trading remains gated four independent ways plus owner authorization.
+Missing or stale evidence fails closed as `UNKNOWN`. What each registered lane
+currently rests on, what it was read from, and where that reading is recorded
+are in
 [`docs/EVIDENCE_STATE_2026-09-13.md`](docs/EVIDENCE_STATE_2026-09-13.md), which
 is a dated record of the last snapshot the VPS produced and not a statement of
 current state — for that, read the generated files named above.
@@ -89,7 +104,8 @@ has been offline since 2026-08-21
 ([`docs/VPS_OUTAGE_2026-08-21.md`](docs/VPS_OUTAGE_2026-08-21.md)). Three merges
 have landed since — #452 on 2026-08-22, #454 on 2026-09-12 and #455 on
 2026-09-13 — and neither #454 nor #455 has had its required gate execute:
-#454's run was cancelled after a day in the queue and #455's is still queued;
+#454's run was cancelled after a day in the queue and #455's has been queued
+since 2026-09-13T14:05Z;
 whether #452 was gated before the runner stopped is not established by any
 artifact in this repository, which itself records that its evidence cannot
 distinguish a host down from 2026-08-21T02:00 from one degraded on 08-21 and
@@ -140,12 +156,13 @@ that can go stale without a test failing.
 | VPS outage record | [`docs/VPS_OUTAGE_2026-08-21.md`](docs/VPS_OUTAGE_2026-08-21.md) |
 | Sharp-odds anchor sourcing | [`docs/POLYMARKET_SHARP_ANCHOR.md`](docs/POLYMARKET_SHARP_ANCHOR.md) |
 | Architecture and single points of failure | [`docs/SYSTEM_MAP.md`](docs/SYSTEM_MAP.md) |
+| Venture thesis, pre-registered with pivot triggers | [`docs/VENTURE_THESIS.md`](docs/VENTURE_THESIS.md) |
 | Engine commands | [`src/polymarket_predictive_engine/cli.py`](src/polymarket_predictive_engine/cli.py) |
 | SuperBru package | [`src/superbru_score_engine`](src/superbru_score_engine) |
 
 The nine classes, counted over members under `docs/`:
 
-- **canonical** — 13 under `docs/`, the rows above less `README.md`, `AGENTS.md`
+- **canonical** — 14 under `docs/`, the rows above less `README.md`, `AGENTS.md`
   and the two source paths.
 - **owner-surface** — 5 under `docs/`. Amendments, decisions and checks that sit
   at the owner's end of the governance chain. The class name records where they
@@ -161,9 +178,9 @@ The nine classes, counted over members under `docs/`:
 - **SuperBru ancillary** — 9 under `docs/`. The score engine, not the economic
   thesis.
 - **incident records** — 1 under `docs/`.
-- **archived** — 15 under `docs/`, in `docs/archive/`, each with a row in
+- **archived** — 14 under `docs/`, in `docs/archive/`, each with a row in
   [`docs/archive/README.md`](docs/archive/README.md) giving the reason it was
-  moved and the canonical file that replaces it, or `none`. Every one is
+  moved and the file that now covers the same ground, or `none`. Every one is
   recoverable from Git history.
 
 Legacy local scripts and runbooks remain for history and regression coverage

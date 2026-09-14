@@ -352,4 +352,4 @@ evidence class. Amendment 2026-09-13 (WO-170; effective only if merged): this
 paragraph also covers WO-170, one corrected pass on WO-166's committed inputs with NAV-path
 risk statistics, an exported ledger, explicit price bases, fixed recent-period cuts, and the
 realised-variance window aligned to 720 return intervals; no new data, span, family, or evidence
-class.
+class. Amendment 2026-09-13 (WO-174; effective only if merged): WO-167's GO and WO-170's corrected pass are full-span readings on inception capital that register no lane under this paragraph's rule that a GO is the trigger for a future pre-observation amendment and is not itself registration; WO-170 reproduced WO-167's gate quantities to the last digit, and the three return bases WO-170's artifact publishes disagree, one of them failing the registered 6.0% hurdle, and the charter's 2026-09-13 WO-170 record is the authority for every figure. The fresh out-of-sample window this paragraph provides for remains undrafted.

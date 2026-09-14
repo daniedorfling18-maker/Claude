@@ -210,6 +210,10 @@ UNDECODABLE_UNDER_ROOTS = (
     "research/premium_poc/data/deribit/ETH_funding_1h.csv.gz",
 )
 
+# Registered floors. Pinned against their own second copies below, for the same
+# reason the scan roots are: a line audit set each to 1 and the suite stayed
+# green, and MINIMUM_REFERRERS_VISITED is the backstop that would catch a large
+# root narrowing.
 MINIMUM_SCRIPTS_VISITED = 100
 MINIMUM_REFERRERS_VISITED = 400
 
@@ -303,7 +307,11 @@ def _refers(text: str, script_rel: str) -> bool:
 
 def _exclusion_paths() -> tuple[str, ...]:
     """The two record-keeping files, parsed out of the registered `AGENTS.md`
-    passage rather than restated here.
+    passage as this module records it.
+
+    The parse is over the module constant, not the live file; identity with
+    `AGENTS.md` is enforced transitively by test 2's third check, which asserts
+    the passage appears there in full and exactly once.
 
     Each must name the removed launchers in order to record or assert their
     removal, so counting either as a referrer would blind the scan it is recorded
@@ -352,6 +360,8 @@ def test_every_script_is_referenced() -> None:
 
     scan_files = [rel for rel in tracked if _under_roots(rel)]
     scripts = [rel for rel in tracked if rel.split("/")[0] == "scripts" and "__pycache__" not in rel]
+    assert MINIMUM_SCRIPTS_VISITED == 100
+    assert MINIMUM_REFERRERS_VISITED == 400
     assert len(scripts) >= MINIMUM_SCRIPTS_VISITED, len(scripts)
     assert len(scan_files) >= MINIMUM_REFERRERS_VISITED, len(scan_files)
 
@@ -371,24 +381,65 @@ def test_every_script_is_referenced() -> None:
         assert name in present, name
     assert len(scripts) >= len(SURVIVING_SCRIPTS), (len(scripts), len(SURVIVING_SCRIPTS))
 
+    # One referrer function, used by the fixpoint and by the probe below, so the
+    # probe cannot be bypassed by editing the fixpoint alone.
+    def referrers(script: str, gone: set[str]) -> list[str]:
+        return [
+            rel
+            for rel in texts
+            if rel != script and rel not in excluded and rel not in gone
+            and _refers(texts[rel], script)
+        ]
+
     # The same fixpoint item 1 computes, asserted empty: a newly orphaned launcher
     # fails here even if this work order's own removal was correct.
     removed: set[str] = set()
     while True:
-        wave = [
-            script
-            for script in scripts
-            if script not in removed
-            and not any(
-                rel != script and rel not in excluded and rel not in removed
-                and _refers(texts[rel], script)
-                for rel in texts
-            )
-        ]
+        wave = [s for s in scripts if s not in removed and not referrers(s, removed)]
         if not wave:
             break
         removed.update(wave)
     assert removed == set(), sorted(removed)
+
+    # A probe whose basename appears in this file and nowhere else in the tree.
+    # With the exclusion applied it has no referrer; without it, this file is
+    # one. So deleting the exclusion from `referrers` — which a line audit did,
+    # leaving both tests green — fails here instead of passing silently. It
+    # matters because this file names all 123 survivors, so an unexcluded test
+    # file is a referrer for every script and the standing invariant becomes
+    # satisfied by nothing. The name is deliberately not a real path.
+    probe = "scripts/__exclusion_probe__.py"
+    assert _refers(texts[own], probe), "the probe must be named by this file"
+    assert referrers(probe, set()) == [], referrers(probe, set())
+
+    # The exclusion set is load-bearing, and that it is APPLIED must be asserted
+    # too. A line audit deleted `rel not in excluded` from the comprehension
+    # above and both tests stayed green: this file names all 123 survivors, so
+    # without the exclusion it becomes a referrer for every one of them and the
+    # standing invariant is satisfied forever by nothing. That is the vacuity
+    # the entry names and closes for the rename seam; this is the other seam.
+    unexcluded = [
+        script
+        for script in scripts
+        if not any(
+            rel != script and _refers(texts[rel], script)
+            for rel in texts
+            if rel not in excluded
+        )
+    ]
+    assert not unexcluded, unexcluded
+    # A probe whose name appears in this file and nowhere else in the tree. With
+    # the exclusion applied it has no referrer; without it, this file is one. So
+    # deleting the exclusion from the comprehension above fails here instead of
+    # passing silently. The name is deliberately not a real path.
+    probe = "scripts/__exclusion_probe__.py"
+    probe_referrers = [
+        rel
+        for rel in texts
+        if rel != probe and rel not in excluded and _refers(texts[rel], probe)
+    ]
+    assert probe_referrers == [], probe_referrers
+    assert _refers(texts[own], probe), "the probe must be named by this file"
 
 
 def test_agents_md_carries_both_registered_amendments() -> None:

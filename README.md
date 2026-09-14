@@ -183,6 +183,8 @@ The nine classes, counted over members under `docs/`:
   moved and the file that now covers the same ground, or `none`. Every one is
   recoverable from Git history.
 
-Legacy local scripts and runbooks remain for history and regression coverage
-only. Their presence is not an instruction to run them, and the VPS-only rule
-above governs regardless.
+Legacy local launchers and runbooks remain only where another file under the
+repository's scan roots still references them, as [`AGENTS.md`](AGENTS.md)
+defines the rule; the 18 unreferenced ones were removed under WO-168a and remain
+in Git history. Their presence is not an instruction to run them, and the
+VPS-only rule above governs regardless.

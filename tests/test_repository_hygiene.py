@@ -35,6 +35,26 @@ ARCHIVED = (
     "polymarket_overnight_governance_20260625.md",
 )
 
+ARCHIVE_REASONS: dict[str, str] = {
+    "POLYMARKET_ACTUARIAL_GRADE_GAP_ASSESSMENT_20260628.md": "dated snapshot",
+    "POLYMARKET_ENGINE_APPLY_NOTES.md": "legacy local design; VPS-only rule",
+    "POLYMARKET_LIVE_LEARNING_SYSTEM_DESIGN.md": "legacy local design; VPS-only rule",
+    "POLYMARKET_MISPRICING_BOT.md": "legacy local design; VPS-only rule",
+    "POLYMARKET_PAPER_PROFIT_AUDIT.md": "superseded by `docs/POLYMARKET_QUANT_MODE_CHARTER.md`",
+    "POLYMARKET_PREDICTIVE_POWER_ROADMAP.md": "superseded by `docs/POLYMARKET_EDGE_STRATEGY_RESET.md`",
+    "POLYMARKET_STRATEGY_V2.md": "superseded by `docs/POLYMARKET_EDGE_STRATEGY_RESET.md`",
+    "POLYMARKET_STRATEGY_V2_QUICKSTART.md": "superseded by `docs/POLYMARKET_EDGE_STRATEGY_RESET.md`",
+    "POLYMARKET_VPS_DOCKER_DRY_RUN.md": "superseded by `docs/POLYMARKET_VPS_DOCKER_RUNBOOK.md`",
+    "VPS_DOCKER_DRY_RUN_MONITOR.md": "superseded by `docs/POLYMARKET_VPS_DOCKER_RUNBOOK.md`",
+    "VPS_RESTART_FORENSICS_2026-07-12.md": "dated snapshot",
+    "VENTURE_THESIS.md": "dated snapshot",
+    "LIVE_DUTCH_ARB_DOCKER.md": "legacy local design; VPS-only rule",
+    "POLYMARKET_RESOLUTION_COLLECTOR.md": (
+        "superseded by `src/polymarket_predictive_engine/resolution_collector.py`"
+    ),
+    "polymarket_overnight_governance_20260625.md": "dated snapshot",
+}
+
 CLASSIFICATION: dict[str, tuple[str, ...]] = {
     # 17 rows; 13 of them under docs/. The other four are the two front doors
     # and the two source paths, which the partition sum does not count.
@@ -223,22 +243,62 @@ PERMITTED_NUMERIC = frozenset(
 # token must be permitted outright, so an unpermitted figure cannot hide inside
 # the residue of a permitted one.
 _NUMERIC_TOKEN = re.compile(r"[^\s|]*\d[^\s|]*")
-_TOKEN_TRIM = "`*_()[]{}<>\"'\u201c\u201d\u2018\u2019,.;:!?\u2014\u2013-"
+# Wrappers may be trimmed from either end; sentence punctuation only from the
+# trailing end. Trimming punctuation from the LEADING end is what a second
+# review caught: str.strip is symmetric, so `.55` and `-55` both reduced to the
+# permitted `55`, and a bare decimal and a negative walked through the guard.
+_TOKEN_WRAP = "`*_()[]{}<>\"'\u201c\u201d\u2018\u2019"
+_TOKEN_TAIL = ",.;:!?\u2014\u2013-"
 
 
 def _numeric_tokens(row: str) -> list[str]:
     tokens = []
     for raw in _NUMERIC_TOKEN.findall(row):
-        token = raw.strip(_TOKEN_TRIM)
+        token = raw.strip(_TOKEN_WRAP).rstrip(_TOKEN_TAIL)
         if token.endswith("'s"):
             token = token[:-2]
-        token = token.strip(_TOKEN_TRIM)
+        token = token.strip(_TOKEN_WRAP).rstrip(_TOKEN_TAIL)
         if token and any(char.isdigit() for char in token):
             tokens.append(token)
     return tokens
 
 
 FORBIDDEN_ON_GUARDED_ROWS = ("annualised_simple", "carry_v0.json")
+
+# Every row's numeric content is pinned, not only the guarded three. A second
+# review found the H1 row — unguarded on the registered ground that WO-173 "has
+# no results to print" — printing the five figures WO-173's own register entry
+# enumerates, and it is the favourable modelled reading this work order's A11
+# names as its favourable direction. The largest unguarded channel was therefore
+# the one A11 said to watch. These sets are exact: a row may lose a figure only
+# by this file changing, and may gain none.
+ROW_PERMITTED_NUMERIC: dict[str, frozenset[str]] = {
+    "H1 sharp-anchor maker carry": frozenset(
+        {"H1", "+$1.68/day", "$3.33/day", "3", "77.5%", "$0", "WO-173", "#455"}
+    ),
+    "H2 dutch-book": frozenset(
+        {
+            "H2",
+            "300",
+            "0",
+            "67",
+            "0.0",
+            "2026-08-21",
+            "docs/VPS_OUTAGE_2026-08-21.md",
+            "outputs/h2_dutch/h2_evaluation.json",
+        }
+    ),
+    "H3 smart-flow": frozenset({"H3", "0", "2026-07-17"}),
+    "The legacy $100/month verdict engine": None,
+    "Perpetual funding carry": None,
+    "Variance risk premium": None,
+}
+
+# The prose outside the table is pinned too: a second review printed a figure in
+# the closing paragraph and the row-scoped rule never saw it.
+PROSE_PERMITTED_NUMERIC = frozenset(
+    {"2026-09-13", "2026-08-21", "fcebaa2", "#455", "#454", "WO-166"}
+)
 
 ROOT_MARKDOWN = (
     "README.md",
@@ -256,7 +316,9 @@ REFERENCE_ALLOWLIST = (("docs/POLYMARKET_CODEX_WORK_ORDERS.md", "docs/VPS_PAPER_
 
 MINIMUM_REFERENCE_TOKENS = 100
 
-_LINK = re.compile(r"\]\(([^()\s]+)\)")
+# The optional group takes a markdown link title: `](path "title")`. Without it
+# a stale target with a title was invisible to the scan.
+_LINK = re.compile(r"\]\(([^()\s]+)(?:\s+\"[^\"]*\")?\)")
 _BACKTICK = re.compile(r"`([^`]*)`")
 _DOC_TOKEN = re.compile(r"\Adocs/\S*\.md\Z")
 
@@ -322,8 +384,13 @@ def test_readme_carries_the_retraction_and_the_evidence_pointer() -> None:
         assert text.count(token) == 1, token
         assert token in retracted_region, token
 
-    objective_region = _collapse(sections["What this repository is for"])
-    assert OBJECTIVE_PARAGRAPH in objective_region
+    # The objective paragraph is the section's FIRST paragraph and is pinned
+    # exactly, not by containment: a second review appended "The maker lane is
+    # now profitable." to it and a containment assertion passed.
+    first_paragraph = _collapse(
+        sections["What this repository is for"].strip().split("\n\n", 1)[0]
+    )
+    assert first_paragraph == OBJECTIVE_PARAGRAPH, first_paragraph
 
     workflows_region = _collapse(sections["Supported workflows"])
     for sentence in VPS_ONLY_SENTENCES:
@@ -346,12 +413,16 @@ def test_readme_carries_the_retraction_and_the_evidence_pointer() -> None:
     )
 
     assert len(_DRIFT_PATTERNS) == 8
-    assert front_door_drift_violations(readme_text=text, agents_text=_read("AGENTS.md")) == []
+    # Scoped to README.md: AGENTS.md is outside this work order's touch list and
+    # must not be able to fail this test.
+    violations = front_door_drift_violations(readme_text=text, agents_text=_read("AGENTS.md"))
+    assert [v for v in violations if v.startswith("README.md:")] == [], violations
     assert "performance/operating_state.md" in text
 
-    # The evidence document is linked, so it cannot be orphaned by a page that
-    # names its section and links nothing.
-    assert f"]({EVIDENCE_STATE})" in text
+    # The link must be in the section that promises it. A second review moved it
+    # to the Documents table, leaving "State of the evidence" naming a document
+    # it did not link, and a whole-file assertion passed.
+    assert f"]({EVIDENCE_STATE})" in sections["State of the evidence"]
 
     # Every class line's printed count equals this file's count for that class.
     documents_region = sections["Documents"]
@@ -450,6 +521,14 @@ def test_archive_readme_lists_every_archived_file() -> None:
 
     assert sorted(listed) == on_disk, (sorted(listed), on_disk)
 
+    # The mapping, not only its shape. Downgrading a `superseded by <path>` row
+    # to `dated snapshot`/`none` erases the supersession, and shape alone
+    # accepts it.
+    assert set(ARCHIVE_REASONS) == set(on_disk), set(ARCHIVE_REASONS) ^ set(on_disk)
+    for cells in rows:
+        name = cells[0].strip("` ")
+        assert cells[1].strip() == ARCHIVE_REASONS[name], (name, cells[1])
+
 
 def test_docs_classification_is_an_exhaustive_partition() -> None:
     for path in CLASSIFICATION["archived"]:
@@ -497,8 +576,14 @@ def test_docs_classification_is_an_exhaustive_partition() -> None:
         assert path in canonical, path
 
     readme = _read("README.md")
+    documents = _readme_sections(readme)["Documents"]
+    canonical_table = _table_rows(documents)
+    # The table, not the page: a second review deleted the table and re-emitted
+    # the 17 links as one prose line, and a whole-file assertion passed.
+    assert len(canonical_table) == 17, len(canonical_table)
+    table_text = "\n".join(" ".join(cells) for cells in canonical_table)
     for path in CLASSIFICATION["canonical"]:
-        assert f"]({path})" in readme, path
+        assert f"]({path})" in table_text, path
 
     # Every row of AGENTS.md's "Stable references" table is canonical.
     agents = _read("AGENTS.md")
@@ -545,19 +630,33 @@ def test_evidence_state_rows_carry_a_class_and_respect_the_close_out_guard() -> 
         # would pass it.
         assert cells[1].strip("` ") == evidence_class, (line, cells[1], evidence_class)
 
+    # Every row is pinned, not only the guarded three.
+    assert set(ROW_PERMITTED_NUMERIC) == {line for line, _ in EVIDENCE_ROWS}
+    for line, cells in by_line.items():
+        assert len(cells) == 5, (line, len(cells))
+        allowed = ROW_PERMITTED_NUMERIC[line]
+        if allowed is None:
+            allowed = PERMITTED_NUMERIC
+        tokens = _numeric_tokens(_collapse(" ".join(cells)))
+        unpermitted = [tok for tok in tokens if tok not in allowed]
+        assert not unpermitted, (line, unpermitted)
+
     checked = 0
     for line in GUARDED_ROWS:
-        row = " ".join(by_line[line])
-        collapsed = _collapse(row)
+        collapsed = _collapse(" ".join(by_line[line]))
         assert CLOSE_OUT_GUARD_CLAUSE in collapsed, line
-
         for forbidden in FORBIDDEN_ON_GUARDED_ROWS:
-            assert forbidden not in row, (line, forbidden)
-
-        tokens = _numeric_tokens(collapsed)
-        assert tokens, line  # the guard clause carries `#455`, so a row with no
-        # numeric token at all means the clause is not really there
-        unpermitted = [tok for tok in tokens if tok not in PERMITTED_NUMERIC]
-        assert not unpermitted, (line, unpermitted)
+            assert forbidden not in collapsed, (line, forbidden)
+        # The guard clause carries `#455`, so a guarded row with no numeric
+        # token at all means the clause is not really there.
+        assert _numeric_tokens(collapsed), line
         checked += 1
     assert checked == 3, checked
+
+    # The prose outside the table is pinned too: a second review printed a
+    # figure in the closing paragraph, where the row-scoped rule never looked.
+    prose = "\n".join(ln for ln in text.splitlines() if not ln.strip().startswith("|"))
+    prose_tokens = _numeric_tokens(_collapse(prose))
+    assert prose_tokens, "no prose tokens found"
+    unpermitted = [tok for tok in prose_tokens if tok not in PROSE_PERMITTED_NUMERIC]
+    assert not unpermitted, unpermitted

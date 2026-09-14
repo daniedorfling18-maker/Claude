@@ -33,9 +33,9 @@ repository.
 ## State of the evidence
 
 Every reading in this repository carries an evidence class, and the classes do
-not mix: historical, model, reconstructed, shadow, paper and live are separate,
-and promotion between them requires prospective out-of-sample proof rather than
-a better backtest. Nothing has been promoted past paper, and the binding capital
+not mix: historical, modeled, reconstructed, shadow, paper and
+live-real-money are separate, and promotion between them requires prospective
+out-of-sample proof rather than a better backtest. Nothing has been promoted past paper, and the binding capital
 is zero. What each registered lane currently rests on, what it was read from,
 and where that reading is recorded are in
 [`docs/EVIDENCE_STATE_2026-09-13.md`](docs/EVIDENCE_STATE_2026-09-13.md), which
@@ -97,7 +97,8 @@ unresponsive by 08-23. The telemetry CSVs are truncated. The legacy verdict
 engine's Gate A metric is a per-share price difference labelled per dollar
 (WO-169, merged at #455, and not verified until that pull request's required
 gate runs). The strategy search selected on its holdout (WO-171, merged at #455,
-and recorded in the register but not in the charter). Maker capacity is bounded by a sizing model rather than measured. The
+recorded in the register but not in the charter, and not verified until that
+pull request's required gate runs). Maker capacity is bounded by a sizing model rather than measured. The
 funding-carry haircut of 2.0 pp is an assumption, not a measurement.
 
 ## Governance in one paragraph

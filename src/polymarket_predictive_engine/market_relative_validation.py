@@ -129,18 +129,83 @@ def _label_target(row: Mapping[str, Any]) -> int | None:
     return None
 
 
-def _label_index(label_rows: Iterable[Mapping[str, Any]]) -> dict[tuple[str, str, str], Mapping[str, Any]]:
+# Lower index wins, whatever order the rows arrive in.
+_LABEL_DROP_PRECEDENCE = (
+    "label key is incomplete",
+    "label is not a clean binary settlement",
+    "label horizon is not all_valid",
+)
+
+
+def _record_drop(dropped: dict[tuple[str, str, str], str], key: tuple[str, str, str], reason: str) -> None:
+    current = dropped.get(key)
+    if current is None or _LABEL_DROP_PRECEDENCE.index(reason) < _LABEL_DROP_PRECEDENCE.index(current):
+        dropped[key] = reason
+
+
+def _label_index(
+    label_rows: Iterable[Mapping[str, Any]],
+) -> tuple[
+    dict[tuple[str, str, str], Mapping[str, Any]],
+    dict[tuple[str, str, str], str],
+    set[tuple[str, str]],
+    set[tuple[str, str]],
+]:
+    """Index clean settled labels, and retain WHY each dropped label was dropped.
+
+    A label can fail to reach the index for three quite different reasons, and
+    a caller that only sees the finished index cannot tell them apart from a
+    market that was never labelled at all. The two extra return values exist so
+    a rejection can name its actual cause: ``dropped`` maps a full key to the
+    reason it never entered the index, and ``pairs`` holds every
+    (market_id, token_id) seen in the label rows regardless of outcome, which
+    is what separates a timestamp mismatch from a genuinely absent market.
+    """
+
     index: dict[tuple[str, str, str], Mapping[str, Any]] = {}
+    dropped: dict[tuple[str, str, str], str] = {}
+    pairs: set[tuple[str, str]] = set()
+    incomplete_pairs: set[tuple[str, str]] = set()
     for row in label_rows:
-        if row.get("horizon", "all_valid") not in {"", "all_valid"}:
-            continue
-        target = _label_target(row)
-        if target is None:
-            continue
         key = (str(row.get("market_id", "")), str(row.get("token_id", "")), str(row.get("prediction_timestamp", "")))
-        if all(key):
-            index[key] = row
-    return index
+        if key[0] and key[1]:
+            pairs.add((key[0], key[1]))
+        # Deterministic precedence, NOT first-row-wins. The label producer emits
+        # several horizon rows per market/token/timestamp, so a setdefault would
+        # let a reordering of labels.csv silently swap which defect the
+        # histogram reports and hide the other.
+        # Key completeness is checked FIRST because it carries the highest
+        # precedence. Ordering it after the horizon and target checks made that
+        # precedence inert: a label that was BOTH incomplete and dirty exited at
+        # the earlier branch, incomplete_pairs never populated, and a complete
+        # prediction for the same market/token reported a timestamp mismatch.
+        # The declared ordering has to be the executed ordering.
+        # EVERY applicable predicate is evaluated and _LABEL_DROP_PRECEDENCE
+        # arbitrates. Short-circuiting on the first failing check made the
+        # declared precedence a lie three separate times: whichever branch
+        # happened to sit earliest won, regardless of its rank, so a row with
+        # more than one defect reported the wrong producer. Control flow must
+        # not be able to contradict the precedence table - the only way to
+        # guarantee that is to stop encoding priority in statement order.
+        reasons: list[str] = []
+        if not all(key):
+            reasons.append("label key is incomplete")
+            # A label missing only its timestamp still registers its pair, so
+            # without this the join would report a timestamp MISMATCH and send
+            # the operator to change the join key, when the actual fault is a
+            # malformed label producer.
+            if key[0] and key[1]:
+                incomplete_pairs.add((key[0], key[1]))
+        if row.get("horizon", "all_valid") not in {"", "all_valid"}:
+            reasons.append("label horizon is not all_valid")
+        if _label_target(row) is None:
+            reasons.append("label is not a clean binary settlement")
+        if reasons:
+            for reason in reasons:
+                _record_drop(dropped, key, reason)
+            continue
+        index[key] = row
+    return index, dropped, pairs, incomplete_pairs
 
 
 def _unit_key(row: Mapping[str, Any]) -> str:
@@ -164,7 +229,7 @@ def join_clean_settled_predictions(
     label_rows: Iterable[Mapping[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Join prediction rows to clean settled labels without using label columns as features."""
-    labels = _label_index(label_rows)
+    labels, dropped_labels, labelled_pairs, incomplete_pairs = _label_index(label_rows)
     joined: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
 
@@ -172,7 +237,25 @@ def join_clean_settled_predictions(
         key = (str(pred.get("market_id", "")), str(pred.get("token_id", "")), str(pred.get("prediction_timestamp", "")))
         label = labels.get(key)
         if not label:
-            rejected.append({"market_id": key[0], "token_id": key[1], "prediction_timestamp": key[2], "reason": "no clean settled label"})
+            # A miss has four distinguishable causes and they need four
+            # different fixes. Collapsing them into one string made a 100%
+            # rejection rate undiagnosable and would wrongly attribute a
+            # timestamp-key or label-quality problem to corpus coverage.
+            if not all(key):
+                # The prediction itself is malformed. Checked BEFORE any
+                # label-side cause, or a blank prediction timestamp reads as a
+                # timestamp mismatch and sends the operator to repair labels or
+                # the join key instead of the prediction producer.
+                reason = "prediction key is incomplete"
+            elif key in dropped_labels:
+                reason = dropped_labels[key]
+            elif (key[0], key[1]) in incomplete_pairs:
+                reason = "label key is incomplete"
+            elif (key[0], key[1]) in labelled_pairs:
+                reason = "label exists for market and token but not at this prediction_timestamp"
+            else:
+                reason = "no label for this market and token"
+            rejected.append({"market_id": key[0], "token_id": key[1], "prediction_timestamp": key[2], "reason": reason})
             continue
 
         model_p, model_source = _first_probability(pred, MODEL_PROBABILITY_FIELDS)

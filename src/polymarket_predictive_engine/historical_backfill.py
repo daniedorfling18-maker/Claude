@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -48,6 +49,10 @@ def _is_closed_candidate(market: dict[str, Any]) -> bool:
 # signal, then take a per-family quota instead of a global recency slice.
 
 DEFAULT_MIN_MARKET_DURATION_HOURS = 6.0
+# "btc-up-or-down-5m", "xrp-up-or-down-15m", "eth-up-or-down-1h" - the venue
+# names its own candle series with the window length, which is a far more
+# reliable signal than any timestamp on the market.
+_CANDLE_SERIES_PATTERN = re.compile(r"up-or-down-\d+\s*(m|min|h|hr)\b|up-or-down-\d+(m|h)$")
 # Domains that publish per-fixture results. A market resolved by one of these is
 # a single sporting fixture, priced against the sharpest books in the world.
 DEFAULT_EXCLUDED_RESOLUTION_DOMAINS = (
@@ -91,6 +96,26 @@ def _resolution_domain(market: dict[str, Any]) -> str:
     return source.split("/", 1)[0].removeprefix("www.")
 
 
+def _series_slug(market: dict[str, Any]) -> str:
+    """The venue's own recurring-series identifier, if the market has one."""
+
+    events = market.get("events")
+    if not isinstance(events, list):
+        return ""
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        series = event.get("series")
+        if not isinstance(series, list):
+            continue
+        for entry in series:
+            if isinstance(entry, dict):
+                slug = str(entry.get("slug") or "").strip().lower()
+                if slug:
+                    return slug
+    return ""
+
+
 def _market_family(market: dict[str, Any]) -> str:
     """Stratification key: the population a market belongs to.
 
@@ -99,6 +124,16 @@ def _market_family(market: dict[str, Any]) -> str:
     granular to stratify on.
     """
 
+    # Series first, measured against the live Gamma feed on 2026-08-15: of the
+    # 100 most recently closed markets, 100 carried an events[].series[].slug
+    # and ZERO carried a `category`, so the category branch below never fired.
+    # Series is also the right granularity - "itf", "dota-2", "setkameua-games",
+    # "btc-up-or-down-5m" - which is exactly what the per-family cap needs to
+    # bound. Every continuously-resolving population carries one; the one-off
+    # questions this study actually trades mostly do not.
+    series = _series_slug(market)
+    if series:
+        return f"series:{series}"
     category = str(market.get("category") or "").strip().lower()
     if category:
         return category
@@ -128,10 +163,20 @@ def _excluded_population(
     domain = _resolution_domain(market)
     if domain and any(domain == bad or domain.endswith(f".{bad}") for bad in excluded_domains):
         return f"per_fixture_sport:{domain}"
+    # Sub-hourly "Up or Down" candles: a coin flip by construction, and the
+    # population that drove the corpus base rate to exactly 0.5000.
+    #
+    # Matched on the venue's own series name, NOT on duration. Measured against
+    # the live feed 2026-08-15: "XRP Up or Down - August 15, 6:00AM-6:15AM ET"
+    # is a fifteen-MINUTE market whose startDate is the LISTING time a day
+    # earlier, so close-minus-start reads 24.1 hours and sails over any sane
+    # duration floor. startDate is when the market was listed, not when its
+    # event window opens, so duration cannot identify this population at all.
+    series = _series_slug(market)
+    if series and _CANDLE_SERIES_PATTERN.search(series):
+        return "sub_hourly_candle_series"
     duration = _market_duration_hours(market)
     if duration is not None and duration < min_duration_hours:
-        # Sub-hourly "Up or Down" candles: a coin flip by construction, and the
-        # population that drove the corpus base rate to exactly 0.5000.
         return "sub_duration_floor"
     return ""
 

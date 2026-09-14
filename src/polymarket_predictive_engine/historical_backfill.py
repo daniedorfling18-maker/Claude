@@ -130,8 +130,27 @@ def _excluded_population(
         return f"per_fixture_sport:{domain}"
     duration = _market_duration_hours(market)
     if duration is not None and duration < min_duration_hours:
-        # Sub-hourly "Up or Down" candles: a coin flip by construction, and the
-        # population that drove the corpus base rate to exactly 0.5000.
+        # A generic short-duration floor. Two corrections to what this comment
+        # used to claim, both measured rather than argued:
+        #
+        # 1. It said sub-hourly "Up or Down" candles are "a coin flip by
+        #    construction". That is withdrawn. A base rate of 0.5000 does not
+        #    imply unpredictability - a fair coin has both properties, but a
+        #    5-minute crypto candle has only the first, and is predictable to
+        #    anyone reading spot faster than the book reprices. Conflating the
+        #    two is what justified excluding that population in the first place,
+        #    and the reasoning was wrong even where the exclusion is not.
+        # 2. It implied this branch is what catches those candles. It is not,
+        #    and never has been: `startDate` is the venue's LISTING time, not
+        #    the event-window open, so a 15-minute market listed a day earlier
+        #    measures ~24.1h here and clears any sane floor. Measured against
+        #    the live Gamma feed (100 most recently closed markets, 2026-08-15):
+        #    this floor caught ZERO candles.
+        #
+        # What the floor is legitimately for: a corpus meant to match the traded
+        # universe should not be dominated by markets that resolve on a price
+        # feed at a fixed instant rather than on an event outcome. That is a
+        # population-match argument, not a claim about predictability.
         return "sub_duration_floor"
     return ""
 

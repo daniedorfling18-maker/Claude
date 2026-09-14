@@ -1,149 +1,168 @@
 # Claude Research Engines
 
-This repository exists to answer one economic question under pre-registered,
-fail-closed rules: can a paper-only Polymarket engine produce verified forward
-evidence of a sustainable edge — concretely, the registered `$100/month`
-(= `$3.33/day`) maker-carry target — before any real capital is considered?
-The Polymarket predictive/paper-trading research engine is the repository's
-principal system. A second, ancillary system — the World Cup/SuperBru score
-engine and its VPS auto-pick watchdog — shares the infrastructure but is not
-part of the economic thesis and should not be read as the repository's main
-line of work.
+## What this repository is for
 
-## Start with generated state
+This repository is a research engine for one question: can a pre-registered,
+fail-closed, paper-only process tell a profitable, executable strategy apart
+from a historical premium, an accounting error, an overfit result, or
+insufficient evidence? A defensible negative result is a successful outcome.
+
+The Polymarket predictive/paper-trading research engine is the principal system
+and the only one the question above is about. A second, ancillary system — the
+World Cup/SuperBru score engine and its VPS auto-pick watchdog — shares the
+infrastructure but is not part of the economic thesis and should not be read as
+the repository's main line of work.
+
+## Generated state
 
 Point-in-time operating state is generated from runtime evidence, not maintained
-in README prose. Read the VPS dashboard or these files in `/home/opc/Claude`:
+in README prose. This page carries no current value. Read the generated files on
+the VPS at `/home/opc/Claude`:
 
 ```text
-http://129.151.178.42:8765/
 outputs/performance/operating_state.md
 outputs/performance/operating_state.json
 ```
 
-[`docs/OPERATING_STATE.md`](docs/OPERATING_STATE.md) defines the control, and
-[`AGENTS.md`](AGENTS.md) defines how agents operate the repository.
+The dashboard is reached at the URL in `PM_DASHBOARD_PUBLIC_URL`, which is a
+Tailscale address; this page prints no host address of its own.
+[`docs/OPERATING_STATE.md`](docs/OPERATING_STATE.md) defines the contract those
+files satisfy, and [`AGENTS.md`](AGENTS.md) defines how agents operate the
+repository.
 
-## Primary economic thesis — sharp-anchor maker carry (H1) — ANSWERED, 2026-08-19
+## State of the evidence
 
-> **Read this first.** The registered evidence clock for the tested edge
-> classes expired on **2026-08-19T23:59:00Z** and the verdict resolved
-> **terminally**: `no_for_tested_edge_classes`. H1 is not an open
-> investigation. It was measured at **$3.02/day gross** across the entire
-> eligible universe against the **$3.33/day** target below, with adverse
-> selection at **$63.62/day** — 21x the gross, for a net of **-$60.60/day**.
-> H2 flagged **0** opportunities in 300 events with a maximum executable
-> basket of **$0.00**. H3 is the one tested class still unmeasured.
->
-> The full record, its provenance, and what remains the repo owner's decision
-> are in
-> [`docs/POLYMARKET_QUANT_MODE_CHARTER.md`](docs/POLYMARKET_QUANT_MODE_CHARTER.md#terminal-verdict--the-registered-evidence-clock-expired-2026-08-19).
-> Those figures were read from VPS telemetry and are not re-derivable from
-> this repository; the terminal read should be confirmed on the VPS. The
-> single registered extension is spent and no agent may extend the window.
->
-> The rest of this section describes what was built and tested, and is kept
-> because the mechanism and its risks are still an accurate account of the
-> experiment. It is **not** a statement that the lane is live.
+Every reading in this repository carries an evidence class, and the classes do
+not mix: historical, model, reconstructed, shadow, paper and live are separate,
+and promotion between them requires prospective out-of-sample proof rather than
+a better backtest. Nothing has been promoted past paper, and the binding capital
+is zero. What each registered lane currently rests on, what it was read from,
+and where that reading is recorded are in
+[`docs/EVIDENCE_STATE_2026-09-13.md`](docs/EVIDENCE_STATE_2026-09-13.md), which
+is a dated record of the last snapshot the VPS produced and not a statement of
+current state — for that, read the generated files named above.
 
-Three research hypotheses are registered in
-[`docs/EXPERIMENT_REGISTRY.md`](docs/EXPERIMENT_REGISTRY.md); the registry
-permits exactly these three and no fourth. H1, sharp-anchor maker carry, was
-the priority lane: it was the only one with a pre-registered profit campaign
-(the frozen M-A/M-B/M-C gates in `maker_carry_study.py`), a registered
-validation ladder, and a registered — and blocked — path toward any future
-funding decision. That path stayed blocked and the campaign returned a NO.
-H2 (persistent dutch-book consistency) and H3 (structural-bias/smart-flow
-cohorts with positive executable CLV) remain registered but were always
-secondary research lanes: their own registrations cap a pass at a shadow
-research candidate and cannot invoke paper or live trading.
+## Retracted figures
 
-**Mechanism.** Passive maker quotes rest on rewarded Polymarket markets
-around independent sharp external anchors (bookmaker-derived probabilities).
-Resting liquidity earns a published reward-pot share and may capture spread;
-the sharp anchor identifies quotes whose apparent carry is least likely to be
-erased by adverse selection. Edge is realised reward plus spread minus
-markout, fees, gas, and all investor costs — never the reward headline alone.
+Until 2026-09-13 this page printed adverse selection at $63.62/day, a net of
+−$60.60/day, and a gross of $3.02/day. The charter's correction of 2026-08-23
+withdrew the section that asserted them; none of the three appears in any
+artifact on the telemetry mirror. The recorded readings and their evidence
+classes are in `docs/EVIDENCE_STATE_2026-09-13.md`, linked under "State of the
+evidence" above.
 
-**What the target means.** The `$100/month` (= `$3.33/day`) figure was a
-pre-registered target, never demonstrated performance — and per the terminal
-verdict above it was not reached.
-M-A requires trusted net carry at or above that target on the registered
-number of distinct UTC days; the study's computed net carry is, by its own
-registration, a simulation upper bound until the three-tier validation
-ladder (fill replay, reward receipt, real-fill markout) confirms it. Current
-gate progress lives only in the generated operating state and study
-artifacts above — never in this file.
-
-**Unresolved risks and measurements.** Fill quality (confirmed-fill ratio),
-realised markout and adverse selection (the human real-fill stage is the only
-true test of that half), reward eligibility of the quotes actually posted
-(time-integrated epoch share versus snapshot extrapolation), inventory
-exposure, and execution costs (fees, gas, requoting) are all still being
-measured. Until they are measured on forward evidence, every carry number in
-any artifact is a hypothesis, not a result.
-
-## Runtime model
+## Supported workflows
 
 Production and verification are VPS-only. Do not run Python engines, tests,
 Docker, dashboards, scheduled tasks, collectors, model training, brokers, or
 watchdogs on the local workstation. Local work is limited to code inspection and
 editing, Git/GitHub operations, and SSH control.
 
-The production stack is deployed from reviewed `main` through
-`Deploy Polymarket VPS Paper` using `docker-compose.vps-paper.yml`. The guarded
-workflow preserves ledgers, records the deployed SHA, verifies current data
-contracts, and retains rollback state.
+Four workflows are supported, and nothing else is:
 
-## Quant/research contract
+1. **VPS production.** Deployment runs through Path A (the
+   `Deploy Polymarket VPS Paper` workflow) or, where Path A is unavailable,
+   Path B, both defined in [`AGENTS.md`](AGENTS.md). Their guard order, refusal
+   conditions and attestation rules live there and are not restated here.
+2. **The offline `pytest` suite in an ephemeral agent sandbox**, under the
+   2026-07-27 amendment in [`AGENTS.md`](AGENTS.md). A sandbox run is not
+   verification of record; the required pull-request gate is.
+3. **Offline historical research from the two named public sources**, writing
+   only under `research/`, under the 2026-09-12 amendment in
+   [`AGENTS.md`](AGENTS.md). It permits nothing prospective and contacts no
+   venue, wallet or paid API. Committed results are reproduced with
+   `python -m premium_research.cli verify-manifest` and
+   `python -m premium_research.cli verify-results`, and the refined and
+   corrected passes with `verify-results --work-order WO-167` and
+   `verify-results --work-order WO-170`. These two selectors landed on `main`
+   with #455, whose required gate has not run, so their results are not
+   verification of record.
+4. **Reading the telemetry mirror** `origin/vps-telemetry`, whose JSON files are
+   complete while its CSVs hold only the last 200 rows. A per-file truncation
+   manifest is WO-172, merged at #455, whose required gate has not run.
 
-The system seeks executable mispricing—not mere probability movement. Entry and
-exit evidence uses actual bid/ask prices, spread, depth, fees, adverse selection,
-and cost attribution. Historical/model/reconstructed/shadow/paper/live evidence
-classes remain separate, and promotion requires prospective out-of-sample proof.
+## Known limitations
 
-Promotion-oriented research is frozen to the three hypotheses registered in
-[`docs/EXPERIMENT_REGISTRY.md`](docs/EXPERIMENT_REGISTRY.md):
+The self-hosted runner has accepted no job since 2026-08-23T12:36Z and the VPS
+has been offline since 2026-08-21
+([`docs/VPS_OUTAGE_2026-08-21.md`](docs/VPS_OUTAGE_2026-08-21.md)). Three merges
+have landed since — #452 on 2026-08-22, #454 on 2026-09-12 and #455 on
+2026-09-13 — and neither #454 nor #455 carries a completed required-gate run;
+whether #452 was gated before the runner stopped is not established by any
+artifact in this repository, which itself records that its evidence cannot
+distinguish a host down from 2026-08-21T02:00 from one degraded on 08-21 and
+unresponsive by 08-23. The telemetry CSVs are truncated. The legacy verdict
+engine's Gate A metric is a per-share price difference labelled per dollar
+(WO-169, merged at #455, whose required gate has not run). The strategy search
+selected on its holdout (WO-171, merged at #455, whose required gate has not
+run). Maker capacity is bounded by a sizing model rather than measured. The
+funding-carry haircut of 2.0 pp is an assumption, not a measurement.
 
-1. sharp-anchor maker carry;
-2. persistent dutch-book consistency opportunities;
-3. structural-bias/smart-flow cohorts with positive executable CLV.
+## Governance in one paragraph
 
-Crypto up/down and unregistered lanes are diagnostic only. No gate may be
-loosened to force trades or a `$100/month` headline.
+One work order per branch and per pull request; every draft passes the S8
+admission checklist in
+[`docs/ENGINEERING_STANDARDS.md`](docs/ENGINEERING_STANDARDS.md) before it is
+registered; the GLOBAL RULE at the top of
+[`docs/POLYMARKET_CODEX_WORK_ORDERS.md`](docs/POLYMARKET_CODEX_WORK_ORDERS.md)
+requires the `origin/main` tip at dispatch to be an ancestor of the build
+branch, with both SHAs recorded on the work order; frozen and registered
+surfaces are merged by the repository owner and never by an agent; no
+autonomous live-order path exists and none may be added; and every reading
+carries its evidence class, with missing or stale evidence failing closed as
+`UNKNOWN` rather than passing quietly.
 
-## Safety status
+## Documents
 
-The engine is shadow/dry-run/paper-gated and funding is closed: the registered
-decision policy's binding capital is exactly zero until its pre-registered
-preconditions pass on forward evidence. WO-67 is a blocked architecture
-registration; there is no approved autonomous live-order path, and live
-trading remains gated four independent ways plus owner authorization. Missing
-or stale evidence fails closed as `UNKNOWN`.
-
-## Work and verification
-
-- Read [`docs/POLYMARKET_CODEX_WORK_ORDERS.md`](docs/POLYMARKET_CODEX_WORK_ORDERS.md).
-- Use one work order per branch/PR.
-- Run target/full tests in an isolated ARM64/Python 3.11 VPS checkout.
-- Require the WO-69 PR gate to pass before merge.
-- Deploy merged `main` with the guarded VPS workflow and inspect post-deploy
-  acceptance plus the generated operating state.
-
-## Key references
+Every file under `docs/` belongs to exactly one class, and the classification is
+the literal dictionary in `tests/test_repository_hygiene.py`, which asserts it is
+an exhaustive partition. The canonical documents are listed in full below; the
+remaining classes are given by name and count only, so this page carries no list
+that can go stale without a test failing.
 
 | Topic | File |
 |---|---|
-| Agent operating rules | `AGENTS.md` |
-| Generated operating-state contract | `docs/OPERATING_STATE.md` |
-| Work orders | `docs/POLYMARKET_CODEX_WORK_ORDERS.md` |
-| Experiment registry | `docs/EXPERIMENT_REGISTRY.md` |
-| Quant-mode charter | `docs/POLYMARKET_QUANT_MODE_CHARTER.md` |
-| Edge reset | `docs/POLYMARKET_EDGE_STRATEGY_RESET.md` |
-| VPS setup | `docs/ORACLE_VPS_SETUP.md` |
-| Docker safety | `docs/POLYMARKET_DOCKER_SAFETY_AUDIT.md` |
-| Polymarket CLI | `src/polymarket_predictive_engine/cli.py` |
-| SuperBru package | `src/superbru_score_engine` |
+| What this repository is | [`README.md`](README.md) |
+| State of the evidence, 2026-09-13 | [`docs/EVIDENCE_STATE_2026-09-13.md`](docs/EVIDENCE_STATE_2026-09-13.md) |
+| Agent operating rules | [`AGENTS.md`](AGENTS.md) |
+| Binding engineering standards | [`docs/ENGINEERING_STANDARDS.md`](docs/ENGINEERING_STANDARDS.md) |
+| Experiment registry and freeze | [`docs/EXPERIMENT_REGISTRY.md`](docs/EXPERIMENT_REGISTRY.md) |
+| Work-order queue and constraints | [`docs/POLYMARKET_CODEX_WORK_ORDERS.md`](docs/POLYMARKET_CODEX_WORK_ORDERS.md) |
+| Quant-mode charter | [`docs/POLYMARKET_QUANT_MODE_CHARTER.md`](docs/POLYMARKET_QUANT_MODE_CHARTER.md) |
+| Quant trading contract | [`docs/POLYMARKET_QUANT_TRADING_CONTRACT.md`](docs/POLYMARKET_QUANT_TRADING_CONTRACT.md) |
+| Generated operating-state contract | [`docs/OPERATING_STATE.md`](docs/OPERATING_STATE.md) |
+| VPS setup and deployment | [`docs/ORACLE_VPS_SETUP.md`](docs/ORACLE_VPS_SETUP.md) |
+| Docker safety | [`docs/POLYMARKET_DOCKER_SAFETY_AUDIT.md`](docs/POLYMARKET_DOCKER_SAFETY_AUDIT.md) |
+| Edge reset and exclusions | [`docs/POLYMARKET_EDGE_STRATEGY_RESET.md`](docs/POLYMARKET_EDGE_STRATEGY_RESET.md) |
+| VPS outage record | [`docs/VPS_OUTAGE_2026-08-21.md`](docs/VPS_OUTAGE_2026-08-21.md) |
+| Sharp-odds anchor sourcing | [`docs/POLYMARKET_SHARP_ANCHOR.md`](docs/POLYMARKET_SHARP_ANCHOR.md) |
+| Architecture and single points of failure | [`docs/SYSTEM_MAP.md`](docs/SYSTEM_MAP.md) |
+| Engine commands | [`src/polymarket_predictive_engine/cli.py`](src/polymarket_predictive_engine/cli.py) |
+| SuperBru package | [`src/superbru_score_engine`](src/superbru_score_engine) |
 
-Legacy local scripts remain for history and regression coverage only. Their
-presence is not an active run instruction.
+The nine classes, counted over members under `docs/`:
+
+- **canonical** — 13 under `docs/`, the rows above less `README.md`, `AGENTS.md`
+  and the two source paths.
+- **owner-surface** — 5 under `docs/`. Amendments, decisions and checks that sit
+  at the owner's end of the governance chain. The class name records where they
+  sit, not who typed them.
+- **draft template, unsigned, not in force** — 1 under `docs/`. Its own header
+  says it authorizes nothing.
+- **referenced by code or tests** — 12 under `docs/`. Runbooks and standards a
+  module or a test names by path, kept where they are for that reason.
+- **retired in place with a loud notice** — 6 under `docs/`. Superseded, but
+  pinned by tests that assert the notice is still on them.
+- **kept by cross-reference** — 10 under `docs/`. Each has exactly one named
+  referrer, and a test asserts the referrer still contains the name.
+- **SuperBru ancillary** — 9 under `docs/`. The score engine, not the economic
+  thesis.
+- **incident records** — 1 under `docs/`.
+- **archived** — 15 under `docs/`, in `docs/archive/`, each with a row in
+  [`docs/archive/README.md`](docs/archive/README.md) giving the reason it was
+  moved and the canonical file that replaces it, or `none`. Every one is
+  recoverable from Git history.
+
+Legacy local scripts and runbooks remain for history and regression coverage
+only. Their presence is not an instruction to run them, and the VPS-only rule
+above governs regardless.

@@ -75,11 +75,12 @@ Four workflows are supported, and nothing else is:
    `python -m premium_research.cli verify-results`, and the refined and
    corrected passes with `verify-results --work-order WO-167` and
    `verify-results --work-order WO-170`. These two selectors landed on `main`
-   with #455, whose required gate has not run, so their results are not
-   verification of record.
+   with #455, and their results are not verification of record until that
+   pull request's required gate runs.
 4. **Reading the telemetry mirror** `origin/vps-telemetry`, whose JSON files are
    complete while its CSVs hold only the last 200 rows. A per-file truncation
-   manifest is WO-172, merged at #455, whose required gate has not run.
+   manifest is WO-172, merged at #455, and not verified until that pull
+   request's required gate runs.
 
 ## Known limitations
 
@@ -87,15 +88,16 @@ The self-hosted runner has accepted no job since 2026-08-23T12:36Z and the VPS
 has been offline since 2026-08-21
 ([`docs/VPS_OUTAGE_2026-08-21.md`](docs/VPS_OUTAGE_2026-08-21.md)). Three merges
 have landed since — #452 on 2026-08-22, #454 on 2026-09-12 and #455 on
-2026-09-13 — and neither #454 nor #455 carries a completed required-gate run;
+2026-09-13 — and neither merge has had its required gate execute: #454's run was
+cancelled after a day in the queue and #455's is still queued;
 whether #452 was gated before the runner stopped is not established by any
 artifact in this repository, which itself records that its evidence cannot
 distinguish a host down from 2026-08-21T02:00 from one degraded on 08-21 and
 unresponsive by 08-23. The telemetry CSVs are truncated. The legacy verdict
 engine's Gate A metric is a per-share price difference labelled per dollar
-(WO-169, merged at #455, whose required gate has not run). The strategy search
-selected on its holdout (WO-171, merged at #455, whose required gate has not
-run). Maker capacity is bounded by a sizing model rather than measured. The
+(WO-169, merged at #455, and not verified until that pull request's required
+gate runs). The strategy search selected on its holdout (WO-171, merged at #455,
+and recorded in the register but not in the charter). Maker capacity is bounded by a sizing model rather than measured. The
 funding-carry haircut of 2.0 pp is an assumption, not a measurement.
 
 ## Governance in one paragraph

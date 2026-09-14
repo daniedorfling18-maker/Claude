@@ -166,8 +166,8 @@ VPS_ONLY_SENTENCES = (
 )
 
 CLOSE_OUT_GUARD_SENTENCE = (
-    "These two selectors landed on `main` with #455, whose required gate has not "
-    "run, so their results are not verification of record."
+    "These two selectors landed on `main` with #455, and their results are not "
+    "verification of record until that pull request's required gate runs."
 )
 
 RETRACTED_TOKENS = ("63.62", "60.60", "3.02/day")
@@ -190,24 +190,53 @@ GUARDED_ROWS = (
 )
 
 CLOSE_OUT_GUARD_CLAUSE = (
-    "recorded in the charter and the register by #455, whose required gate has "
-    "not run, so it is not verification of record"
+    "recorded in the charter and the register by #455, and not verification of "
+    "record until that pull request's required gate runs"
 )
 
 # Identifiers and figures already of record; never a measurement from a result
-# no gate has verified. `#455` is here for the same reason `WO-166` is: it names
-# a merge, not a quantity, and the guard clause itself carries it.
-PERMITTED_NUMERIC = (
-    "$100/month",
-    "−0.013943",
-    "55",
-    "2026-08-19",
-    "#455",
-    "WO-166",
-    "WO-167",
-    "WO-169",
-    "WO-170",
+# no gate has verified. The merge numbers are here for the same reason `WO-166`
+# is: they name a merge, not a quantity. `#455` because the guard clause itself
+# carries it, `#454` because the rows name the merge whose required check was
+# cancelled without executing.
+PERMITTED_NUMERIC = frozenset(
+    {
+        "$100/month",
+        "−0.013943",
+        "55",
+        "2026-08-19",
+        "#455",
+        "#454",
+        "WO-166",
+        "WO-167",
+        "WO-169",
+        "WO-170",
+    }
 )
+
+# A numeric token is a maximal run of non-space, non-pipe characters containing a
+# digit. Tokens, not substrings: `55` is a substring of `#455`, so deleting the
+# permitted literals from the row is fail-open in one direction and self-defeating
+# in the other. Removing them in the order the register lists them turns `#455`
+# into `#4`; removing them longest-first turns a forbidden `$55` into a bare `$`,
+# which no pattern catches. Extraction has neither failure: every digit-bearing
+# token must be permitted outright, so an unpermitted figure cannot hide inside
+# the residue of a permitted one.
+_NUMERIC_TOKEN = re.compile(r"[^\s|]*\d[^\s|]*")
+_TOKEN_TRIM = "`*_()[]{}<>\"'\u201c\u201d\u2018\u2019,.;:!?\u2014\u2013-"
+
+
+def _numeric_tokens(row: str) -> list[str]:
+    tokens = []
+    for raw in _NUMERIC_TOKEN.findall(row):
+        token = raw.strip(_TOKEN_TRIM)
+        if token.endswith("'s"):
+            token = token[:-2]
+        token = token.strip(_TOKEN_TRIM)
+        if token and any(char.isdigit() for char in token):
+            tokens.append(token)
+    return tokens
+
 
 FORBIDDEN_ON_GUARDED_ROWS = ("annualised_simple", "carry_v0.json")
 
@@ -525,15 +554,10 @@ def test_evidence_state_rows_carry_a_class_and_respect_the_close_out_guard() -> 
         for forbidden in FORBIDDEN_ON_GUARDED_ROWS:
             assert forbidden not in row, (line, forbidden)
 
-        # Permitted literals are removed longest-first before the forbidden
-        # patterns are sought, so the digits inside `2026-08-19`, `#455` and
-        # `WO-166` are not read as bare numbers. An implementation that scans
-        # the raw row fails on the guard clause itself.
-        residue = collapsed
-        for literal in sorted(PERMITTED_NUMERIC, key=len, reverse=True):
-            residue = residue.replace(literal, " ")
-        leftover = re.findall(r"\d+(?:\.\d+)?%?", residue)
-        assert not leftover, (line, leftover)
-        assert not re.search(r"\$\s*\d", residue), line
+        tokens = _numeric_tokens(collapsed)
+        assert tokens, line  # the guard clause carries `#455`, so a row with no
+        # numeric token at all means the clause is not really there
+        unpermitted = [tok for tok in tokens if tok not in PERMITTED_NUMERIC]
+        assert not unpermitted, (line, unpermitted)
         checked += 1
     assert checked == 3, checked

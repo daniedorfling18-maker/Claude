@@ -88,8 +88,8 @@ The self-hosted runner has accepted no job since 2026-08-23T12:36Z and the VPS
 has been offline since 2026-08-21
 ([`docs/VPS_OUTAGE_2026-08-21.md`](docs/VPS_OUTAGE_2026-08-21.md)). Three merges
 have landed since — #452 on 2026-08-22, #454 on 2026-09-12 and #455 on
-2026-09-13 — and neither merge has had its required gate execute: #454's run was
-cancelled after a day in the queue and #455's is still queued;
+2026-09-13 — and neither #454 nor #455 has had its required gate execute:
+#454's run was cancelled after a day in the queue and #455's is still queued;
 whether #452 was gated before the runner stopped is not established by any
 artifact in this repository, which itself records that its evidence cannot
 distinguish a host down from 2026-08-21T02:00 from one degraded on 08-21 and

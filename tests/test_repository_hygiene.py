@@ -13,6 +13,7 @@ drift from this dictionary without a test failing.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -192,6 +193,12 @@ CLOSE_OUT_GUARD_SENTENCE = (
 
 RETRACTED_TOKENS = ("63.62", "60.60", "3.02/day")
 
+# Registered by test 1 and, until a third review, never implemented: the one
+# defect item 1 names — `README.md:19` printed `http://129.151.178.42:8765/` at
+# `6cf7fc6`, against AGENTS.md's Tailscale-only rule — could be re-introduced
+# with the whole suite green.
+_BARE_IPV4_URL = re.compile(r"https?://\d{1,3}(?:\.\d{1,3}){3}")
+
 EVIDENCE_STATE = "docs/EVIDENCE_STATE_2026-09-13.md"
 
 EVIDENCE_ROWS: tuple[tuple[str, str], ...] = (
@@ -214,34 +221,12 @@ CLOSE_OUT_GUARD_CLAUSE = (
     "record until that pull request's required gate runs"
 )
 
-# Identifiers and figures already of record; never a measurement from a result
-# no gate has verified. The merge numbers are here for the same reason `WO-166`
-# is: they name a merge, not a quantity. `#455` because the guard clause itself
-# carries it, `#454` because the rows name the merge whose required check was
-# cancelled without executing.
-PERMITTED_NUMERIC = frozenset(
-    {
-        "$100/month",
-        "−0.013943",
-        "55",
-        "2026-08-19",
-        "#455",
-        "#454",
-        "WO-166",
-        "WO-167",
-        "WO-169",
-        "WO-170",
-    }
-)
-
-# A numeric token is a maximal run of non-space, non-pipe characters containing a
-# digit. Tokens, not substrings: `55` is a substring of `#455`, so deleting the
-# permitted literals from the row is fail-open in one direction and self-defeating
+# A numeric token is a maximal run of non-space, non-pipe characters containing
+# a digit. Tokens, not substrings: `55` is a substring of `#455`, so deleting the
+# permitted literals from a row is fail-open in one direction and self-defeating
 # in the other. Removing them in the order the register lists them turns `#455`
 # into `#4`; removing them longest-first turns a forbidden `$55` into a bare `$`,
-# which no pattern catches. Extraction has neither failure: every digit-bearing
-# token must be permitted outright, so an unpermitted figure cannot hide inside
-# the residue of a permitted one.
+# which no pattern catches. Extraction has neither failure.
 _NUMERIC_TOKEN = re.compile(r"[^\s|]*\d[^\s|]*")
 # Wrappers may be trimmed from either end; sentence punctuation only from the
 # trailing end. Trimming punctuation from the LEADING end is what a second
@@ -265,33 +250,58 @@ def _numeric_tokens(row: str) -> list[str]:
 
 FORBIDDEN_ON_GUARDED_ROWS = ("annualised_simple", "carry_v0.json")
 
-# Every row's numeric content is pinned, not only the guarded three. A second
-# review found the H1 row — unguarded on the registered ground that WO-173 "has
-# no results to print" — printing the five figures WO-173's own register entry
-# enumerates, and it is the favourable modelled reading this work order's A11
-# names as its favourable direction. The largest unguarded channel was therefore
-# the one A11 said to watch. These sets are exact: a row may lose a figure only
-# by this file changing, and may gain none.
-ROW_PERMITTED_NUMERIC: dict[str, frozenset[str]] = {
-    "H1 sharp-anchor maker carry": frozenset(
-        {"H1", "+$1.68/day", "$3.33/day", "3", "77.5%", "$0", "WO-173", "#455"}
-    ),
-    "H2 dutch-book": frozenset(
-        {
-            "H2",
-            "300",
-            "0",
-            "67",
-            "0.0",
-            "2026-08-21",
-            "docs/VPS_OUTAGE_2026-08-21.md",
-            "outputs/h2_dutch/h2_evaluation.json",
-        }
-    ),
-    "H3 smart-flow": frozenset({"H3", "0", "2026-07-17"}),
-    "The legacy $100/month verdict engine": None,
-    "Perpetual funding carry": None,
-    "Variance risk premium": None,
+# Every row's numeric content is pinned exactly, as a MULTISET, and every row has
+# its own set — including the three guarded ones.
+#
+# Two reviews were needed to get here. The second found the H1 row unguarded on
+# the registered ground that WO-173 "has no results to print", while printing the
+# five figures WO-173's own entry enumerates — the favourable modelled reading
+# A11 names as this work order's favourable direction. The third found that
+# permit-LISTS still let a row move a permitted figure anywhere inside itself:
+# "+$1.68/day against the $3.33/day target" became "$3.33/day against the
+# $3.33/day target, met", raising the modelled carry to the target with the suite
+# green; and that mapping the guarded rows to one shared set let the Variance
+# risk premium row borrow `$100/month`, `55` and `2026-08-19` from the other two.
+# Counting each token fixes both: a row's figures are exactly these, in exactly
+# these quantities.
+ROW_NUMERIC_TOKENS: dict[str, dict[str, int]] = {
+    "H1 sharp-anchor maker carry": {
+        "H1": 1,
+        "+$1.68/day": 1,
+        "$3.33/day": 1,
+        "3": 1,
+        "77.5%": 1,
+        "$0": 1,
+        "WO-173": 1,
+        "#455": 1,
+    },
+    "H2 dutch-book": {
+        "H2": 2,
+        "300": 1,
+        "0": 2,
+        "67": 1,
+        "0.0": 1,
+        "2026-08-21": 1,
+        "docs/VPS_OUTAGE_2026-08-21.md": 2,
+        "outputs/h2_dutch/h2_evaluation.json": 1,
+    },
+    "H3 smart-flow": {"H3": 1, "0": 1, "2026-07-17": 1},
+    "The legacy $100/month verdict engine": {
+        "$100/month": 1,
+        "2026-08-19": 1,
+        "\u22120.013943": 1,
+        "55": 1,
+        "WO-169": 1,
+        "#455": 1,
+    },
+    "Perpetual funding carry": {
+        "WO-166": 1,
+        "WO-167": 2,
+        "WO-170": 2,
+        "#455": 3,
+        "#454": 1,
+    },
+    "Variance risk premium": {"WO-166": 1, "WO-170": 1, "#455": 1, "#454": 1},
 }
 
 # The prose outside the table is pinned too: a second review printed a figure in
@@ -418,6 +428,7 @@ def test_readme_carries_the_retraction_and_the_evidence_pointer() -> None:
     violations = front_door_drift_violations(readme_text=text, agents_text=_read("AGENTS.md"))
     assert [v for v in violations if v.startswith("README.md:")] == [], violations
     assert "performance/operating_state.md" in text
+    assert not _BARE_IPV4_URL.search(text), _BARE_IPV4_URL.search(text)
 
     # The link must be in the section that promises it. A second review moved it
     # to the Documents table, leaving "State of the evidence" naming a document
@@ -426,17 +437,18 @@ def test_readme_carries_the_retraction_and_the_evidence_pointer() -> None:
 
     # Every class line's printed count equals this file's count for that class.
     documents_region = sections["Documents"]
-    checked = 0
-    for name, members in CLASSIFICATION.items():
-        under_docs = sum(1 for path in members if path.startswith("docs/"))
-        pattern = re.compile(
-            r"- \*\*" + re.escape(name) + r"\*\* — (\d+) under `docs/`"
-        )
-        match = pattern.search(documents_region)
-        assert match is not None, f"no class line for {name!r}"
-        assert int(match.group(1)) == under_docs, (name, match.group(1), under_docs)
-        checked += 1
-    assert checked == 9, checked
+    # findall, not search, and the set must be exactly the nine: a third review
+    # added a tenth class line carrying an unpinned number, and a duplicate
+    # `canonical` line whose count was 86 away from the dictionary. Both passed
+    # a first-match check, which is the channel this work order exists to close.
+    printed = re.findall(r"- \*\*([^*]+)\*\* — (\d+) under `docs/`", documents_region)
+    assert len(printed) == 9, printed
+    assert {name for name, _ in printed} == set(CLASSIFICATION), (
+        {name for name, _ in printed} ^ set(CLASSIFICATION)
+    )
+    for name, printed_count in printed:
+        under_docs = sum(1 for path in CLASSIFICATION[name] if path.startswith("docs/"))
+        assert int(printed_count) == under_docs, (name, printed_count, under_docs)
 
 
 def _reference_scan_files() -> list[Path]:
@@ -630,16 +642,25 @@ def test_evidence_state_rows_carry_a_class_and_respect_the_close_out_guard() -> 
         # would pass it.
         assert cells[1].strip("` ") == evidence_class, (line, cells[1], evidence_class)
 
-    # Every row is pinned, not only the guarded three.
-    assert set(ROW_PERMITTED_NUMERIC) == {line for line, _ in EVIDENCE_ROWS}
+    # Every row is pinned, as a multiset, to its own registered tokens.
+    assert set(ROW_NUMERIC_TOKENS) == {line for line, _ in EVIDENCE_ROWS}
     for line, cells in by_line.items():
         assert len(cells) == 5, (line, len(cells))
-        allowed = ROW_PERMITTED_NUMERIC[line]
-        if allowed is None:
-            allowed = PERMITTED_NUMERIC
-        tokens = _numeric_tokens(_collapse(" ".join(cells)))
-        unpermitted = [tok for tok in tokens if tok not in allowed]
-        assert not unpermitted, (line, unpermitted)
+        counted = Counter(_numeric_tokens(_collapse(" ".join(cells))))
+        assert counted == Counter(ROW_NUMERIC_TOKENS[line]), (
+            line,
+            counted - Counter(ROW_NUMERIC_TOKENS[line]),
+            Counter(ROW_NUMERIC_TOKENS[line]) - counted,
+        )
+
+    # The header and separator rows are inside the guard too. A third review put
+    # a retracted figure and a favourable net into the header, where _table_rows
+    # drops the first two pipe-lines and the prose scan skips every pipe-line, so
+    # nothing read them at all.
+    pipe_lines = [ln for ln in text.splitlines() if ln.strip().startswith("|")]
+    assert len(pipe_lines) >= 2, pipe_lines
+    header_tokens = _numeric_tokens(_collapse(" ".join(pipe_lines[:2])))
+    assert header_tokens == [], header_tokens
 
     checked = 0
     for line in GUARDED_ROWS:
@@ -647,9 +668,6 @@ def test_evidence_state_rows_carry_a_class_and_respect_the_close_out_guard() -> 
         assert CLOSE_OUT_GUARD_CLAUSE in collapsed, line
         for forbidden in FORBIDDEN_ON_GUARDED_ROWS:
             assert forbidden not in collapsed, (line, forbidden)
-        # The guard clause carries `#455`, so a guarded row with no numeric
-        # token at all means the clause is not really there.
-        assert _numeric_tokens(collapsed), line
         checked += 1
     assert checked == 3, checked
 

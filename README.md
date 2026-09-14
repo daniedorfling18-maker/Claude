@@ -117,9 +117,9 @@ carries its evidence class, with missing or stale evidence failing closed as
 
 ## Documents
 
-Every file under `docs/` belongs to exactly one class, and the classification is
-the literal dictionary in `tests/test_repository_hygiene.py`, which asserts it is
-an exhaustive partition. The canonical documents are listed in full below; the
+Every file under `docs/` except the archive index belongs to exactly one class,
+and the classification is the literal dictionary in
+`tests/test_repository_hygiene.py`, which asserts it is an exhaustive partition. The canonical documents are listed in full below; the
 remaining classes are given by name and count only, so this page carries no list
 that can go stale without a test failing.
 

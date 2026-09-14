@@ -250,59 +250,90 @@ def _numeric_tokens(row: str) -> list[str]:
 
 FORBIDDEN_ON_GUARDED_ROWS = ("annualised_simple", "carry_v0.json")
 
-# Every row's numeric content is pinned exactly, as a MULTISET, and every row has
-# its own set — including the three guarded ones.
+# Each row's figures are pinned three ways, because the first two were not
+# enough and a fourth review showed why.
 #
-# Two reviews were needed to get here. The second found the H1 row unguarded on
-# the registered ground that WO-173 "has no results to print", while printing the
-# five figures WO-173's own entry enumerates — the favourable modelled reading
-# A11 names as this work order's favourable direction. The third found that
-# permit-LISTS still let a row move a permitted figure anywhere inside itself:
-# "+$1.68/day against the $3.33/day target" became "$3.33/day against the
-# $3.33/day target, met", raising the modelled carry to the target with the suite
-# green; and that mapping the guarded rows to one shared set let the Variance
-# risk premium row borrow `$100/month`, `55` and `2026-08-19` from the other two.
-# Counting each token fixes both: a row's figures are exactly these, in exactly
-# these quantities.
-ROW_NUMERIC_TOKENS: dict[str, dict[str, int]] = {
+# QUANTITIES, as an exact multiset. Catches a figure added, removed or altered.
+# IDENTIFIERS, by membership only. Hypothesis labels, work-order and merge
+#   numbers and artifact paths carry digits but are not quantities. Counting
+#   them made the guard asymmetric in the wrong direction: adding one more
+#   "and #455 has still not been gated" — a MORE conservative statement —
+#   failed, while deleting the word "not" from H2's "which is not the verdict"
+#   passed. Membership keeps the pin and drops that penalty.
+# PHRASES, as exact literals. Most bind a figure to the claim it measures; the
+#   carry row's also pins the A11 caution that tenure on `main` is not
+#   verification, which the register requires and nothing else asserted.
+#   Without these a row could permute its own figures and keep its multiset:
+#   "modelled net carry +$1.68/day against the $3.33/day target" became
+#   "$3.33/day against the +$1.68/day target", raising the modelled carry to
+#   the target — the favourable direction A11 names — with the suite green, as
+#   did H2's "events_scanned = 0 with flagged_deviations = 300". A multiset
+#   over the whole row cannot see a permutation within it; a literal can.
+ROW_QUANTITIES: dict[str, dict[str, int]] = {
     "H1 sharp-anchor maker carry": {
-        "H1": 1,
         "+$1.68/day": 1,
         "$3.33/day": 1,
         "3": 1,
         "77.5%": 1,
         "$0": 1,
-        "WO-173": 1,
-        "#455": 1,
     },
-    "H2 dutch-book": {
-        "H2": 2,
-        "300": 1,
-        "0": 2,
-        "67": 1,
-        "0.0": 1,
-        "2026-08-21": 1,
-        "docs/VPS_OUTAGE_2026-08-21.md": 2,
-        "outputs/h2_dutch/h2_evaluation.json": 1,
-    },
-    "H3 smart-flow": {"H3": 1, "0": 1, "2026-07-17": 1},
+    "H2 dutch-book": {"300": 1, "0": 2, "67": 1, "0.0": 1, "2026-08-21": 1},
+    "H3 smart-flow": {"0": 1, "2026-07-17": 1},
     "The legacy $100/month verdict engine": {
         "$100/month": 1,
         "2026-08-19": 1,
-        "\u22120.013943": 1,
+        "−0.013943": 1,
         "55": 1,
-        "WO-169": 1,
-        "#455": 1,
     },
-    "Perpetual funding carry": {
-        "WO-166": 1,
-        "WO-167": 2,
-        "WO-170": 2,
-        "#455": 3,
-        "#454": 1,
-    },
-    "Variance risk premium": {"WO-166": 1, "WO-170": 1, "#455": 1, "#454": 1},
+    "Perpetual funding carry": {},
+    "Variance risk premium": {},
 }
+
+ROW_IDENTIFIERS: dict[str, frozenset[str]] = {
+    "H1 sharp-anchor maker carry": frozenset({"H1", "WO-173", "#455"}),
+    "H2 dutch-book": frozenset(
+        {"H2", "docs/VPS_OUTAGE_2026-08-21.md", "outputs/h2_dutch/h2_evaluation.json"}
+    ),
+    "H3 smart-flow": frozenset({"H3"}),
+    "The legacy $100/month verdict engine": frozenset({"WO-169", "#455"}),
+    "Perpetual funding carry": frozenset(
+        {"WO-166", "WO-167", "WO-170", "#455", "#454"}
+    ),
+    "Variance risk premium": frozenset({"WO-166", "WO-170", "#455", "#454"}),
+}
+
+ROW_REQUIRED_PHRASES: dict[str, tuple[str, ...]] = {
+    "H1 sharp-anchor maker carry": (
+        "modelled net carry +$1.68/day against the $3.33/day target",
+        "rests on 3 replay-confirmed hypothetical fills",
+        "with 77.5% of opportunities lacking contemporaneous book state",
+        "realized wallet rewards are $0",
+    ),
+    "H2 dutch-book": (
+        "the 2026-08-21 scan, which is **not** the verdict",
+        "`events_scanned = 300` with `flagged_deviations = 0`",
+        "`groups_with_complete_ask_side = 67` with `flagged_deviations = 0`",
+        "`max_executable_basket_usd = 0.0`",
+    ),
+    "H3 smart-flow": ("`fills_seen = 0`, last generated 2026-07-17",),
+    "The legacy $100/month verdict engine": (
+        "which expired 2026-08-19",
+        "(−0.013943 on 55 units,",
+    ),
+    "Perpetual funding carry": (
+        "Tenure on `main` is not verification and this row must not read as "
+        "though it were",
+    ),
+    "Variance risk premium": (),
+}
+
+
+def _is_quantity(token: str) -> bool:
+    """A token is a quantity when, past any sign or currency mark, it starts with
+    a digit. `+$1.68/day`, `77.5%`, `0.0` and `2026-08-19` are quantities;
+    `H1`, `WO-166`, `#455` and `docs/VPS_OUTAGE_2026-08-21.md` are not."""
+    return token.lstrip("+-\u2212$").startswith(tuple("0123456789"))
+
 
 # The prose outside the table is pinned too: a second review printed a figure in
 # the closing paragraph and the row-scoped rule never saw it.
@@ -642,16 +673,27 @@ def test_evidence_state_rows_carry_a_class_and_respect_the_close_out_guard() -> 
         # would pass it.
         assert cells[1].strip("` ") == evidence_class, (line, cells[1], evidence_class)
 
-    # Every row is pinned, as a multiset, to its own registered tokens.
-    assert set(ROW_NUMERIC_TOKENS) == {line for line, _ in EVIDENCE_ROWS}
+    lines = {line for line, _ in EVIDENCE_ROWS}
+    assert set(ROW_QUANTITIES) == lines
+    assert set(ROW_IDENTIFIERS) == lines
+    assert set(ROW_REQUIRED_PHRASES) == lines
     for line, cells in by_line.items():
         assert len(cells) == 5, (line, len(cells))
-        counted = Counter(_numeric_tokens(_collapse(" ".join(cells))))
-        assert counted == Counter(ROW_NUMERIC_TOKENS[line]), (
+        collapsed = _collapse(" ".join(cells))
+        tokens = _numeric_tokens(collapsed)
+
+        quantities = Counter(tok for tok in tokens if _is_quantity(tok))
+        expected = Counter(ROW_QUANTITIES[line])
+        assert quantities == expected, (line, quantities - expected, expected - quantities)
+
+        identifiers = {tok for tok in tokens if not _is_quantity(tok)}
+        assert identifiers <= ROW_IDENTIFIERS[line], (
             line,
-            counted - Counter(ROW_NUMERIC_TOKENS[line]),
-            Counter(ROW_NUMERIC_TOKENS[line]) - counted,
+            identifiers - ROW_IDENTIFIERS[line],
         )
+
+        for phrase in ROW_REQUIRED_PHRASES[line]:
+            assert phrase in collapsed, (line, phrase)
 
     # The header and separator rows are inside the guard too. A third review put
     # a retracted figure and a favourable net into the header, where _table_rows

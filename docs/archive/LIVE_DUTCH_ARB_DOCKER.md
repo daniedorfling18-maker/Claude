@@ -167,7 +167,7 @@ long-short / mm stack in `docker-compose.polymarket-fixed.yml`. This one **can**
 5. The `py-clob-client-v2` SDK installed (`INSTALL_POLYMARKET_SDK=true` at build).
 
 Miss any one and the bot logs `dry_run` / `live_error` and places nothing. Per
-`docs/POLYMARKET_MISPRICING_BOT.md`, keep it in `dry_run` until `long_short_intents.csv` has looked
+`docs/archive/POLYMARKET_MISPRICING_BOT.md`, keep it in `dry_run` until `long_short_intents.csv` has looked
 sane for several sessions and you have reconciled fills against your wallet before raising
 `POLYMARKET_MAX_ORDER_USD` (default `5`).
 

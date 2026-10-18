@@ -53,4 +53,4 @@ The dry-run monitor never trades. To let the long/short engine place **passive m
    wallet before increasing size.
 
 If any guard fails (wrong region, missing key, geoblock), the engine reports `live_error`
-and places nothing. See `docs/POLYMARKET_MISPRICING_BOT.md` for the full long/short section.
+and places nothing. See `docs/archive/POLYMARKET_MISPRICING_BOT.md` for the full long/short section.

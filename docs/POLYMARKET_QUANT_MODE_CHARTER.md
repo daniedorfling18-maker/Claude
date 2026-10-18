@@ -2099,6 +2099,8 @@ of the "no re-leveraging after price falls" channel WO-166 registered as pushing
 The error was found by the S8 gate on the follow-up work order, which read the ledgers rather than
 the prose.
 
+No registration of the funding carry as a lane follows from WO-167's GO or WO-170's corrected pass. The registry's WO-166 paragraph provides for a future pre-observation amendment with a fresh out-of-sample window; that amendment is not WO-174's, is not drafted, and needs a VPS.
+
 ### Build delta 1, applied after the independent reviews
 
 The line audit found that replacing G3's basis selector with a constant left all 91 tests and
